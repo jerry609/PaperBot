@@ -169,6 +169,17 @@ class ReportWriter:
         Returns:
             渲染后的 Markdown 报告
         """
+        # 准备模板数据，确保与 paper_report.md.j2 期望的字段一致
+        template_data = {
+            "paper": paper.to_dict(),
+            "influence": influence.to_dict(),
+            "research": research_result or {},
+            "code_analysis": code_analysis_result or {},
+            "quality": quality_result or {},
+            "scholar_name": scholar_name,
+            "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        }
+
         if not HAS_JINJA2 or not self._jinja_env:
             logger.warning("Jinja2 not available, using fallback template")
             return self._fallback_render(
@@ -178,16 +189,7 @@ class ReportWriter:
         
         try:
             template = self._jinja_env.get_template(self.template_name)
-            
-            return template.render(
-                paper=paper.to_dict(),
-                influence=influence.to_dict(),
-                research=research_result or {},
-                code_analysis=code_analysis_result or {},
-                quality=quality_result or {},
-                scholar_name=scholar_name,
-                generated_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            )
+            return template.render(**template_data)
         except Exception as e:
             logger.warning(f"Template rendering failed: {e}, using fallback")
             return self._fallback_render(

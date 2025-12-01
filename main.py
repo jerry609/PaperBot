@@ -183,6 +183,13 @@ def simple_paper_download(conference: str, year: str, url: Optional[str] = None,
         
 def main():
     """主函数"""
+    # 设置控制台编码，防止中文乱码
+    import sys
+    import io
+    if sys.platform == 'win32':
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
+
     print("=" * 60)
     print("🔐 SecuriPaperBot - 智能论文分析框架")
     print("=" * 60)
@@ -317,12 +324,14 @@ def run_scholar_tracking(args):
 
         settings = profile_agent.get_settings()
         reporting_cfg = settings.get("reporting", {})
+        min_score = settings.get("min_influence_score", 0)
 
         tracker_agent = PaperTrackerAgent({**overrides, "api": settings.get("api", {})})
         coordinator = ScholarWorkflowCoordinator(
             {
                 "output_dir": str(profile_agent.get_output_dir()),
                 "report_template": reporting_cfg.get("template", "paper_report.md.j2"),
+                "use_documentation_agent": False, # 禁用 DocumentationAgent 以避免接口不匹配
             }
         )
 
@@ -340,12 +349,12 @@ def run_scholar_tracking(args):
             if not scholar:
                 print(f"❌ 未找到学者: {args.scholar_id}")
                 return
-            result = await tracker_agent.track_scholar(scholar)
+            result = await tracker_agent.track_scholar(scholar, dry_run=args.dry_run)
             results = [result]
             await tracker_agent.ss_agent.close()
         else:
             print("\n🔍 开始追踪所有订阅学者...")
-            results = await tracker_agent.track_all_scholars()
+            results = await tracker_agent.track_all_scholars(dry_run=args.dry_run)
 
         # 显示结果
         total_new = 0

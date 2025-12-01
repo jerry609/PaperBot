@@ -22,7 +22,23 @@ class ResearchAgent(BaseAgent):
             'usenix': self._process_usenix
         }
 
-    async def process(self, conference: str, year: str) -> Dict[str, Any]:
+    async def process(self, *args, **kwargs) -> Dict[str, Any]:
+        """处理方法"""
+        # 模式 1: 会议论文下载 (原逻辑)
+        if "conference" in kwargs and "year" in kwargs:
+            return await self._process_conference(kwargs["conference"], kwargs["year"])
+        
+        # 模式 2: 单篇论文分析 (新逻辑)
+        if "paper_title" in kwargs:
+            return await self._analyze_single_paper(
+                title=kwargs.get("paper_title"),
+                paper_id=kwargs.get("paper_id"),
+                abstract=kwargs.get("abstract")
+            )
+            
+        raise ValueError("Invalid arguments for ResearchAgent.process")
+
+    async def _process_conference(self, conference: str, year: str) -> Dict[str, Any]:
         """处理指定会议和年份的论文"""
         try:
             if conference not in self.supported_conferences:
@@ -40,6 +56,39 @@ class ResearchAgent(BaseAgent):
         except Exception as e:
             self.log_error(e, {'conference': conference, 'year': year})
             raise
+    
+    async def _analyze_single_paper(self, title: str, paper_id: str, abstract: Optional[str]) -> Dict[str, Any]:
+        """分析单篇论文"""
+        result = {
+            "paper_id": paper_id,
+            "title": title,
+            "executive_summary": None,
+            "github_url": None,
+            "key_contributions": []
+        }
+        
+        if abstract:
+            # 1. 生成摘要总结
+            result["executive_summary"] = await self.summarize_abstract(abstract)
+            
+            # 2. 尝试从摘要中提取 GitHub 链接 (简单的正则)
+            github_pattern = r'https?://github\.com/[\w-]+/[\w-]+'
+            links = re.findall(github_pattern, abstract)
+            if links:
+                result["github_url"] = links[0]
+        
+        # 3. 如果启用了 LLM，可以生成 key_contributions
+        if self.client and abstract:
+             try:
+                 prompt = f"Based on the abstract below, list 3 key contributions of the paper '{title}'.\n\nAbstract: {abstract}"
+                 response = await self.ask_claude(prompt)
+                 # 简单的按行分割
+                 contributions = [line.strip('- *') for line in response.split('\n') if line.strip()]
+                 result["key_contributions"] = contributions[:3]
+             except Exception as e:
+                 self.log_error(e, {"context": "generate_key_contributions"})
+             
+        return result
 
     async def _process_ccs(self, year: str) -> List[Dict[str, Any]]:
         """处理CCS会议论文"""

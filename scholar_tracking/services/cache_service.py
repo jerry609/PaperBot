@@ -215,6 +215,7 @@ class CacheService:
             }
         )
 
+        # 确保 paper_ids 字段存在，避免数据不完整
         if "paper_ids" not in data:
             data["paper_ids"] = []
             data["count"] = 0

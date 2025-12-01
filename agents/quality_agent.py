@@ -28,22 +28,75 @@ class QualityAgent(BaseAgent):
         }
         self.thresholds = self._load_thresholds()
 
-    async def process(self, analysis_results: Dict[str, Any]) -> Dict[str, Any]:
+    async def process(self, *args, **kwargs) -> Dict[str, Any]:
         """处理代码质量评估"""
+        # 适配 Coordinator 调用：process(context)
+        analysis_results = None
+        if args and isinstance(args[0], dict):
+            context = args[0]
+            # 如果上下文中有 code_analysis 结果，使用它
+            if "code_analysis" in context and isinstance(context["code_analysis"], dict):
+                # 如果是扁平化结果，没法做深入分析，只能返回空或模拟值
+                if "analysis_results" not in context["code_analysis"]:
+                     return self._process_flat_result(context)
+                analysis_results = context["code_analysis"]
+            elif "analysis_results" in context:
+                analysis_results = context
+        elif kwargs and "analysis_results" in kwargs:
+            analysis_results = kwargs["analysis_results"]
+            
+        if not analysis_results:
+             # 无法进行深入分析，返回基础结构
+             return {
+                 'quality_scores': {},
+                 'summary': "无法进行深入质量评估（缺少代码分析详情）",
+                 'overall_assessment': "暂无代码详情，无法评估。",
+                 'strengths': [],
+                 'weaknesses': []
+             }
+
         try:
             quality_scores = {}
-            for repo_result in analysis_results['analysis_results']:
+            for repo_result in analysis_results.get('analysis_results', []):
                 quality_scores[repo_result['repo_url']] = await self._evaluate_quality(
                     repo_result['analysis']
                 )
 
             return {
                 'quality_scores': quality_scores,
-                'summary': await self._generate_quality_summary(quality_scores)
+                'summary': await self._generate_quality_summary(quality_scores),
+                # 添加 Coordinator 需要的字段
+                'overall_assessment': await self._generate_quality_summary(quality_scores),
+                'strengths': [], # TODO: 从 scores 中提取
+                'weaknesses': []
             }
         except Exception as e:
             self.log_error(e)
             raise
+
+    def _process_flat_result(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        """处理扁平化的上下文（通常只有元数据）"""
+        return {
+            'quality_scores': {},
+            'summary': "基于元数据的基础评估",
+            'overall_assessment': "代码已公开，但未进行深度静态分析。",
+            'strengths': ["代码开源"],
+            'weaknesses': ["缺少深度质量指标"]
+        }
+
+    async def _generate_quality_summary(self, quality_scores: Dict[str, Any]) -> str:
+        """生成质量摘要（简单的实现）"""
+        if not quality_scores:
+            return "没有可用的质量评分。"
+        
+        summary = []
+        for url, score in quality_scores.items():
+            if score:
+                status = score.get('status', '未知')
+                overall = score.get('overall_score', 0)
+                summary.append(f"仓库 {url}: 质量{status} ({overall:.2f})")
+        
+        return "; ".join(summary)
 
     async def _evaluate_quality(self, repo_analysis: Dict[str, Any]) -> Dict[str, Any]:
         """评估单个仓库的代码质量"""

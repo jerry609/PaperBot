@@ -27,6 +27,54 @@ PaperBot 是一个专为计算机领域设计的智能论文分析框架。它�
 - 自动提取论文中的代码仓库链接。
 - 代码质量、结构与安全性分析。
 
+## 🏗️ 系统架构
+
+```mermaid
+graph TB
+    subgraph Interface [用户接口层]
+        CLI[🖥️ 命令行入口]
+        Config[⚙️ 配置管理]
+    end
+
+    subgraph Tracking [学者追踪子系统]
+        SPA[👤 Scholar Profile Agent]
+        PTA[📡 Paper Tracker Agent]
+        SSA[🔌 Semantic Scholar API]
+    end
+
+    subgraph Pipeline [多 Agent 分析流水线]
+        Coord{Workflow Coordinator}
+        RA[🔍 Research Agent]
+        CAA[💻 Code Analysis Agent]
+        QA[⚖️ Quality Agent]
+    end
+
+    subgraph Service [评估与输出服务]
+        IC[📊 Influence Calculator]
+        RW[📝 Report Writer]
+        Cache[💾 缓存服务]
+    end
+
+    CLI -->|启动| Coord
+    Config -.-> Coord
+    
+    Coord -->|调度| SPA
+    SPA --> PTA
+    PTA <-->|API 交互| SSA
+    PTA -.->|状态存储| Cache
+    
+    PTA -->|发现新论文| RA
+    RA -->|提取元数据| CAA
+    CAA -->|代码分析| QA
+    QA -->|质量评估| IC
+    IC -->|计算 PIS| RW
+    
+    RW -->|生成| MD[📄 Markdown 报告]
+    
+    style Coord fill:#f96,stroke:#333,stroke-width:2px
+    style IC fill:#9f9,stroke:#333,stroke-width:2px
+```
+
 ## 🚀 快速开始
 
 ### 1. 环境准备

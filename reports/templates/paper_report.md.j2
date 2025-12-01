@@ -46,19 +46,19 @@
 {% endfor %}
 {% endif %}
 
+{% if research.critical_findings %}
+### 重要发现
+{% for finding in research.critical_findings %}
+- {{ finding }}
+{% endfor %}
+{% endif %}
+
 ---
 
-## 💻 代码与可复现性
+## 🔎 关键指标速览
 
-{% if paper.github_url or code_analysis.repo_url %}
-### 代码仓库
-
-| 指标 | 值 |
-| **仓库地址** | [{{ code_analysis.repo_name or paper.github_url }}]({{ paper.github_url or code_analysis.repo_url }}) |
 {% set academic_metrics = influence.metrics_breakdown.academic if influence.metrics_breakdown else {} %}
 {% set engineering_metrics = influence.metrics_breakdown.engineering if influence.metrics_breakdown else {} %}
-
-## 🔎 关键指标速览
 
 | 指标 | 数值 |
 |------|------|
@@ -70,21 +70,25 @@
 | 可复现性评分 | {{ code_analysis.reproducibility_score or engineering_metrics.reproducibility_score or "-" }} |
 
 ---
+
+## 💻 代码与可复现性
+
+{% if paper.github_url or code_analysis.repo_url %}
+### 代码仓库
+
+| 指标 | 值 |
+|------|-----|
+| **仓库地址** | [{{ code_analysis.repo_name or paper.github_url }}]({{ paper.github_url or code_analysis.repo_url }}) |
 {% if code_analysis.stars is defined %}| **Stars** | ⭐ {{ code_analysis.stars }} |{% endif %}
 {% if code_analysis.forks is defined %}| **Forks** | 🍴 {{ code_analysis.forks }} |{% endif %}
 {% if code_analysis.language %}| **主要语言** | {{ code_analysis.language }} |{% endif %}
 {% if code_analysis.license %}| **许可证** | {{ code_analysis.license }} |{% endif %}
 {% if code_analysis.updated_at %}| **最后更新** | {{ code_analysis.updated_at }} |{% endif %}
+
 {% if code_analysis.quality_notes %}
 ### 代码质量分析
-
-{% if research.critical_findings %}
-### 重要发现
-{% for finding in research.critical_findings %}
-- {{ finding }}
-{% endfor %}
-{% endif %}
 {{ code_analysis.quality_notes }}
+{% endif %}
 
 {% if code_analysis.reproducibility_score is defined %}
 ### 可复现性评分
@@ -92,6 +96,8 @@
 
 {% if code_analysis.reproducibility_notes %}
 {{ code_analysis.reproducibility_notes }}
+{% endif %}
+{% endif %}
 
 {% if code_analysis.key_findings %}
 ### 代码要点
@@ -99,18 +105,16 @@
 - {{ item }}
 {% endfor %}
 {% endif %}
-{% endif %}
-{% endif %}
 
 {% else %}
 ⚠️ **未发现公开代码仓库**
-{% endif %}
 {% endif %}
 
 ---
 
 ### 综合评分
 
+| 维度 | 得分 | 说明 |
 |------|------|------|
 | **🎯 总分** | **{{ "%.1f"|format(influence.total_score) }}/100** | 综合影响力评估 |
 | 📚 学术影响力 | {{ "%.1f"|format(influence.academic_score) }}/100 | 引用数 + 发表渠道 |
@@ -134,23 +138,27 @@
 - 代码公开: {{ "是" if influence.metrics_breakdown.engineering.has_code else "否" }}
 - GitHub Stars: {{ influence.metrics_breakdown.engineering.repo_stars or 0 }}
 {% endif %}
+{% endif %}
 
 ---
 
 ## 🎯 推荐级别
 
-{% set rec = influence.recommendation %}
+{% set rec = influence.recommendation.value if influence.recommendation.value else influence.recommendation %}
 {% if rec == "强烈推荐深入阅读" %}
+### 🌟🌟🌟 强烈推荐深入阅读
 
 这篇论文在学术价值和工程实践方面都表现出色，建议优先阅读和研究。
 {% elif rec == "建议关注" %}
 ### 🌟🌟 建议关注
 
 这篇论文具有较高的参考价值，值得花时间了解其核心内容。
+{% elif rec == "可选阅读" %}
 ### 🌟 可选阅读
 
 这篇论文可作为相关领域的补充材料。
 {% else %}
+### 低优先级
 
 这篇论文的影响力评分较低，可根据具体研究需求决定是否阅读。
 {% endif %}
@@ -161,9 +169,11 @@
 ## 📋 质量评估
 
 {{ quality.overall_assessment }}
+
 {% if quality.strengths %}
 ### 优点
 {% for s in quality.strengths %}
+- {{ s }}
 {% endfor %}
 {% endif %}
 

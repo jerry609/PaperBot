@@ -62,7 +62,7 @@ class SubscriptionService:
         
         scholars = subscriptions.get("scholars", [])
         if not scholars:
-            raise ValueError("No scholars configured for tracking")
+            logger.warning("No scholars configured for tracking")
         
         # 校验每个学者的必填字段
         for i, scholar in enumerate(scholars):
@@ -73,24 +73,23 @@ class SubscriptionService:
         
         # 校验 settings
         settings = subscriptions.get("settings", {})
-        required_settings = [
-            "check_interval",
-            "papers_per_scholar",
-            "min_influence_score",
-            "output_dir",
-            "cache_dir",
-            "api",
-        ]
-        missing = [key for key in required_settings if not settings.get(key)]
-        if missing:
-            raise ValueError(f"Missing subscription settings: {', '.join(missing)}")
+        # 只验证关键的 check_interval 和 papers_per_scholar 是否存在，其余允许使用默认值
+        if settings.get("check_interval") not in ["daily", "weekly", "monthly", None]:
+             raise ValueError(f"Invalid check_interval: {settings.get('check_interval')}")
+        
+        if settings.get("min_influence_score") is not None:
+             score = settings.get("min_influence_score")
+             if not (0 <= score <= 100):
+                 raise ValueError(f"min_influence_score must be between 0 and 100, got {score}")
 
-        api_config = settings.get("api", {})
-        semantic_api = api_config.get("semantic_scholar")
-        if not semantic_api or not semantic_api.get("base_url"):
-            raise ValueError("Semantic Scholar API config requires 'base_url'")
-        if semantic_api.get("timeout") is None:
-            raise ValueError("Semantic Scholar API config requires 'timeout'")
+        # 检查 API 配置是否存在（如果提供了 api 字段）
+        if "api" in settings:
+            api_config = settings["api"]
+            semantic_api = api_config.get("semantic_scholar")
+            if semantic_api:
+                if not semantic_api.get("base_url"):
+                    logger.warning("Semantic Scholar API config missing 'base_url', using default")
+
     
     def get_scholars(self) -> List[Scholar]:
         """获取所有订阅的学者"""

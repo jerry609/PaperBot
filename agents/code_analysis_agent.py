@@ -18,8 +18,57 @@ class CodeAnalysisAgent(BaseAgent):
         self.temp_dir = Path(tempfile.gettempdir()) / "securipaperbot"
         self.temp_dir.mkdir(exist_ok=True)
 
-    async def process(self, github_links: List[str]) -> Dict[str, Any]:
-        """处理一组GitHub仓库的分析任务"""
+    async def process(self, *args, **kwargs) -> Dict[str, Any]:
+        """处理 GitHub 仓库分析任务"""
+        repo_links = []
+        
+        # 适配 repo_url 参数
+        if "repo_url" in kwargs:
+             repo_links = [kwargs["repo_url"]]
+        elif "github_links" in kwargs:
+             repo_links = kwargs["github_links"]
+        elif args and isinstance(args[0], list):
+             repo_links = args[0]
+        else:
+             # 尝试从位置参数获取
+             if args and isinstance(args[0], str):
+                 repo_links = [args[0]]
+             else:
+                 raise ValueError("Invalid arguments for CodeAnalysisAgent.process")
+
+        result = await self._process_batch(repo_links)
+
+        # 如果是单仓库模式，尝试返回扁平化结果适配 Coordinator
+        if "repo_url" in kwargs and result['analysis_results']:
+            repo_result = result['analysis_results'][0]
+            return self._flatten_result(repo_result)
+            
+        return result
+
+    def _flatten_result(self, repo_result: Dict[str, Any]) -> Dict[str, Any]:
+        """将嵌套的分析结果扁平化"""
+        analysis = repo_result.get('analysis', {})
+        structure = analysis.get('structure_analysis', {})
+        quality = analysis.get('quality_analysis', {})
+        
+        # 尝试从 git 信息中获取更新时间（如果 CodeAnalyzer 支持）
+        # 目前 CodeAnalyzer 似乎没有返回 updated_at
+        
+        flat = {
+            "repo_name": repo_result.get('repo_url', '').split('/')[-1],
+            "repo_url": repo_result.get('repo_url'),
+            "stars": 0, # 静态分析无法获取，需 GitHub API
+            "forks": 0,
+            "language": structure.get('primary_language', 'Unknown'),
+            "updated_at": None,
+            "has_readme": structure.get('documentation', {}).get('has_readme', False),
+            "reproducibility_score": quality.get('overall_score', 0) * 100,
+            "quality_notes": str(quality.get('recommendations', []))
+        }
+        return flat
+
+    async def _process_batch(self, github_links: List[str]) -> Dict[str, Any]:
+        """处理一组GitHub仓库的分析任务（原 process 逻辑）"""
         try:
             analysis_results = []
             for link in github_links:

@@ -51,10 +51,13 @@ class PaperTrackerAgent(BaseAgent):
             "timestamp": datetime.now().isoformat(),
         }
     
-    async def track_all_scholars(self) -> List[Dict[str, Any]]:
+    async def track_all_scholars(self, dry_run: bool = False) -> List[Dict[str, Any]]:
         """
         追踪所有订阅学者的新论文
         
+        Args:
+            dry_run: 是否为试运行模式（不更新缓存）
+            
         Returns:
             每个学者的追踪结果列表
         """
@@ -65,7 +68,7 @@ class PaperTrackerAgent(BaseAgent):
         
         for scholar in scholars:
             try:
-                result = await self.track_scholar(scholar)
+                result = await self.track_scholar(scholar, dry_run=dry_run)
                 results.append(result)
             except Exception as e:
                 logger.error(f"Failed to track scholar {scholar.name}: {e}")
@@ -82,12 +85,13 @@ class PaperTrackerAgent(BaseAgent):
         
         return results
     
-    async def track_scholar(self, scholar: Scholar) -> Dict[str, Any]:
+    async def track_scholar(self, scholar: Scholar, dry_run: bool = False) -> Dict[str, Any]:
         """
         追踪单个学者的新论文
         
         Args:
             scholar: 学者对象
+            dry_run: 是否为试运行模式（不更新缓存）
             
         Returns:
             追踪结果字典
@@ -126,15 +130,16 @@ class PaperTrackerAgent(BaseAgent):
             f"total={len(current_papers)}, cached={len(cached_paper_ids)}, new={len(new_papers)}"
         )
         
-        # 4. 更新缓存
-        if new_paper_ids:
-            self.profile_agent.add_to_cache(
-                scholar.semantic_scholar_id,
-                new_paper_ids,
-            )
-        
-        # 5. 更新学者的最后检查时间
-        self.profile_agent.update_scholar_last_checked(scholar)
+        # 4. 更新缓存 (仅在非 dry-run 模式下)
+        if not dry_run:
+            if new_paper_ids:
+                self.profile_agent.add_to_cache(
+                    scholar.semantic_scholar_id,
+                    new_paper_ids,
+                )
+            
+            # 5. 更新学者的最后检查时间
+            self.profile_agent.update_scholar_last_checked(scholar)
         
         return {
             "scholar_id": scholar.semantic_scholar_id,
