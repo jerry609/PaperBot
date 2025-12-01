@@ -286,5 +286,9 @@ async def batch_process():
 - [ ] 优化并行处理性能
 - [ ] 添加Web界面
 
+## 🙏 致谢
+
+特别感谢 [Qc-TX](https://github.com/Qc-TX) 对爬虫脚本的完善与贡献！
+
 
 

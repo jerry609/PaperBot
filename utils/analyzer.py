@@ -10,7 +10,7 @@ import subprocess
 from dataclasses import dataclass
 from concurrent.futures import ThreadPoolExecutor
 import threading
-from ..utils.logger import setup_logger
+from .logger import setup_logger
 
 
 @dataclass

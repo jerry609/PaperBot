@@ -6,7 +6,7 @@ import git
 from pathlib import Path
 import tempfile
 from .base_agent import BaseAgent
-from ..utils.analyzer import CodeAnalyzer
+from utils.analyzer import CodeAnalyzer
 
 
 class CodeAnalysisAgent(BaseAgent):
@@ -105,6 +105,11 @@ class CodeAnalysisAgent(BaseAgent):
     async def _analyze_dependencies(self, repo_path: Path) -> Dict[str, Any]:
         """分析依赖关系"""
         return await self.analyzer.analyze_dependencies(repo_path)
+
+    async def explain_code_security(self, code_snippet: str) -> str:
+        """使用Claude解释代码的安全隐患"""
+        prompt = f"Analyze the following code snippet for security vulnerabilities and explain them briefly:\n\n{code_snippet}"
+        return await self.ask_claude(prompt, system="You are a security expert.")
 
     async def _cleanup(self, repo_path: Path):
         """清理临时文件"""

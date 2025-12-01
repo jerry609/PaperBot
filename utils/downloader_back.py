@@ -8,8 +8,10 @@ import urllib.parse
 from bs4 import BeautifulSoup
 import re
 import time
+import random
 from datetime import datetime
 import logging
+
 
 # 使用标准日志，避免相对导入问题
 def setup_logger(name):
@@ -42,7 +44,7 @@ class PaperDownloader:
 
         # 会议URL模板
         self.conference_urls = {
-            'ccs': 'https://dl.acm.org/doi/proceedings/10.1145/',
+            'ccs': 'https://dl.acm.org/doi/proceedings',
             'sp': 'https://ieeexplore.ieee.org/xpl/conhome/',
             'ndss': 'https://www.ndss-symposium.org/',
             'usenix': 'https://www.usenix.org/conference/'
@@ -162,7 +164,8 @@ class PaperDownloader:
             raise
 
 
-    
+    async def _parse_ccs_papers(self, base_url: str, year: str) -> List[Dict[str, Any]]:
+        return none
 
 
     async def _parse_ndss_papers(self, base_url: str, year: str) -> List[Dict[str, Any]]:
@@ -542,23 +545,16 @@ class PaperDownloader:
                 authors_text = author_match.group(1)
                 authors = [author.strip() for author in authors_text.split(',')]
             
-            # 查找DOI链接 - 优先使用标准DOI格式
-            doi_match = re.search(r'DOI:\s*(https?://[^\s]+)', citation)
-            doi_url = doi_match.group(1) if doi_match else ''
+            # 查找所有链接，只保留包含doi.ieeecomputersociety.org的链接
+            all_urls = re.findall(r'https?://[^\s]+', citation)
+            doi_url = ''
             
-            # 如果找到的是doi.ieeecomputersociety.org链接，转换为标准doi.org格式
-            if doi_url and 'doi.ieeecomputersociety.org' in doi_url:
-                doi_url = doi_url.replace('doi.ieeecomputersociety.org', 'doi.org')
+            for url in all_urls:
+                if 'doi.ieeecomputersociety.org' in url:
+                    doi_url = url
+                    break
             
-            # 如果没有标准DOI，查找所有URL中包含doi.ieeecomputersociety.org的链接并转换
-            if not doi_url:
-                all_urls = re.findall(r'https?://[^\s]+', citation)
-                for url in all_urls:
-                    if 'doi.ieeecomputersociety.org' in url:
-                        doi_url = url.replace('doi.ieeecomputersociety.org', 'doi.org')
-                        break
-            
-            # 如果还是没找到合适的链接，跳过这篇论文
+            # 如果没找到包含doi.ieeecomputersociety.org的链接，跳过这篇论文
             if not doi_url:
                 return None
             
@@ -604,22 +600,79 @@ class PaperDownloader:
                     
                     print(f"✅ 成功访问页面: {str(response.url)[:60]}...")
                     
-                    # 检查是否重定向到了Computer.org页面
+                    # 查找PDF下载链接的多种模式
+                    pdf_patterns = [
+                        # Computer.org特定的DOWNLOAD PDF按钮
+                        soup.find('a', string=re.compile(r'DOWNLOAD PDF', re.I)),
+                        soup.find('a', text=re.compile(r'download.*pdf', re.I)),
+                        soup.find('button', string=re.compile(r'download.*pdf', re.I)),
+                        
+                        # 带有PDF相关class的链接
+                        soup.find('a', class_=re.compile(r'download|pdf', re.I)),
+                        soup.find('a', attrs={'aria-label': re.compile(r'download|pdf', re.I)}),
+                        
+                        # 直接PDF链接
+                        soup.find('a', href=re.compile(r'\.pdf$', re.I)),
+                        
+                        # Meta标签中的PDF链接
+                        soup.find('meta', attrs={'name': 'citation_pdf_url'}),
+                        soup.find('meta', attrs={'property': 'citation_pdf_url'})
+                    ]
+                    
+                    for pattern in pdf_patterns:
+                        if pattern:
+                            if pattern.name == 'meta':
+                                pdf_url = pattern.get('content')
+                            else:
+                                pdf_url = pattern.get('href')
+                                
+                            if pdf_url:
+                                # 补全相对URL
+                                if not pdf_url.startswith('http'):
+                                    if pdf_url.startswith('/'):
+                                        pdf_url = f"https://www.computer.org{pdf_url}"
+                                    else:
+                                        base_url = '/'.join(str(response.url).split('/')[:-1])
+                                        pdf_url = f"{base_url}/{pdf_url}"
+                                
+                                print(f"✅ 找到PDF链接: {pdf_url[:60]}...")
+                                return pdf_url
+                    
+                    # 如果没找到直接链接，尝试查找data-*属性中PDF链接
+                    for element in soup.find_all(attrs={'data-pdf-url': True}):
+                        pdf_url = element.get('data-pdf-url')
+                        if pdf_url:
+                            if not pdf_url.startswith('http'):
+                                pdf_url = f"https://www.computer.org{pdf_url}"
+                            print(f"🔗 从data属性找到PDF: {pdf_url[:60]}...")
+                            return pdf_url
+                    
+                    # 尝试查找包含PDF的所有链接
+                    all_links = soup.find_all('a', href=True)
+                    for link in all_links:
+                        href = link.get('href')
+                        if href and ('pdf' in href.lower() or 'download' in href.lower()):
+                            if not href.startswith('http'):
+                                if href.startswith('/'):
+                                    href = f"https://www.computer.org{href}"
+                                else:
+                                    base_url = '/'.join(str(response.url).split('/')[:-1])
+                                    href = f"{base_url}/{href}"
+                            print(f"🔍 候选PDF链接: {href[:60]}...")
+                            return href
+                    
+                    # 最后尝试：从当前页面URL构造PDF链接
                     current_url = str(response.url)
-                    if 'computer.org' in current_url:
-                        # 在Computer.org页面查找PDF下载链接
-                        return await self._extract_pdf_from_computer_org_page(soup, current_url)
-                    else:
-                        # 在其他页面（如doi.org重定向页）查找PDF链接
-                        pdf_url = await self._extract_pdf_from_generic_page(soup, str(response.url))
-                        # 如果是IEEE页面，直接返回构造的PDF链接
-                        if 'ieeexplore.ieee.org' in current_url and not pdf_url:
-                            match = re.search(r'/document/(\d+)', current_url)
-                            if match:
-                                arnumber = match.group(1)
-                                pdf_url = f"https://ieeexplore.ieee.org/stamp/stamp.jsp?tp=&arnumber={arnumber}"
-                                print(f"✅ 构造PDF链接成功: {pdf_url[:60]}...")
-                        return pdf_url
+                    if '/proceedings-article/' in current_url:
+                        # 提取文章ID
+                        parts = current_url.rstrip('/').split('/')
+                        if parts:
+                            article_id = parts[-1]
+                            # 使用真正的Computer.org PDF下载API
+                            pdf_url = f"https://www.computer.org/csdl/pds/api/csdl/proceedings/download-article/{article_id}/pdf"
+                            print(f"🔗 构造PDF API链接: {pdf_url}")
+                            return pdf_url
+                        
                 else:
                     print(f"❌ DOI访问失败: HTTP {response.status}")
                     
@@ -627,86 +680,6 @@ class PaperDownloader:
             print(f"❌ 解析PDF链接失败: {str(e)}")
             
         return ''
-    
-    async def _extract_pdf_from_computer_org_page(self, soup, current_url: str) -> str:
-        """从Computer.org页面提取PDF链接"""
-        # 查找PDF下载链接的多种模式
-        pdf_patterns = [
-            # Computer.org特定的DOWNLOAD PDF按钮
-            soup.find('a', string=re.compile(r'DOWNLOAD PDF', re.I)),
-            soup.find('a', text=re.compile(r'download.*pdf', re.I)),
-            soup.find('button', string=re.compile(r'download.*pdf', re.I)),
-            
-            # 带有PDF相关class的链接
-            soup.find('a', class_=re.compile(r'download|pdf', re.I)),
-            soup.find('a', attrs={'aria-label': re.compile(r'download|pdf', re.I)}),
-            
-            # 直接PDF链接
-            soup.find('a', href=re.compile(r'\.pdf$', re.I)),
-            
-            # Meta标签中的PDF链接
-            soup.find('meta', attrs={'name': 'citation_pdf_url'}),
-            soup.find('meta', attrs={'property': 'citation_pdf_url'})
-        ]
-        
-        for pattern in pdf_patterns:
-            if pattern:
-                if pattern.name == 'meta':
-                    pdf_url = pattern.get('content')
-                else:
-                    pdf_url = pattern.get('href')
-                    
-                if pdf_url:
-                    # 补全相对URL
-                    if not pdf_url.startswith('http'):
-                        if pdf_url.startswith('/'):
-                            pdf_url = f"https://www.computer.org{pdf_url}"
-                        else:
-                            base_url = '/'.join(current_url.split('/')[:-1])
-                            pdf_url = f"{base_url}/{pdf_url}"
-                    
-                    print(f"✅ 找到PDF链接: {pdf_url[:60]}...")
-                    return pdf_url
-        
-        # 如果没找到直接链接，尝试查找data-*属性中PDF链接
-        for element in soup.find_all(attrs={'data-pdf-url': True}):
-            pdf_url = element.get('data-pdf-url')
-            if pdf_url:
-                if not pdf_url.startswith('http'):
-                    pdf_url = f"https://www.computer.org{pdf_url}"
-                print(f"🔗 从data属性找到PDF: {pdf_url[:60]}...")
-                return pdf_url
-        
-        # 尝试查找包含PDF的所有链接
-        all_links = soup.find_all('a', href=True)
-        for link in all_links:
-            href = link.get('href')
-            if href and ('pdf' in href.lower() or 'download' in href.lower()):
-                if not href.startswith('http'):
-                    if href.startswith('/'):
-                        href = f"https://www.computer.org{href}"
-                    else:
-                        base_url = '/'.join(current_url.split('/')[:-1])
-                        href = f"{base_url}/{href}"
-                print(f"🔍 候选PDF链接: {href[:60]}...")
-                return href
-        
-        # 最后尝试：从当前页面URL构造PDF链接
-        if '/proceedings-article/' in current_url:
-            # 提取文章ID
-            parts = current_url.rstrip('/').split('/')
-            if parts:
-                article_id = parts[-1]
-                # 使用真正的Computer.org PDF下载API
-                pdf_url = f"https://www.computer.org/csdl/pds/api/csdl/proceedings/download-article/{article_id}/pdf"
-                print(f"🔗 构造PDF API链接: {pdf_url}")
-                return pdf_url
-        
-        return ''
-    
-
-    
-    
 
     async def _parse_usenix_papers(self, base_url: str, year: str) -> List[Dict[str, Any]]:
         """解析USENIX Security论文列表 - 精确修复版本"""
@@ -919,79 +892,152 @@ class PaperDownloader:
 
 
 
-
     async def _download_with_retry(self, url: str) -> Optional[bytes]:
-        """带重试机制的下载 - 修复版本，支持IEEE SP论文特殊流程"""
+        """带重试机制的下载 - 支持CCS反爬策略"""
         if not url:
             return None
-
+        
+        # 对ACM CCS论文使用特殊处理
+        if 'dl.acm.org/doi/pdf/' in url:
+            return await self._download_acm_ccs_pdf_enhanced(url)
+        
         # 对Computer.org的SP论文使用特殊处理
         if 'computer.org/csdl/pds/api' in url:
             return await self._download_computer_org_pdf(url)
-
-        # 对IEEE SP论文特殊处理
-        if 'ieeexplore.ieee.org/stampPDF/getPDF.jsp' in url:
-            return await self._download_ieee_pdf_with_httpx(url)
-
+        
         # 其他链接使用原有方法
         return await self._download_with_aiohttp(url)
-
-    async def _download_ieee_pdf_with_httpx(self, url: str) -> Optional[bytes]:
-        """使用httpx+HTTP2自动获取ERIGHTS并下载IEEE SP PDF"""
+    
+    async def _download_acm_ccs_pdf_enhanced(self, url: str) -> Optional[bytes]:
+        """增强版ACM CCS PDF下载方法 - 完整的反爬策略"""
         try:
-            import httpx
-            # 第一次请求，ERIGHTS=0000
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36 Edg/139.0.0.0',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
-                'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-                'Accept-Encoding': 'gzip, deflate, br',
-                'Connection': 'keep-alive',
-                'Dnt': '1',
-                'Upgrade-Insecure-Requests': '1',
-                'Sec-Fetch-Site': 'same-origin',
-                'Sec-Fetch-Mode': 'navigate',
-                'Sec-Fetch-Dest': 'iframe',
-                'Referer': 'https://ieeexplore.ieee.org/',
-                'Sec-Ch-Ua': '"Not;A=Brand";v="99", "Microsoft Edge";v="139", "Chromium";v="139"',
-                'Sec-Ch-Ua-Mobile': '?0',
-                'Sec-Ch-Ua-Platform': '"Windows"',
-                'Priority': 'u=0, i',
-            }
-            cookies = {'ERIGHTS': '0000'}
-            timeout = 60
-            async with httpx.AsyncClient(http2=True, timeout=timeout, follow_redirects=False) as client:
-                # 第一次请求
-                resp1 = await client.get(url, headers=headers, cookies=cookies)
-                # 检查302和Set-Cookie
-                if resp1.status_code in (302, 303, 307, 301):
-                    set_cookie = resp1.headers.get('set-cookie', '')
-                    # 提取ERIGHTS
-                    import re
-                    m = re.search(r'ERIGHTS=([^;]+)', set_cookie)
-                    if m:
-                        erights_val = m.group(1)
-                        cookies['ERIGHTS'] = erights_val
-                        # 跟随Location
-                        next_url = resp1.headers.get('location', url)
-                        # 第二次请求
-                        resp2 = await client.get(url, headers=headers, cookies=cookies)
-                        if resp2.status_code == 200 and resp2.content and resp2.content[:4] == b'%PDF':
-                            return resp2.content
-                        # 有时需要再请求一次
-                        if resp2.status_code in (302, 303, 307, 301):
-                            # 再次尝试
-                            resp3 = await client.get(url, headers=headers, cookies=cookies)
-                            if resp3.status_code == 200 and resp3.content and resp3.content[:4] == b'%PDF':
-                                return resp3.content
+            # 1. 首先访问数据库主页获取session
+            await self._warm_up_acm_session()
+            
+            # 2. 提取DOI信息
+            doi_match = re.search(r'/doi/pdf/(.+)', url)
+            if not doi_match:
+                raise Exception("Invalid DOI URL format")
+            
+            doi = doi_match.group(1)
+            acm_page_url = f"https://dl.acm.org/doi/{doi}"
+            
+            # 3. 先访问论文页面获取cookies和referer
+            print(f"🔍 访问论文页面: {acm_page_url[:60]}...")
+            
+            page_headers = self._get_anti_crawler_headers()
+            
+            async with aiohttp.ClientSession(headers=page_headers) as session:
+                # 随机延迟
+                await asyncio.sleep(random.uniform(2, 5))
+                
+                timeout = aiohttp.ClientTimeout(total=30, connect=10)
+                async with session.get(acm_page_url, timeout=timeout) as response:
+                    if response.status == 200:
+                        print(f"✅ 成功访问论文页面")
+                        
+                        # 4. 现在下载PDF，使用论文页面作为referer
+                        pdf_headers = self._get_pdf_download_headers(acm_page_url)
+                        
+                        # 添加更长的延迟
+                        await asyncio.sleep(random.uniform(3, 7))
+                        
+                        print(f"📥 开始下载PDF: {url[:60]}...")
+                        
+                        async with session.get(url, headers=pdf_headers, timeout=timeout) as pdf_response:
+                            if pdf_response.status == 200:
+                                content = await pdf_response.read()
+                                
+                                # 验证PDF文件
+                                if self._is_valid_pdf(content):
+                                    print(f"✅ PDF下载成功 (size: {len(content)/1024:.1f}KB)")
+                                    return content
+                                else:
+                                    raise Exception("Downloaded content is not a valid PDF")
+                            elif pdf_response.status == 403:
+                                raise Exception("Access denied - may need institutional access or VPN")
+                            elif pdf_response.status == 429:
+                                raise Exception("Rate limited - need to slow down requests")
+                            else:
+                                raise Exception(f"PDF download failed: HTTP {pdf_response.status}")
+                    elif response.status == 403:
+                        raise Exception("Access to paper page denied - may need institutional access")
                     else:
-                        # 没有ERIGHTS，直接尝试内容
-                        if resp1.status_code == 200 and resp1.content and resp1.content[:4] == b'%PDF':
-                            return resp1.content
-                elif resp1.status_code == 200 and resp1.content and resp1.content[:4] == b'%PDF':
-                    return resp1.content
+                        raise Exception(f"Paper page access failed: HTTP {response.status}")
+                        
         except Exception as e:
-            self.logger.error(f"httpx下载IEEE PDF失败: {str(e)}")
+            self.logger.warning(f"Enhanced ACM download failed: {str(e)}")
+            # 如果增强方法失败，尝试简单方法
+            return await self._download_acm_ccs_pdf_simple(url)
+    
+    async def _warm_up_acm_session(self):
+        """预热 ACM session，获取必要的 cookies"""
+        try:
+            headers = self._get_anti_crawler_headers()
+            
+            async with aiohttp.ClientSession(headers=headers) as session:
+                # 访问 ACM 主页
+                await asyncio.sleep(random.uniform(1, 3))
+                timeout = aiohttp.ClientTimeout(total=20, connect=10)
+                
+                async with session.get('https://dl.acm.org/', timeout=timeout) as response:
+                    if response.status == 200:
+                        print(f"🔥 ACM session 预热成功")
+                    else:
+                        print(f"⚠️  ACM session 预热失败: HTTP {response.status}")
+                        
+        except Exception as e:
+            self.logger.debug(f"ACM session warm-up failed: {str(e)}")
+    
+    async def _download_acm_ccs_pdf_simple(self, url: str) -> Optional[bytes]:
+        """简单版ACM CCS PDF下载方法作为备用"""
+        try:
+            headers = self._get_pdf_download_headers()
+            
+            async with aiohttp.ClientSession(headers=headers) as session:
+                await asyncio.sleep(random.uniform(2, 5))
+                
+                timeout = aiohttp.ClientTimeout(total=60, connect=20)
+                async with session.get(url, timeout=timeout) as response:
+                    if response.status == 200:
+                        content = await response.read()
+                        if self._is_valid_pdf(content):
+                            return content
+                    
+            return None
+            
+        except Exception as e:
+            self.logger.warning(f"Simple ACM download failed: {str(e)}")
+            return None
+    
+    async def _download_with_retry(self, url: str) -> Optional[bytes]:
+        """带重试机制的下载 - 修复版本"""
+        if not url:
+            return None
+        
+        # 对Computer.org的SP论文使用特殊处理
+        if 'computer.org/csdl/pds/api' in url:
+            return await self._download_computer_org_pdf(url)
+        
+        # 对ACM CCS论文使用特殊处理
+        if 'dl.acm.org/doi/pdf/' in url:
+            return await self._download_acm_ccs_pdf(url)
+        
+        # 其他链接使用原有方法
+        return await self._download_with_aiohttp(url)
+    
+    async def _download_acm_ccs_pdf(self, url: str) -> Optional[bytes]:
+        """专门为ACM CCS PDF下载的方法 - 使用curl绕过保护机制"""
+        # 尝试多次下载，增加成功率
+        for attempt in range(3):
+            result = await self._download_with_curl(url)
+            if result:
+                return result
+            # 添加延迟
+            import asyncio
+            import random
+            delay = random.uniform(5, 10)
+            await asyncio.sleep(delay)
         return None
     
     async def _download_computer_org_pdf(self, api_url: str) -> Optional[bytes]:
@@ -999,18 +1045,46 @@ class PaperDownloader:
         return await self._download_with_curl(api_url)
     
     async def _download_with_curl(self, url: str) -> Optional[bytes]:
-        """使用curl命令下载"""
+        """使用curl命令下载，绕过ACM保护机制"""
         try:
             import asyncio
             import subprocess
+            import random
+            import re
             
+            # 提取DOI用于Referer头
+            doi_match = re.search(r'/doi/pdf/(.+)', url)
+            referer = f"https://dl.acm.org/doi/{doi_match.group(1)}" if doi_match else url
+            
+            # 随机选择User-Agent，模拟不同浏览器
+            user_agents = [
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36 Edg/139.0.0.0',
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36',
+                'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36',
+                'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36'
+            ]
+            
+            # 构建curl命令，模拟真实浏览器请求
             cmd = [
                 'curl',
                 '-L',  # 跟随重定向
                 '-s',  # 静默模式
                 '--max-time', '60',  # 最大超时时间
-                '--user-agent', 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
-                '--header', 'Accept: application/pdf,application/octet-stream,*/*',
+                '--user-agent', random.choice(user_agents),
+                '--header', 'Accept: application/pdf,application/octet-stream,*/*;q=0.8',
+                '--header', f'Referer: {referer}',
+                '--header', 'Accept-Language: en-US,en;q=0.9',
+                '--header', 'Accept-Encoding: gzip, deflate, br',
+                '--header', 'Connection: keep-alive',
+                '--header', 'Upgrade-Insecure-Requests: 1',
+                '--header', 'Sec-Fetch-Dest: document',
+                '--header', 'Sec-Fetch-Mode: navigate',
+                '--header', 'Sec-Fetch-Site: same-origin',
+                '--header', 'Cache-Control: max-age=0',
+                '--header', 'DNT: 1',
+                '--header', 'Sec-Ch-Ua: "Not;A=Brand";v="99", "Microsoft Edge";v="139", "Chromium";v="139"',
+                '--header', 'Sec-Ch-Ua-Mobile: ?0',
+                '--header', 'Sec-Ch-Ua-Platform: "Windows"',
                 url
             ]
             

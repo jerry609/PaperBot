@@ -4,11 +4,25 @@
 download:
   path: "./papers"
   max_retries: 3
-  retry_delay: 5
-  max_concurrent_downloads: 5
+  retry_delay: 3  # 增加重试延迟到3秒
+  max_concurrent_downloads: 1  # 关闭并发，使用单线程
+  batch_size: 1  # 每次只处理1个
   cleanup_days: 30
   user_agent: "SecuriPaperBot/1.0"
-  timeout: 30
+  timeout: 90  # 增加超时时间到90秒
+  connection_pool_size: 5  # 减少连接池大小
+  keep_alive_timeout: 60  # 增加保活时间
+  
+  # 智能并发控制设置
+  smart_concurrent:
+    enabled: false  # 默认关闭，可手动开启
+    min_concurrent: 1    # 最小并发数
+    max_concurrent: 4    # 最大并发数
+    initial_concurrent: 2  # 初始并发数
+    failure_threshold: 0.3  # 失败率阈值
+    slow_threshold: 10.0    # 慢下载阈值(秒)
+    adjustment_interval: 5   # 调整评估周期
+    rest_interval: 1.0      # 请求间隔(秒)
 
 # 分析设置
 analysis:
@@ -30,18 +44,13 @@ analysis:
 # 安全设置
 security:
   verify_ssl: true
-  rate_limit: 60  # requests per minute
-  timeout: 30
+  rate_limit: 120  # 增加每分钟请求数到120
+  timeout: 45  # 增加超时时间
   allowed_domains:
     - "dl.acm.org"
     - "ieeexplore.ieee.org"
     - "www.ndss-symposium.org"
     - "www.usenix.org"
-  security_checks:
-    - "sql_injection"
-    - "xss"
-    - "command_injection"
-    - "path_traversal"
 
 # 输出设置
 output:
@@ -54,11 +63,6 @@ output:
     - "quality_report"
     - "security_report"
     - "recommendations"
-  templates:
-    summary: "templates/summary.md.j2"
-    analysis: "templates/analysis.md.j2"
-    quality_report: "templates/quality.md.j2"
-    security_report: "templates/security.md.j2"
 
 # 日志设置
 logging:
@@ -108,3 +112,7 @@ apis:
     model: "gpt-4"
     temperature: 0.3
     max_tokens: 2000
+  anthropic:
+    model: "claude-3-5-sonnet-20241022"
+    max_tokens: 4096
+    temperature: 0.0

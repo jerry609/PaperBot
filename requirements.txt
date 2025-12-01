@@ -1,0 +1,43 @@
+# 用于IEEE SP论文下载的HTTP2支持
+httpx[http2]
+# 基础依赖
+requests>=2.28.0
+urllib3>=1.26.0
+lxml>=4.9.0
+beautifulsoup4>=4.11.0
+
+# 异步处理
+aiohttp>=3.8.0
+aiofiles>=22.1.0
+
+# PDF处理
+pdfplumber>=0.7.0
+PyPDF2>=3.0.0
+
+# 数据处理
+pandas>=1.5.0
+numpy>=1.24.0
+
+# 配置管理
+pyyaml>=6.0
+python-dotenv>=0.19.0
+
+# 日志和调试
+colorlog>=6.7.0
+
+# 代码分析（可选）
+gitpython>=3.1.0
+pygithub>=1.58.0
+
+# 开发工具（可选）
+pytest>=7.2.0
+pytest-asyncio>=0.21.0
+black>=22.0.0
+flake8>=5.0.0
+
+# AI SDK
+anthropic>=0.3.0
+
+# Code Analysis
+radon>=5.1.0
+safety>=2.3.0
