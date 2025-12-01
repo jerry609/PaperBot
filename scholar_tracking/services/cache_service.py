@@ -7,7 +7,7 @@
 import json
 import logging
 from pathlib import Path
-from typing import Set, Optional, Dict, Any
+from typing import Set, Optional, Dict, Any, List
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -37,6 +37,32 @@ class CacheService:
     def _get_cache_path(self, scholar_id: str) -> Path:
         """获取学者的缓存文件路径"""
         return self.cache_dir / f"{scholar_id}.json"
+
+    def _read_cache_file(self, cache_path: Path) -> Dict[str, Any]:
+        """读取缓存文件内容"""
+        if not cache_path.exists():
+            return {}
+
+        try:
+            with open(cache_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except json.JSONDecodeError as e:
+            logger.warning(f"Invalid cache file {cache_path.name}: {e}")
+            return {}
+        except Exception as e:
+            logger.error(f"Failed to read cache {cache_path}: {e}")
+            return {}
+
+    def _write_cache_file(self, cache_path: Path, data: Dict[str, Any]):
+        """原子性写入缓存文件，防止部分写入"""
+        tmp_path = cache_path.with_suffix(".tmp")
+        try:
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+            tmp_path.replace(cache_path)
+        except Exception as e:
+            logger.error(f"Failed to write cache for {cache_path.name}: {e}")
+            raise
     
     def load_paper_ids(self, scholar_id: str) -> Set[str]:
         """
@@ -49,24 +75,14 @@ class CacheService:
             已处理的论文 ID 集合
         """
         cache_path = self._get_cache_path(scholar_id)
-        
-        if not cache_path.exists():
-            logger.debug(f"No cache found for scholar {scholar_id}")
-            return set()
-        
-        try:
-            with open(cache_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            
-            paper_ids = set(data.get("paper_ids", []))
-            logger.debug(f"Loaded {len(paper_ids)} cached paper IDs for scholar {scholar_id}")
-            return paper_ids
-        except json.JSONDecodeError as e:
-            logger.warning(f"Invalid cache file for {scholar_id}: {e}")
-            return set()
-        except Exception as e:
-            logger.error(f"Failed to load cache for {scholar_id}: {e}")
-            return set()
+        data = self._read_cache_file(cache_path)
+        paper_ids = set(data.get("paper_ids", []))
+
+        if paper_ids:
+            logger.debug(
+                f"Loaded {len(paper_ids)} cached paper IDs for scholar {scholar_id}"
+            )
+        return paper_ids
     
     def save_paper_ids(self, scholar_id: str, paper_ids: Set[str]):
         """
@@ -77,21 +93,18 @@ class CacheService:
             paper_ids: 论文 ID 集合
         """
         cache_path = self._get_cache_path(scholar_id)
-        
+        existing = self._read_cache_file(cache_path)
+
         data = {
+            **existing,
             "scholar_id": scholar_id,
-            "paper_ids": list(paper_ids),
+            "paper_ids": sorted(list(paper_ids)),
             "count": len(paper_ids),
             "last_updated": datetime.now().isoformat(),
         }
-        
-        try:
-            with open(cache_path, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
-            logger.debug(f"Saved {len(paper_ids)} paper IDs for scholar {scholar_id}")
-        except Exception as e:
-            logger.error(f"Failed to save cache for {scholar_id}: {e}")
-            raise
+
+        self._write_cache_file(cache_path, data)
+        logger.debug(f"Saved {len(paper_ids)} paper IDs for scholar {scholar_id}")
     
     def add_paper_ids(self, scholar_id: str, new_paper_ids: Set[str]) -> Set[str]:
         """
@@ -120,30 +133,20 @@ class CacheService:
             缓存统计信息字典
         """
         cache_path = self._get_cache_path(scholar_id)
-        
         if not cache_path.exists():
             return {
                 "exists": False,
                 "paper_count": 0,
                 "last_updated": None,
             }
-        
-        try:
-            with open(cache_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            
-            return {
-                "exists": True,
-                "paper_count": data.get("count", len(data.get("paper_ids", []))),
-                "last_updated": data.get("last_updated"),
-            }
-        except Exception:
-            return {
-                "exists": True,
-                "paper_count": 0,
-                "last_updated": None,
-                "error": True,
-            }
+
+        data = self._read_cache_file(cache_path)
+        return {
+            "exists": True,
+            "paper_count": data.get("count", len(data.get("paper_ids", []))),
+            "last_updated": data.get("last_updated"),
+            "history_length": len(data.get("history", [])),
+        }
     
     def clear_cache(self, scholar_id: str) -> bool:
         """
@@ -184,3 +187,36 @@ class CacheService:
         
         logger.info(f"Cleared {count} cache files")
         return count
+
+    def append_run_history(
+        self,
+        scholar_id: str,
+        processed_papers: List[Dict[str, Any]],
+    ):
+        """记录一次处理批次，稳定保存增量状态"""
+        if not processed_papers:
+            return
+
+        cache_path = self._get_cache_path(scholar_id)
+        data = self._read_cache_file(cache_path)
+
+        history = data.get("history", [])
+        history.append(
+            {
+                "timestamp": datetime.now().isoformat(),
+                "papers": processed_papers,
+            }
+        )
+
+        data.update(
+            {
+                "scholar_id": scholar_id,
+                "history": history[-20:],  # 限制历史长度
+            }
+        )
+
+        if "paper_ids" not in data:
+            data["paper_ids"] = []
+            data["count"] = 0
+
+        self._write_cache_file(cache_path, data)

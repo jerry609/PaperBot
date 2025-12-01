@@ -62,7 +62,7 @@ class SubscriptionService:
         
         scholars = subscriptions.get("scholars", [])
         if not scholars:
-            logger.warning("No scholars configured for tracking")
+            raise ValueError("No scholars configured for tracking")
         
         # 校验每个学者的必填字段
         for i, scholar in enumerate(scholars):
@@ -73,8 +73,24 @@ class SubscriptionService:
         
         # 校验 settings
         settings = subscriptions.get("settings", {})
-        if not settings:
-            logger.warning("No settings configured, using defaults")
+        required_settings = [
+            "check_interval",
+            "papers_per_scholar",
+            "min_influence_score",
+            "output_dir",
+            "cache_dir",
+            "api",
+        ]
+        missing = [key for key in required_settings if not settings.get(key)]
+        if missing:
+            raise ValueError(f"Missing subscription settings: {', '.join(missing)}")
+
+        api_config = settings.get("api", {})
+        semantic_api = api_config.get("semantic_scholar")
+        if not semantic_api or not semantic_api.get("base_url"):
+            raise ValueError("Semantic Scholar API config requires 'base_url'")
+        if semantic_api.get("timeout") is None:
+            raise ValueError("Semantic Scholar API config requires 'timeout'")
     
     def get_scholars(self) -> List[Scholar]:
         """获取所有订阅的学者"""
@@ -105,7 +121,13 @@ class SubscriptionService:
             "cache_dir": settings.get("cache_dir", "cache/scholar_papers"),
             "api": settings.get("api", {}),
             "logging": settings.get("logging", {}),
+            "reporting": settings.get("reporting", {}),
         }
+
+    def get_reporting_config(self) -> Dict[str, Any]:
+        """获取报告输出配置"""
+        settings = self.get_settings()
+        return settings.get("reporting", {})
     
     def get_api_config(self, api_name: str) -> Dict[str, Any]:
         """获取特定 API 的配置"""

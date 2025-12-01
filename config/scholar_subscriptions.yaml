@@ -59,3 +59,10 @@ subscriptions:
       # 是否将日志写入文件
       file_logging: true
       log_dir: "logs"
+
+    # 报告输出设置
+    reporting:
+      # 使用的 Jinja 模板文件（位于 reports/templates/）
+      template: "paper_report.md.j2"
+      # 是否在 cache/scholar_papers 中记录处理历史
+      persist_history: true

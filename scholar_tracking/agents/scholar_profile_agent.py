@@ -30,7 +30,15 @@ class ScholarProfileAgent(BaseAgent):
         super().__init__(config)
         
         # 初始化服务
-        self.subscription_service = SubscriptionService()
+        config_path = None
+        if config:
+            config_path = (
+                config.get("subscriptions_config_path")
+                or config.get("subscription_config_path")
+                or config.get("config_path")
+            )
+
+        self.subscription_service = SubscriptionService(config_path=config_path)
         
         # 获取缓存目录
         cache_dir = self.subscription_service.get_cache_dir()
@@ -217,7 +225,16 @@ class ScholarProfileAgent(BaseAgent):
             lines.append(
                 f"  - {scholar.name} (ID: {scholar.semantic_scholar_id})"
                 f" | Cached papers: {cache_stats.get('paper_count', 0)}"
+                f" | History entries: {cache_stats.get('history_length', 0)}"
             )
         
         lines.append("=" * 50)
         return "\n".join(lines)
+
+    def record_processed_papers(
+        self,
+        scholar_id: str,
+        processed_papers: List[Dict[str, Any]],
+    ):
+        """记录已处理论文的增量信息"""
+        self.cache_service.append_run_history(scholar_id, processed_papers)
