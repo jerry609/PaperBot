@@ -192,6 +192,11 @@ def main():
         sys.exit(1)
     
     parser = argparse.ArgumentParser(description="SecuriPaperBot - 智能论文分析工具")
+    
+    # 添加子命令
+    subparsers = parser.add_subparsers(dest='command', help='可用命令')
+    
+    # 下载命令（默认行为）
     parser.add_argument('--conference', choices=['ccs', 'sp', 'ndss', 'usenix'], 
                        help='会议名称')
     parser.add_argument('--year', help='会议年份 (例如: 23 表示2023年)')
@@ -200,6 +205,20 @@ def main():
     parser.add_argument('--demo', action='store_true', help='运行演示模式')
     parser.add_argument('--smart', action='store_true', help='明确启用智能并发下载模式')
     parser.add_argument('--no-smart', action='store_true', help='禁用智能模式，使用传统稳定模式')
+    
+    # 学者追踪命令
+    track_parser = subparsers.add_parser('track', help='学者追踪功能')
+    track_parser.add_argument('--config', type=str, 
+                              default='config/scholar_subscriptions.yaml',
+                              help='订阅配置文件路径')
+    track_parser.add_argument('--scholar-id', type=str, 
+                              help='仅追踪指定学者 (Semantic Scholar ID)')
+    track_parser.add_argument('--force', action='store_true',
+                              help='强制重新检测（清除缓存）')
+    track_parser.add_argument('--dry-run', action='store_true',
+                              help='仅检测新论文，不生成报告')
+    track_parser.add_argument('--summary', action='store_true',
+                              help='显示追踪状态摘要')
     
     args = parser.parse_args()
     
@@ -230,6 +249,11 @@ def main():
         print("pip install requests lxml urllib3 aiohttp beautifulsoup4 pdfplumber")
         sys.exit(1)
     
+    # 处理学者追踪命令
+    if args.command == 'track':
+        run_scholar_tracking(args)
+        return
+    
     if args.conference and args.year:
         # 所有会议使用相同的下载逻辑
         if args.no_smart:
@@ -253,9 +277,123 @@ def main():
         print("    USENIX: python main.py --conference usenix --year 23")
         print("  关闭智能模式 (传统稳定模式):")
         print("    python main.py --conference ndss --year 23 --no-smart")
+        print("  学者追踪:")
+        print("    python main.py track --summary")
+        print("    python main.py track")
+        print("    python main.py track --scholar-id 1741101")
+        print("    python main.py track --force")
         print("  查看帮助: python main.py --help")
         print("💡 注意: 所有会议都使用相同的下载方式，支持不同年份")
         print("🤖 智能模式默认启用，提供更快的下载速度和进度显示")
+
+
+def run_scholar_tracking(args):
+    """运行学者追踪功能"""
+    print("=" * 60)
+    print("📚 PaperBot 学者追踪系统")
+    print("=" * 60)
+    
+    async def _run_tracking():
+        from scholar_tracking import PaperTrackerAgent, ScholarProfileAgent
+        from core.workflow_coordinator import ScholarWorkflowCoordinator
+        from reports import ReportWriter
+        
+        # 初始化
+        profile_agent = ScholarProfileAgent()
+        tracker_agent = PaperTrackerAgent()
+        
+        # 显示摘要
+        if args.summary:
+            print("\n📊 追踪状态摘要:")
+            print(profile_agent.summary())
+            return
+        
+        # 强制模式
+        if args.force and args.scholar_id:
+            print(f"\n🔄 强制重新检测学者: {args.scholar_id}")
+            profile_agent.clear_scholar_cache(args.scholar_id)
+        elif args.force:
+            print("\n🔄 清除所有缓存...")
+            profile_agent.clear_all_cache()
+        
+        # 追踪学者
+        if args.scholar_id:
+            scholar = profile_agent.get_scholar_by_id(args.scholar_id)
+            if not scholar:
+                print(f"❌ 未找到学者: {args.scholar_id}")
+                return
+            result = await tracker_agent.track_scholar(scholar)
+            results = [result]
+        else:
+            print("\n🔍 开始追踪所有订阅学者...")
+            results = await tracker_agent.track_all_scholars()
+        
+        # 显示结果
+        total_new = 0
+        for result in results:
+            scholar_name = result.get("scholar_name", "Unknown")
+            new_count = result.get("new_papers_count", len(result.get("new_papers", [])))
+            status = result.get("status", "unknown")
+            
+            if status == "success":
+                print(f"  ✅ {scholar_name}: 发现 {new_count} 篇新论文")
+                total_new += new_count
+            elif status == "error":
+                print(f"  ❌ {scholar_name}: {result.get('error', '未知错误')}")
+            else:
+                print(f"  ⚠️  {scholar_name}: {status}")
+        
+        print(f"\n📈 总计发现 {total_new} 篇新论文")
+        
+        # 生成报告（非 dry-run 模式）
+        if not args.dry_run and total_new > 0:
+            print("\n📝 生成分析报告...")
+            
+            coordinator = ScholarWorkflowCoordinator()
+            writer = ReportWriter()
+            
+            for result in results:
+                if result.get("status") != "success":
+                    continue
+                
+                scholar_name = result.get("scholar_name")
+                new_papers = result.get("new_papers", [])
+                
+                if not new_papers:
+                    continue
+                
+                print(f"\n  处理 {scholar_name} 的 {len(new_papers)} 篇论文...")
+                
+                # 将字典转换为 PaperMeta 对象
+                from scholar_tracking.models import PaperMeta
+                papers = [PaperMeta.from_dict(p) for p in new_papers]
+                
+                for paper in papers:
+                    try:
+                        report, influence, _ = await coordinator.run_paper_pipeline(
+                            paper, scholar_name
+                        )
+                        
+                        # 写入报告
+                        report_path = writer.write_report(
+                            report, paper, scholar_name
+                        )
+                        
+                        print(f"    📄 {paper.title[:40]}... -> {report_path.name}")
+                        print(f"       PIS: {influence.total_score:.1f}/100 ({influence.recommendation.value})")
+                    except Exception as e:
+                        print(f"    ❌ 处理失败: {paper.title[:40]}... - {e}")
+        
+        print("\n✅ 学者追踪完成!")
+    
+    try:
+        asyncio.run(_run_tracking())
+    except KeyboardInterrupt:
+        print("\n⚠️  用户中断")
+    except Exception as e:
+        print(f"\n❌ 追踪过程出错: {e}")
+        import traceback
+        traceback.print_exc()
 
 if __name__ == "__main__":
     main()

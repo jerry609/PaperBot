@@ -1,0 +1,61 @@
+# 学者订阅配置文件
+# PaperBot Scholar Tracking System
+
+subscriptions:
+  # 订阅的学者列表
+  scholars:
+    - name: "Dawn Song"
+      semantic_scholar_id: "1741101"
+      keywords:
+        - "Adversarial Machine Learning"
+        - "Blockchain Security"
+        - "AI Security"
+    
+    - name: "Nicolas Papernot"
+      semantic_scholar_id: "2810933"
+      keywords:
+        - "Machine Learning Security"
+        - "Adversarial Examples"
+
+  # 全局设置
+  settings:
+    # 检查间隔: daily / weekly
+    check_interval: "weekly"
+    
+    # 每次拉取每个学者的论文数量
+    papers_per_scholar: 20
+    
+    # 最低影响力分数阈值 (0-100)
+    # 低于此分数的论文仍会生成报告，但会标记为"低优先级"
+    min_influence_score: 50
+    
+    # 报告输出目录 (相对于项目根目录)
+    output_dir: "output/reports"
+    
+    # 缓存目录 (相对于项目根目录)
+    cache_dir: "cache/scholar_papers"
+    
+    # API 配置
+    api:
+      # Semantic Scholar API
+      semantic_scholar:
+        base_url: "https://api.semanticscholar.org/graph/v1"
+        # 可选: API Key (如果有的话，可以获得更高的请求限制)
+        api_key: null
+        # 请求超时时间 (秒)
+        timeout: 30
+        # 请求间隔 (秒)，避免触发限流
+        request_interval: 1.0
+      
+      # GitHub API (可选，用于获取代码仓库信息)
+      github:
+        # GitHub Personal Access Token (可选)
+        token: null
+        timeout: 30
+
+    # 日志配置
+    logging:
+      level: "INFO"
+      # 是否将日志写入文件
+      file_logging: true
+      log_dir: "logs"

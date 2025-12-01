@@ -1,0 +1,182 @@
+{# 论文分析报告模板 #}
+{# PaperBot Paper Analysis Report Template #}
+
+# {{ paper.title }}
+
+## 📋 元信息
+
+| 属性 | 值 |
+|------|-----|
+| **作者** | {{ paper.authors | join(", ") if paper.authors else "未知" }} |
+| **年份** | {{ paper.year or "未知" }} |
+| **发表于** | {{ paper.venue or "未知" }} |
+| **引用数** | {{ paper.citation_count or 0 }} |
+| **Semantic Scholar ID** | {{ paper.paper_id }} |
+{% if paper.doi %}| **DOI** | {{ paper.doi }} |{% endif %}
+{% if paper.arxiv_id %}| **arXiv** | [{{ paper.arxiv_id }}](https://arxiv.org/abs/{{ paper.arxiv_id }}) |{% endif %}
+{% if paper.url %}| **链接** | [查看论文]({{ paper.url }}) |{% endif %}
+
+{% if scholar_name %}
+> 📚 **追踪学者**: {{ scholar_name }}
+{% endif %}
+
+---
+
+## 📝 执行摘要
+
+{% if research.executive_summary %}
+{{ research.executive_summary }}
+{% elif paper.tldr %}
+**TL;DR**: {{ paper.tldr }}
+
+{% if paper.abstract %}
+### 完整摘要
+{{ paper.abstract }}
+{% endif %}
+{% elif paper.abstract %}
+{{ paper.abstract }}
+{% else %}
+*暂无摘要信息*
+{% endif %}
+
+{% if research.key_contributions %}
+### 核心贡献
+{% for contribution in research.key_contributions %}
+- {{ contribution }}
+{% endfor %}
+{% endif %}
+
+---
+
+## 💻 代码与可复现性
+
+{% if paper.github_url or code_analysis.repo_url %}
+### 代码仓库
+
+| 指标 | 值 |
+|------|-----|
+| **仓库地址** | [{{ code_analysis.repo_name or paper.github_url }}]({{ paper.github_url or code_analysis.repo_url }}) |
+{% if code_analysis.stars is defined %}| **Stars** | ⭐ {{ code_analysis.stars }} |{% endif %}
+{% if code_analysis.forks is defined %}| **Forks** | 🍴 {{ code_analysis.forks }} |{% endif %}
+{% if code_analysis.language %}| **主要语言** | {{ code_analysis.language }} |{% endif %}
+{% if code_analysis.license %}| **许可证** | {{ code_analysis.license }} |{% endif %}
+{% if code_analysis.updated_at %}| **最后更新** | {{ code_analysis.updated_at }} |{% endif %}
+
+{% if code_analysis.quality_notes %}
+### 代码质量分析
+{{ code_analysis.quality_notes }}
+{% endif %}
+
+{% if code_analysis.reproducibility_score is defined %}
+### 可复现性评分
+**{{ code_analysis.reproducibility_score }}/100**
+
+{% if code_analysis.reproducibility_notes %}
+{{ code_analysis.reproducibility_notes }}
+{% endif %}
+{% endif %}
+
+{% else %}
+⚠️ **未发现公开代码仓库**
+
+{% if research.code_search_notes %}
+{{ research.code_search_notes }}
+{% endif %}
+{% endif %}
+
+---
+
+## 📊 影响力评分 (PIS)
+
+### 综合评分
+
+| 维度 | 分数 | 说明 |
+|------|------|------|
+| **🎯 总分** | **{{ "%.1f"|format(influence.total_score) }}/100** | 综合影响力评估 |
+| 📚 学术影响力 | {{ "%.1f"|format(influence.academic_score) }}/100 | 引用数 + 发表渠道 |
+| 🔧 工程影响力 | {{ "%.1f"|format(influence.engineering_score) }}/100 | 代码可用性 + 社区活跃度 |
+
+### 评分详解
+
+{{ influence.explanation }}
+
+{% if influence.metrics_breakdown %}
+### 指标明细
+
+#### 学术指标
+{% if influence.metrics_breakdown.academic %}
+- 引用数: {{ influence.metrics_breakdown.academic.citation_count }}
+- 顶会发表: {{ "是" if influence.metrics_breakdown.academic.is_top_venue else "否" }}
+{% endif %}
+
+#### 工程指标
+{% if influence.metrics_breakdown.engineering %}
+- 代码公开: {{ "是" if influence.metrics_breakdown.engineering.has_code else "否" }}
+- GitHub Stars: {{ influence.metrics_breakdown.engineering.repo_stars or 0 }}
+{% endif %}
+{% endif %}
+
+---
+
+## 🎯 推荐级别
+
+{% set rec = influence.recommendation %}
+{% if rec == "强烈推荐深入阅读" %}
+### 🌟🌟🌟 强烈推荐深入阅读
+
+这篇论文在学术价值和工程实践方面都表现出色，建议优先阅读和研究。
+{% elif rec == "建议关注" %}
+### 🌟🌟 建议关注
+
+这篇论文具有较高的参考价值，值得花时间了解其核心内容。
+{% elif rec == "可选阅读" %}
+### 🌟 可选阅读
+
+这篇论文可作为相关领域的补充材料。
+{% else %}
+### ⚪ 低优先级
+
+这篇论文的影响力评分较低，可根据具体研究需求决定是否阅读。
+{% endif %}
+
+{% if quality.overall_assessment %}
+---
+
+## 📋 质量评估
+
+{{ quality.overall_assessment }}
+
+{% if quality.strengths %}
+### 优点
+{% for s in quality.strengths %}
+- {{ s }}
+{% endfor %}
+{% endif %}
+
+{% if quality.weaknesses %}
+### 不足
+{% for w in quality.weaknesses %}
+- {{ w }}
+{% endfor %}
+{% endif %}
+{% endif %}
+
+---
+
+## 📚 相关信息
+
+{% if paper.fields_of_study %}
+**研究领域**: {{ paper.fields_of_study | join(", ") }}
+{% endif %}
+
+{% if research.related_papers %}
+### 相关论文
+{% for rp in research.related_papers %}
+- {{ rp }}
+{% endfor %}
+{% endif %}
+
+---
+
+*📅 报告生成时间: {{ generated_at }}*  
+*🤖 由 PaperBot 自动生成*

@@ -1,0 +1,109 @@
+# 顶级会议/期刊名单
+# 用于 PaperBot Impact Score (PIS) 的学术影响力评分
+
+# 安全领域四大顶会
+security:
+  tier1:
+    - "CCS"
+    - "ACM CCS"
+    - "ACM Conference on Computer and Communications Security"
+    - "S&P"
+    - "IEEE S&P"
+    - "IEEE Symposium on Security and Privacy"
+    - "USENIX Security"
+    - "USENIX Security Symposium"
+    - "NDSS"
+    - "Network and Distributed System Security Symposium"
+  
+  tier2:
+    - "ACSAC"
+    - "RAID"
+    - "ESORICS"
+    - "AsiaCCS"
+    - "DSN"
+    - "DIMVA"
+
+# 机器学习/AI 领域
+machine_learning:
+  tier1:
+    - "NeurIPS"
+    - "Neural Information Processing Systems"
+    - "ICML"
+    - "International Conference on Machine Learning"
+    - "ICLR"
+    - "International Conference on Learning Representations"
+  
+  tier2:
+    - "AAAI"
+    - "IJCAI"
+    - "CVPR"
+    - "ECCV"
+    - "ICCV"
+    - "ACL"
+    - "EMNLP"
+    - "NAACL"
+
+# 系统领域
+systems:
+  tier1:
+    - "OSDI"
+    - "SOSP"
+    - "NSDI"
+    - "EuroSys"
+    - "ATC"
+    - "USENIX ATC"
+  
+  tier2:
+    - "ASPLOS"
+    - "ISCA"
+    - "MICRO"
+    - "HPCA"
+    - "SC"
+    - "PPoPP"
+
+# 软件工程
+software_engineering:
+  tier1:
+    - "ICSE"
+    - "FSE"
+    - "ESEC/FSE"
+    - "ASE"
+  
+  tier2:
+    - "ISSTA"
+    - "ICST"
+    - "MSR"
+    - "ICSME"
+
+# 网络
+networking:
+  tier1:
+    - "SIGCOMM"
+    - "NSDI"
+    - "MobiCom"
+    - "MobiSys"
+  
+  tier2:
+    - "IMC"
+    - "CoNEXT"
+    - "INFOCOM"
+
+# 数据库
+database:
+  tier1:
+    - "SIGMOD"
+    - "VLDB"
+    - "ICDE"
+  
+  tier2:
+    - "EDBT"
+    - "CIKM"
+
+# 评分权重配置
+scoring:
+  # tier1 顶会加分
+  tier1_bonus: 20
+  # tier2 优秀会议加分
+  tier2_bonus: 10
+  # 未知/其他会议基础分
+  base_score: 0
