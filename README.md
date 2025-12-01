@@ -156,25 +156,7 @@ PaperBot/
 
 ## 🔄 学者追踪工作流
 
-```mermaid
-graph TD
-    A[Scholar Subscription] -->|Fetch| B[Semantic Scholar API]
-    B -->|New Papers| C[Paper Detection Node]
-    C -->|Filter Cached| D[New Paper List]
-    
-    D --> E[Workflow Coordinator]
-    
-    subgraph "Multi-Agent Pipeline"
-        E --> F[Research Agent]
-        F -->|Abstract & Code Link| G[Code Analysis Agent]
-        G -->|Repo Stats & Quality| H[Quality Agent]
-        H -->|Assessment| I[Influence Calculator]
-    end
-    
-    I -->|PIS Score| J[Report Writer]
-    J -->|Markdown| K[Output Report]
-    J -->|Update| L[Cache History]
-```
+![Workflow Diagram](asset/workflow.png)
 
 ## 🛠 配置说明
 
