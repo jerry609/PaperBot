@@ -22,6 +22,20 @@ from .json_parser import (
     parse_json,
     safe_parse_json,
 )
+from .text_processing import (
+    clean_json_tags,
+    remove_reasoning_from_output,
+    extract_clean_response,
+    fix_incomplete_json,
+    truncate_content,
+    format_search_results_for_prompt,
+    # 学者追踪专用
+    format_paper_for_prompt,
+    format_scholar_for_prompt,
+    deduplicate_papers,
+    extract_github_url,
+    extract_arxiv_id,
+)
 
 __all__ = [
     # 日志
@@ -47,4 +61,16 @@ __all__ = [
     'JSONParseError',
     'parse_json',
     'safe_parse_json',
+    # 文本处理
+    'clean_json_tags',
+    'remove_reasoning_from_output',
+    'extract_clean_response',
+    'fix_incomplete_json',
+    'truncate_content',
+    'format_search_results_for_prompt',
+    'format_paper_for_prompt',
+    'format_scholar_for_prompt',
+    'deduplicate_papers',
+    'extract_github_url',
+    'extract_arxiv_id',
 ]

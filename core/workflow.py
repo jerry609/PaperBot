@@ -6,14 +6,14 @@ import asyncio
 from pathlib import Path
 import json
 
-from ..agents import (
+from agents import (
     ResearchAgent,
     CodeAnalysisAgent,
     QualityAgent,
     DocumentationAgent
 )
-from .context import AnalysisContext
-from ..utils.logger import setup_logger
+from core.context import AnalysisContext
+from utils.logger import setup_logger
 
 
 class WorkflowCoordinator:
