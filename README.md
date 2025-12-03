@@ -8,6 +8,7 @@ PaperBot 是一个专为计算机领域设计的智能论文分析框架。它�
 
 ### 1. 学者追踪与智能分析 (New!)
 - **全自动追踪**: 定期监测指定学者的最新论文（基于 Semantic Scholar）。
+- **Deep Research 模式**: 引入迭代式反思循环（Reflection Loop），对发现的论文和研究方向进行多轮检索与验证，构建更完整的学者画像。
 - **多 Agent 协作**:
   - **Research Agent**: 提取论文核心贡献与摘要。
   - **Code Analysis Agent**: 自动发现并分析关联 GitHub 仓库，评估代码质量与可复现性。
@@ -38,6 +39,7 @@ graph TB
 
     subgraph Tracking [学者追踪子系统]
         SPA[👤 Scholar Profile Agent]
+        DRA[🧠 Deep Research Agent]
         PTA[📡 Paper Tracker Agent]
         SSA[🔌 Semantic Scholar API]
     end
@@ -57,22 +59,25 @@ graph TB
 
     CLI -->|启动| Coord
     Config -.-> Coord
-    
+
     Coord -->|调度| SPA
-    SPA --> PTA
+    SPA -->|基础画像| DRA
+
+    DRA <-->|反思循环| PTA
     PTA <-->|API 交互| SSA
     PTA -.->|状态存储| Cache
-    
-    PTA -->|发现新论文| RA
+
+    DRA -->|发现关键论文| RA
     RA -->|提取元数据| CAA
     CAA -->|代码分析| QA
     QA -->|质量评估| IC
     IC -->|计算 PIS| RW
-    
+
     RW -->|生成| MD[📄 Markdown 报告]
-    
+
     style Coord fill:#f96,stroke:#333,stroke-width:2px
     style IC fill:#9f9,stroke:#333,stroke-width:2px
+    style DRA fill:#bbf,stroke:#333,stroke-width:2px
 ```
 
 ## 🚀 快速开始
@@ -171,6 +176,7 @@ PaperBot/
 ## 🙏 致谢
 
 特别感谢 [Qc-TX](https://github.com/Qc-TX) 对爬虫脚本的完善与贡献！
+多 Agent 协作与深度研究流程的部分实践参考了 [BettaFish](https://github.com/666ghj/BettaFish) InsightEngine 的公开实现。
 
 
 
