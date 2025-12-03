@@ -41,7 +41,6 @@ class SemanticScholarAgent(BaseAgent):
         "externalIds",
         "url",
         "openAccessPdf",
-        "tldr",
         "publicationDate",
     ]
     

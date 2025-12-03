@@ -1,0 +1,12 @@
+experiment_name: "sentiment_benchmark_v1"
+dataset: "sample_sentiment"
+models:
+  - name: "bert_baseline"
+    type: "bert"
+  - name: "qwen_small"
+    type: "llm"
+metrics:
+  - accuracy
+  - f1_score
+output_dir: "output/experiments/sentiment_v1"
+

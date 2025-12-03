@@ -73,8 +73,23 @@ class SubscriptionService:
         
         # 校验 settings
         settings = subscriptions.get("settings", {})
-        if not settings:
-            logger.warning("No settings configured, using defaults")
+        # 只验证关键的 check_interval 和 papers_per_scholar 是否存在，其余允许使用默认值
+        if settings.get("check_interval") not in ["daily", "weekly", "monthly", None]:
+             raise ValueError(f"Invalid check_interval: {settings.get('check_interval')}")
+        
+        if settings.get("min_influence_score") is not None:
+             score = settings.get("min_influence_score")
+             if not (0 <= score <= 100):
+                 raise ValueError(f"min_influence_score must be between 0 and 100, got {score}")
+
+        # 检查 API 配置是否存在（如果提供了 api 字段）
+        if "api" in settings:
+            api_config = settings["api"]
+            semantic_api = api_config.get("semantic_scholar")
+            if semantic_api:
+                if not semantic_api.get("base_url"):
+                    logger.warning("Semantic Scholar API config missing 'base_url', using default")
+
     
     def get_scholars(self) -> List[Scholar]:
         """获取所有订阅的学者"""
@@ -105,7 +120,13 @@ class SubscriptionService:
             "cache_dir": settings.get("cache_dir", "cache/scholar_papers"),
             "api": settings.get("api", {}),
             "logging": settings.get("logging", {}),
+            "reporting": settings.get("reporting", {}),
         }
+
+    def get_reporting_config(self) -> Dict[str, Any]:
+        """获取报告输出配置"""
+        settings = self.get_settings()
+        return settings.get("reporting", {})
     
     def get_api_config(self, api_name: str) -> Dict[str, Any]:
         """获取特定 API 的配置"""

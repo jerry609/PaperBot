@@ -25,7 +25,11 @@ logger = logging.getLogger(__name__)
 class ReportWriter:
     """报告写入器"""
     
-    def __init__(self, output_dir: Optional[Path] = None):
+    def __init__(
+        self,
+        output_dir: Optional[Path] = None,
+        template_name: str = "paper_report.md.j2",
+    ):
         """
         初始化报告写入器
         
@@ -37,6 +41,7 @@ class ReportWriter:
             output_dir = project_root / "output" / "reports"
         
         self.output_dir = Path(output_dir)
+        self.template_name = template_name
         self._ensure_output_dir()
         
         # 初始化 Jinja2 环境（如果可用）
@@ -164,6 +169,17 @@ class ReportWriter:
         Returns:
             渲染后的 Markdown 报告
         """
+        # 准备模板数据，确保与 paper_report.md.j2 期望的字段一致
+        template_data = {
+            "paper": paper.to_dict(),
+            "influence": influence.to_dict(),
+            "research": research_result or {},
+            "code_analysis": code_analysis_result or {},
+            "quality": quality_result or {},
+            "scholar_name": scholar_name,
+            "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        }
+
         if not HAS_JINJA2 or not self._jinja_env:
             logger.warning("Jinja2 not available, using fallback template")
             return self._fallback_render(
@@ -172,17 +188,8 @@ class ReportWriter:
             )
         
         try:
-            template = self._jinja_env.get_template("paper_report.md.j2")
-            
-            return template.render(
-                paper=paper.to_dict(),
-                influence=influence.to_dict(),
-                research=research_result or {},
-                code_analysis=code_analysis_result or {},
-                quality=quality_result or {},
-                scholar_name=scholar_name,
-                generated_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            )
+            template = self._jinja_env.get_template(self.template_name)
+            return template.render(**template_data)
         except Exception as e:
             logger.warning(f"Template rendering failed: {e}, using fallback")
             return self._fallback_render(

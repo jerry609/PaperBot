@@ -18,6 +18,7 @@ from agents import (
 from scholar_tracking.models import PaperMeta, CodeMeta
 from scholar_tracking.models.influence import InfluenceResult
 from influence import InfluenceCalculator
+from reports.writer import ReportWriter
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +35,11 @@ class ScholarWorkflowCoordinator:
     5. DocumentationAgent → 生成 Markdown 报告
     """
     
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+    def __init__(
+        self,
+        config: Optional[Dict[str, Any]] = None,
+        report_writer: Optional[ReportWriter] = None,
+    ):
         """
         初始化协调器
         
@@ -52,21 +57,33 @@ class ScholarWorkflowCoordinator:
         
         # 初始化影响力计算器
         self.influence_calculator = InfluenceCalculator(config)
+
+        # 报告渲染器
+        output_dir = None
+        if self.config.get("output_dir"):
+            output_dir = Path(self.config["output_dir"])
+        template_name = self.config.get("report_template", "paper_report.md.j2")
+        self.report_writer = report_writer or ReportWriter(
+            output_dir=output_dir,
+            template_name=template_name,
+        )
     
     async def run_paper_pipeline(
         self,
         paper: PaperMeta,
         scholar_name: Optional[str] = None,
-    ) -> Tuple[str, InfluenceResult, Dict[str, Any]]:
+        persist_report: bool = True,
+    ) -> Tuple[Optional[Path], InfluenceResult, Dict[str, Any]]:
         """
         运行论文分析流水线
         
         Args:
             paper: 论文元数据
             scholar_name: 学者名称（用于报告生成）
+            persist_report: 是否写入 Markdown 文件
             
         Returns:
-            (report_markdown, influence_result, pipeline_data)
+            (report_path, influence_result, pipeline_data)
         """
         pipeline_data = {
             "paper_id": paper.paper_id,
@@ -81,6 +98,8 @@ class ScholarWorkflowCoordinator:
         research_result = {}
         code_analysis_result = {}
         quality_result = {}
+        report_path: Optional[Path] = None
+        report_markdown: Optional[str] = None
         
         try:
             # Stage 1: Research Agent - 扩展摘要和代码仓库发现
@@ -143,7 +162,7 @@ class ScholarWorkflowCoordinator:
                 "result": influence_result.to_dict(),
             }
             
-            # Stage 5: Documentation Agent - 报告生成
+            # Stage 5: Report Rendering
             self.logger.info(f"[5/5] Generating report...")
             try:
                 report_markdown = await self._generate_report(
@@ -156,18 +175,37 @@ class ScholarWorkflowCoordinator:
                 )
                 pipeline_data["stages"]["documentation"] = {"status": "success"}
             except Exception as e:
-                self.logger.warning(f"DocumentationAgent failed: {e}")
-                pipeline_data["stages"]["documentation"] = {"status": "failed", "error": str(e)}
+                self.logger.warning(f"Documentation stage failed: {e}")
+                pipeline_data["stages"]["documentation"] = {
+                    "status": "failed",
+                    "error": str(e),
+                }
                 pipeline_data["errors"].append(f"Documentation: {e}")
-                # 使用备用报告生成
                 report_markdown = self._generate_fallback_report(
                     paper, influence_result, pipeline_data
                 )
             
+            # 持久化报告
+            if report_markdown:
+                if persist_report:
+                    try:
+                        report_path = self.report_writer.write_report(
+                            report_markdown,
+                            paper,
+                            scholar_name,
+                        )
+                        pipeline_data["report_path"] = str(report_path)
+                    except Exception as e:
+                        self.logger.error(f"Failed to write report: {e}")
+                        pipeline_data["errors"].append(f"ReportWrite: {e}")
+                        pipeline_data["report_content"] = report_markdown
+                else:
+                    pipeline_data["report_content"] = report_markdown
+            
             pipeline_data["completed_at"] = datetime.now().isoformat()
             pipeline_data["status"] = "success" if not pipeline_data["errors"] else "partial"
             
-            return report_markdown, influence_result, pipeline_data
+            return report_path, influence_result, pipeline_data
             
         except Exception as e:
             self.logger.error(f"Pipeline failed for {paper.title}: {e}")
@@ -178,7 +216,22 @@ class ScholarWorkflowCoordinator:
             influence_result = self.influence_calculator.calculate(paper, None)
             report_markdown = self._generate_fallback_report(paper, influence_result, pipeline_data)
             
-            return report_markdown, influence_result, pipeline_data
+            if report_markdown and persist_report:
+                try:
+                    report_path = self.report_writer.write_report(
+                        report_markdown,
+                        paper,
+                        scholar_name,
+                    )
+                    pipeline_data["report_path"] = str(report_path)
+                except Exception as write_error:
+                    self.logger.error(f"Failed to write fallback report: {write_error}")
+                    pipeline_data["errors"].append(f"ReportWrite: {write_error}")
+                    pipeline_data["report_content"] = report_markdown
+            else:
+                pipeline_data["report_content"] = report_markdown
+            
+            return report_path, influence_result, pipeline_data
     
     async def _run_research_stage(self, paper: PaperMeta) -> Dict[str, Any]:
         """运行研究阶段"""
@@ -251,7 +304,7 @@ class ScholarWorkflowCoordinator:
         influence_result: InfluenceResult,
     ) -> str:
         """生成完整的 Markdown 报告"""
-        # 调用 DocumentationAgent 生成报告
+        # 调用 Jinja 模板生成报告，可选地使用 DocumentationAgent 丰富内容
         report_data = {
             "paper": paper.to_dict(),
             "scholar_name": scholar_name,
@@ -260,16 +313,22 @@ class ScholarWorkflowCoordinator:
             "quality": quality_result,
             "influence": influence_result.to_dict(),
         }
+
+        if self.config.get("use_documentation_agent"):
+            try:
+                doc_result = await self.documentation_agent.process(report_data)
+                report_data["documentation_agent"] = doc_result
+            except Exception as e:
+                self.logger.warning(f"DocumentationAgent enrichment failed: {e}")
         
-        result = await self.documentation_agent.process(report_data)
-        
-        if isinstance(result, dict) and "report" in result:
-            return result["report"]
-        elif isinstance(result, str):
-            return result
-        else:
-            # 使用备用模板
-            return self._generate_fallback_report(paper, influence_result, {})
+        return self.report_writer.render_template(
+            paper=paper,
+            influence=influence_result,
+            research_result=research_result,
+            code_analysis_result=code_analysis_result,
+            quality_result=quality_result,
+            scholar_name=scholar_name,
+        )
     
     def _generate_fallback_report(
         self,
@@ -353,7 +412,19 @@ class ScholarWorkflowCoordinator:
                 self.logger.error(f"Failed to process paper: {e}")
                 # 创建失败结果
                 influence = self.influence_calculator.calculate(paper, None)
-                report = self._generate_fallback_report(paper, influence, {"error": str(e)})
-                results.append((report, influence, {"status": "failed", "error": str(e)}))
+                fallback_report = self._generate_fallback_report(
+                    paper, influence, {"error": str(e)}
+                )
+                results.append(
+                    (
+                        None,
+                        influence,
+                        {
+                            "status": "failed",
+                            "error": str(e),
+                            "report_content": fallback_report,
+                        },
+                    )
+                )
         
         return results

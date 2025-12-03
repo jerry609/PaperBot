@@ -183,6 +183,13 @@ def simple_paper_download(conference: str, year: str, url: Optional[str] = None,
         
 def main():
     """主函数"""
+    # 设置控制台编码，防止中文乱码
+    import sys
+    import io
+    if sys.platform == 'win32':
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
+
     print("=" * 60)
     print("🔐 SecuriPaperBot - 智能论文分析框架")
     print("=" * 60)
@@ -292,22 +299,42 @@ def run_scholar_tracking(args):
     print("=" * 60)
     print("📚 PaperBot 学者追踪系统")
     print("=" * 60)
-    
+
+    config_path = Path(args.config).expanduser()
+    if not config_path.is_absolute():
+        config_path = current_dir / config_path
+    config_path = config_path.resolve()
+    if not config_path.exists():
+        print(f"❌ 找不到订阅配置文件: {config_path}")
+        return
+
     async def _run_tracking():
         from scholar_tracking import PaperTrackerAgent, ScholarProfileAgent
+        from scholar_tracking.models import PaperMeta
         from core.workflow_coordinator import ScholarWorkflowCoordinator
-        from reports import ReportWriter
-        
-        # 初始化
-        profile_agent = ScholarProfileAgent()
-        tracker_agent = PaperTrackerAgent()
-        
+
+        overrides = {"subscriptions_config_path": str(config_path)}
+        profile_agent = ScholarProfileAgent(overrides)
+
         # 显示摘要
         if args.summary:
             print("\n📊 追踪状态摘要:")
             print(profile_agent.summary())
             return
-        
+
+        settings = profile_agent.get_settings()
+        reporting_cfg = settings.get("reporting", {})
+        min_score = settings.get("min_influence_score", 0)
+
+        tracker_agent = PaperTrackerAgent({**overrides, "api": settings.get("api", {})})
+        coordinator = ScholarWorkflowCoordinator(
+            {
+                "output_dir": str(profile_agent.get_output_dir()),
+                "report_template": reporting_cfg.get("template", "paper_report.md.j2"),
+                "use_documentation_agent": False, # 禁用 DocumentationAgent 以避免接口不匹配
+            }
+        )
+
         # 强制模式
         if args.force and args.scholar_id:
             print(f"\n🔄 强制重新检测学者: {args.scholar_id}")
@@ -315,26 +342,27 @@ def run_scholar_tracking(args):
         elif args.force:
             print("\n🔄 清除所有缓存...")
             profile_agent.clear_all_cache()
-        
+
         # 追踪学者
         if args.scholar_id:
             scholar = profile_agent.get_scholar_by_id(args.scholar_id)
             if not scholar:
                 print(f"❌ 未找到学者: {args.scholar_id}")
                 return
-            result = await tracker_agent.track_scholar(scholar)
+            result = await tracker_agent.track_scholar(scholar, dry_run=args.dry_run)
             results = [result]
+            await tracker_agent.ss_agent.close()
         else:
             print("\n🔍 开始追踪所有订阅学者...")
-            results = await tracker_agent.track_all_scholars()
-        
+            results = await tracker_agent.track_all_scholars(dry_run=args.dry_run)
+
         # 显示结果
         total_new = 0
         for result in results:
             scholar_name = result.get("scholar_name", "Unknown")
             new_count = result.get("new_papers_count", len(result.get("new_papers", [])))
             status = result.get("status", "unknown")
-            
+
             if status == "success":
                 print(f"  ✅ {scholar_name}: 发现 {new_count} 篇新论文")
                 total_new += new_count
@@ -342,50 +370,80 @@ def run_scholar_tracking(args):
                 print(f"  ❌ {scholar_name}: {result.get('error', '未知错误')}")
             else:
                 print(f"  ⚠️  {scholar_name}: {status}")
-        
+
         print(f"\n📈 总计发现 {total_new} 篇新论文")
-        
-        # 生成报告（非 dry-run 模式）
-        if not args.dry_run and total_new > 0:
+
+        if total_new == 0:
+            print("\n✅ 学者追踪完成!")
+            return
+
+        persist_reports = not args.dry_run
+        if args.dry_run:
+            print("\n🧪 Dry-Run 模式：将运行分析但不写入 Markdown 文件。")
+        else:
             print("\n📝 生成分析报告...")
-            
-            coordinator = ScholarWorkflowCoordinator()
-            writer = ReportWriter()
-            
-            for result in results:
-                if result.get("status") != "success":
-                    continue
-                
-                scholar_name = result.get("scholar_name")
-                new_papers = result.get("new_papers", [])
-                
-                if not new_papers:
-                    continue
-                
-                print(f"\n  处理 {scholar_name} 的 {len(new_papers)} 篇论文...")
-                
-                # 将字典转换为 PaperMeta 对象
-                from scholar_tracking.models import PaperMeta
-                papers = [PaperMeta.from_dict(p) for p in new_papers]
-                
-                for paper in papers:
-                    try:
-                        report, influence, _ = await coordinator.run_paper_pipeline(
-                            paper, scholar_name
-                        )
-                        
-                        # 写入报告
-                        report_path = writer.write_report(
-                            report, paper, scholar_name
-                        )
-                        
-                        print(f"    📄 {paper.title[:40]}... -> {report_path.name}")
-                        print(f"       PIS: {influence.total_score:.1f}/100 ({influence.recommendation.value})")
-                    except Exception as e:
-                        print(f"    ❌ 处理失败: {paper.title[:40]}... - {e}")
-        
+
+        for result in results:
+            if result.get("status") != "success":
+                continue
+
+            scholar_name = result.get("scholar_name")
+            new_papers = result.get("new_papers", [])
+
+            if not new_papers:
+                continue
+
+            print(f"\n  处理 {scholar_name} 的 {len(new_papers)} 篇论文...")
+            papers = [PaperMeta.from_dict(p) for p in new_papers]
+            processed_records = []
+
+            for paper in papers:
+                try:
+                    report_path, influence, pipeline_data = await coordinator.run_paper_pipeline(
+                        paper,
+                        scholar_name,
+                        persist_report=persist_reports,
+                    )
+
+                    pis = f"{influence.total_score:.1f}/100 ({influence.recommendation.value})"
+                    if report_path:
+                        print(f"    📄 {paper.title[:40]}... -> {report_path.name} | PIS {pis}")
+                    else:
+                        print(f"    📄 {paper.title[:40]}... -> (未持久化) | PIS {pis}")
+
+                    processed_records.append(
+                        {
+                            "paper_id": paper.paper_id,
+                            "title": paper.title,
+                            "report_path": str(report_path) if report_path else None,
+                            "pis": round(influence.total_score, 2),
+                            "recommendation": influence.recommendation.value,
+                            "status": pipeline_data.get("status", "success"),
+                        }
+                    )
+                except Exception as e:
+                    print(f"    ❌ 处理失败: {paper.title[:40]}... - {e}")
+                    processed_records.append(
+                        {
+                            "paper_id": paper.paper_id,
+                            "title": paper.title,
+                            "status": f"failed: {e}",
+                        }
+                    )
+
+            scholar_id = result.get("scholar_id")
+            if (
+                processed_records
+                and scholar_id
+                and reporting_cfg.get("persist_history", True)
+            ):
+                profile_agent.record_processed_papers(
+                    scholar_id,
+                    processed_records,
+                )
+
         print("\n✅ 学者追踪完成!")
-    
+
     try:
         asyncio.run(_run_tracking())
     except KeyboardInterrupt:
