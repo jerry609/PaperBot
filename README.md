@@ -163,6 +163,34 @@ PaperBot/
 
 ![Workflow Diagram](asset/workflow.png)
 
+## 🎨 学者追踪 UI 设计预览
+
+> 下图为 PaperBot 学者追踪系统的初版 UI 设计稿，用于展示 Dashboard、论文卡片、学者卡片、信息流事件和筛选面板等关键界面。
+
+1. 主控制台 Dashboard 概览
+
+  ![PaperBot UI 1](asset/ui/1.png)
+
+2. 论文信息卡片与列表视图
+
+  ![PaperBot UI 2](asset/ui/2.png)
+
+3. 学者画像与统计指标视图
+
+  ![PaperBot UI 3](asset/ui/3.png)
+
+4. 学者动态信息流与事件 Feed
+
+  ![PaperBot UI 4](asset/ui/4.png)
+
+5. 高级筛选条件与研究领域面板
+
+  ![PaperBot UI 5](asset/ui/5.png)
+
+6. 综合样例界面 / 交互细节补充
+
+  ![PaperBot UI 6](asset/ui/6.png)
+
 ## 🛠 配置说明
 
 主要配置文件位于 `config/` 目录下：
