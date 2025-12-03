@@ -37,3 +37,4 @@ output/reports/**/*.md
 !cache/scholar_papers/.gitkeep
 !output/reports/.gitkeep
 !logs/.gitkeep
+BettaFish/
