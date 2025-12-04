@@ -30,7 +30,7 @@ PaperBot 是一个专为计算机领域设计的智能论文分析框架。它�
 
 ## 🏗️ 系统架构
 
-![System Architecture](asset/arcv2.png)
+![System Architecture](public/asset/arcv2.png)
 
 ## 🚀 快速开始
 
@@ -113,7 +113,7 @@ PaperBot/
 
 ## 🔄 学者追踪工作流
 
-![Workflow Diagram](asset/workflow.png)
+![Workflow Diagram](public/asset/workflow.png)
 
 ## 🎨 学者追踪 UI 设计预览
 
