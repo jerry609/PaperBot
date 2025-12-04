@@ -111,9 +111,13 @@ PaperBot/
 └── cache/                  # 数据缓存
 ```
 
-## 🔄 学者追踪工作流
+## � 论文分析流水线
 
-![Workflow Diagram](public/asset/workflow.png)
+![Paper Analysis Pipeline](public/asset/workflowv2.png)
+
+## �🔄 学者追踪工作流
+
+![Scholar Tracking Workflow](public/asset/scholar.png)
 
 ## 🎨 学者追踪 UI 设计预览
 
