@@ -146,44 +146,9 @@ def simple_paper_download(conference: str, year: str, url: Optional[str] = None,
         print(f"❌ 异步执行失败: {e}")
         print("💡 请确保您有网络访问权限和正确的会议信息。")
         
-def main():
-    """主函数"""
-    # 设置控制台编码，防止中文乱码
-    import sys
-    import io
-    if sys.platform == 'win32':
-        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
-        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
-
-    # 全局时区/seed/日志
-    os.environ.setdefault("TZ", "UTC")
-    try:
-        time.tzset()
-    except Exception:
-        pass
-    seed = int(os.getenv("PAPERBOT_SEED", "42"))
-    try:
-        import random
-        random.seed(seed)
-        import numpy as np
-        np.random.seed(seed)
-    except Exception:
-        pass
-    logging.basicConfig(
-        level=os.getenv("PAPERBOT_LOG_LEVEL", "INFO"),
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    )
-
-    print("=" * 60)
-    print("🔐 SecuriPaperBot - 智能论文分析框架")
-    print("=" * 60)
-    
-    # 检查环境
-    if not check_python_version():
-        sys.exit(1)
-    
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="SecuriPaperBot - 智能论文分析工具")
-    
+    # 全局
     # 添加子命令
     subparsers = parser.add_subparsers(dest='command', help='可用命令')
     
@@ -232,6 +197,46 @@ def main():
     parser.add_argument('--data-source', dest='data_source', default=None,
                        help='数据源类型覆盖 (api/local/hybrid)，local 时需配合 dataset_path/dataset_name')
 
+    return parser
+
+
+def main():
+    """主函数"""
+    # 设置控制台编码，防止中文乱码
+    import sys
+    import io
+    if sys.platform == 'win32':
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
+
+    # 全局时区/seed/日志
+    os.environ.setdefault("TZ", "UTC")
+    try:
+        time.tzset()
+    except Exception:
+        pass
+    seed = int(os.getenv("PAPERBOT_SEED", "42"))
+    try:
+        import random
+        random.seed(seed)
+        import numpy as np
+        np.random.seed(seed)
+    except Exception:
+        pass
+    logging.basicConfig(
+        level=os.getenv("PAPERBOT_LOG_LEVEL", "INFO"),
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    )
+
+    print("=" * 60)
+    print("🔐 SecuriPaperBot - 智能论文分析框架")
+    print("=" * 60)
+    
+    # 检查环境
+    if not check_python_version():
+        sys.exit(1)
+    
+    parser = build_parser()
     args = parser.parse_args()
     
     if args.check:

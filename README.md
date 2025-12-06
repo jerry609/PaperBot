@@ -131,6 +131,10 @@ python main.py track --mode academic --repro --report-template academic_report.m
 
 报告中会追加“可复现性验证”区块，展示状态、命令、耗时、日志摘要。
 
+ReproAgent 可复现性验证整体流程如下图所示：
+
+![ReproAgent Reproducibility Flow](public/asset/repoagent.png)
+
 ## 📂 目录结构
 
 ```
