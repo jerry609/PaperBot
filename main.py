@@ -210,6 +210,8 @@ def main():
                               help='仅检测新论文，不生成报告')
     track_parser.add_argument('--summary', action='store_true',
                               help='显示追踪状态摘要')
+    track_parser.add_argument('--dataset-path', type=str,
+                               help='本地数据集路径（覆盖 data_source.dataset_path）')
 
     # 运行实验（ExperimentManager）
     exp_parser = subparsers.add_parser('run-exp', help='运行实验配置 (ExperimentManager)')
@@ -217,12 +219,16 @@ def main():
 
     # 渲染报告（从 meta.json + 模板）
     render_parser = subparsers.add_parser('render-report', help='根据 meta.json 渲染报告')
-    render_parser.add_argument('--meta', required=True, help='pipeline/实验生成的 meta.json 路径')
+    render_parser.add_argument('--meta', required=False, help='pipeline/实验生成的 meta.json 路径，缺省自动选最新')
     render_parser.add_argument('--template', default=None, help='报告模板名称，默认使用 meta 或 settings 中配置')
     render_parser.add_argument('--output', default=None, help='输出文件路径（可选，默认按论文ID命名写入默认目录）')
     
     parser.add_argument('--mode', choices=['production', 'academic'], default=os.getenv("PAPERBOT_MODE", "production"),
                        help='运行模式 (production/academic)')
+    parser.add_argument('--report-template', dest='report_template', default=None,
+                       help='覆盖报告模板名称 (如 paper_report.md.j2 / academic_report.md.j2)')
+    parser.add_argument('--data-source', dest='data_source', default=None,
+                       help='数据源类型覆盖 (api/local/hybrid)，local 时需配合 dataset_path/dataset_name')
 
     args = parser.parse_args()
     
@@ -326,13 +332,26 @@ def render_report(args):
     from reports.writer import ReportWriter
     from scholar_tracking.models import PaperMeta
     from scholar_tracking.models.influence import InfluenceResult
+    from pathlib import Path
+    import glob
 
-    meta_path = Path(args.meta).expanduser()
-    if not meta_path.is_absolute():
-        meta_path = current_dir / meta_path
-    meta_path = meta_path.resolve()
-    if not meta_path.exists():
-        print(f"❌ 找不到 meta 文件: {meta_path}")
+    meta_path = None
+    if args.meta:
+        candidate = Path(args.meta).expanduser()
+        if not candidate.is_absolute():
+            candidate = current_dir / candidate
+        if candidate.exists():
+            meta_path = candidate.resolve()
+    else:
+        # 自动发现 output/experiments 下最新 *_meta.json
+        pattern = current_dir / "output" / "experiments" / "*_meta.json"
+        metas = glob.glob(str(pattern))
+        if metas:
+            metas.sort(key=lambda p: Path(p).stat().st_mtime, reverse=True)
+            meta_path = Path(metas[0]).resolve()
+
+    if not meta_path or not meta_path.exists():
+        print("❌ 找不到 meta 文件，请使用 --meta 指定或确保 output/experiments 下存在 *_meta.json")
         return
 
     try:
@@ -383,6 +402,19 @@ def render_report(args):
         scholar_name=scholar_name,
     )
 
+    # 追加复现信息（若 meta 提供）
+    reproducibility_lines = []
+    if meta.get("git_commit") or meta.get("pip_freeze"):
+        reproducibility_lines.append("\n\n---\n## 复现信息")
+        if meta.get("git_commit"):
+            reproducibility_lines.append(f"- Git Commit: `{meta['git_commit']}`")
+        if meta.get("pip_freeze"):
+            reproducibility_lines.append("- 环境依赖（截断展示）:")
+            for line in meta["pip_freeze"][:20]:
+                reproducibility_lines.append(f"  - {line}")
+    if reproducibility_lines:
+        md += "\n".join(reproducibility_lines)
+
     if args.output:
         out_path = Path(args.output).expanduser()
         if not out_path.is_absolute():
@@ -418,8 +450,16 @@ def run_scholar_tracking(args):
         overrides = {"subscriptions_config_path": str(config_path)}
         mode = getattr(args, "mode", None) or getattr(settings, "mode", "production")
         overrides["mode"] = mode
-        if mode == "academic":
+        if args.report_template:
+            overrides["report_template"] = args.report_template
+        elif mode == "academic":
             overrides["report_template"] = "academic_report.md.j2"
+        if args.data_source:
+            overrides["data_source"] = {**settings.data_source, "type": args.data_source}
+        if getattr(args, "dataset_path", None):
+            ds = overrides.get("data_source", settings.data_source.copy())
+            ds["dataset_path"] = args.dataset_path
+            overrides["data_source"] = ds
         profile_agent = ScholarProfileAgent(overrides)
 
         # 显示摘要

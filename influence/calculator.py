@@ -11,6 +11,7 @@ from scholar_tracking.models import PaperMeta, CodeMeta
 from scholar_tracking.models.influence import InfluenceResult
 from .metrics import AcademicMetricsCalculator, EngineeringMetricsCalculator
 from .weights import INFLUENCE_WEIGHTS
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +72,8 @@ class InfluenceCalculator:
         
         # 3. 计算总分
         total_score = self.w1 * academic_score + self.w2 * engineering_score
+        recency_factor = self._apply_recency_factor(paper)
+        total_score *= recency_factor
         total_score = min(100, max(0, total_score))
         
         # 4. 生成解释
@@ -89,7 +92,7 @@ class InfluenceCalculator:
             metrics_breakdown={
                 "academic": academic_metrics.to_dict(),
                 "engineering": engineering_metrics.to_dict(),
-                "weights": {"w1": self.w1, "w2": self.w2},
+                "weights": {"w1": self.w1, "w2": self.w2, "recency_factor": recency_factor},
             },
         )
         
@@ -138,6 +141,23 @@ class InfluenceCalculator:
         )
         
         return "\n".join(parts)
+
+    def _apply_recency_factor(self, paper: PaperMeta) -> float:
+        """
+        基于年份的时间衰减，half-life 配置于 weights.recency_half_life_years
+        """
+        half_life = self.config.get("weights", {}).get("recency_half_life_years") or INFLUENCE_WEIGHTS.get("recency_half_life_years")
+        if not half_life:
+            return 1.0
+        try:
+            year = int(paper.year) if paper.year else None
+            if not year:
+                return 1.0
+            age = max(0, datetime.now().year - year)
+            factor = 0.5 ** (age / float(half_life))
+            return max(0.3, min(1.0, factor))
+        except Exception:
+            return 1.0
     
     def batch_calculate(
         self,

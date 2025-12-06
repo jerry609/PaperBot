@@ -28,6 +28,14 @@ PaperBot 是一个专为计算机领域设计的智能论文分析框架。它�
 - 自动提取论文中的代码仓库链接。
 - 代码质量、结构与安全性分析。
 
+## 🆚 与 AlphaXiv 的主要区别
+
+- **定位**：PaperBot 面向“论文+代码+复现”的多 Agent 深度分析与报告生成；AlphaXiv 更偏论文聚合/推荐。  
+- **代码与工程维度**：PaperBot 会自动发现/分析仓库，输出工程影响力（stars、last commit、可复现性）；AlphaXiv 主要提供论文元信息/摘要。  
+- **学者追踪与报告**：支持学者订阅、自动检测新论文、生成 Markdown/学术模板报告（含影响力评分、代码要点）；AlphaXiv 无学者追踪与工程报告链路。  
+- **可复现/实验**：内置 ExperimentManager，记录 git commit、依赖快照，支持学术模式/本地数据源、数据集校验脚本；AlphaXiv 不提供实验与复现闭环。  
+- **会议抓取与代码提取**：ConferenceResearchAgent 直接抓取顶会论文并尝试提取 GitHub 链接，带并发/重试/兜底；AlphaXiv 不聚焦抓取代码资源。  
+- **模板与模式**：学术/生产模式切换，paper/academic 模板可选，render-report 支持 meta 自动发现；AlphaXiv 模板化/报告定制能力有限。
 ## 🏗️ 系统架构
 
 ![System Architecture](public/asset/arcv2.png)
@@ -73,16 +81,38 @@ python main.py track --dry-run
 
 # 指定配置文件
 python main.py track --config my_subscriptions.yaml
+
+# 学术模式 & 模板
+python main.py track --mode academic --report-template academic_report.md.j2
+# 使用本地数据集（覆盖 data_source）
+python main.py track --mode academic --data-source local --dataset-path datasets/processed/sample_sentiment.csv
 ```
 
 ### 3. 会议论文下载
 
 ```bash
-# 下载 CCS 2023 论文 (默认智能并发模式)
+# 下载 CCS 2023 论文（使用 ConferenceResearchAgent）
 python main.py --conference ccs --year 23
 
 # 下载 NDSS 2023 论文
 python main.py --conference ndss --year 23
+```
+
+### 4. 实验与报告渲染
+```bash
+# 运行实验
+python main.py run-exp --config ExperimentManager/configs/exp_sentiment.yaml
+
+# 渲染最新实验报告（自动选取 output/experiments 最新 meta）
+python main.py render-report --template academic_report.md.j2
+# 或指定 meta
+python main.py render-report --meta output/experiments/xxx_meta.json --template paper_report.md.j2
+```
+
+### 5. 数据集校验
+```bash
+python scripts/validate_datasets.py
+# 检查 datasets/processed/*.csv 是否包含 text/label，metadata 是否含 license/source
 ```
 
 ## 📂 目录结构

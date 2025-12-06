@@ -2,6 +2,7 @@ import csv
 import json
 import logging
 import random
+import subprocess
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
@@ -177,10 +178,33 @@ class ExperimentRunner:
             "seed": self.seed,
             "dataset_summary": dataset_summary,
             "results_summary": self.results,
+            "git_commit": self._get_git_commit(),
+            "pip_freeze": self._get_pip_freeze_summary(),
         }
 
         with open(output_dir / f"{exp_name}_{timestamp}_meta.json", "w", encoding="utf-8") as f:
             json.dump(meta, f, indent=2, ensure_ascii=False)
+
+    def _get_git_commit(self) -> str:
+        try:
+            return (
+                subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=Path.cwd())
+                .decode()
+                .strip()
+            )
+        except Exception:
+            return ""
+
+    def _get_pip_freeze_summary(self, limit: int = 30) -> List[str]:
+        try:
+            out = (
+                subprocess.check_output(["pip", "freeze"], cwd=Path.cwd())
+                .decode()
+                .splitlines()
+            )
+            return out[:limit]
+        except Exception:
+            return []
 
 
 if __name__ == "__main__":

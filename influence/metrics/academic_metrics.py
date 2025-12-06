@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 class AcademicMetricsCalculator:
     """学术影响力指标计算器"""
     
-    def __init__(self, venues_config_path: Optional[Path] = None):
+    def __init__(self, venues_config_path: Optional[Path] = None, recency_half_life_years: Optional[int] = None):
         """
         初始化计算器
         
@@ -30,6 +30,8 @@ class AcademicMetricsCalculator:
             venues_config_path: 顶会配置文件路径
         """
         self.weights = INFLUENCE_WEIGHTS["academic"]
+        if recency_half_life_years is not None:
+            self.weights["recency_half_life_years"] = recency_half_life_years
         
         # 加载顶会配置
         if venues_config_path is None:

@@ -51,6 +51,27 @@
 ### 4.2 结果解读
 {{ report.findings or "（结果解读占位，可由 LLM 生成）" }}
 
+## 4.3 复现信息
+{% if meta %}
+- Git Commit: {{ meta.git_commit or "未提供" }}
+- Pip Freeze（截断）:
+{% if meta.pip_freeze %}
+{% for dep in meta.pip_freeze[:20] %}
+  - {{ dep }}
+{% endfor %}
+{% else %}
+  - 未提供
+{% endif %}
+{% else %}
+（未提供 meta 信息）
+{% endif %}
+
+## 4.4 影响力与发表信息
+{% set academic_metrics = influence.metrics_breakdown.academic if influence.metrics_breakdown else {} %}
+{% set weights = influence.metrics_breakdown.weights if influence.metrics_breakdown else {} %}
+- 发表级别：{% if academic_metrics.venue_tier == 1 %}Tier1{% elif academic_metrics.venue_tier == 2 %}Tier2{% else %}Other{% endif %}
+- 时间衰减系数：{{ "%.2f"|format(weights.recency_factor) if weights and weights.recency_factor is not none else "1.00" }}
+
 ## 5. 讨论
 - 主要发现：{{ report.discussion.main_points or "（占位）" }}
 - 误差或局限：{{ report.discussion.limitations or "（占位）" }}
