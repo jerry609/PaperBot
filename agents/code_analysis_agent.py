@@ -63,7 +63,8 @@ class CodeAnalysisAgent(BaseAgent):
             "updated_at": meta.get("last_commit_at"),
             "has_readme": structure.get('documentation', {}).get('has_readme', False),
             "reproducibility_score": quality.get('overall_score', 0) * 100,
-            "quality_notes": str(quality.get('recommendations', []))
+            "quality_notes": str(quality.get('recommendations', [])),
+            "confidence": self._compute_confidence(meta, structure),
         }
         return flat
 
@@ -193,6 +194,25 @@ class CodeAnalysisAgent(BaseAgent):
         required_keys = ['github_token', 'analysis_depth', 'security_checks']
         return all(key in self.config for key in required_keys)
 
+    def _compute_confidence(self, meta: Dict[str, Any], structure: Dict[str, Any]) -> float:
+        """简单信心分：有 README + 近期提交 + stars/forks 加权"""
+        score = 0.3  # base
+        if structure.get('documentation', {}).get('has_readme'):
+            score += 0.2
+        try:
+            from datetime import datetime, timedelta
+            last = meta.get("last_commit_at")
+            if last:
+                dt = datetime.fromisoformat(last.replace("Z", "+00:00"))
+                if datetime.now(dt.tzinfo) - dt <= timedelta(days=180):
+                    score += 0.2
+        except Exception:
+            pass
+        stars = meta.get("stars") or 0
+        forks = meta.get("forks") or 0
+        if stars or forks:
+            score += 0.2
+        return round(min(1.0, score), 2)
     def _extract_repo_meta(self, repo_path: Path, repo_url: str) -> Dict[str, Any]:
         """获取静态元信息：last commit 时间，GitHub stars/forks（若有 token）"""
         meta: Dict[str, Any] = {}

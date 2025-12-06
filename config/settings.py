@@ -122,6 +122,7 @@ class Settings:
         "timeout_sec": 300,
         "network": False,  # 禁用网络，True 表示允许
     })
+    offline: bool = False  # 离线/私有模式开关
     conferences: Dict[str, ConferenceConfig] = field(default_factory=dict)
 
     @classmethod
@@ -177,6 +178,9 @@ class Settings:
         if 'repro' in config_data:
             settings.repro = {**settings.repro, **config_data['repro']}
         
+        if 'offline' in config_data:
+            settings.offline = bool(config_data['offline'])
+        
         if 'conferences' in config_data:
             settings.conferences = {
                 name: ConferenceConfig(**conf_data)
@@ -205,6 +209,9 @@ class Settings:
         env_repro_image = os.getenv('PAPERBOT_REPRO_IMAGE')
         if env_repro_image:
             self.repro['docker_image'] = env_repro_image
+        env_offline = os.getenv('PAPERBOT_OFFLINE')
+        if env_offline is not None:
+            self.offline = env_offline.lower() in ("1", "true", "yes", "on")
         
         # 其他环境变量
         acm_url = os.getenv('ACM_LIBRARY_URL')

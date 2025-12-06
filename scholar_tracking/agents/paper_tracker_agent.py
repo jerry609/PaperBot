@@ -36,6 +36,7 @@ class PaperTrackerAgent(BaseAgent):
         self.data_source: Optional[BaseDataSource] = build_data_source(
             (config or {}).get("data_source", {})
         )
+        self.offline = (config or {}).get("offline", False)
         
         # 获取设置
         self.settings = self.profile_agent.get_settings()
@@ -104,20 +105,36 @@ class PaperTrackerAgent(BaseAgent):
         
         # 1. 获取该学者当前的论文列表（优先 DataSource）
         current_papers: List[PaperMeta] = []
+        source = "api"
+        fetched_at = datetime.now().isoformat()
         if self.data_source:
             try:
                 current_papers = await self.data_source.fetch_papers_by_author(
                     scholar, limit=self.papers_per_scholar
                 )
+                source = "local_datasource"
                 logger.info(f"Local datasource returned {len(current_papers)} papers for {scholar.name}")
             except Exception as e:
                 logger.warning(f"Local datasource failed, fallback to API: {e}")
 
-        if not current_papers:
+        if not current_papers and not self.offline:
             current_papers = await self.ss_agent.fetch_papers_by_author(
                 scholar.semantic_scholar_id,
                 limit=self.papers_per_scholar,
             )
+            source = "semantic_scholar_api"
+
+        if not current_papers and self.offline:
+            logger.warning(f"Offline mode and no local data for {scholar.name}")
+            return {
+                "scholar_id": scholar.semantic_scholar_id,
+                "scholar_name": scholar.name,
+                "status": "no_data_offline",
+                "total_papers": 0,
+                "new_papers": [],
+                "source": "offline_no_data",
+                "fetched_at": fetched_at,
+            }
         
         if not current_papers:
             logger.warning(f"No papers found for {scholar.name}")
@@ -164,6 +181,8 @@ class PaperTrackerAgent(BaseAgent):
             "cached_papers": len(cached_paper_ids),
             "new_papers_count": len(new_papers),
             "new_papers": [p.to_dict() for p in new_papers],
+            "source": source,
+            "fetched_at": fetched_at,
         }
     
     async def detect_new_papers(

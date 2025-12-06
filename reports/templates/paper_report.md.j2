@@ -71,6 +71,7 @@
 | 可复现性评分 | {{ code_analysis.reproducibility_score or engineering_metrics.reproducibility_score or "-" }} |
 | 时间衰减系数 | {{ "%.2f"|format(weights.recency_factor) if weights and weights.recency_factor is not none else "1.00" }} |
 | 发表级别 | {% if academic_metrics.venue_tier == 1 %}Tier1{% elif academic_metrics.venue_tier == 2 %}Tier2{% else %}Other{% endif %} |
+| 代码信心分 | {{ code_analysis.confidence if code_analysis.confidence is not none else "-" }} |
 
 ---
 

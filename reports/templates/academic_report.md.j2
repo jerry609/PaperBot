@@ -71,6 +71,7 @@
 {% set weights = influence.metrics_breakdown.weights if influence.metrics_breakdown else {} %}
 - 发表级别：{% if academic_metrics.venue_tier == 1 %}Tier1{% elif academic_metrics.venue_tier == 2 %}Tier2{% else %}Other{% endif %}
 - 时间衰减系数：{{ "%.2f"|format(weights.recency_factor) if weights and weights.recency_factor is not none else "1.00" }}
+- 代码信心分：{{ code_analysis.confidence if code_analysis.confidence is not none else "-" }}
 
 ## 5. 可复现性验证
 {% if repro and repro.status %}

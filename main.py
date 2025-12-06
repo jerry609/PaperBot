@@ -196,6 +196,7 @@ def build_parser() -> argparse.ArgumentParser:
                        help='覆盖报告模板名称 (如 paper_report.md.j2 / academic_report.md.j2)')
     parser.add_argument('--data-source', dest='data_source', default=None,
                        help='数据源类型覆盖 (api/local/hybrid)，local 时需配合 dataset_path/dataset_name')
+    parser.add_argument('--offline', action='store_true', help='离线/私有模式（优先本地数据源，禁用外部调用）')
 
     return parser
 
@@ -459,6 +460,7 @@ def run_scholar_tracking(args):
         overrides = {"subscriptions_config_path": str(config_path)}
         mode = getattr(args, "mode", None) or getattr(settings, "mode", "production")
         overrides["mode"] = mode
+        overrides["offline"] = args.offline or getattr(settings, "offline", False)
         if args.report_template:
             overrides["report_template"] = args.report_template
         elif mode == "academic":
