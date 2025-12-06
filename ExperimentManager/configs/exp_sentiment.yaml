@@ -1,12 +1,22 @@
 experiment_name: "sentiment_benchmark_v1"
-dataset: "sample_sentiment"
+dataset: "sample_sentiment"          # 对应 datasets/processed/sample_sentiment.csv
+seed: 42                            # 确保结果可复现
+
 models:
-  - name: "bert_baseline"
-    type: "bert"
-  - name: "qwen_small"
-    type: "llm"
+  - name: "majority_baseline"
+    type: "majority"                # 预测全部为多数类
+  - name: "keyword_rule"
+    type: "rule_keyword"            # 简单关键词启发式
+    pos_keywords: ["好", "棒", "推荐", "赞"]
+    neg_keywords: ["差", "不", "糟", "坑"]
+  - name: "random_label"
+    type: "random"                  # 随机标签，用于对比
+
 metrics:
   - accuracy
-  - f1_score
+  - f1_macro
+  - f1_0
+  - f1_1
+
 output_dir: "output/experiments/sentiment_v1"
 

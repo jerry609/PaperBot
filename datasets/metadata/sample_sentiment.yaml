@@ -1,0 +1,13 @@
+name: sample_sentiment
+description: 极简中文情感分类示例数据，用于验证 ExperimentManager 管线。
+source: "合成示例，用于本地自测"
+collection_time: "2025-01-01"
+license: "CC-BY-SA 4.0（示例数据，实际使用请替换为合规数据集）"
+fields:
+  text: "原始文本，UTF-8"
+  label: "情感标签，1=正向，0=负向"
+splits:
+  train: 1.0   # 示例未拆分，全部用于简单验证
+notes:
+  - 若用于真实实验，请替换为实际数据集并在此处注明来源与许可。
+
