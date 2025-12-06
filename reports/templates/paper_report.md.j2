@@ -209,6 +209,24 @@
 *🤖 由 PaperBot 自动生成*
 
 ---
+## 🔁 可复现性验证
+{% if repro and repro.status %}
+- 状态: {{ repro.status }} (score={{ repro.score or "-" }})
+- 耗时: {{ repro.duration_sec or "-" }} 秒
+- 退出码: {{ repro.exit_code or "-" }}
+- 命令:
+{% for c in repro.commands or [] %}
+  - {{ c }}
+{% endfor %}
+- 日志摘要:
+```
+{{ repro.logs or "无" }}
+```
+{% else %}
+未执行可复现性验证
+{% endif %}
+
+---
 ## 复现信息
 {% if meta %}
 - Git Commit: {{ meta.git_commit or "未提供" }}

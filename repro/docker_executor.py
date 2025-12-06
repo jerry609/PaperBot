@@ -1,0 +1,89 @@
+import logging
+import time
+from pathlib import Path
+from typing import Dict, List, Optional
+
+import docker
+from docker.errors import DockerException, APIError
+
+logger = logging.getLogger(__name__)
+
+
+class DockerExecutor:
+    """
+    轻量 Docker 执行器
+    - 挂载代码目录只读
+    - 可选独立 cache 目录（可写）
+    - 限制 CPU/内存/超时
+    - 可禁用网络
+    """
+
+    def __init__(self, image: str, cpu_shares: int = 1, mem_limit: str = "1g", network: bool = False):
+        self.image = image
+        self.cpu_shares = cpu_shares
+        self.mem_limit = mem_limit
+        self.network_disabled = not network
+        try:
+            self.client = docker.from_env()
+        except DockerException as e:
+            logger.warning(f"Docker not available: {e}")
+            self.client = None
+
+    def available(self) -> bool:
+        return self.client is not None
+
+    def run(
+        self,
+        workdir: Path,
+        commands: List[str],
+        timeout_sec: int = 300,
+        cache_dir: Optional[Path] = None,
+    ) -> Dict[str, str]:
+        if not self.client:
+            return {"status": "error", "error": "Docker client unavailable"}
+
+        container = None
+        start = time.time()
+        try:
+            binds = {
+                str(workdir): {"bind": "/workspace", "mode": "ro"},
+            }
+            if cache_dir:
+                cache_dir.mkdir(parents=True, exist_ok=True)
+                binds[str(cache_dir)] = {"bind": "/cache", "mode": "rw"}
+
+            container = self.client.containers.run(
+                self.image,
+                command=["/bin/sh", "-c", " && ".join(commands)],
+                working_dir="/workspace",
+                detach=True,
+                cpu_shares=self.cpu_shares,
+                mem_limit=self.mem_limit,
+                network_disabled=self.network_disabled,
+                volumes=binds,
+                environment={"PIP_CACHE_DIR": "/cache/pip"} if cache_dir else {},
+            )
+
+            exit_code = container.wait(timeout=timeout_sec)
+            logs = container.logs(stdout=True, stderr=True).decode(errors="ignore")
+            duration = time.time() - start
+            status = "success" if exit_code.get("StatusCode", 1) == 0 else "failed"
+            return {
+                "status": status,
+                "exit_code": exit_code.get("StatusCode", 1),
+                "logs": logs[-8000:],  # 截断
+                "duration_sec": duration,
+            }
+        except APIError as e:
+            logger.error(f"Docker API error: {e}")
+            return {"status": "error", "error": str(e)}
+        except Exception as e:
+            logger.error(f"Docker exec error: {e}")
+            return {"status": "error", "error": str(e)}
+        finally:
+            if container:
+                try:
+                    container.remove(force=True)
+                except Exception:
+                    pass
+

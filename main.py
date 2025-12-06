@@ -212,6 +212,8 @@ def main():
                               help='显示追踪状态摘要')
     track_parser.add_argument('--dataset-path', type=str,
                                help='本地数据集路径（覆盖 data_source.dataset_path）')
+    track_parser.add_argument('--repro', action='store_true',
+                               help='启用可复现性验证（需 Docker）')
 
     # 运行实验（ExperimentManager）
     exp_parser = subparsers.add_parser('run-exp', help='运行实验配置 (ExperimentManager)')
@@ -446,6 +448,8 @@ def run_scholar_tracking(args):
         from scholar_tracking.models import PaperMeta
         from core.workflow_coordinator import ScholarWorkflowCoordinator
         from config.settings import settings
+        from repro import ReproAgent
+        import tempfile, shutil, git
 
         overrides = {"subscriptions_config_path": str(config_path)}
         mode = getattr(args, "mode", None) or getattr(settings, "mode", "production")
@@ -557,6 +561,45 @@ def run_scholar_tracking(args):
                         print(f"    📄 {paper.title[:40]}... -> {report_path.name} | PIS {pis}")
                     else:
                         print(f"    📄 {paper.title[:40]}... -> (未持久化) | PIS {pis}")
+
+                    # 可复现性验证（需 repo）
+                    repro_result = {}
+                    if args.repro and (paper.github_url or paper.has_code):
+                        tmp_dir = Path(tempfile.mkdtemp(prefix="paperbot-repro-"))
+                        try:
+                            repo_url = paper.github_url
+                            if repo_url:
+                                print(f"    🔁 Repro: cloning {repo_url}")
+                                git.Repo.clone_from(repo_url, tmp_dir)
+                                repro_agent = ReproAgent({"repro": settings.repro})
+                                repro_result = await repro_agent.run(tmp_dir)
+                            else:
+                                repro_result = {"status": "skipped", "reason": "no_repo"}
+                        except Exception as e:
+                            repro_result = {"status": "error", "error": str(e)}
+                            print(f"    ⚠️ Repro 失败: {e}")
+                        finally:
+                            try:
+                                shutil.rmtree(tmp_dir)
+                            except Exception:
+                                pass
+
+                        # 重新渲染报告，写回
+                        try:
+                            md = coordinator.report_writer.render_template(
+                                paper=paper,
+                                influence=influence,
+                                research_result=pipeline_data.get("stages", {}).get("research", {}).get("result", {}),
+                                code_analysis_result=pipeline_data.get("stages", {}).get("code_analysis", {}).get("result", {}),
+                                quality_result=pipeline_data.get("stages", {}).get("quality", {}).get("result", {}),
+                                scholar_name=scholar_name,
+                                repro_result=repro_result,
+                                meta=None,
+                            )
+                            path = coordinator.report_writer.write_report(md, paper, scholar_name)
+                            pipeline_data["report_path"] = str(path)
+                        except Exception as e:
+                            print(f"    ⚠️ 重渲染报告失败: {e}")
 
                     processed_records.append(
                         {

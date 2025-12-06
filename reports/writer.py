@@ -154,6 +154,8 @@ class ReportWriter:
         code_analysis_result: Optional[Dict[str, Any]] = None,
         quality_result: Optional[Dict[str, Any]] = None,
         scholar_name: Optional[str] = None,
+        repro_result: Optional[Dict[str, Any]] = None,
+        meta: Optional[Dict[str, Any]] = None,
     ) -> str:
         """
         使用 Jinja2 模板渲染报告
@@ -178,6 +180,8 @@ class ReportWriter:
             "quality": quality_result or {},
             "scholar_name": scholar_name,
             "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "repro": repro_result or {},
+            "meta": meta or {},
         }
 
         if not HAS_JINJA2 or not self._jinja_env:

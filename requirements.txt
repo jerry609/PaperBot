@@ -38,7 +38,11 @@ flake8>=5.0.0
 
 # AI SDK
 anthropic>=0.3.0
+claude-agent-sdk>=0.1.0
 
 # Code Analysis
 radon>=5.1.0
 safety>=2.3.0
+
+# Docker sandbox
+docker>=7.0.0

@@ -72,6 +72,23 @@
 - 发表级别：{% if academic_metrics.venue_tier == 1 %}Tier1{% elif academic_metrics.venue_tier == 2 %}Tier2{% else %}Other{% endif %}
 - 时间衰减系数：{{ "%.2f"|format(weights.recency_factor) if weights and weights.recency_factor is not none else "1.00" }}
 
+## 5. 可复现性验证
+{% if repro and repro.status %}
+- 状态: {{ repro.status }} (score={{ repro.score or "-" }})
+- 耗时: {{ repro.duration_sec or "-" }} 秒
+- 退出码: {{ repro.exit_code or "-" }}
+- 命令:
+{% for c in repro.commands or [] %}
+  - {{ c }}
+{% endfor %}
+- 日志摘要:
+```
+{{ repro.logs or "无" }}
+```
+{% else %}
+未执行可复现性验证
+{% endif %}
+
 ## 5. 讨论
 - 主要发现：{{ report.discussion.main_points or "（占位）" }}
 - 误差或局限：{{ report.discussion.limitations or "（占位）" }}

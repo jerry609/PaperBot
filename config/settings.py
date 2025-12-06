@@ -115,6 +115,13 @@ class Settings:
     report: Dict[str, Any] = field(default_factory=lambda: {
         "template": "paper_report.md.j2",  # academic_report.md.j2 for academic
     })
+    repro: Dict[str, Any] = field(default_factory=lambda: {
+        "docker_image": "python:3.10-slim",
+        "cpu_shares": 1,
+        "mem_limit": "1g",
+        "timeout_sec": 300,
+        "network": False,  # 禁用网络，True 表示允许
+    })
     conferences: Dict[str, ConferenceConfig] = field(default_factory=dict)
 
     @classmethod
@@ -167,6 +174,9 @@ class Settings:
         if 'report' in config_data:
             settings.report = {**settings.report, **config_data['report']}
         
+        if 'repro' in config_data:
+            settings.repro = {**settings.repro, **config_data['repro']}
+        
         if 'conferences' in config_data:
             settings.conferences = {
                 name: ConferenceConfig(**conf_data)
@@ -192,6 +202,9 @@ class Settings:
         env_ds_path = os.getenv('PAPERBOT_DATASET_PATH')
         if env_ds_path:
             self.data_source['dataset_path'] = env_ds_path
+        env_repro_image = os.getenv('PAPERBOT_REPRO_IMAGE')
+        if env_repro_image:
+            self.repro['docker_image'] = env_repro_image
         
         # 其他环境变量
         acm_url = os.getenv('ACM_LIBRARY_URL')

@@ -115,6 +115,22 @@ python scripts/validate_datasets.py
 # 检查 datasets/processed/*.csv 是否包含 text/label，metadata 是否含 license/source
 ```
 
+### 6. 可复现性验证（Repro）
+```bash
+# 学者追踪时启用可复现性验证（需 Docker、本地镜像可配置）
+python main.py track --mode academic --repro
+
+# 自定义报告模板
+python main.py track --mode academic --repro --report-template academic_report.md.j2
+```
+配置项（settings.yaml/env）：
+- `repro.docker_image`: 基线镜像，默认 python:3.10-slim
+- `repro.cpu_shares` / `repro.mem_limit`: 资源限制
+- `repro.timeout_sec`: 超时（秒）
+- `repro.network`: 是否允许容器出网（默认禁用）
+
+报告中会追加“可复现性验证”区块，展示状态、命令、耗时、日志摘要。
+
 ## 📂 目录结构
 
 ```
