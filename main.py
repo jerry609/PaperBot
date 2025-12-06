@@ -12,6 +12,7 @@ import asyncio
 import time
 from pathlib import Path
 from typing import Optional
+import logging
 
 # 解决 Windows 上 curl_cffi 的兼容性问题
 if sys.platform == 'win32':
@@ -125,54 +126,18 @@ def simple_paper_download(conference: str, year: str, url: Optional[str] = None,
             print("ℹ️  CCS 下载目前不支持智能模式，将使用稳定顺序模式。")
             smart_mode = False  # 强制为顺序模式
     else:
-        from utils.downloader import PaperDownloader
-        from utils.smart_downloader import SmartDownloadManager
-        DownloaderClass = PaperDownloader
-        print(f"📚 目标会议: {conference.upper()}")
-
-    mode_message = "🤖 使用智能并发模式" if smart_mode else "🔄 使用稳定顺序模式"
-    print(mode_message)
-
-    config = {'download_path': f'./papers/{conference}_{year}'}
+    from agents.conference_research_agent import ConferenceResearchAgent
 
     async def _run_download():
-        downloader_instance = None
         try:
-            # 初始化下载器
-            if smart_mode and not is_ccs:
-                manager = SmartDownloadManager(config)
-                downloader_instance = manager.downloader
-                papers = await downloader_instance.get_conference_papers(conference, year)
-            else:
-                # 对于顺序模式或CCS，直接使用下载器
-                downloader_instance = DownloaderClass(config)
-                await downloader_instance.__aenter__() # Manually enter context
-                papers = await downloader_instance.get_conference_papers(conference, year)
-
+            agent = ConferenceResearchAgent({"download_path": f'./papers/{conference}_{year}'})
+            result = await agent.process(conference, year)
+            papers = result.get("papers", [])
             print(f"✅ 找到 {len(papers)} 篇论文")
-            if not papers:
-                print("⚠️  未找到任何论文，请检查会议名称和年份。")
-                return
-
-            valid_papers = [p for p in papers if isinstance(p.get('url'), str) and p['url'].strip()]
-            print(f"📝 有效PDF链接: {len(valid_papers)}/{len(papers)}")
-            if not valid_papers:
-                print("⚠️  没有找到有效的PDF下载链接。")
-                return
-
-            if smart_mode and not is_ccs:
-                print("🤖 启动智能下载模式...")
-                await manager.download_papers_smart(valid_papers)
-            else:
-                # 所有顺序模式（包括CCS）都使用此路径
-                await _sequential_download(downloader_instance, valid_papers)
-        
+            with_pdf = [p for p in papers if p.get("local_path")]
+            print(f"📝 下载成功 {len(with_pdf)} 篇；含代码链接 {sum(1 for p in papers if p.get('github_links'))}")
         except Exception as e:
             print(f"❌ 下载过程中出现严重错误: {e}")
-        finally:
-            if downloader_instance and not (smart_mode and not is_ccs):
-                 await downloader_instance.__aexit__(None, None, None) # Manually exit context
-
 
     try:
         asyncio.run(_run_download())
@@ -189,6 +154,25 @@ def main():
     if sys.platform == 'win32':
         sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
         sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
+
+    # 全局时区/seed/日志
+    os.environ.setdefault("TZ", "UTC")
+    try:
+        time.tzset()
+    except Exception:
+        pass
+    seed = int(os.getenv("PAPERBOT_SEED", "42"))
+    try:
+        import random
+        random.seed(seed)
+        import numpy as np
+        np.random.seed(seed)
+    except Exception:
+        pass
+    logging.basicConfig(
+        level=os.getenv("PAPERBOT_LOG_LEVEL", "INFO"),
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    )
 
     print("=" * 60)
     print("🔐 SecuriPaperBot - 智能论文分析框架")
@@ -226,7 +210,20 @@ def main():
                               help='仅检测新论文，不生成报告')
     track_parser.add_argument('--summary', action='store_true',
                               help='显示追踪状态摘要')
+
+    # 运行实验（ExperimentManager）
+    exp_parser = subparsers.add_parser('run-exp', help='运行实验配置 (ExperimentManager)')
+    exp_parser.add_argument('--config', required=True, help='实验配置文件路径 (YAML)')
+
+    # 渲染报告（从 meta.json + 模板）
+    render_parser = subparsers.add_parser('render-report', help='根据 meta.json 渲染报告')
+    render_parser.add_argument('--meta', required=True, help='pipeline/实验生成的 meta.json 路径')
+    render_parser.add_argument('--template', default=None, help='报告模板名称，默认使用 meta 或 settings 中配置')
+    render_parser.add_argument('--output', default=None, help='输出文件路径（可选，默认按论文ID命名写入默认目录）')
     
+    parser.add_argument('--mode', choices=['production', 'academic'], default=os.getenv("PAPERBOT_MODE", "production"),
+                       help='运行模式 (production/academic)')
+
     args = parser.parse_args()
     
     if args.check:
@@ -259,6 +256,16 @@ def main():
     # 处理学者追踪命令
     if args.command == 'track':
         run_scholar_tracking(args)
+        return
+
+    # 处理实验命令
+    if args.command == 'run-exp':
+        run_experiment(args)
+        return
+
+    # 渲染报告
+    if args.command == 'render-report':
+        render_report(args)
         return
     
     if args.conference and args.year:
@@ -294,6 +301,100 @@ def main():
         print("🤖 智能模式默认启用，提供更快的下载速度和进度显示")
 
 
+def run_experiment(args):
+    """运行 ExperimentManager 实验"""
+    from ExperimentManager.runner import ExperimentRunner
+
+    cfg_path = Path(args.config).expanduser()
+    if not cfg_path.is_absolute():
+        cfg_path = current_dir / cfg_path
+    cfg_path = cfg_path.resolve()
+    if not cfg_path.exists():
+        print(f"❌ 找不到实验配置文件: {cfg_path}")
+        return
+
+    print(f"🧪 运行实验: {cfg_path}")
+    runner = ExperimentRunner(str(cfg_path))
+    runner.run()
+    print("✅ 实验完成，结果已写入 output/experiments")
+
+
+def render_report(args):
+    """根据 meta.json 渲染报告（paper/academic 模板兼容）"""
+    import json
+    from config.settings import settings
+    from reports.writer import ReportWriter
+    from scholar_tracking.models import PaperMeta
+    from scholar_tracking.models.influence import InfluenceResult
+
+    meta_path = Path(args.meta).expanduser()
+    if not meta_path.is_absolute():
+        meta_path = current_dir / meta_path
+    meta_path = meta_path.resolve()
+    if not meta_path.exists():
+        print(f"❌ 找不到 meta 文件: {meta_path}")
+        return
+
+    try:
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    except Exception as e:
+        print(f"❌ 读取 meta 失败: {e}")
+        return
+
+    # 兼容不同字段命名
+    paper_dict = meta.get("paper") or meta.get("paper_meta") or {}
+    influence_dict = meta.get("influence") or meta.get("influence_result") or meta.get("results_summary", [{}])[0].get("influence", {})
+    research = meta.get("research") or meta.get("research_result") or {}
+    code_analysis = meta.get("code_analysis") or meta.get("code_analysis_result") or {}
+    quality = meta.get("quality") or meta.get("quality_result") or {}
+    scholar_name = meta.get("scholar_name") or meta.get("scholar") or None
+
+    try:
+        paper = PaperMeta.from_dict(paper_dict)
+    except Exception as e:
+        print(f"❌ 构造 PaperMeta 失败: {e}")
+        return
+
+    if not influence_dict:
+        # 最小兜底，避免模板崩溃
+        influence_dict = {
+            "total_score": 0.0,
+            "academic_score": 0.0,
+            "engineering_score": 0.0,
+            "explanation": "No influence data provided.",
+            "metrics_breakdown": {},
+            "recommendation": "低优先级",
+        }
+    influence = InfluenceResult.from_dict(influence_dict)
+
+    template_name = (
+        args.template
+        or meta.get("template")
+        or settings.report.get("template", "paper_report.md.j2")
+    )
+
+    writer = ReportWriter(template_name=template_name)
+    md = writer.render_template(
+        paper=paper,
+        influence=influence,
+        research_result=research,
+        code_analysis_result=code_analysis,
+        quality_result=quality,
+        scholar_name=scholar_name,
+    )
+
+    if args.output:
+        out_path = Path(args.output).expanduser()
+        if not out_path.is_absolute():
+            out_path = current_dir / out_path
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(md, encoding="utf-8")
+        print(f"✅ 报告已写入: {out_path}")
+    else:
+        path = writer.write_report(md, paper, scholar_name=scholar_name)
+        print(f"✅ 报告已写入: {path}")
+
+
 def run_scholar_tracking(args):
     """运行学者追踪功能"""
     print("=" * 60)
@@ -312,8 +413,13 @@ def run_scholar_tracking(args):
         from scholar_tracking import PaperTrackerAgent, ScholarProfileAgent
         from scholar_tracking.models import PaperMeta
         from core.workflow_coordinator import ScholarWorkflowCoordinator
+        from config.settings import settings
 
         overrides = {"subscriptions_config_path": str(config_path)}
+        mode = getattr(args, "mode", None) or getattr(settings, "mode", "production")
+        overrides["mode"] = mode
+        if mode == "academic":
+            overrides["report_template"] = "academic_report.md.j2"
         profile_agent = ScholarProfileAgent(overrides)
 
         # 显示摘要
@@ -326,12 +432,13 @@ def run_scholar_tracking(args):
         reporting_cfg = settings.get("reporting", {})
         min_score = settings.get("min_influence_score", 0)
 
-        tracker_agent = PaperTrackerAgent({**overrides, "api": settings.get("api", {})})
+        tracker_agent = PaperTrackerAgent({**overrides, "api": settings.get("api", {}), "data_source": settings.get("data_source", {})})
         coordinator = ScholarWorkflowCoordinator(
             {
                 "output_dir": str(profile_agent.get_output_dir()),
-                "report_template": reporting_cfg.get("template", "paper_report.md.j2"),
+                "report_template": reporting_cfg.get("template", overrides.get("report_template", "paper_report.md.j2")),
                 "use_documentation_agent": False, # 禁用 DocumentationAgent 以避免接口不匹配
+                "mode": mode,
             }
         )
 

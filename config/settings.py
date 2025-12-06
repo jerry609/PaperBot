@@ -105,6 +105,16 @@ class Settings:
     output: OutputConfig = field(default_factory=OutputConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
     api: APIConfig = field(default_factory=APIConfig)
+    # 模式与数据源
+    mode: str = "production"  # production / academic
+    data_source: Dict[str, Any] = field(default_factory=lambda: {
+        "type": "api",          # api / local / hybrid
+        "dataset_name": None,   # 对应 datasets/processed/{name}.csv
+        "dataset_path": None,   # 显式路径优先
+    })
+    report: Dict[str, Any] = field(default_factory=lambda: {
+        "template": "paper_report.md.j2",  # academic_report.md.j2 for academic
+    })
     conferences: Dict[str, ConferenceConfig] = field(default_factory=dict)
 
     @classmethod
@@ -148,6 +158,15 @@ class Settings:
         if 'apis' in config_data:
             settings.api = APIConfig(**config_data['apis'])
         
+        if 'mode' in config_data:
+            settings.mode = config_data['mode']
+        
+        if 'data_source' in config_data:
+            settings.data_source = {**settings.data_source, **config_data['data_source']}
+        
+        if 'report' in config_data:
+            settings.report = {**settings.report, **config_data['report']}
+        
         if 'conferences' in config_data:
             settings.conferences = {
                 name: ConferenceConfig(**conf_data)
@@ -161,6 +180,18 @@ class Settings:
         # API配置
         self.api.github_token = os.getenv('GITHUB_TOKEN', self.api.github_token)
         self.api.openai_api_key = os.getenv('OPENAI_API_KEY', self.api.openai_api_key)
+        env_mode = os.getenv('PAPERBOT_MODE')
+        if env_mode:
+            self.mode = env_mode
+        env_template = os.getenv('PAPERBOT_REPORT_TEMPLATE')
+        if env_template:
+            self.report['template'] = env_template
+        env_ds_type = os.getenv('PAPERBOT_DATA_SOURCE')
+        if env_ds_type:
+            self.data_source['type'] = env_ds_type
+        env_ds_path = os.getenv('PAPERBOT_DATASET_PATH')
+        if env_ds_path:
+            self.data_source['dataset_path'] = env_ds_path
         
         # 其他环境变量
         acm_url = os.getenv('ACM_LIBRARY_URL')

@@ -12,6 +12,7 @@ from agents.base_agent import BaseAgent
 from ..models import Scholar, PaperMeta
 from .semantic_scholar_agent import SemanticScholarAgent
 from .scholar_profile_agent import ScholarProfileAgent
+from ..services.data_source import build_data_source, BaseDataSource
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +33,9 @@ class PaperTrackerAgent(BaseAgent):
         # 初始化依赖的 Agent
         self.profile_agent = ScholarProfileAgent(config)
         self.ss_agent = SemanticScholarAgent(config)
+        self.data_source: Optional[BaseDataSource] = build_data_source(
+            (config or {}).get("data_source", {})
+        )
         
         # 获取设置
         self.settings = self.profile_agent.get_settings()
@@ -98,11 +102,22 @@ class PaperTrackerAgent(BaseAgent):
         """
         logger.info(f"Tracking scholar: {scholar.name} (ID: {scholar.semantic_scholar_id})")
         
-        # 1. 获取该学者当前的论文列表
-        current_papers = await self.ss_agent.fetch_papers_by_author(
-            scholar.semantic_scholar_id,
-            limit=self.papers_per_scholar,
-        )
+        # 1. 获取该学者当前的论文列表（优先 DataSource）
+        current_papers: List[PaperMeta] = []
+        if self.data_source:
+            try:
+                current_papers = await self.data_source.fetch_papers_by_author(
+                    scholar, limit=self.papers_per_scholar
+                )
+                logger.info(f"Local datasource returned {len(current_papers)} papers for {scholar.name}")
+            except Exception as e:
+                logger.warning(f"Local datasource failed, fallback to API: {e}")
+
+        if not current_papers:
+            current_papers = await self.ss_agent.fetch_papers_by_author(
+                scholar.semantic_scholar_id,
+                limit=self.papers_per_scholar,
+            )
         
         if not current_papers:
             logger.warning(f"No papers found for {scholar.name}")

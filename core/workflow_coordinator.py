@@ -85,6 +85,7 @@ class ScholarWorkflowCoordinator:
         Returns:
             (report_path, influence_result, pipeline_data)
         """
+        self._validate_paper_meta(paper)
         pipeline_data = {
             "paper_id": paper.paper_id,
             "paper_title": paper.title,
@@ -168,9 +169,12 @@ class ScholarWorkflowCoordinator:
                 report_markdown = await self._generate_report(
                     paper=paper,
                     scholar_name=scholar_name,
-                    research_result=research_result,
-                    code_analysis_result=code_analysis_result,
-                    quality_result=quality_result,
+                    research_result=self._ensure_defaults(research_result, default={}),
+                    code_analysis_result=self._ensure_defaults(
+                        code_analysis_result,
+                        default={"repo_url": paper.github_url, "repo_name": None},
+                    ),
+                    quality_result=self._ensure_defaults(quality_result, default={}),
                     influence_result=influence_result,
                 )
                 pipeline_data["stages"]["documentation"] = {"status": "success"}
@@ -383,6 +387,24 @@ class ScholarWorkflowCoordinator:
 *由 PaperBot 自动生成*
 """
         return report
+
+    def _validate_paper_meta(self, paper: PaperMeta) -> None:
+        """最小校验，提前发现必填字段缺失"""
+        missing = []
+        if not paper.paper_id:
+            missing.append("paper_id")
+        if not paper.title:
+            missing.append("title")
+        if missing:
+            raise ValueError(f"PaperMeta missing required fields: {', '.join(missing)}")
+
+    def _ensure_defaults(self, value: Any, default: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """确保传递给模板的数据包含默认字段，避免 KeyError"""
+        if not isinstance(value, dict):
+            return default or {}
+        merged = dict(default or {})
+        merged.update({k: v for k, v in value.items() if v is not None})
+        return merged
     
     async def run_batch_pipeline(
         self,
