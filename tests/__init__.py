@@ -1,5 +1,12 @@
-# PaperBot Tests
-# 测试模块
+import sys
+from unittest.mock import MagicMock
+
+# Mock dependencies globally for tests
+sys.modules["pytest"] = MagicMock()
+sys.modules["docker"] = MagicMock()
+sys.modules["docker.errors"] = MagicMock()
+sys.modules["anthropic"] = MagicMock()
+sys.modules["claude_agent_sdk"] = MagicMock()
 
 from .test_framework import (
     # Mock 数据生成器
