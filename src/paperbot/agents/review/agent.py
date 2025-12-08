@@ -51,8 +51,8 @@ Be direct but respectful. Prioritize scientific correctness and reproducibility.
 
     async def _execute(self, *args, **kwargs) -> Dict[str, Any]:
         """Core execution: perform paper review."""
-        title = kwargs.get("title")
-        abstract = kwargs.get("abstract")
+        title = kwargs.get("title", "")
+        abstract = kwargs.get("abstract", "")
         full_text = kwargs.get("full_text")  # Optional
         related_work = kwargs.get("related_work", [])  # Optional list of similar papers
         

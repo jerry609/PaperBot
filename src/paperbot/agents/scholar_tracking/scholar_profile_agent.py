@@ -146,10 +146,12 @@ class ScholarProfileAgent(BaseAgent):
         """
         stats = {}
         for scholar in self.list_tracked_scholars():
-            stats[scholar.semantic_scholar_id] = {
-                "name": scholar.name,
-                **self.get_cache_stats(scholar.semantic_scholar_id),
-            }
+            scholar_id = scholar.semantic_scholar_id or ""
+            if scholar_id:
+                stats[scholar_id] = {
+                    "name": scholar.name,
+                    **self.get_cache_stats(scholar_id),
+                }
         return stats
     
     def update_scholar_last_checked(self, scholar: Scholar):
@@ -222,7 +224,8 @@ class ScholarProfileAgent(BaseAgent):
         ]
         
         for scholar in scholars:
-            cache_stats = self.get_cache_stats(scholar.semantic_scholar_id)
+            scholar_id = scholar.semantic_scholar_id or ""
+            cache_stats = self.get_cache_stats(scholar_id) if scholar_id else {}
             lines.append(
                 f"  - {scholar.name} (ID: {scholar.semantic_scholar_id})"
                 f" | Cached papers: {cache_stats.get('paper_count', 0)}"

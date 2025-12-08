@@ -105,7 +105,7 @@ class QualityAgent(BaseAgent):
         
         return "; ".join(summary)
 
-    async def _evaluate_quality(self, repo_analysis: Dict[str, Any]) -> Dict[str, Any]:
+    async def _evaluate_quality(self, repo_analysis: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """评估单个仓库的代码质量"""
         try:
             scores = {}

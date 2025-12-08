@@ -63,7 +63,7 @@ class DocumentationAgent(BaseAgent):
             raise
 
     async def _generate_api_documentation(self,
-                                          analysis_results: Dict[str, Any]) -> Dict[str, Any]:
+                                          analysis_results: Dict[str, Any]) -> str:
         """生成API文档"""
         try:
             api_docs = {
@@ -78,10 +78,10 @@ class DocumentationAgent(BaseAgent):
 
         except Exception as e:
             self.log_error(e)
-            return {}
+            return ""
 
     async def _generate_security_guide(self,
-                                       analysis_results: Dict[str, Any]) -> Dict[str, Any]:
+                                       analysis_results: Dict[str, Any]) -> str:
         """生成安全指南"""
         try:
             security_info = {
@@ -95,10 +95,10 @@ class DocumentationAgent(BaseAgent):
 
         except Exception as e:
             self.log_error(e)
-            return {}
+            return ""
 
     async def _generate_best_practices(self,
-                                       quality_report: Dict[str, Any]) -> Dict[str, Any]:
+                                       quality_report: Dict[str, Any]) -> str:
         """生成最佳实践文档"""
         try:
             practices = {
@@ -113,10 +113,10 @@ class DocumentationAgent(BaseAgent):
 
         except Exception as e:
             self.log_error(e)
-            return {}
+            return ""
 
     async def _generate_implementation_guide(self,
-                                             analysis_results: Dict[str, Any]) -> Dict[str, Any]:
+                                             analysis_results: Dict[str, Any]) -> str:
         """生成实现指南"""
         try:
             guide = {
@@ -131,7 +131,7 @@ class DocumentationAgent(BaseAgent):
 
         except Exception as e:
             self.log_error(e)
-            return {}
+            return ""
 
     async def _generate_markdown(self, documentation: Dict[str, Any]) -> str:
         """生成Markdown格式文档"""

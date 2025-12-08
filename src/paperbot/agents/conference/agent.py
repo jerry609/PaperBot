@@ -54,7 +54,7 @@ class ConferenceResearchAgent(BaseAgent):
         }
 
     async def _process_ccs(self, year: str) -> List[Dict[str, Any]]:
-        base_url = self.config.get('acm_base_url')
+        base_url = self.config.get('acm_base_url', 'https://dl.acm.org/doi/proceedings')
         return await self._process_generic(base_url, year, self._fetch_ccs_papers)
 
     async def _process_sp(self, year: str) -> List[Dict[str, Any]]:

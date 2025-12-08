@@ -252,7 +252,11 @@ class SemanticScholarAgent(BaseAgent):
         Returns:
             更新后的学者对象
         """
-        author_info = await self.fetch_author_info(scholar.semantic_scholar_id)
+        scholar_id = scholar.semantic_scholar_id
+        if not scholar_id:
+            return scholar
+        
+        author_info = await self.fetch_author_info(scholar_id)
         
         if author_info:
             scholar.h_index = author_info.get("hIndex")

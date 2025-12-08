@@ -131,7 +131,9 @@ class DeepResearchAgent(BaseAgent):
         action = kwargs.get("action", "research")
         
         if action == "research":
-            scholar_id = kwargs.get("scholar_id")
+            scholar_id = kwargs.get("scholar_id", "")
+            if not scholar_id:
+                return {"error": "scholar_id is required"}
             analysis_goal = kwargs.get("goal", "全面分析学者的学术影响力")
             return await self.deep_research(scholar_id, analysis_goal)
         
@@ -310,7 +312,12 @@ class DeepResearchAgent(BaseAgent):
                 "analysis_goal": analysis_goal,
             }
             
-            reflection_result = self.reflection_search_node.run(reflection_input)
+            if not self.reflection_search_node:
+                logger.warning("反思搜索节点未初始化，跳过反思循环")
+                break
+            
+            reflection_node_result = await self.reflection_search_node.run(reflection_input)
+            reflection_result = reflection_node_result.data or {}
             
             if not reflection_result.get("should_continue"):
                 logger.info(f"  → 反思循环结束: {reflection_result.get('reason', '信息已充分')}")
@@ -332,7 +339,11 @@ class DeepResearchAgent(BaseAgent):
                     "scholar_info": state.scholar_info,
                 }
                 
-                summary_result = self.reflection_summary_node.run(summary_input)
+                if not self.reflection_summary_node:
+                    continue
+                
+                summary_node_result = await self.reflection_summary_node.run(summary_input)
+                summary_result = summary_node_result.data or {}
                 
                 state.current_summary = summary_result.get("updated_summary", state.current_summary)
                 state.key_findings.extend(summary_result.get("key_findings", []))

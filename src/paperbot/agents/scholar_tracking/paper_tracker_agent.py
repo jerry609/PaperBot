@@ -200,15 +200,17 @@ class PaperTrackerAgent(BaseAgent):
             (新论文列表, 所有当前论文ID集合)
         """
         # 获取当前论文
+        scholar_id = scholar.semantic_scholar_id or ""
+        if not scholar_id:
+            return [], set()
+        
         current_papers = await self.ss_agent.fetch_papers_by_author(
-            scholar.semantic_scholar_id,
+            scholar_id,
             limit=self.papers_per_scholar,
         )
         
         # 获取缓存
-        cached_paper_ids = self.profile_agent.load_scholar_cache(
-            scholar.semantic_scholar_id
-        )
+        cached_paper_ids = self.profile_agent.load_scholar_cache(scholar_id)
         
         # 找出新论文
         current_paper_ids = {p.paper_id for p in current_papers}
@@ -242,7 +244,7 @@ class PaperTrackerAgent(BaseAgent):
                     "name": s.name,
                     "id": s.semantic_scholar_id,
                     "cached_papers": cache_stats.get(
-                        s.semantic_scholar_id, {}
+                        s.semantic_scholar_id or "", {}
                     ).get("paper_count", 0),
                 }
                 for s in scholars

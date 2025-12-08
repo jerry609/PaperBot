@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict, Generic, TypeVar, Union
+from typing import Any, Dict, Generic, TypeVar, Union, cast
 
 
 class ErrorSeverity(Enum):
@@ -63,11 +63,11 @@ class Result(Generic[T, E]):
 
     def unwrap(self) -> T:
         if not self._is_ok:
-            raise self._value
-        return self._value
+            raise cast(E, self._value)
+        return cast(T, self._value)
 
     def unwrap_or(self, default: T) -> T:
-        return self._value if self._is_ok else default
+        return cast(T, self._value) if self._is_ok else default
 
     def map(self, fn) -> "Result[T, E]":
         if self._is_ok:
