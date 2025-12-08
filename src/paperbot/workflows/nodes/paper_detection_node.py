@@ -6,9 +6,11 @@
 
 from typing import Any, Dict, List, Optional
 from datetime import datetime, timedelta
-from loguru import logger
+import logging
 
 from paperbot.repro.nodes.base_node import BaseNode
+
+logger = logging.getLogger(__name__)
 
 
 class PaperDetectionNode(BaseNode):
@@ -17,7 +19,6 @@ class PaperDetectionNode(BaseNode):
     def __init__(
         self,
         paper_tracker,
-        llm_client: Any = None,
         node_name: str = "PaperDetectionNode"
     ):
         """
@@ -25,13 +26,12 @@ class PaperDetectionNode(BaseNode):
         
         Args:
             paper_tracker: 论文追踪代理
-            llm_client: 可选的 LLM 客户端
             node_name: 节点名称
         """
-        super().__init__(node_name=node_name, llm_client=llm_client)
+        super().__init__(node_name=node_name)
         self.paper_tracker = paper_tracker
     
-    def run(self, input_data: Dict[str, Any], **kwargs) -> Dict[str, Any]:
+    async def _execute(self, input_data: Dict[str, Any], **kwargs) -> Dict[str, Any]:
         """
         检测新论文
         
@@ -45,10 +45,10 @@ class PaperDetectionNode(BaseNode):
         since_days = input_data.get("since_days", 30)
         
         if not scholars:
-            self.log_warning("没有提供学者信息")
+            logger.warning("没有提供学者信息")
             return {"new_papers": [], "papers_by_scholar": {}}
         
-        self.log_info(f"开始检测 {len(scholars)} 位学者的新论文 (最近 {since_days} 天)")
+        logger.info(f"开始检测 {len(scholars)} 位学者的新论文 (最近 {since_days} 天)")
         
         all_papers = []
         papers_by_scholar = {}
@@ -58,7 +58,7 @@ class PaperDetectionNode(BaseNode):
             scholar_name = scholar.get("name", scholar_id)
             
             if not scholar_id:
-                self.log_warning(f"学者缺少ID: {scholar}")
+                logger.warning(f"学者缺少ID: {scholar}")
                 continue
             
             try:
@@ -71,23 +71,23 @@ class PaperDetectionNode(BaseNode):
                 all_papers.extend(papers)
                 
                 if papers:
-                    self.log_info(f"  {scholar_name}: 发现 {len(papers)} 篇新论文")
+                    logger.info(f"  {scholar_name}: 发现 {len(papers)} 篇新论文")
                     for paper in papers[:3]:  # 只显示前3篇
                         title = paper.get("title", "Unknown")[:50]
-                        self.log_info(f"    - {title}...")
+                        logger.info(f"    - {title}...")
                     if len(papers) > 3:
-                        self.log_info(f"    ... 还有 {len(papers) - 3} 篇")
+                        logger.info(f"    ... 还有 {len(papers) - 3} 篇")
                 else:
-                    self.log_info(f"  {scholar_name}: 没有新论文")
+                    logger.info(f"  {scholar_name}: 没有新论文")
                     
             except Exception as e:
-                self.log_error(f"  检测失败 {scholar_name}: {e}")
+                logger.error(f"  检测失败 {scholar_name}: {e}")
                 papers_by_scholar[scholar_name] = []
         
         # 去重（同一论文可能有多个作者）
         unique_papers = self._deduplicate_papers(all_papers)
         
-        self.log_success(f"共发现 {len(unique_papers)} 篇新论文 (去重后)")
+        logger.info(f"共发现 {len(unique_papers)} 篇新论文 (去重后)")
         
         return {
             "new_papers": unique_papers,

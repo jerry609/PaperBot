@@ -6,7 +6,7 @@
 """
 
 from typing import Any, Dict, List, Optional
-from loguru import logger
+import logging
 
 from paperbot.repro.nodes.base_node import LLMNode
 from paperbot.agents.prompts.scholar_prompts import (
@@ -14,6 +14,8 @@ from paperbot.agents.prompts.scholar_prompts import (
     output_schema_reflection_search,
 )
 from paperbot.utils.json_parser import parse_json
+
+logger = logging.getLogger(__name__)
 
 
 class ReflectionSearchNode(LLMNode):
@@ -40,11 +42,11 @@ class ReflectionSearchNode(LLMNode):
         super().__init__(
             node_name=node_name,
             llm_client=llm_client,
-            system_prompt=SYSTEM_PROMPT_REFLECTION_SEARCH,
         )
+        self.system_prompt = SYSTEM_PROMPT_REFLECTION_SEARCH
         self.max_reflections = max_reflections
     
-    def run(self, input_data: Dict[str, Any], **kwargs) -> Dict[str, Any]:
+    async def _execute(self, input_data: Dict[str, Any], **kwargs) -> Dict[str, Any]:
         """
         执行反思分析
         
@@ -63,7 +65,7 @@ class ReflectionSearchNode(LLMNode):
         
         # 检查是否超过最大反思次数
         if reflection_count >= self.max_reflections:
-            self.log_info(f"已达到最大反思次数 ({self.max_reflections})，停止反思")
+            logger.info(f"已达到最大反思次数 ({self.max_reflections})，停止反思")
             return {
                 "should_continue": False,
                 "reason": f"已达到最大反思次数 ({self.max_reflections})",
@@ -72,7 +74,7 @@ class ReflectionSearchNode(LLMNode):
         # 构建反思提示
         user_prompt = self._build_reflection_prompt(input_data)
         
-        self.log_info(f"执行第 {reflection_count + 1}/{self.max_reflections} 次反思分析")
+        logger.info(f"执行第 {reflection_count + 1}/{self.max_reflections} 次反思分析")
         
         try:
             # 调用 LLM
@@ -88,9 +90,9 @@ class ReflectionSearchNode(LLMNode):
             
             # 检查是否有有价值的补充搜索
             if self._is_valuable_search(result):
-                self.log_info(f"  → 补充搜索: {result.get('search_query', '')}")
-                self.log_info(f"  → 搜索类型: {result.get('search_type', '')}")
-                self.log_info(f"  → 理由: {result.get('reasoning', '')[:100]}...")
+                logger.info(f"  → 补充搜索: {result.get('search_query', '')}")
+                logger.info(f"  → 搜索类型: {result.get('search_type', '')}")
+                logger.info(f"  → 理由: {result.get('reasoning', '')[:100]}...")
                 
                 return {
                     "should_continue": True,
@@ -101,14 +103,14 @@ class ReflectionSearchNode(LLMNode):
                     "reflection_count": reflection_count + 1,
                 }
             else:
-                self.log_info("  → 信息已充分，无需继续搜索")
+                logger.info("  → 信息已充分，无需继续搜索")
                 return {
                     "should_continue": False,
                     "reason": "信息已充分",
                 }
                 
         except Exception as e:
-            self.log_error(f"反思分析失败: {e}")
+            logger.error(f"反思分析失败: {e}")
             return {
                 "should_continue": False,
                 "error": str(e),
@@ -209,8 +211,8 @@ class ReflectionSummaryNode(LLMNode):
         super().__init__(
             node_name=node_name,
             llm_client=llm_client,
-            system_prompt=self._build_system_prompt(),
         )
+        self.system_prompt = self._build_system_prompt()
     
     def _build_system_prompt(self) -> str:
         """构建系统提示"""
@@ -238,7 +240,7 @@ class ReflectionSummaryNode(LLMNode):
 只返回JSON对象，不要有额外解释。
 """
     
-    def run(self, input_data: Dict[str, Any], **kwargs) -> Dict[str, Any]:
+    async def _execute(self, input_data: Dict[str, Any], **kwargs) -> Dict[str, Any]:
         """
         更新分析总结
         
@@ -252,7 +254,7 @@ class ReflectionSummaryNode(LLMNode):
         new_results = input_data.get("new_results", [])
         scholar_info = input_data.get("scholar_info", {})
         
-        self.log_info("更新分析总结...")
+        logger.info("更新分析总结...")
         
         # 构建用户提示
         user_prompt = f"""
@@ -278,7 +280,7 @@ class ReflectionSummaryNode(LLMNode):
             
             result = parse_json(response)
             
-            self.log_info(f"  → 完整度评分: {result.get('completeness_score', 0):.2f}")
+            logger.info(f"  → 完整度评分: {result.get('completeness_score', 0):.2f}")
             
             return {
                 "updated_summary": result.get("updated_summary", current_summary),
@@ -287,7 +289,7 @@ class ReflectionSummaryNode(LLMNode):
             }
             
         except Exception as e:
-            self.log_error(f"更新总结失败: {e}")
+            logger.error(f"更新总结失败: {e}")
             return {
                 "updated_summary": current_summary,
                 "key_findings": [],

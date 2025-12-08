@@ -161,7 +161,7 @@ class ScholarClassifier:
     """学者分类器 - 自动识别学者类型"""
     
     @staticmethod
-    def classify(scholar: Scholar, papers: List[PaperMeta] = None) -> Set[ScholarType]:
+    def classify(scholar: Scholar, papers: Optional[List[PaperMeta]] = None) -> Set[ScholarType]:
         """
         根据学者信息和论文列表自动分类
         
@@ -507,7 +507,7 @@ class FilterPresets:
         )
     
     @staticmethod
-    def top_venue_papers(year: int = None) -> PaperFilterCriteria:
+    def top_venue_papers(year: Optional[int] = None) -> PaperFilterCriteria:
         """顶会论文"""
         return PaperFilterCriteria(
             top_venues_only=True,

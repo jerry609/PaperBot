@@ -6,9 +6,11 @@
 
 from typing import Any, Dict, List, Optional
 from datetime import datetime
-from loguru import logger
+import logging
 
 from paperbot.repro.nodes.base_node import BaseNode
+
+logger = logging.getLogger(__name__)
 
 
 class ReportGenerationNode(BaseNode):
@@ -28,10 +30,11 @@ class ReportGenerationNode(BaseNode):
             llm_client: 可选的 LLM 客户端（用于智能摘要生成）
             node_name: 节点名称
         """
-        super().__init__(node_name=node_name, llm_client=llm_client)
+        super().__init__(node_name=node_name)
         self.report_writer = report_writer
+        self.llm_client = llm_client
     
-    def run(self, input_data: Dict[str, Any], **kwargs) -> Dict[str, Any]:
+    async def _execute(self, input_data: Dict[str, Any], **kwargs) -> Dict[str, Any]:
         """
         生成报告
         
@@ -41,7 +44,7 @@ class ReportGenerationNode(BaseNode):
         Returns:
             包含报告路径的字典
         """
-        self.log_info("开始生成报告...")
+        logger.info("开始生成报告...")
         
         # 准备报告数据
         report_data = self._prepare_report_data(input_data)
@@ -50,15 +53,15 @@ class ReportGenerationNode(BaseNode):
         if self.llm_client:
             try:
                 report_data["ai_summary"] = self._generate_ai_summary(report_data)
-                self.log_info("  AI 摘要生成完成")
+                logger.info("  AI 摘要生成完成")
             except Exception as e:
-                self.log_warning(f"  AI 摘要生成失败: {e}")
+                logger.warning(f"  AI 摘要生成失败: {e}")
                 report_data["ai_summary"] = None
         
         # 写入报告
         try:
             report_path = self.report_writer.write(report_data)
-            self.log_success(f"报告已生成: {report_path}")
+            logger.info(f"报告已生成: {report_path}")
             
             return {
                 "report_path": report_path,
@@ -67,7 +70,7 @@ class ReportGenerationNode(BaseNode):
             }
             
         except Exception as e:
-            self.log_error(f"报告生成失败: {e}")
+            logger.error(f"报告生成失败: {e}")
             return {
                 "report_path": None,
                 "error": str(e),
@@ -178,7 +181,7 @@ Top 论文:
             )
             return response.strip()
         except Exception as e:
-            self.log_warning(f"LLM 调用失败: {e}")
+            logger.warning(f"LLM 调用失败: {e}")
             return ""
     
     def _format_papers_for_prompt(self, papers: List[Dict]) -> str:

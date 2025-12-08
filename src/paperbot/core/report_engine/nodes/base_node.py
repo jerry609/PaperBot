@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING
 
 from loguru import logger
 
@@ -18,12 +18,12 @@ if TYPE_CHECKING:
 class BaseNode(ABC):
     """报告引擎节点基类。"""
     
-    def __init__(self, llm_client: "LLMClient", name: str):
+    def __init__(self, llm_client: Optional["LLMClient"], name: str):
         """
         初始化节点。
         
         Args:
-            llm_client: LLM 客户端
+            llm_client: LLM 客户端（可选）
             name: 节点名称
         """
         self.llm = llm_client

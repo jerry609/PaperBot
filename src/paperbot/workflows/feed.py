@@ -362,7 +362,9 @@ class ScholarFeedService:
     
     def track_scholar(self, scholar: Scholar):
         """添加追踪学者"""
-        self._tracked_scholars[scholar.semantic_scholar_id] = scholar
+        scholar_id = scholar.semantic_scholar_id
+        if scholar_id:
+            self._tracked_scholars[scholar_id] = scholar
     
     def untrack_scholar(self, scholar_id: str):
         """取消追踪学者"""

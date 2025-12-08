@@ -98,9 +98,12 @@ Output JSON:
             end = response.rfind('}') + 1
             if start != -1 and end > start:
                 data = json.loads(response[start:end])
+                hyperparams = data.get("hyperparameters", {})
                 return ImplementationSpec(
-                    component_specs=data.get("specs", []),
-                    hyperparameters=data.get("hyperparameters", {}),
+                    layers=data.get("specs", []),
+                    learning_rate=hyperparams.get("learning_rate", 1e-4),
+                    batch_size=hyperparams.get("batch_size", 32),
+                    epochs=hyperparams.get("epochs", 10),
                     data_format=data.get("data_format", "csv"),
                 )
         except json.JSONDecodeError:
@@ -111,11 +114,13 @@ Output JSON:
     def _fallback_spec(self, plan: Optional[ReproductionPlan]) -> ImplementationSpec:
         """Generate fallback spec."""
         return ImplementationSpec(
-            component_specs=[
+            layers=[
                 {"name": "Model", "type": "class", "methods": ["forward", "train"]},
                 {"name": "DataLoader", "type": "class", "methods": ["load", "preprocess"]},
             ],
-            hyperparameters={"learning_rate": 0.001, "batch_size": 32, "epochs": 10},
+            learning_rate=0.001,
+            batch_size=32,
+            epochs=10,
             data_format="csv",
         )
 

@@ -54,8 +54,8 @@ class ChapterGenerationNode(BaseNode):
         Returns:
             生成的章节数据
         """
-        slug = chapter_meta.get("slug")
-        title = chapter_meta.get("title")
+        slug = chapter_meta.get("slug") or "chapter"
+        title = chapter_meta.get("title") or "章节"
         user_prompt = self._build_prompt(chapter_meta, context)
 
         if not self.llm:
@@ -90,7 +90,7 @@ class ChapterGenerationNode(BaseNode):
             else:
                 body_parts.append(f"{key}: {str(val)[:400]}")
         body = "\n".join(body_parts) or "This section summarizes the findings."
-        return default_chapter_template(slug=slug or "chapter", title=title or "章节", body=body)
+        return default_chapter_template(slug=slug, title=title, body=body)
 
     def _check_density(self, chapter: Dict[str, Any]) -> None:
         """检查章节内容密度。"""

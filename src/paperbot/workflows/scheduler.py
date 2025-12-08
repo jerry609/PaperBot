@@ -324,7 +324,9 @@ class PaperCollector:
     
     def track_scholar(self, scholar: Scholar):
         """添加追踪学者"""
-        self._tracked_scholars[scholar.semantic_scholar_id] = scholar
+        scholar_id = scholar.semantic_scholar_id
+        if scholar_id:
+            self._tracked_scholars[scholar_id] = scholar
         self.feed_service.track_scholar(scholar)
     
     def untrack_scholar(self, scholar_id: str):
@@ -607,7 +609,7 @@ class ConferenceTracker:
         name: str,
         deadline: datetime,
         url: Optional[str] = None,
-        remind_days_before: List[int] = None,
+        remind_days_before: Optional[List[int]] = None,
     ):
         """添加会议"""
         self._conferences[name] = {

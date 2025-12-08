@@ -5,9 +5,11 @@
 """
 
 from typing import Any, Dict, List, Optional
-from loguru import logger
+import logging
 
 from paperbot.repro.nodes.base_node import BaseNode
+
+logger = logging.getLogger(__name__)
 
 
 class ScholarFetchNode(BaseNode):
@@ -16,7 +18,6 @@ class ScholarFetchNode(BaseNode):
     def __init__(
         self,
         scholar_profile,
-        llm_client: Any = None,
         node_name: str = "ScholarFetchNode"
     ):
         """
@@ -24,13 +25,12 @@ class ScholarFetchNode(BaseNode):
         
         Args:
             scholar_profile: 学者档案代理
-            llm_client: 可选的 LLM 客户端
             node_name: 节点名称
         """
-        super().__init__(node_name=node_name, llm_client=llm_client)
+        super().__init__(node_name=node_name)
         self.scholar_profile = scholar_profile
     
-    def run(self, input_data: Dict[str, Any], **kwargs) -> Dict[str, Any]:
+    async def _execute(self, input_data: Dict[str, Any], **kwargs) -> Dict[str, Any]:
         """
         获取学者信息
         
@@ -43,10 +43,10 @@ class ScholarFetchNode(BaseNode):
         scholar_ids = input_data.get("scholar_ids", [])
         
         if not scholar_ids:
-            self.log_warning("没有提供学者ID")
+            logger.warning("没有提供学者ID")
             return {"scholars": []}
         
-        self.log_info(f"开始获取 {len(scholar_ids)} 位学者的信息")
+        logger.info(f"开始获取 {len(scholar_ids)} 位学者的信息")
         
         scholars = []
         for scholar_id in scholar_ids:
@@ -54,13 +54,13 @@ class ScholarFetchNode(BaseNode):
                 scholar_data = self.scholar_profile.get_scholar(scholar_id)
                 if scholar_data:
                     scholars.append(scholar_data)
-                    self.log_info(f"  ✓ 获取学者: {scholar_data.get('name', scholar_id)}")
+                    logger.info(f"  ✓ 获取学者: {scholar_data.get('name', scholar_id)}")
                 else:
-                    self.log_warning(f"  ✗ 无法获取学者: {scholar_id}")
+                    logger.warning(f"  ✗ 无法获取学者: {scholar_id}")
             except Exception as e:
-                self.log_error(f"  ✗ 获取学者失败 {scholar_id}: {e}")
+                logger.error(f"  ✗ 获取学者失败 {scholar_id}: {e}")
         
-        self.log_success(f"成功获取 {len(scholars)}/{len(scholar_ids)} 位学者信息")
+        logger.info(f"成功获取 {len(scholars)}/{len(scholar_ids)} 位学者信息")
         
         return {"scholars": scholars}
     

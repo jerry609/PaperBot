@@ -94,11 +94,16 @@ Output a JSON with this structure:
             end = response.rfind('}') + 1
             if start != -1 and end > start:
                 data = json.loads(response[start:end])
+                # Convert files list to file_structure dict
+                file_structure = {
+                    f.get("path", ""): f.get("purpose", "")
+                    for f in data.get("files", [])
+                }
                 return ReproductionPlan(
-                    title=paper_context.title,
-                    files=[(f.get("path", ""), f.get("purpose", "")) 
-                           for f in data.get("files", [])],
-                    components=data.get("components", []),
+                    project_name=paper_context.title,
+                    description=paper_context.abstract or "Paper reproduction",
+                    file_structure=file_structure,
+                    key_components=data.get("components", []),
                     dependencies=data.get("dependencies", []),
                 )
         except json.JSONDecodeError:
@@ -109,16 +114,17 @@ Output a JSON with this structure:
     def _fallback_plan(self, paper_context: PaperContext) -> ReproductionPlan:
         """Generate fallback plan when LLM is unavailable."""
         return ReproductionPlan(
-            title=paper_context.title,
-            files=[
-                ("main.py", "Main entry point"),
-                ("model.py", "Model implementation"),
-                ("data.py", "Data loading"),
-                ("config.py", "Configuration"),
-                ("utils.py", "Utility functions"),
-                ("requirements.txt", "Dependencies"),
-            ],
-            components=["Model", "DataLoader", "Trainer"],
+            project_name=paper_context.title,
+            description=paper_context.abstract or "Paper reproduction",
+            file_structure={
+                "main.py": "Main entry point",
+                "model.py": "Model implementation",
+                "data.py": "Data loading",
+                "config.py": "Configuration",
+                "utils.py": "Utility functions",
+                "requirements.txt": "Dependencies",
+            },
+            key_components=["Model", "DataLoader", "Trainer"],
             dependencies=["numpy", "torch", "transformers"],
         )
 

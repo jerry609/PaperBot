@@ -5,9 +5,11 @@
 """
 
 from typing import Any, Dict, List, Optional
-from loguru import logger
+import logging
 
 from paperbot.repro.nodes.base_node import BaseNode
+
+logger = logging.getLogger(__name__)
 
 
 class InfluenceCalculationNode(BaseNode):
@@ -16,7 +18,6 @@ class InfluenceCalculationNode(BaseNode):
     def __init__(
         self,
         calculator,
-        llm_client: Any = None,
         node_name: str = "InfluenceCalculationNode"
     ):
         """
@@ -24,13 +25,12 @@ class InfluenceCalculationNode(BaseNode):
         
         Args:
             calculator: 影响力计算器
-            llm_client: 可选的 LLM 客户端
             node_name: 节点名称
         """
-        super().__init__(node_name=node_name, llm_client=llm_client)
+        super().__init__(node_name=node_name)
         self.calculator = calculator
     
-    def run(self, input_data: Dict[str, Any], **kwargs) -> Dict[str, Any]:
+    async def _execute(self, input_data: Dict[str, Any], **kwargs) -> Dict[str, Any]:
         """
         计算影响力
         
@@ -44,10 +44,10 @@ class InfluenceCalculationNode(BaseNode):
         all_papers = input_data.get("papers", [])
         
         if not scholars:
-            self.log_warning("没有提供学者信息")
+            logger.warning("没有提供学者信息")
             return {"influence_results": []}
         
-        self.log_info(f"开始计算 {len(scholars)} 位学者的影响力")
+        logger.info(f"开始计算 {len(scholars)} 位学者的影响力")
         
         results = []
         
@@ -73,7 +73,7 @@ class InfluenceCalculationNode(BaseNode):
                 }
                 results.append(result)
                 
-                self.log_info(
+                logger.info(
                     f"  {scholar_name}: "
                     f"学术={influence.get('academic_score', 0):.2f}, "
                     f"工程={influence.get('engineering_score', 0):.2f}, "
@@ -81,7 +81,7 @@ class InfluenceCalculationNode(BaseNode):
                 )
                 
             except Exception as e:
-                self.log_error(f"  计算失败 {scholar_name}: {e}")
+                logger.error(f"  计算失败 {scholar_name}: {e}")
                 results.append({
                     "scholar_id": scholar_id,
                     "scholar_name": scholar_name,
@@ -94,7 +94,7 @@ class InfluenceCalculationNode(BaseNode):
         # 按总分排序
         results.sort(key=lambda x: x.get("total_score", 0), reverse=True)
         
-        self.log_success(f"影响力计算完成")
+        logger.info("影响力计算完成")
         
         return {
             "influence_results": results,
