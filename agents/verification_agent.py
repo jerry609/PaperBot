@@ -16,6 +16,9 @@ Uses Mixin pattern:
 from typing import Dict, List, Any, Optional
 from .base_agent import BaseAgent
 from .mixins import SemanticScholarMixin, TextParsingMixin
+from core.report_engine import ReportEngine, ReportEngineConfig, ReportResult
+from pathlib import Path
+import os
 
 
 class VerificationAgent(BaseAgent, SemanticScholarMixin, TextParsingMixin):
@@ -32,6 +35,7 @@ When uncertain, acknowledge the uncertainty rather than making unfounded claims.
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         super().__init__(config)
         self.init_s2_client(config)  # Initialize S2 mixin
+        self._report_engine: Optional[ReportEngine] = None
 
     def _validate_input(self, *args, **kwargs) -> Optional[Dict[str, Any]]:
         """Validate that title and abstract are provided."""
@@ -69,6 +73,61 @@ When uncertain, acknowledge the uncertainty rather than making unfounded claims.
             "overall_assessment": overall
         }
 
+    def _post_process(self, result: Dict[str, Any]) -> Dict[str, Any]:
+        result = super()._post_process(result)
+        rendered: Dict[str, Any] = {}
+        engine = self._get_report_engine()
+        if engine:
+            try:
+                ctx = {
+                    "verification": result,
+                }
+                compare_items = result.get("compare_items")
+                summary = result.get("overall_assessment", {}).get("summary", "")
+                topic = result.get("paper_title", "Verification")
+                re_res: ReportResult = engine.generate(
+                    topic=topic,
+                    summary=summary,
+                    sections_context=ctx,
+                    task_id=topic,
+                    enable_pdf=engine.config.pdf_enabled,
+                    compare_items=compare_items,
+                )
+                rendered = {
+                    "html": str(re_res.html_path) if re_res.html_path else None,
+                    "pdf": str(re_res.pdf_path) if re_res.pdf_path else None,
+                    "ir": str(re_res.ir_path) if re_res.ir_path else None,
+                }
+            except Exception as exc:  # pragma: no cover
+                self.logger.warning(f"ReportEngine 渲染失败: {exc}")
+                rendered = {"error": str(exc)}
+        result["report_engine"] = rendered
+        return result
+
+    # ==================== Helpers ====================
+    def _get_report_engine(self) -> Optional[ReportEngine]:
+        if hasattr(self, "_report_engine") and self._report_engine:
+            return self._report_engine
+        cfg_dict = self.config.get("report_engine", {})
+        if not cfg_dict or not cfg_dict.get("enabled"):
+            return None
+        api_key = cfg_dict.get("api_key") or self.config.get("openai_api_key") or os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            return None
+        self._report_engine = ReportEngine(
+            ReportEngineConfig(
+                enabled=True,
+                api_key=api_key,
+                model=cfg_dict.get("model", "gpt-4o-mini"),
+                base_url=cfg_dict.get("base_url"),
+                output_dir=Path(cfg_dict.get("output_dir", "output/reports")),
+                template_dir=Path(cfg_dict.get("template_dir", "core/report_engine/templates")),
+                pdf_enabled=cfg_dict.get("pdf_enabled", True),
+                max_words=cfg_dict.get("max_words", 4000),
+            )
+        )
+        return self._report_engine
+
     async def _extract_claims(self, title: str, abstract: str, num_claims: int) -> List[str]:
         """Extract the top N verifiable claims from the abstract."""
         prompt = f"""Extract the {num_claims} most important **verifiable claims** from this paper.
@@ -103,6 +162,10 @@ Example format:
         # Search Semantic Scholar (using mixin)
         supporting_papers = await self.search_semantic_scholar(supporting_query, limit)
         refuting_papers = await self.search_semantic_scholar(refuting_query, limit)
+
+        # 附加来源可信度与抓取时间
+        supporting_papers = self._enrich_evidence_meta(supporting_papers)
+        refuting_papers = self._enrich_evidence_meta(refuting_papers)
         
         return {
             "supporting_query": supporting_query,
@@ -160,6 +223,29 @@ Be objective. If evidence is mixed or insufficient, say so."""
             "key_evidence": self.extract_field(response, "Key Evidence"),
             "raw_response": response
         }
+
+    # ---------------- Meta helpers ----------------
+    def _enrich_evidence_meta(self, papers: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """为证据附加域名、可信度占位、抓取时间戳，方便报告展示。"""
+        import datetime
+        enriched = []
+        now = datetime.datetime.utcnow().isoformat()
+        for p in papers or []:
+            url = p.get("url") or p.get("link") or ""
+            domain = ""
+            if url:
+                try:
+                    from urllib.parse import urlparse
+                    domain = urlparse(url).netloc
+                except Exception:
+                    domain = ""
+            item = dict(p)
+            item["source_domain"] = domain
+            item["source_trust"] = p.get("venue", "") or "unknown"
+            item["fetched_at"] = now
+            item.setdefault("hash", "")
+            enriched.append(item)
+        return enriched
 
     def _compute_overall_assessment(self, results: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Compute an overall assessment of the paper's claims."""

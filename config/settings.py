@@ -97,6 +97,30 @@ class APIConfig:
 
 
 @dataclass
+class ReportEngineConf:
+    """报告引擎配置"""
+    enabled: bool = False
+    api_key: Optional[str] = None
+    model: str = "gpt-4o-mini"
+    base_url: Optional[str] = None
+    output_dir: str = "output/reports"
+    template_dir: str = "core/report_engine/templates"
+    pdf_enabled: bool = True
+    max_words: int = 6000
+
+
+@dataclass
+class CollabHostConfig:
+    """主持人 LLM 配置"""
+    enabled: bool = False
+    api_key: Optional[str] = None
+    model: str = "gpt-4o-mini"
+    base_url: Optional[str] = None
+    temperature: float = 0.3
+    top_p: float = 0.9
+
+
+@dataclass
 class Settings:
     """主配置类"""
     download: DownloadConfig = field(default_factory=DownloadConfig)
@@ -105,6 +129,11 @@ class Settings:
     output: OutputConfig = field(default_factory=OutputConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
     api: APIConfig = field(default_factory=APIConfig)
+    report_engine: ReportEngineConf = field(default_factory=ReportEngineConf)
+    collab: Dict[str, Any] = field(default_factory=lambda: {
+        "enabled": False,
+        "host": CollabHostConfig().__dict__,
+    })
     # 模式与数据源
     mode: str = "production"  # production / academic
     data_source: Dict[str, Any] = field(default_factory=lambda: {
@@ -165,6 +194,18 @@ class Settings:
         
         if 'apis' in config_data:
             settings.api = APIConfig(**config_data['apis'])
+
+        if 'report_engine' in config_data:
+            settings.report_engine = ReportEngineConf(**config_data['report_engine'])
+        
+        if 'collab' in config_data:
+            collab_cfg = config_data['collab']
+            host_cfg = collab_cfg.get("host", {})
+            settings.collab = {
+                **settings.collab,
+                **{k: v for k, v in collab_cfg.items() if k != "host"},
+            }
+            settings.collab["host"] = {**settings.collab.get("host", {}), **host_cfg}
         
         if 'mode' in config_data:
             settings.mode = config_data['mode']
@@ -212,6 +253,49 @@ class Settings:
         env_offline = os.getenv('PAPERBOT_OFFLINE')
         if env_offline is not None:
             self.offline = env_offline.lower() in ("1", "true", "yes", "on")
+
+        # Report Engine
+        re_enabled = os.getenv('PAPERBOT_RE_ENABLED')
+        re_api = os.getenv('PAPERBOT_RE_API_KEY')
+        re_model = os.getenv('PAPERBOT_RE_MODEL')
+        re_base = os.getenv('PAPERBOT_RE_BASE_URL')
+        re_out = os.getenv('PAPERBOT_RE_OUTPUT_DIR')
+        re_tpl = os.getenv('PAPERBOT_RE_TEMPLATE_DIR')
+        re_pdf = os.getenv('PAPERBOT_RE_PDF_ENABLED')
+        re_max = os.getenv('PAPERBOT_RE_MAX_WORDS')
+        if re_enabled is not None:
+            self.report_engine.enabled = re_enabled.lower() in ("1", "true", "yes", "on")
+        if re_api:
+            self.report_engine.api_key = re_api
+        if re_model:
+            self.report_engine.model = re_model
+        if re_base:
+            self.report_engine.base_url = re_base
+        if re_out:
+            self.report_engine.output_dir = re_out
+        if re_tpl:
+            self.report_engine.template_dir = re_tpl
+        if re_pdf is not None:
+            self.report_engine.pdf_enabled = re_pdf.lower() in ("1", "true", "yes", "on")
+        if re_max:
+            try:
+                self.report_engine.max_words = int(re_max)
+            except ValueError:
+                pass
+
+        # 主持人 LLM
+        host_api = os.getenv('PAPERBOT_HOST_API_KEY')
+        host_model = os.getenv('PAPERBOT_HOST_MODEL')
+        host_base = os.getenv('PAPERBOT_HOST_BASE_URL')
+        host_enabled = os.getenv('PAPERBOT_HOST_ENABLED')
+        if host_api:
+            self.collab["host"]["api_key"] = host_api
+        if host_model:
+            self.collab["host"]["model"] = host_model
+        if host_base:
+            self.collab["host"]["base_url"] = host_base
+        if host_enabled is not None:
+            self.collab["host"]["enabled"] = host_enabled.lower() in ("1", "true", "yes", "on")
         
         # 其他环境变量
         acm_url = os.getenv('ACM_LIBRARY_URL')
@@ -227,6 +311,8 @@ class Settings:
             'output': self.output.__dict__,
             'logging': self.logging.__dict__,
             'api': self.api.__dict__,
+            'report_engine': self.report_engine.__dict__,
+            'collab': self.collab,
             'conferences': {
                 name: conf.__dict__ for name, conf in self.conferences.items()
             }

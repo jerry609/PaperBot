@@ -38,6 +38,7 @@ class DockerExecutor:
         commands: List[str],
         timeout_sec: int = 300,
         cache_dir: Optional[Path] = None,
+        record_meta: bool = True,
     ) -> Dict[str, str]:
         if not self.client:
             return {"status": "error", "error": "Docker client unavailable"}
@@ -68,12 +69,25 @@ class DockerExecutor:
             logs = container.logs(stdout=True, stderr=True).decode(errors="ignore")
             duration = time.time() - start
             status = "success" if exit_code.get("StatusCode", 1) == 0 else "failed"
-            return {
+            result = {
                 "status": status,
                 "exit_code": exit_code.get("StatusCode", 1),
                 "logs": logs[-8000:],  # 截断
                 "duration_sec": duration,
             }
+            if record_meta:
+                result.update(
+                    {
+                        "runtime_meta": {
+                            "image": self.image,
+                            "cpu_shares": self.cpu_shares,
+                            "mem_limit": self.mem_limit,
+                            "network_enabled": not self.network_disabled,
+                            "timeout_sec": timeout_sec,
+                        }
+                    }
+                )
+            return result
         except APIError as e:
             logger.error(f"Docker API error: {e}")
             return {"status": "error", "error": str(e)}

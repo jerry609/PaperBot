@@ -273,6 +273,20 @@ PaperBot/
 ### 环境变量
 - `OPENAI_API_KEY`: 用于 LLM 分析（可选）。
 - `GITHUB_TOKEN`: 用于 GitHub API 调用（提高限流阈值）。
+- 协作主持人（可选，默认关闭）：
+  - `PAPERBOT_HOST_ENABLED`: 是否启用主持人协作（true/false）
+  - `PAPERBOT_HOST_API_KEY`: 主持人 LLM Key（未设置则回落到 OPENAI_API_KEY）
+  - `PAPERBOT_HOST_MODEL`: 主持人模型名称（默认 gpt-4o-mini）
+  - `PAPERBOT_HOST_BASE_URL`: 主持人 LLM Base URL（可为空）
+- 报告引擎（可选，生成 HTML/PDF）：
+  - `PAPERBOT_RE_ENABLED`: 是否启用 ReportEngine
+  - `PAPERBOT_RE_API_KEY`: LLM Key（未设置则回落到 OPENAI_API_KEY）
+  - `PAPERBOT_RE_MODEL`: 模型名称（默认 gpt-4o-mini）
+  - `PAPERBOT_RE_BASE_URL`: 自定义 Base URL
+  - `PAPERBOT_RE_OUTPUT_DIR`: 输出目录（默认 output/reports）
+  - `PAPERBOT_RE_TEMPLATE_DIR`: 模板目录（默认 core/report_engine/templates）
+  - `PAPERBOT_RE_PDF_ENABLED`: PDF 导出开关（true/false）
+  - `PAPERBOT_RE_MAX_WORDS`: 总字数预算
 
 ## 🙏 致谢
 

@@ -15,6 +15,7 @@ Uses Mixin pattern:
 from typing import Dict, List, Any, Optional
 from .base_agent import BaseAgent
 from .mixins import TextParsingMixin
+from core.report_engine import ReportEngine, ReportEngineConfig, ReportResult
 
 
 class ReviewerAgent(BaseAgent, TextParsingMixin):
@@ -37,6 +38,7 @@ Be direct but respectful. Prioritize scientific correctness and reproducibility.
 
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         super().__init__(config)
+        self._report_engine: Optional[ReportEngine] = None
 
     def _validate_input(self, *args, **kwargs) -> Optional[Dict[str, Any]]:
         """Validate that title and abstract are provided."""
@@ -72,6 +74,61 @@ Be direct but respectful. Prioritize scientific correctness and reproducibility.
         return await self._generate_final_review(
             title, abstract, preliminary, deep_critique, novelty
         )
+
+    def _post_process(self, result: Dict[str, Any]) -> Dict[str, Any]:
+        result = super()._post_process(result)
+        rendered: Dict[str, Any] = {}
+        engine = self._get_report_engine()
+        if engine:
+            try:
+                ctx = {
+                    "review": result,
+                }
+                compare_items = result.get("compare_items")
+                summary = result.get("summary", "")
+                topic = result.get("paper_title", "Review")
+                re_res: ReportResult = engine.generate(
+                    topic=topic,
+                    summary=summary,
+                    sections_context=ctx,
+                    task_id=topic,
+                    enable_pdf=engine.config.pdf_enabled,
+                    compare_items=compare_items,
+                )
+                rendered = {
+                    "html": str(re_res.html_path) if re_res.html_path else None,
+                    "pdf": str(re_res.pdf_path) if re_res.pdf_path else None,
+                    "ir": str(re_res.ir_path) if re_res.ir_path else None,
+                }
+            except Exception as exc:  # pragma: no cover - 渲染失败时降级
+                self.logger.warning(f"ReportEngine 渲染失败: {exc}")
+                rendered = {"error": str(exc)}
+        result["report_engine"] = rendered
+        return result
+
+    # ==================== Helpers ====================
+    def _get_report_engine(self) -> Optional[ReportEngine]:
+        if hasattr(self, "_report_engine") and self._report_engine:
+            return self._report_engine
+        cfg_dict = self.config.get("report_engine", {})
+        if not cfg_dict or not cfg_dict.get("enabled"):
+            return None
+        api_key = cfg_dict.get("api_key") or self.config.get("openai_api_key") or os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            return None
+        self._report_engine = ReportEngine(
+            ReportEngineConfig(
+                enabled=True,
+                api_key=api_key,
+                model=cfg_dict.get("model", "gpt-4o-mini"),
+                base_url=cfg_dict.get("base_url"),
+                output_dir=Path(cfg_dict.get("output_dir", "output/reports")),
+                template_dir=Path(cfg_dict.get("template_dir", "core/report_engine/templates")),
+                pdf_enabled=cfg_dict.get("pdf_enabled", True),
+                max_words=cfg_dict.get("max_words", 4000),
+            )
+        )
+        return self._report_engine
 
     async def _preliminary_screening(self, title: str, abstract: str) -> Dict[str, Any]:
         """Quick initial assessment of paper quality and scope."""

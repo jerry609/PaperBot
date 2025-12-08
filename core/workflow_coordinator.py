@@ -19,6 +19,14 @@ from scholar_tracking.models import PaperMeta, CodeMeta
 from scholar_tracking.models.influence import InfluenceResult
 from influence import InfluenceCalculator
 from reports.writer import ReportWriter
+from core.collaboration import (
+    CollaborationBus,
+    HostOrchestrator,
+    HostConfig,
+    AgentMessage,
+    MessageType,
+)
+from core.report_engine import ReportEngine, ReportEngineConfig
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +56,7 @@ class ScholarWorkflowCoordinator:
         """
         self.config = config or {}
         self.logger = logging.getLogger(self.__class__.__name__)
+        self.collab_settings = self.config.get("collab", {})
         
         # 初始化 Agents
         self.research_agent = ResearchAgent(config)
@@ -67,6 +76,19 @@ class ScholarWorkflowCoordinator:
             output_dir=output_dir,
             template_name=template_name,
         )
+
+        # 协作总线与主持人
+        self.collab_bus = CollaborationBus()
+        self.host = HostOrchestrator(self._build_host_config())
+        self.collab_enabled = bool(self.collab_settings.get("enabled", True))
+
+        # Report Engine
+        self.report_engine_cfg = self._build_report_engine_config()
+        self.report_engine = ReportEngine(self.report_engine_cfg)
+
+        # 复现结果占位
+        self._latest_repro = None
+        self._env_info = self._build_env_info()
     
     async def run_paper_pipeline(
         self,
@@ -86,6 +108,10 @@ class ScholarWorkflowCoordinator:
             (report_path, influence_result, pipeline_data)
         """
         self._validate_paper_meta(paper)
+        self._current_paper_ctx = {
+            "paper_id": paper.paper_id,
+            "paper_title": paper.title,
+        }
         pipeline_data = {
             "paper_id": paper.paper_id,
             "paper_title": paper.title,
@@ -93,6 +119,7 @@ class ScholarWorkflowCoordinator:
             "started_at": datetime.now().isoformat(),
             "stages": {},
             "errors": [],
+            "collab_log_path": None,
         }
         
         code_meta = None
@@ -111,6 +138,11 @@ class ScholarWorkflowCoordinator:
                     "status": "success",
                     "result": research_result,
                 }
+                self._emit_stage_message(
+                    stage="research",
+                    content=f"ResearchAgent 完成: {paper.title}",
+                    payload=research_result,
+                )
                 
                 # 从研究结果中提取代码仓库信息
                 if research_result.get("github_url"):
@@ -130,6 +162,11 @@ class ScholarWorkflowCoordinator:
                         "status": "success",
                         "result": code_analysis_result,
                     }
+                    self._emit_stage_message(
+                        stage="code_analysis",
+                        content="CodeAnalysisAgent 完成",
+                        payload=code_analysis_result,
+                    )
                     
                     # 构建 CodeMeta
                     code_meta = self._build_code_meta(paper, code_analysis_result)
@@ -137,8 +174,20 @@ class ScholarWorkflowCoordinator:
                     self.logger.warning(f"CodeAnalysisAgent failed: {e}")
                     pipeline_data["stages"]["code_analysis"] = {"status": "failed", "error": str(e)}
                     pipeline_data["errors"].append(f"CodeAnalysis: {e}")
+                    self._emit_stage_message(
+                        stage="code_analysis",
+                        content=f"CodeAnalysisAgent 失败: {e}",
+                        payload={"error": str(e)},
+                        message_type=MessageType.ERROR,
+                    )
             else:
                 pipeline_data["stages"]["code_analysis"] = {"status": "skipped", "reason": "no code"}
+                self._emit_stage_message(
+                    stage="code_analysis",
+                    content="CodeAnalysisAgent 跳过（无代码仓库）",
+                    payload={"reason": "no code"},
+                    message_type=MessageType.RESULT,
+                )
             
             # Stage 3: Quality Agent - 质量评估
             self.logger.info(f"[3/5] Running QualityAgent...")
@@ -150,10 +199,24 @@ class ScholarWorkflowCoordinator:
                     "status": "success",
                     "result": quality_result,
                 }
+                # 捕获复现/可运行性结果（如果下游质量阶段已有）
+                if quality_result.get("repro"):
+                    self._latest_repro = quality_result.get("repro")
+                self._emit_stage_message(
+                    stage="quality",
+                    content="QualityAgent 完成",
+                    payload=quality_result,
+                )
             except Exception as e:
                 self.logger.warning(f"QualityAgent failed: {e}")
                 pipeline_data["stages"]["quality"] = {"status": "failed", "error": str(e)}
                 pipeline_data["errors"].append(f"Quality: {e}")
+                self._emit_stage_message(
+                    stage="quality",
+                    content=f"QualityAgent 失败: {e}",
+                    payload={"error": str(e)},
+                    message_type=MessageType.ERROR,
+                )
             
             # Stage 4: Influence Calculator - 影响力评分
             self.logger.info(f"[4/5] Calculating influence score...")
@@ -162,6 +225,11 @@ class ScholarWorkflowCoordinator:
                 "status": "success",
                 "result": influence_result.to_dict(),
             }
+            self._emit_stage_message(
+                stage="influence",
+                content="InfluenceCalculator 完成",
+                payload=influence_result.to_dict(),
+            )
             
             # Stage 5: Report Rendering
             self.logger.info(f"[5/5] Generating report...")
@@ -176,6 +244,7 @@ class ScholarWorkflowCoordinator:
                     ),
                     quality_result=self._ensure_defaults(quality_result, default={}),
                     influence_result=influence_result,
+                    env_info=self._env_info,
                 )
                 pipeline_data["stages"]["documentation"] = {"status": "success"}
             except Exception as e:
@@ -188,6 +257,40 @@ class ScholarWorkflowCoordinator:
                 report_markdown = self._generate_fallback_report(
                     paper, influence_result, pipeline_data
                 )
+                self._emit_stage_message(
+                    stage="documentation",
+                    content="DocumentationAgent 完成",
+                    payload={"has_report": bool(report_markdown)},
+                )
+
+            # 新版 Report Engine 输出
+            if self.report_engine_cfg.enabled:
+                try:
+                    re_result = self._run_report_engine(
+                        topic=paper.title,
+                        summary=research_result.get("summary", ""),
+                        sections_context={
+                            "paper": paper.to_dict(),
+                            "research": research_result,
+                            "code_analysis": code_analysis_result,
+                            "quality": quality_result,
+                            "influence": influence_result.to_dict(),
+                            "repro": self._latest_repro,
+                            "env_info": self._env_info,
+                            "data_time": pipeline_data.get("started_at"),
+                        },
+                        task_id=paper.paper_id or paper.title,
+                    )
+                    pipeline_data["stages"]["report_engine"] = {
+                        "status": "success",
+                        "html": str(re_result.html_path) if re_result.html_path else None,
+                        "pdf": str(re_result.pdf_path) if re_result.pdf_path else None,
+                        "ir": str(re_result.ir_path) if re_result.ir_path else None,
+                    }
+                except Exception as exc:
+                    self.logger.warning(f"ReportEngine 生成失败: {exc}")
+                    pipeline_data["stages"]["report_engine"] = {"status": "failed", "error": str(exc)}
+                    pipeline_data["errors"].append(f"ReportEngine: {exc}")
             
             # 持久化报告
             if report_markdown:
@@ -208,6 +311,9 @@ class ScholarWorkflowCoordinator:
             
             pipeline_data["completed_at"] = datetime.now().isoformat()
             pipeline_data["status"] = "success" if not pipeline_data["errors"] else "partial"
+
+            # 持久化协作日志
+            pipeline_data["collab_log_path"] = str(self._persist_collab_log(paper))
             
             return report_path, influence_result, pipeline_data
             
@@ -234,8 +340,110 @@ class ScholarWorkflowCoordinator:
                     pipeline_data["report_content"] = report_markdown
             else:
                 pipeline_data["report_content"] = report_markdown
-            
+            pipeline_data["collab_log_path"] = str(self._persist_collab_log(paper))
             return report_path, influence_result, pipeline_data
+
+    # =========================================================
+    # 协作与主持人辅助函数
+    # =========================================================
+
+    def _emit_stage_message(
+        self,
+        stage: str,
+        content: str,
+        payload: Optional[dict] = None,
+        message_type: MessageType = MessageType.RESULT,
+    ):
+        """写入协作总线并尝试触发主持人引导。"""
+        if not self.collab_enabled:
+            return
+        msg = AgentMessage(
+            sender=stage,
+            message_type=message_type,
+            content=content,
+            metadata=payload or {},
+            stage=stage,
+        )
+        self.collab_bus.add_message(msg)
+        self._maybe_host_guidance(stage)
+
+    def _maybe_host_guidance(self, stage: str):
+        """主持人根据最近消息生成引导，失败自动降级。"""
+        if not self.collab_enabled or not self.host.is_available():
+            return
+        recent = self.collab_bus.latest_messages(limit=20)
+        guidance = self.host.generate_guidance(
+            messages=recent,
+            context={**(self._current_paper_ctx or {}), "stage": stage},
+        )
+        if guidance:
+            self.collab_bus.add_host_message(guidance, stage=stage)
+            self.collab_bus.next_round()
+
+    def _persist_collab_log(self, paper: PaperMeta) -> Path:
+        """持久化协作日志到 output/collab_logs 下。"""
+        base_dir = self.config.get("output_dir") or "./output"
+        log_dir = Path(base_dir) / "collab_logs"
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"{paper.paper_id or 'paper'}_{timestamp}.jsonl"
+        return self.collab_bus.persist(log_dir / filename)
+
+    def _build_host_config(self) -> HostConfig:
+        """从配置构造主持人配置，缺省使用通用 OpenAI Key。"""
+        host_cfg = self.collab_settings.get("host", {})
+        api_key = host_cfg.get("api_key") or self.config.get("openai_api_key") or self.config.get("api_key")
+        model = host_cfg.get("model") or self.config.get("host_model") or "gpt-4o-mini"
+        base_url = host_cfg.get("base_url") or self.config.get("host_base_url")
+        enabled = bool(host_cfg.get("enabled", False))
+        return HostConfig(
+            enabled=enabled,
+            api_key=api_key,
+            model=model,
+            base_url=base_url,
+            temperature=host_cfg.get("temperature", 0.3),
+            top_p=host_cfg.get("top_p", 0.9),
+        )
+
+    def _build_report_engine_config(self) -> ReportEngineConfig:
+        cfg = self.config.get("report_engine", {})
+        return ReportEngineConfig(
+            enabled=cfg.get("enabled", False),
+            api_key=cfg.get("api_key") or self.config.get("openai_api_key"),
+            model=cfg.get("model", "gpt-4o-mini"),
+            base_url=cfg.get("base_url"),
+            output_dir=Path(cfg.get("output_dir", "output/reports")),
+            template_dir=Path(cfg.get("template_dir", "core/report_engine/templates")),
+            pdf_enabled=cfg.get("pdf_enabled", True),
+            max_words=cfg.get("max_words", 6000),
+        )
+
+    def _run_report_engine(
+        self,
+        topic: str,
+        summary: str,
+        sections_context: Dict[str, Any],
+        task_id: str,
+    ):
+        return self.report_engine.generate(
+            topic=topic,
+            summary=summary,
+            sections_context=sections_context,
+            task_id=task_id,
+            enable_pdf=self.report_engine_cfg.pdf_enabled,
+        )
+
+    def _build_env_info(self) -> str:
+        """构造环境信息摘要（模型/镜像/资源限制）。"""
+        parts = []
+        if self.report_engine_cfg.enabled:
+            parts.append(f"ReportEngineModel={self.report_engine_cfg.model}")
+        repro_cfg = self.config.get("repro", {})
+        if repro_cfg:
+            parts.append(f"DockerImage={repro_cfg.get('docker_image','')}")
+            parts.append(f"CPU={repro_cfg.get('cpu_shares','')}")
+            parts.append(f"Mem={repro_cfg.get('mem_limit','')}")
+            parts.append(f"Network={repro_cfg.get('network')}")
+        return "; ".join([p for p in parts if p])
     
     async def _run_research_stage(self, paper: PaperMeta) -> Dict[str, Any]:
         """运行研究阶段"""

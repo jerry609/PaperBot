@@ -11,11 +11,13 @@ from typing import Any, Dict, Optional, List
 
 class MessageType(str, Enum):
     """Types of agent messages."""
-    INSIGHT = "insight"        # Agent found something interesting
-    REQUEST = "request"        # Agent needs help from others
-    RESULT = "result"          # Agent completed a task
-    ERROR = "error"            # Agent encountered an error
-    SYNTHESIS = "synthesis"    # Coordinator synthesized insights
+
+    INSIGHT = "insight"  # Agent found something interesting
+    REQUEST = "request"  # Agent needs help from others
+    RESULT = "result"  # Agent completed a task
+    ERROR = "error"  # Agent encountered an error
+    SYNTHESIS = "synthesis"  # Coordinator synthesized insights
+    HOST_GUIDANCE = "host_guidance"  # Host/主持人引导语
 
 
 @dataclass
@@ -29,12 +31,18 @@ class AgentMessage:
         content: Message content (text or structured data)
         timestamp: When the message was sent
         metadata: Additional context
+        conversation_id: 当前协作会话ID
+        round_index: 协作轮次（主持人触发后递增）
+        stage: 来源阶段（research/code/quality/report等）
     """
     sender: str
     message_type: MessageType
     content: Any
     timestamp: datetime = field(default_factory=datetime.now)
     metadata: Dict[str, Any] = field(default_factory=dict)
+    conversation_id: str = ""
+    round_index: int = 0
+    stage: str = ""
     
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -43,6 +51,9 @@ class AgentMessage:
             "content": self.content if isinstance(self.content, (str, dict, list)) else str(self.content),
             "timestamp": self.timestamp.isoformat(),
             "metadata": self.metadata,
+            "conversation_id": self.conversation_id,
+            "round_index": self.round_index,
+            "stage": self.stage,
         }
     
     @classmethod

@@ -46,3 +46,7 @@ safety>=2.3.0
 
 # Docker sandbox
 docker>=7.0.0
+
+# Report Engine
+weasyprint>=62.3
+json-repair>=0.22.0
