@@ -225,3 +225,37 @@ class StatefulNode(BaseNode[T]):
         """Execute node with state object."""
         return await self.run(input_data, state=state, **kwargs)
 
+
+class LLMNode(BaseNode[T]):
+    """
+    Node that uses an LLM client for processing.
+    
+    Usage:
+        class MyLLMNode(LLMNode[MyOutputType]):
+            async def _execute(self, input_data: Any, **kwargs) -> MyOutputType:
+                response = self.llm_client.invoke(...)
+                return result
+    """
+    
+    def __init__(
+        self,
+        llm_client: Any = None,
+        node_name: str = None,
+        max_retries: int = 0,
+        **kwargs
+    ):
+        super().__init__(node_name=node_name, max_retries=max_retries, **kwargs)
+        self.llm_client = llm_client
+    
+    def log_info(self, message: str) -> None:
+        """Log info message."""
+        self.logger.info(message)
+    
+    def log_warning(self, message: str) -> None:
+        """Log warning message."""
+        self.logger.warning(message)
+    
+    def log_error(self, message: str) -> None:
+        """Log error message."""
+        self.logger.error(message)
+

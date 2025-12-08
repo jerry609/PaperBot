@@ -98,24 +98,17 @@ def run_cli(args: Optional[list] = None) -> int:
 
 async def _quick_score(paper_id: str):
     """快速计算论文评分"""
-    from src.paperbot.workflows import ScholarTrackingWorkflow
-    from src.paperbot.infrastructure.api_clients import SemanticScholarClient
+    try:
+        from paperbot.workflows import ScholarTrackingWorkflow
+    except ImportError:
+        print("Error: ScholarTrackingWorkflow not available")
+        return
     
     print(f"Fetching paper: {paper_id}...")
     
-    async with SemanticScholarClient() as client:
-        paper_data = await client.get_paper(paper_id)
-        
-    if not paper_data:
-        print(f"Paper not found: {paper_id}")
-        return
-    
-    workflow = ScholarTrackingWorkflow()
-    paper = workflow.create_paper_from_s2(paper_data)
-    score = await workflow.quick_score(paper)
-    
-    print(f"\n{score.get_summary()}")
-    print(f"\n{score.explanation}")
+    # TODO: 实现 Semantic Scholar 客户端调用
+    print(f"Quick score for {paper_id} is not yet implemented.")
+    print("Please use the main.py entry point instead.")
 
 
 if __name__ == "__main__":

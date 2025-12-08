@@ -62,6 +62,58 @@ class PaperMeta:
             doi=data.get("doi"),
             keywords=data.get("keywords", []),
         )
+    
+    @classmethod
+    def from_semantic_scholar(cls, data: Dict[str, Any]) -> "PaperMeta":
+        """从 Semantic Scholar API 响应创建实例。"""
+        # 提取作者名称
+        authors = []
+        if "authors" in data:
+            for author in data["authors"]:
+                if isinstance(author, dict):
+                    authors.append(author.get("name", ""))
+                elif isinstance(author, str):
+                    authors.append(author)
+        
+        # 提取年份
+        year = data.get("year")
+        if not year and data.get("publicationDate"):
+            try:
+                year = int(data["publicationDate"][:4])
+            except (ValueError, TypeError):
+                pass
+        
+        # 提取 GitHub URL
+        github_url = None
+        has_code = False
+        if data.get("openAccessPdf"):
+            pdf_url = data["openAccessPdf"].get("url", "")
+            if "github" in pdf_url.lower():
+                github_url = pdf_url
+                has_code = True
+        
+        # 检查 externalIds 中的 GitHub
+        if data.get("externalIds"):
+            for key, value in data["externalIds"].items():
+                if "github" in str(value).lower():
+                    github_url = value
+                    has_code = True
+                    break
+        
+        return cls(
+            paper_id=data.get("paperId", ""),
+            title=data.get("title", ""),
+            authors=authors,
+            abstract=data.get("abstract"),
+            year=year,
+            venue=data.get("venue") or data.get("publicationVenue", {}).get("name"),
+            citation_count=data.get("citationCount", 0),
+            github_url=github_url,
+            has_code=has_code,
+            url=data.get("url"),
+            doi=data.get("externalIds", {}).get("DOI"),
+            keywords=data.get("fieldsOfStudy", []) or [],
+        )
 
 
 @dataclass

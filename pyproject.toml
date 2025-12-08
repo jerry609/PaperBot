@@ -1,0 +1,76 @@
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "paperbot"
+version = "2.0.0"
+description = "顶会论文分析与学者追踪框架"
+readme = "README.md"
+requires-python = ">=3.8"
+license = {text = "MIT"}
+authors = [
+    {name = "PaperBot Team"}
+]
+keywords = ["paper", "scholar", "analysis", "tracking", "ai"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
+dependencies = [
+    "requests>=2.28.0",
+    "aiohttp>=3.8.0",
+    "beautifulsoup4>=4.11.0",
+    "lxml>=4.9.0",
+    "pydantic>=2.0",
+    "loguru>=0.7.0",
+    "openai>=1.0.0",
+    "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "black>=23.0.0",
+    "isort>=5.12.0",
+    "mypy>=1.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/jerry609/PaperBot"
+Repository = "https://github.com/jerry609/PaperBot"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-dir]
+"" = "src"
+
+[tool.pyright]
+pythonVersion = "3.10"
+pythonPlatform = "All"
+extraPaths = ["src"]
+typeCheckingMode = "basic"
+
+[tool.pylsp-mypy]
+enabled = true
+live_mode = true
+
+[tool.black]
+line-length = 100
+target-version = ['py310']
+
+[tool.isort]
+profile = "black"
+line_length = 100
+src_paths = ["src"]
+

@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional
 from datetime import datetime, timedelta
 from loguru import logger
 
-from paperbot.core.pipeline import BaseNode
+from paperbot.repro.nodes.base_node import BaseNode
 
 
 class PaperDetectionNode(BaseNode):

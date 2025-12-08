@@ -91,4 +91,14 @@ class InfluenceResult:
             "explanation": self.explanation,
             "metrics_breakdown": self.metrics_breakdown,
         }
-
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "InfluenceResult":
+        """从字典创建实例。"""
+        return cls(
+            total_score=data.get("total_score", 0.0),
+            academic_score=data.get("academic_score", 0.0),
+            engineering_score=data.get("engineering_score", 0.0),
+            explanation=data.get("explanation", ""),
+            metrics_breakdown=data.get("metrics_breakdown", {}),
+        )

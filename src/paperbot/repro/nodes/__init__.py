@@ -4,7 +4,7 @@ Node-based processing pipeline for ReproAgent.
 Inspired by BettaFish's node architecture.
 """
 
-from .base_node import BaseNode, NodeResult, StatefulNode
+from .base_node import BaseNode, NodeResult, StatefulNode, LLMNode
 from .planning_node import PlanningNode
 from .analysis_node import AnalysisNode
 from .generation_node import GenerationNode
@@ -14,6 +14,7 @@ __all__ = [
     "BaseNode",
     "NodeResult",
     "StatefulNode",
+    "LLMNode",
     "PlanningNode",
     "AnalysisNode",
     "GenerationNode",

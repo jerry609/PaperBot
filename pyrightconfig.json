@@ -1,0 +1,13 @@
+{
+    "include": ["src", "main.py", "config", "tests"],
+    "exclude": ["**/__pycache__", "**/node_modules", ".git", "output", "cache"],
+    "extraPaths": ["src"],
+    "pythonVersion": "3.10",
+    "pythonPlatform": "All",
+    "typeCheckingMode": "basic",
+    "reportMissingImports": "warning",
+    "reportMissingTypeStubs": false,
+    "reportUnusedImport": "warning",
+    "reportUnusedVariable": "warning"
+}
+

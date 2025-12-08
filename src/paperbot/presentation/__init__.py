@@ -2,8 +2,14 @@
 展示层 - CLI、报告生成、API。
 """
 
-from .cli import run_cli
-from .reports import ReportGenerator
+# CLI
+try:
+    from .cli import run_cli
+except ImportError:
+    run_cli = None
 
-__all__ = ["run_cli", "ReportGenerator"]
+# Reports
+from .reports import ReportWriter
+
+__all__ = ["run_cli", "ReportWriter"]
 

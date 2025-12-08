@@ -1,15 +1,22 @@
-# securipaperbot/utils/analyzer.py
+# paperbot/utils/analyzer.py
 
 from typing import Dict, List, Any, Optional
 from pathlib import Path
 import ast
 import re
-import radon.complexity as radon
-from radon.visitors import ComplexityVisitor
 import subprocess
 from dataclasses import dataclass
 from concurrent.futures import ThreadPoolExecutor
 import threading
+from datetime import datetime
+
+try:
+    import radon.complexity as radon
+    from radon.visitors import ComplexityVisitor
+except ImportError:
+    radon = None
+    ComplexityVisitor = None
+
 from paperbot.utils.logger import setup_logger
 
 
@@ -75,6 +82,61 @@ class CodeAnalyzer:
             return security_report
         except Exception as e:
             self.logger.error(f"Security analysis failed: {str(e)}")
+            return {}
+
+    async def analyze_quality(self, repo_path: Path) -> Dict[str, Any]:
+        """分析代码质量"""
+        try:
+            complexity = self._analyze_code_complexity(repo_path)
+            documentation = self._analyze_documentation(repo_path)
+            
+            # 计算总体质量分数
+            overall_score = 0.0
+            recommendations = []
+            
+            # 复杂度评分 (0-1)
+            total_complexity = complexity.get('overall_complexity', 0)
+            if total_complexity > 0:
+                complexity_score = max(0, 1 - (total_complexity / 100))
+            else:
+                complexity_score = 1.0
+            overall_score += complexity_score * self.quality_weights['complexity']
+            
+            if complexity_score < 0.5:
+                recommendations.append("Consider refactoring complex functions")
+            
+            # 文档评分
+            doc_coverage = documentation.get('docstring_coverage', 0)
+            overall_score += doc_coverage * self.quality_weights['documentation']
+            
+            if doc_coverage < 0.5:
+                recommendations.append("Improve documentation coverage")
+            
+            # 检查是否有 README
+            has_readme = any(
+                'readme' in f.get('path', '').lower() 
+                for f in documentation.get('documentation_files', [])
+            )
+            
+            return {
+                'overall_score': overall_score,
+                'complexity_score': complexity_score,
+                'documentation_score': doc_coverage,
+                'has_readme': has_readme,
+                'recommendations': recommendations,
+                'complexity_metrics': complexity,
+                'documentation_metrics': documentation,
+            }
+        except Exception as e:
+            self.logger.error(f"Quality analysis failed: {str(e)}")
+            return {'overall_score': 0, 'recommendations': []}
+
+    async def analyze_dependencies(self, repo_path: Path) -> Dict[str, Any]:
+        """分析项目依赖（异步版本）"""
+        try:
+            return self._analyze_dependencies(repo_path)
+        except Exception as e:
+            self.logger.error(f"Dependency analysis failed: {str(e)}")
             return {}
 
     def _analyze_files(self, repo_path: Path) -> Dict[str, Any]:

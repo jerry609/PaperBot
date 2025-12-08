@@ -2,6 +2,9 @@
 工作流定义层 - 业务流程编排。
 """
 
+# ScholarTrackingWorkflow
+from .scholar_tracking import ScholarTrackingWorkflow
+
 # 兼容层：也导出原有的 ScholarWorkflowCoordinator
 try:
     from paperbot.core.workflow_coordinator import ScholarWorkflowCoordinator
@@ -52,6 +55,7 @@ from .nodes import (
 )
 
 __all__ = [
+    "ScholarTrackingWorkflow",
     "ScholarWorkflowCoordinator",
     # Feed
     "FeedGenerator",

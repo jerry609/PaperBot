@@ -8,7 +8,7 @@
 from typing import Any, Dict, List, Optional
 from loguru import logger
 
-from paperbot.core.pipeline import LLMNode
+from paperbot.repro.nodes.base_node import LLMNode
 from paperbot.agents.prompts.scholar_prompts import (
     SYSTEM_PROMPT_REFLECTION_SEARCH,
     output_schema_reflection_search,
