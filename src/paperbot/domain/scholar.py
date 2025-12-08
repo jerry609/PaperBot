@@ -25,6 +25,7 @@ class Scholar:
     email: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    last_checked: Optional[datetime] = None  # 最后检查时间
     
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典。"""
@@ -43,6 +44,7 @@ class Scholar:
             "email": self.email,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            "last_checked": self.last_checked.isoformat() if self.last_checked else None,
         }
     
     @classmethod

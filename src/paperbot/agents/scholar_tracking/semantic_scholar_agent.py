@@ -260,8 +260,8 @@ class SemanticScholarAgent(BaseAgent):
         
         if author_info:
             scholar.h_index = author_info.get("hIndex")
-            scholar.citation_count = author_info.get("citationCount")
-            scholar.paper_count = author_info.get("paperCount")
+            scholar.citation_count = author_info.get("citationCount") or 0
+            scholar.paper_count = author_info.get("paperCount") or 0
             
             if author_info.get("affiliations"):
                 scholar.affiliations = author_info["affiliations"]

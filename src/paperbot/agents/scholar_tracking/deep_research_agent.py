@@ -435,12 +435,14 @@ class DeepResearchAgent(BaseAgent):
                 "papers": state.collected_papers,
             }
             
-            influence_result = self.influence_node.run(influence_input)
-            results = influence_result.get("influence_results", [])
+            influence_node_result = await self.influence_node.run(influence_input)
+            influence_data = influence_node_result.data or {}
+            results = influence_data.get("influence_results", [])
             
             if results:
                 state.influence_result = results[0]
-                logger.info(f"  → 影响力评分: {state.influence_result.get('total_score', 0):.2f}")
+                total_score = state.influence_result.get('total_score', 0) if state.influence_result else 0
+                logger.info(f"  → 影响力评分: {total_score:.2f}")
         
         except Exception as e:
             logger.warning(f"  ⚠ 影响力评估失败: {e}")
@@ -535,7 +537,7 @@ def create_deep_research_agent(
     llm_client = None
     if api_key:
         from paperbot.core.llm_client import LLMClient
-        llm_client = LLMClient(api_key=api_key, model=model)
+        llm_client = LLMClient(api_key=api_key, model_name=model)
     
     config = DeepResearchConfig(
         max_reflections=kwargs.get('max_reflections', 3),
