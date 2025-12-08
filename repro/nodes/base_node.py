@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Dict, Optional, Callable, TypeVar, Generic
 import logging
+from core.abstractions import ExecutionResult
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +32,19 @@ class NodeResult:
     def fail(cls, error: str, **metadata) -> "NodeResult":
         """Create a failed result."""
         return cls(success=False, error=error, metadata=metadata)
+
+    def to_execution_result(self) -> ExecutionResult[Any]:
+        """Convert to unified ExecutionResult for downstream compatibility."""
+        duration_ms = None
+        if self.duration_seconds:
+            duration_ms = self.duration_seconds * 1000
+        return ExecutionResult(
+            success=self.success,
+            data=self.data,
+            error=self.error,
+            duration_ms=duration_ms,
+            metadata=self.metadata,
+        )
 
 
 T = TypeVar('T')

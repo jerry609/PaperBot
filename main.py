@@ -14,6 +14,8 @@ from pathlib import Path
 from typing import Optional
 import logging
 
+from core.di.bootstrap import bootstrap_dependencies
+
 # 解决 Windows 上 curl_cffi 的兼容性问题
 if sys.platform == 'win32':
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
@@ -248,6 +250,7 @@ def main():
         level=os.getenv("PAPERBOT_LOG_LEVEL", "INFO"),
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     )
+    bootstrap_dependencies()
 
     print("=" * 60)
     print("🔐 SecuriPaperBot - 智能论文分析框架")

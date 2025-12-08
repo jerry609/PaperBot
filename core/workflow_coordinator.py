@@ -29,6 +29,8 @@ from core.collaboration import (
 )
 from core.report_engine import ReportEngine, ReportEngineConfig
 from core.pipeline_context import PipelineContext
+from core.pipeline import Pipeline, PipelineStage
+from core.abstractions import ExecutionResult
 
 logger = logging.getLogger(__name__)
 
@@ -100,15 +102,7 @@ class ScholarWorkflowCoordinator:
         persist_report: bool = True,
     ) -> Tuple[Optional[Path], InfluenceResult, Dict[str, Any]]:
         """
-        运行论文分析流水线
-        
-        Args:
-            paper: 论文元数据
-            scholar_name: 学者名称（用于报告生成）
-            persist_report: 是否写入 Markdown 文件
-            
-        Returns:
-            (report_path, influence_result, pipeline_data)
+        运行论文分析流水线（声明式 Pipeline 驱动）。
         """
         self._validate_paper_meta(paper)
         self._current_paper_ctx = {
@@ -121,7 +115,7 @@ class ScholarWorkflowCoordinator:
             env_info=self._env_info,
             data_time=datetime.now().isoformat(),
         )
-        self._stage_event("research", "start")
+
         pipeline_data = {
             "paper_id": paper.paper_id,
             "paper_title": paper.title,
@@ -131,244 +125,51 @@ class ScholarWorkflowCoordinator:
             "errors": [],
             "collab_log_path": None,
         }
-        
-        code_meta = None
-        research_result = {}
-        code_analysis_result = {}
-        quality_result = {}
-        report_path: Optional[Path] = None
-        report_markdown: Optional[str] = None
-        
-        try:
-            # Stage 1: Research Agent - 扩展摘要和代码仓库发现
-            self.logger.info(f"[1/5] Running ResearchAgent for: {paper.title[:50]}...")
-            t0 = time.perf_counter()
-            try:
-                research_result = await self._run_research_stage(paper)
-                pipeline_data["stages"]["research"] = {
-                    "status": "success",
-                    "result": research_result,
-                }
-                self._emit_stage_message(
-                    stage="research",
-                    content=f"ResearchAgent 完成: {paper.title}",
-                    payload=research_result,
-                )
-                
-                # 从研究结果中提取代码仓库信息
-                if research_result.get("github_url"):
-                    paper.github_url = research_result["github_url"]
-                    paper.has_code = True
-            except Exception as e:
-                self.logger.warning(f"ResearchAgent failed: {e}")
-                pipeline_data["stages"]["research"] = {"status": "failed", "error": str(e)}
-                pipeline_data["errors"].append(f"Research: {e}")
-                if self._ctx:
-                    self._ctx.add_error(str(e))
-            finally:
-                if self._ctx:
-                    self._ctx.record_timing("research", time.perf_counter() - t0)
-                self._stage_event("research", "end")
-            
-            # Stage 2: Code Analysis Agent - 代码分析
-            self.logger.info(f"[2/5] Running CodeAnalysisAgent...")
-            t0 = time.perf_counter()
-            self._stage_event("code_analysis", "start")
-            if paper.github_url or paper.has_code:
-                try:
-                    code_analysis_result = await self._run_code_analysis_stage(paper)
-                    pipeline_data["stages"]["code_analysis"] = {
-                        "status": "success",
-                        "result": code_analysis_result,
-                    }
-                    self._emit_stage_message(
-                        stage="code_analysis",
-                        content="CodeAnalysisAgent 完成",
-                        payload=code_analysis_result,
-                    )
-                    
-                    # 构建 CodeMeta
-                    code_meta = self._build_code_meta(paper, code_analysis_result)
-                except Exception as e:
-                    self.logger.warning(f"CodeAnalysisAgent failed: {e}")
-                    pipeline_data["stages"]["code_analysis"] = {"status": "failed", "error": str(e)}
-                    pipeline_data["errors"].append(f"CodeAnalysis: {e}")
-                    self._emit_stage_message(
-                        stage="code_analysis",
-                        content=f"CodeAnalysisAgent 失败: {e}",
-                        payload={"error": str(e)},
-                        message_type=MessageType.ERROR,
-                    )
-                    if self._ctx:
-                        self._ctx.add_error(str(e))
-            else:
-                pipeline_data["stages"]["code_analysis"] = {"status": "skipped", "reason": "no code"}
-                self._emit_stage_message(
-                    stage="code_analysis",
-                    content="CodeAnalysisAgent 跳过（无代码仓库）",
-                    payload={"reason": "no code"},
-                    message_type=MessageType.RESULT,
-                )
-            if self._ctx:
-                self._ctx.record_timing("code_analysis", time.perf_counter() - t0)
-            self._stage_event("code_analysis", "end")
-            
-            # Stage 3: Quality Agent - 质量评估
-            self.logger.info(f"[3/5] Running QualityAgent...")
-            t0 = time.perf_counter()
-            self._stage_event("quality", "start")
-            try:
-                quality_result = await self._run_quality_stage(
-                    paper, research_result, code_analysis_result
-                )
-                pipeline_data["stages"]["quality"] = {
-                    "status": "success",
-                    "result": quality_result,
-                }
-                # 捕获复现/可运行性结果（如果下游质量阶段已有）
-                if quality_result.get("repro"):
-                    self._latest_repro = quality_result.get("repro")
-                self._emit_stage_message(
-                    stage="quality",
-                    content="QualityAgent 完成",
-                    payload=quality_result,
-                )
-            except Exception as e:
-                self.logger.warning(f"QualityAgent failed: {e}")
-                pipeline_data["stages"]["quality"] = {"status": "failed", "error": str(e)}
-                pipeline_data["errors"].append(f"Quality: {e}")
-                self._emit_stage_message(
-                    stage="quality",
-                    content=f"QualityAgent 失败: {e}",
-                    payload={"error": str(e)},
-                    message_type=MessageType.ERROR,
-                )
-                if self._ctx:
-                    self._ctx.add_error(str(e))
-            finally:
-                if self._ctx:
-                    self._ctx.record_timing("quality", time.perf_counter() - t0)
-                self._stage_event("quality", "end")
-            
-            # Stage 4: Influence Calculator - 影响力评分
-            self.logger.info(f"[4/5] Calculating influence score...")
-            t0 = time.perf_counter()
-            self._stage_event("influence", "start")
-            influence_result = self.influence_calculator.calculate(paper, code_meta)
-            pipeline_data["stages"]["influence"] = {
-                "status": "success",
-                "result": influence_result.to_dict(),
-            }
-            self._emit_stage_message(
-                stage="influence",
-                content="InfluenceCalculator 完成",
-                payload=influence_result.to_dict(),
-            )
-            if self._ctx:
-                self._ctx.record_timing("influence", time.perf_counter() - t0)
-            self._stage_event("influence", "end")
-            
-            # Stage 5: Report Rendering
-            self.logger.info(f"[5/5] Generating report...")
-            t0 = time.perf_counter()
-            self._stage_event("documentation", "start")
-            try:
-                report_markdown = await self._generate_report(
-                    paper=paper,
-                    scholar_name=scholar_name,
-                    research_result=self._ensure_defaults(research_result, default={}),
-                    code_analysis_result=self._ensure_defaults(
-                        code_analysis_result,
-                        default={"repo_url": paper.github_url, "repo_name": None},
-                    ),
-                    quality_result=self._ensure_defaults(quality_result, default={}),
-                    influence_result=influence_result,
-                    env_info=self._env_info,
-                )
-                pipeline_data["stages"]["documentation"] = {"status": "success"}
-            except Exception as e:
-                self.logger.warning(f"Documentation stage failed: {e}")
-                pipeline_data["stages"]["documentation"] = {
-                    "status": "failed",
-                    "error": str(e),
-                }
-                pipeline_data["errors"].append(f"Documentation: {e}")
-                report_markdown = self._generate_fallback_report(
-                    paper, influence_result, pipeline_data
-                )
-                self._emit_stage_message(
-                    stage="documentation",
-                    content="DocumentationAgent 完成",
-                    payload={"has_report": bool(report_markdown)},
-                )
-                if self._ctx:
-                    self._ctx.add_error(str(e))
-            finally:
-                if self._ctx:
-                    self._ctx.record_timing("documentation", time.perf_counter() - t0)
-                self._stage_event("documentation", "end")
 
-            # 新版 Report Engine 输出
-            if self.report_engine_cfg.enabled:
-                t_re = time.perf_counter()
-                self._stage_event("report_engine", "start")
+        ctx = {
+            "paper": paper,
+            "scholar_name": scholar_name,
+            "pipeline_data": pipeline_data,
+            "code_meta": None,
+            "research_result": {},
+            "code_analysis_result": {},
+            "quality_result": {},
+            "influence_result": None,
+            "report_markdown": None,
+            "report_path": None,
+            "persist_report": persist_report,
+        }
+
+        pipeline = self._build_pipeline(ctx)
+        try:
+            pipeline_result = await pipeline.run(ctx)
+            # 如果报告还未写入但有内容，兜底写盘
+            if ctx["report_markdown"] and not ctx["report_path"]:
                 try:
-                    re_result = self._run_report_engine(
-                        topic=paper.title,
-                        summary=research_result.get("summary", ""),
-                        sections_context={
-                            "paper": paper.to_dict(),
-                            "research": research_result,
-                            "code_analysis": code_analysis_result,
-                            "quality": quality_result,
-                            "influence": influence_result.to_dict(),
-                            "repro": self._latest_repro,
-                            "env_info": self._env_info,
-                            "data_time": pipeline_data.get("started_at"),
-                        },
-                        task_id=paper.paper_id or paper.title,
-                        scenario=self.report_engine_cfg.scenario or "scholar",
-                    )
-                    pipeline_data["stages"]["report_engine"] = {
-                        "status": "success",
-                        "html": str(re_result.html_path) if re_result.html_path else None,
-                        "pdf": str(re_result.pdf_path) if re_result.pdf_path else None,
-                        "ir": str(re_result.ir_path) if re_result.ir_path else None,
-                        "summary": str(re_result.summary_path) if re_result.summary_path else None,
-                    }
-                except Exception as exc:
-                    self.logger.warning(f"ReportEngine 生成失败: {exc}")
-                    pipeline_data["stages"]["report_engine"] = {"status": "failed", "error": str(exc)}
-                    pipeline_data["errors"].append(f"ReportEngine: {exc}")
-                    if self._ctx:
-                        self._ctx.add_fallback("report_engine_failed")
-                finally:
-                    if self._ctx:
-                        self._ctx.record_timing("report_engine", time.perf_counter() - t_re)
-                    self._stage_event("report_engine", "end")
-            else:
-                if self._ctx:
-                    self._ctx.add_fallback("report_engine_disabled")
-                pipeline_data["stages"]["report_engine"] = {"status": "disabled"}
-            
-            # 持久化报告
-            if report_markdown:
-                if persist_report:
-                    try:
+                    if persist_report:
                         report_path = self.report_writer.write_report(
-                            report_markdown,
+                            ctx["report_markdown"],
                             paper,
                             scholar_name,
                         )
+                        ctx["report_path"] = report_path
                         pipeline_data["report_path"] = str(report_path)
-                    except Exception as e:
-                        self.logger.error(f"Failed to write report: {e}")
-                        pipeline_data["errors"].append(f"ReportWrite: {e}")
-                        pipeline_data["report_content"] = report_markdown
-                else:
-                    pipeline_data["report_content"] = report_markdown
+                    else:
+                        pipeline_data["report_content"] = ctx["report_markdown"]
+                except Exception as e:  # noqa: BLE001
+                    self.logger.error(f"Failed to write report: {e}")
+                    pipeline_data["errors"].append(f"ReportWrite: {e}")
+                    pipeline_data["report_content"] = ctx["report_markdown"]
+
+            # pipeline_status
             pipeline_data["completed_at"] = datetime.now().isoformat()
-            pipeline_data["status"] = "success" if not pipeline_data["errors"] else "partial"
+            status = "success"
+            if pipeline_result.failed():
+                status = "failed"
+            elif pipeline_data["errors"]:
+                status = "partial"
+            pipeline_data["status"] = status
+
             if self._ctx:
                 self._ctx.mark_completed(pipeline_data["status"])
                 pipeline_data["timings"] = self._ctx.timings
@@ -376,12 +177,14 @@ class ScholarWorkflowCoordinator:
                 pipeline_data["started_at"] = self._ctx.started_at
                 pipeline_data["completed_at"] = self._ctx.completed_at
 
-            # 持久化协作日志
             pipeline_data["collab_log_path"] = str(self._persist_collab_log(paper))
-            
-            return report_path, influence_result, pipeline_data
-            
-        except Exception as e:
+
+            influence_result: InfluenceResult = ctx["influence_result"] or self.influence_calculator.calculate(
+                paper, ctx.get("code_meta")
+            )
+            return ctx["report_path"], influence_result, pipeline_data
+
+        except Exception as e:  # noqa: BLE001
             self.logger.error(f"Pipeline failed for {paper.title}: {e}")
             pipeline_data["status"] = "failed"
             pipeline_data["errors"].append(str(e))
@@ -392,25 +195,25 @@ class ScholarWorkflowCoordinator:
                 pipeline_data["fallbacks"] = self._ctx.fallbacks
                 pipeline_data["started_at"] = self._ctx.started_at
                 pipeline_data["completed_at"] = self._ctx.completed_at
-            
-            # 即使失败也计算影响力分数
+
             influence_result = self.influence_calculator.calculate(paper, None)
-            report_markdown = self._generate_fallback_report(paper, influence_result, pipeline_data)
-            
-            if report_markdown and persist_report:
+            fallback_md = self._generate_fallback_report(paper, influence_result, pipeline_data)
+
+            report_path = None
+            if fallback_md and persist_report:
                 try:
                     report_path = self.report_writer.write_report(
-                        report_markdown,
+                        fallback_md,
                         paper,
                         scholar_name,
                     )
                     pipeline_data["report_path"] = str(report_path)
-                except Exception as write_error:
+                except Exception as write_error:  # noqa: BLE001
                     self.logger.error(f"Failed to write fallback report: {write_error}")
                     pipeline_data["errors"].append(f"ReportWrite: {write_error}")
-                    pipeline_data["report_content"] = report_markdown
+                    pipeline_data["report_content"] = fallback_md
             else:
-                pipeline_data["report_content"] = report_markdown
+                pipeline_data["report_content"] = fallback_md
             pipeline_data["collab_log_path"] = str(self._persist_collab_log(paper))
             return report_path, influence_result, pipeline_data
 
@@ -522,6 +325,260 @@ class ScholarWorkflowCoordinator:
             parts.append(f"Mem={repro_cfg.get('mem_limit','')}")
             parts.append(f"Network={repro_cfg.get('network')}")
         return "; ".join([p for p in parts if p])
+
+    def _build_pipeline(self, ctx: Dict[str, Any]) -> Pipeline:
+        """构建声明式流水线，复用已有阶段逻辑。"""
+        pipeline_data = ctx["pipeline_data"]
+        paper: PaperMeta = ctx["paper"]
+        scholar_name = ctx.get("scholar_name")
+
+        def _update_stage(stage_name: str, stage_result, result_payload=None):
+            pd = pipeline_data["stages"]
+            if stage_result.status == "skipped":
+                pd[stage_name] = {"status": "skipped", "reason": "skip_if"}
+            elif stage_result.status == "error":
+                pd[stage_name] = {"status": "failed", "error": stage_result.error}
+                pipeline_data["errors"].append(f"{stage_name}: {stage_result.error}")
+                if self._ctx:
+                    self._ctx.add_error(stage_result.error or stage_name)
+            else:
+                pd[stage_name] = {
+                    "status": "success",
+                    "result": result_payload if result_payload is not None else stage_result.output,
+                }
+            return ctx
+
+        async def stage_research(c: Dict[str, Any]) -> ExecutionResult[Any]:
+            self.logger.info(f"[1/5] Running ResearchAgent for: {paper.title[:50]}...")
+            self._stage_event("research", "start")
+            t0 = time.perf_counter()
+            try:
+                res = await self._run_research_stage(paper)
+                c["research_result"] = res
+                if res.get("github_url"):
+                    paper.github_url = res["github_url"]
+                    paper.has_code = True
+                self._emit_stage_message(
+                    stage="research",
+                    content=f"ResearchAgent 完成: {paper.title}",
+                    payload=res,
+                )
+                return ExecutionResult.ok(res)
+            except Exception as exc:  # noqa: BLE001
+                self.logger.warning(f"ResearchAgent failed: {exc}")
+                return ExecutionResult.fail(str(exc))
+            finally:
+                if self._ctx:
+                    self._ctx.record_timing("research", time.perf_counter() - t0)
+                self._stage_event("research", "end")
+
+        async def stage_code_analysis(c: Dict[str, Any]) -> ExecutionResult[Any]:
+            self.logger.info("[2/5] Running CodeAnalysisAgent...")
+            self._stage_event("code_analysis", "start")
+            t0 = time.perf_counter()
+            if not (paper.github_url or paper.has_code):
+                return ExecutionResult.ok({"status": "no_code_url", "reason": "no code"})
+            try:
+                res = await self._run_code_analysis_stage(paper)
+                c["code_analysis_result"] = res
+                c["code_meta"] = self._build_code_meta(paper, res)
+                self._emit_stage_message(
+                    stage="code_analysis",
+                    content="CodeAnalysisAgent 完成",
+                    payload=res,
+                )
+                return ExecutionResult.ok(res)
+            except Exception as exc:  # noqa: BLE001
+                self.logger.warning(f"CodeAnalysisAgent failed: {exc}")
+                self._emit_stage_message(
+                    stage="code_analysis",
+                    content=f"CodeAnalysisAgent 失败: {exc}",
+                    payload={"error": str(exc)},
+                    message_type=MessageType.ERROR,
+                )
+                return ExecutionResult.fail(str(exc))
+            finally:
+                if self._ctx:
+                    self._ctx.record_timing("code_analysis", time.perf_counter() - t0)
+                self._stage_event("code_analysis", "end")
+
+        async def stage_quality(c: Dict[str, Any]) -> ExecutionResult[Any]:
+            self.logger.info("[3/5] Running QualityAgent...")
+            self._stage_event("quality", "start")
+            t0 = time.perf_counter()
+            try:
+                res = await self._run_quality_stage(
+                    paper, c.get("research_result", {}), c.get("code_analysis_result", {})
+                )
+                c["quality_result"] = res
+                if res.get("repro"):
+                    self._latest_repro = res.get("repro")
+                self._emit_stage_message(
+                    stage="quality",
+                    content="QualityAgent 完成",
+                    payload=res,
+                )
+                return ExecutionResult.ok(res)
+            except Exception as exc:  # noqa: BLE001
+                self.logger.warning(f"QualityAgent failed: {exc}")
+                self._emit_stage_message(
+                    stage="quality",
+                    content=f"QualityAgent 失败: {exc}",
+                    payload={"error": str(exc)},
+                    message_type=MessageType.ERROR,
+                )
+                return ExecutionResult.fail(str(exc))
+            finally:
+                if self._ctx:
+                    self._ctx.record_timing("quality", time.perf_counter() - t0)
+                self._stage_event("quality", "end")
+
+        async def stage_influence(c: Dict[str, Any]) -> ExecutionResult[Any]:
+            self.logger.info("[4/5] Calculating influence score...")
+            self._stage_event("influence", "start")
+            t0 = time.perf_counter()
+            try:
+                influence = self.influence_calculator.calculate(paper, c.get("code_meta"))
+                c["influence_result"] = influence
+                self._emit_stage_message(
+                    stage="influence",
+                    content="InfluenceCalculator 完成",
+                    payload=influence.to_dict(),
+                )
+                return ExecutionResult.ok(influence.to_dict())
+            finally:
+                if self._ctx:
+                    self._ctx.record_timing("influence", time.perf_counter() - t0)
+                self._stage_event("influence", "end")
+
+        async def stage_documentation(c: Dict[str, Any]) -> ExecutionResult[Any]:
+            self.logger.info("[5/5] Generating report...")
+            self._stage_event("documentation", "start")
+            t0 = time.perf_counter()
+            try:
+                md = await self._generate_report(
+                    paper=paper,
+                    scholar_name=scholar_name,
+                    research_result=self._ensure_defaults(c.get("research_result", {}), default={}),
+                    code_analysis_result=self._ensure_defaults(
+                        c.get("code_analysis_result", {}),
+                        default={"repo_url": paper.github_url, "repo_name": None},
+                    ),
+                    quality_result=self._ensure_defaults(c.get("quality_result", {}), default={}),
+                    influence_result=c.get("influence_result"),
+                    env_info=self._env_info,
+                )
+                c["report_markdown"] = md
+                return ExecutionResult.ok({"has_report": True})
+            except Exception as exc:  # noqa: BLE001
+                self.logger.warning(f"Documentation stage failed: {exc}")
+                c["report_markdown"] = self._generate_fallback_report(
+                    paper, c.get("influence_result") or self.influence_calculator.calculate(paper, c.get("code_meta")), pipeline_data
+                )
+                if self._ctx:
+                    self._ctx.add_error(str(exc))
+                pipeline_data["errors"].append(f"Documentation: {exc}")
+                return ExecutionResult.fail(str(exc))
+            finally:
+                if self._ctx:
+                    self._ctx.record_timing("documentation", time.perf_counter() - t0)
+                self._stage_event("documentation", "end")
+
+        async def stage_report_engine(c: Dict[str, Any]) -> ExecutionResult[Any]:
+            if not self.report_engine_cfg.enabled:
+                if self._ctx:
+                    self._ctx.add_fallback("report_engine_disabled")
+                return ExecutionResult.ok({"status": "disabled"})
+            self._stage_event("report_engine", "start")
+            t0 = time.perf_counter()
+            try:
+                re_result = self._run_report_engine(
+                    topic=paper.title,
+                    summary=c.get("research_result", {}).get("summary", ""),
+                    sections_context={
+                        "paper": paper.to_dict(),
+                        "research": c.get("research_result", {}),
+                        "code_analysis": c.get("code_analysis_result", {}),
+                        "quality": c.get("quality_result", {}),
+                        "influence": c.get("influence_result").to_dict()
+                        if isinstance(c.get("influence_result"), InfluenceResult)
+                        else c.get("influence_result", {}),
+                        "repro": self._latest_repro,
+                        "env_info": self._env_info,
+                        "data_time": pipeline_data.get("started_at"),
+                    },
+                    task_id=paper.paper_id or paper.title,
+                    scenario=self.report_engine_cfg.scenario or "scholar",
+                )
+                payload = {
+                    "html": str(re_result.html_path) if re_result.html_path else None,
+                    "pdf": str(re_result.pdf_path) if re_result.pdf_path else None,
+                    "ir": str(re_result.ir_path) if re_result.ir_path else None,
+                    "summary": str(re_result.summary_path) if re_result.summary_path else None,
+                }
+                return ExecutionResult.ok(payload)
+            except Exception as exc:  # noqa: BLE001
+                self.logger.warning(f"ReportEngine 生成失败: {exc}")
+                pipeline_data["errors"].append(f"ReportEngine: {exc}")
+                if self._ctx:
+                    self._ctx.add_fallback("report_engine_failed")
+                return ExecutionResult.fail(str(exc))
+            finally:
+                if self._ctx:
+                    self._ctx.record_timing("report_engine", time.perf_counter() - t0)
+                self._stage_event("report_engine", "end")
+
+        pipeline = Pipeline("scholar_tracking")
+        pipeline.add_stage(
+            PipelineStage(
+                name="research",
+                run_fn=stage_research,
+                is_critical=False,
+                update_context=lambda c, r: _update_stage("research", r, c.get("research_result")),
+            )
+        ).add_stage(
+            PipelineStage(
+                name="code_analysis",
+                run_fn=stage_code_analysis,
+                is_critical=False,
+                update_context=lambda c, r: _update_stage("code_analysis", r, c.get("code_analysis_result")),
+            )
+        ).add_stage(
+            PipelineStage(
+                name="quality",
+                run_fn=stage_quality,
+                is_critical=False,
+                update_context=lambda c, r: _update_stage("quality", r, c.get("quality_result")),
+            )
+        ).add_stage(
+            PipelineStage(
+                name="influence",
+                run_fn=stage_influence,
+                update_context=lambda c, r: _update_stage(
+                    "influence",
+                    r,
+                    c.get("influence_result").to_dict()
+                    if isinstance(c.get("influence_result"), InfluenceResult)
+                    else r.output,
+                ),
+            )
+        ).add_stage(
+            PipelineStage(
+                name="documentation",
+                run_fn=stage_documentation,
+                is_critical=False,
+                update_context=lambda c, r: _update_stage("documentation", r),
+            )
+        ).add_stage(
+            PipelineStage(
+                name="report_engine",
+                run_fn=stage_report_engine,
+                is_critical=False,
+                update_context=lambda c, r: _update_stage("report_engine", r, r.output),
+            )
+        )
+
+        return pipeline
     
     async def _run_research_stage(self, paper: PaperMeta) -> Dict[str, Any]:
         """运行研究阶段"""

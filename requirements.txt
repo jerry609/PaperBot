@@ -22,6 +22,9 @@ numpy>=1.24.0
 pyyaml>=6.0
 python-dotenv>=0.19.0
 
+# 配置模型
+pydantic>=1.10.0
+
 # 日志和调试
 colorlog>=6.7.0
 loguru>=0.7.0

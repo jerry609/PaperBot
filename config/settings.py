@@ -5,6 +5,7 @@ import yaml
 from pathlib import Path
 from typing import Dict, Any, Optional
 from dataclasses import dataclass, field
+from config.models import AppConfig, LLMConfig, SemanticScholarConfig, ReproConfig, PipelineConfig
 
 
 @dataclass
@@ -338,6 +339,38 @@ def create_settings(config_path: Optional[str] = None) -> Settings:
     settings = Settings.load_from_file(config_path)
     settings.load_environment_variables()
     return settings
+
+
+def to_app_config(settings: Settings) -> AppConfig:
+    """将旧版 Settings 映射为新的 AppConfig（向后兼容）。"""
+    llm_cfg = LLMConfig(
+        provider="anthropic",
+        model=settings.api.openai_model,
+        api_key=settings.api.openai_api_key,
+        temperature=settings.api.openai_temperature,
+        max_tokens=settings.api.openai_max_tokens,
+    )
+    s2_cfg = SemanticScholarConfig(api_key=None)
+    repro_cfg = ReproConfig(
+        docker_image=settings.repro.get("docker_image", "python:3.10-slim"),
+        timeout_sec=int(settings.repro.get("timeout_sec", 300)),
+        cpu_shares=int(settings.repro.get("cpu_shares", 1)),
+        mem_limit=settings.repro.get("mem_limit", "1g"),
+        network=bool(settings.repro.get("network", False)),
+    )
+    pipeline_cfg = PipelineConfig(
+        mode=settings.mode,
+        report_template=settings.report.get("template", "paper_report.md.j2"),
+        enable_code_analysis=True,
+        enable_repro=settings.repro.get("enable_repro", False),
+    )
+    return AppConfig(
+        llm=llm_cfg,
+        semantic_scholar=s2_cfg,
+        repro=repro_cfg,
+        pipeline=pipeline_cfg,
+        raw=settings.to_dict(),
+    )
 
 
 # 全局设置实例
