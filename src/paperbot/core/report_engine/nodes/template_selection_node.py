@@ -24,12 +24,12 @@ SYSTEM_PROMPT_TEMPLATE = """你是报告模板选择助手。根据用户主题�
 class TemplateSelectionNode(BaseNode):
     """模板选择节点。"""
     
-    def __init__(self, llm_client: "LLMClient", template_dir: Path):
+    def __init__(self, llm_client: Optional["LLMClient"], template_dir: Path):
         """
         初始化模板选择节点。
         
         Args:
-            llm_client: LLM 客户端
+            llm_client: LLM 客户端（可选）
             template_dir: 模板目录路径
         """
         super().__init__(llm_client, "TemplateSelection")

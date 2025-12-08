@@ -4,7 +4,7 @@
 
 from __future__ import annotations
 
-from typing import List, Dict, Any, TYPE_CHECKING
+from typing import List, Dict, Any, Optional, TYPE_CHECKING
 
 from .base_node import BaseNode
 from ..utils.json_parser import JSONParseError
@@ -20,12 +20,12 @@ SYSTEM_PROMPT_BUDGET = """你是篇幅规划助手。输入章节目录，输出
 class WordBudgetNode(BaseNode):
     """篇幅规划节点。"""
     
-    def __init__(self, llm_client: "LLMClient", default_total: int = 6000):
+    def __init__(self, llm_client: Optional["LLMClient"], default_total: int = 6000):
         """
         初始化篇幅规划节点。
         
         Args:
-            llm_client: LLM 客户端
+            llm_client: LLM 客户端（可选）
             default_total: 默认总字数
         """
         super().__init__(llm_client, "WordBudget")

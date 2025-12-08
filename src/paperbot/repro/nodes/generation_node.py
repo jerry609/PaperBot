@@ -82,8 +82,8 @@ Output ONLY the Python code, no markdown.
                     title=paper_context.title,
                     filepath=filepath,
                     purpose=purpose,
-                    components=", ".join(plan.components),
-                    specs=str(spec.component_specs)[:500]
+                    components=", ".join(plan.key_components),
+                    specs=str(spec.layers)[:500]
                 )
                 
                 result = query(
@@ -199,15 +199,14 @@ class DataLoader:
 '''
     
     def _template_config(self, spec: ImplementationSpec) -> str:
-        hp = spec.hyperparameters
         return f'''"""Configuration."""
 
 class Config:
     """Configuration class."""
     
-    learning_rate = {hp.get("learning_rate", 0.001)}
-    batch_size = {hp.get("batch_size", 32)}
-    epochs = {hp.get("epochs", 10)}
+    learning_rate = {spec.learning_rate}
+    batch_size = {spec.batch_size}
+    epochs = {spec.epochs}
 '''
     
     def _template_generic(self, name: str, purpose: str) -> str:

@@ -10,18 +10,15 @@ from datetime import datetime
 from typing import Any, Dict, Optional, Callable, TypeVar, Generic
 import logging
 
-# 尝试导入核心抽象，如果失败则定义本地版本
-try:
-    from paperbot.core.abstractions import ExecutionResult
-except ImportError:
-    # 本地定义兼容版本
-    @dataclass
-    class ExecutionResult:
-        success: bool
-        data: Any = None
-        error: Optional[str] = None
-        duration_ms: Optional[float] = None
-        metadata: Dict[str, Any] = field(default_factory=dict)
+# 本地定义 ExecutionResult 以避免泛型类型冲突
+@dataclass
+class ExecutionResult:
+    """执行结果（本地版本，非泛型）"""
+    success: bool
+    data: Any = None
+    error: Optional[str] = None
+    duration_ms: Optional[float] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
 logger = logging.getLogger(__name__)
 

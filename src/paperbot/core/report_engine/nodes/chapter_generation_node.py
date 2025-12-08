@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 import json
-from typing import Dict, Any, List, TYPE_CHECKING
+from typing import Dict, Any, List, Optional, TYPE_CHECKING
 from pathlib import Path
 from loguru import logger
 
@@ -26,12 +26,12 @@ SYSTEM_PROMPT_CHAPTER = """你是报告撰写助手。根据章节题目与素�
 class ChapterGenerationNode(BaseNode):
     """章节生成节点。"""
     
-    def __init__(self, llm_client: "LLMClient", validator: IRValidator, min_body_chars: int = 400):
+    def __init__(self, llm_client: Optional["LLMClient"], validator: IRValidator, min_body_chars: int = 400):
         """
         初始化章节生成节点。
         
         Args:
-            llm_client: LLM 客户端
+            llm_client: LLM 客户端（可选）
             validator: IR 验证器
             min_body_chars: 最小正文字符数
         """

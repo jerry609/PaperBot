@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 import json
-from typing import Dict, Any, List, TYPE_CHECKING
+from typing import Dict, Any, List, Optional, TYPE_CHECKING
 
 from .base_node import BaseNode
 from ..utils.json_parser import JSONParseError
@@ -22,12 +22,12 @@ SYSTEM_PROMPT_LAYOUT = """你是报告布局设计师。根据模板章节与素
 class DocumentLayoutNode(BaseNode):
     """文档布局节点。"""
     
-    def __init__(self, llm_client: "LLMClient", name: str = "DocumentLayout"):
+    def __init__(self, llm_client: Optional["LLMClient"], name: str = "DocumentLayout"):
         """
         初始化文档布局节点。
         
         Args:
-            llm_client: LLM 客户端
+            llm_client: LLM 客户端（可选）
             name: 节点名称
         """
         super().__init__(llm_client, name)
