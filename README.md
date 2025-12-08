@@ -139,6 +139,7 @@ ReproAgent 可复现性验证整体流程如下图所示：
 
 ```
 PaperBot/
+├── AI4S/                   # AI for Science & LLM Papers Collection
 ├── main.py                 # 统一入口脚本
 ├── config/                 # 配置文件
 │   ├── scholar_subscriptions.yaml
