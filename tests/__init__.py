@@ -2,11 +2,50 @@ import sys
 from unittest.mock import MagicMock
 
 # Mock dependencies globally for tests
+# Core AI/ML
 sys.modules["pytest"] = MagicMock()
 sys.modules["docker"] = MagicMock()
 sys.modules["docker.errors"] = MagicMock()
 sys.modules["anthropic"] = MagicMock()
 sys.modules["claude_agent_sdk"] = MagicMock()
+
+# Git/GitHub
+sys.modules["git"] = MagicMock()
+sys.modules["github"] = MagicMock()
+
+# Web scraping
+sys.modules["bs4"] = MagicMock()
+sys.modules["lxml"] = MagicMock()
+
+# Logging
+sys.modules["loguru"] = MagicMock()
+sys.modules["colorlog"] = MagicMock()
+
+# Code analysis
+sys.modules["radon"] = MagicMock()
+sys.modules["radon.complexity"] = MagicMock()
+sys.modules["radon.visitors"] = MagicMock()
+sys.modules["safety"] = MagicMock()
+
+# PDF processing
+sys.modules["pdfplumber"] = MagicMock()
+sys.modules["PyPDF2"] = MagicMock()
+
+# Async/HTTP
+sys.modules["aiohttp"] = MagicMock()
+sys.modules["aiofiles"] = MagicMock()
+sys.modules["httpx"] = MagicMock()
+
+# Templating
+sys.modules["jinja2"] = MagicMock()
+sys.modules["markdown"] = MagicMock()
+
+# Data processing
+sys.modules["pandas"] = MagicMock()
+sys.modules["numpy"] = MagicMock()
+sys.modules["yaml"] = MagicMock()
+sys.modules["dotenv"] = MagicMock()
+sys.modules["python_dotenv"] = MagicMock()
 
 from .test_framework import (
     # Mock 数据生成器
