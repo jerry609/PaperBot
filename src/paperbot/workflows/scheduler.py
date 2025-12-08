@@ -345,12 +345,15 @@ class PaperCollector:
         
         try:
             # 获取论文
-            papers = await self._paper_fetcher(scholar.semantic_scholar_id)
+            scholar_id = scholar.semantic_scholar_id or ""
+            if not scholar_id:
+                return []
+            papers = await self._paper_fetcher(scholar_id)
             
             new_papers = []
             for paper in papers[:self.config.max_papers_per_scholar]:
                 # 检查是否已收录
-                if self.storage.has_record(paper.paper_id, scholar.semantic_scholar_id):
+                if self.storage.has_record(paper.paper_id, scholar_id):
                     # 检查引用变化
                     await self._check_citation_change(scholar, paper)
                     continue
@@ -358,7 +361,7 @@ class PaperCollector:
                 # 创建收录记录
                 record = CollectionRecord(
                     paper_id=paper.paper_id,
-                    scholar_id=scholar.semantic_scholar_id,
+                    scholar_id=scholar_id,
                     collected_at=datetime.now(),
                     citation_count_at_collection=paper.citation_count,
                     metadata={
@@ -448,7 +451,7 @@ class Scheduler:
     管理定时收录任务
     """
     
-    def __init__(self, config: SchedulerConfig = None):
+    def __init__(self, config: Optional[SchedulerConfig] = None):
         self.config = config or SchedulerConfig()
         self.collector = PaperCollector(self.config)
         self.storage = CollectionStorage(self.config.data_dir)
