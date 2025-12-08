@@ -10,8 +10,8 @@ import logging
 from typing import Dict, Any, Optional, List, Tuple
 from pathlib import Path
 
-from paperbot.core.pipeline import Pipeline, PipelineStage
-from paperbot.core.abstractions import ExecutionResult
+# Pipeline 用于类型提示和未来扩展
+# from paperbot.core.pipeline import Pipeline
 from paperbot.domain.paper import PaperMeta, CodeMeta
 from paperbot.domain.influence.result import InfluenceResult
 

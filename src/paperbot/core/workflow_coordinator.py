@@ -20,11 +20,11 @@ class PipelineContext:
     """流水线上下文"""
     paper: Any = None
     scholar_name: Optional[str] = None
-    research_result: Dict[str, Any] = field(default_factory=dict)
-    code_analysis_result: Dict[str, Any] = field(default_factory=dict)
-    quality_result: Dict[str, Any] = field(default_factory=dict)
+    research_result: Dict[str, Any] = field(default_factory=lambda: {})
+    code_analysis_result: Dict[str, Any] = field(default_factory=lambda: {})
+    quality_result: Dict[str, Any] = field(default_factory=lambda: {})
     influence_result: Any = None
-    stages: Dict[str, Any] = field(default_factory=dict)
+    stages: Dict[str, Any] = field(default_factory=lambda: {})
     status: str = "pending"
     error: Optional[str] = None
 

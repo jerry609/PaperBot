@@ -5,8 +5,8 @@ Phase 3: Generate code files based on plan and spec.
 """
 
 import logging
-from typing import Dict, Any, Optional, List
-from .base_node import BaseNode, NodeResult
+from typing import Dict, Any, Optional
+from .base_node import BaseNode
 from ..models import PaperContext, ReproductionPlan, ImplementationSpec
 
 logger = logging.getLogger(__name__)

@@ -5,18 +5,16 @@
 """
 
 import asyncio
-import time
 from dataclasses import dataclass, field
-from typing import List, Optional, Dict, Any, Callable, Awaitable, Set
+from typing import List, Optional, Dict, Any, Callable, Awaitable
 from datetime import datetime, timedelta
 from enum import Enum
 import json
-import hashlib
 from pathlib import Path
 
 from paperbot.domain.scholar import Scholar
 from paperbot.domain.paper import PaperMeta
-from paperbot.workflows.feed import FeedGenerator, FeedEventFactory, ScholarFeedService
+from paperbot.workflows.feed import ScholarFeedService
 
 
 class CollectionInterval(Enum):
@@ -48,7 +46,7 @@ class CollectionRecord:
     citation_count_at_collection: int = 0
     
     # 元数据
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: Dict[str, Any] = field(default_factory=lambda: {})
     
     def to_dict(self) -> Dict[str, Any]:
         return {

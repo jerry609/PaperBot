@@ -4,7 +4,7 @@
 从 Semantic Scholar API 获取学者信息
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict
 import logging
 
 from paperbot.repro.nodes.base_node import BaseNode

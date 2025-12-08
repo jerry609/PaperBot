@@ -5,13 +5,12 @@
 根据当前分析状态识别信息空白并生成补充搜索
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 import logging
 
 from paperbot.repro.nodes.base_node import LLMNode
 from paperbot.agents.prompts.scholar_prompts import (
     SYSTEM_PROMPT_REFLECTION_SEARCH,
-    output_schema_reflection_search,
 )
 from paperbot.utils.json_parser import parse_json
 

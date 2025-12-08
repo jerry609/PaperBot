@@ -13,12 +13,12 @@ import logging
 import tempfile
 from pathlib import Path
 from typing import Dict, Any, Optional
-from dataclasses import dataclass, field
 
 from .models import PaperContext, ReproductionPlan, ImplementationSpec, ReproductionResult, ReproPhase
 from .nodes import PlanningNode, AnalysisNode, GenerationNode, VerificationNode
 from .docker_executor import DockerExecutor
-from .execution_result import ExecutionResult
+# ExecutionResult 用于类型兼容
+# from .execution_result import ExecutionResult
 
 logger = logging.getLogger(__name__)
 

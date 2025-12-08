@@ -100,7 +100,7 @@ class PaperMeta:
         
         # 检查 externalIds 中的 GitHub
         if data.get("externalIds"):
-            for key, value in data["externalIds"].items():
+            for _, value in data["externalIds"].items():
                 if "github" in str(value).lower():
                     github_url = value
                     has_code = True
