@@ -43,9 +43,9 @@ class PaperTrackerAgent(BaseAgent):
         self.settings = self.profile_agent.get_settings()
         self.papers_per_scholar = self.settings.get("papers_per_scholar", 20)
     
-    async def process(self, *args, **kwargs) -> Dict[str, Any]:
+    async def _execute(self, *args, **kwargs) -> Dict[str, Any]:
         """
-        主处理方法：检测所有订阅学者的新论文
+        执行论文追踪：检测所有订阅学者的新论文
         
         Returns:
             包含新论文信息的字典

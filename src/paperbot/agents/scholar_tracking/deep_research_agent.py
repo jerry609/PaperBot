@@ -124,9 +124,9 @@ class DeepResearchAgent(BaseAgent):
         else:
             self.influence_node = None
     
-    async def process(self, *args, **kwargs) -> Dict[str, Any]:
+    async def _execute(self, *args, **kwargs) -> Dict[str, Any]:
         """
-        BaseAgent 要求的处理方法
+        执行深度研究
         """
         action = kwargs.get("action", "research")
         

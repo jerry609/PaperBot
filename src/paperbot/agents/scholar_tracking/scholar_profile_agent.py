@@ -48,8 +48,8 @@ class ScholarProfileAgent(BaseAgent):
         # 学者列表缓存
         self._scholars: Optional[List[Scholar]] = None
     
-    async def process(self, *args, **kwargs) -> Dict[str, Any]:
-        """基类要求的处理方法"""
+    async def _execute(self, *args, **kwargs) -> Dict[str, Any]:
+        """执行学者画像管理操作"""
         action = kwargs.get("action", "list")
         
         if action == "list":

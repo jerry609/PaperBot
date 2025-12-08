@@ -14,17 +14,14 @@ import logging
 try:
     from paperbot.core.abstractions import ExecutionResult
 except ImportError:
-    try:
-        from paperbot.core.abstractions import ExecutionResult
-    except ImportError:
-        # 本地定义兼容版本
-        @dataclass
-        class ExecutionResult:
-            success: bool
-            data: Any = None
-            error: Optional[str] = None
-            duration_ms: Optional[float] = None
-            metadata: Dict[str, Any] = field(default_factory=dict)
+    # 本地定义兼容版本
+    @dataclass
+    class ExecutionResult:
+        success: bool
+        data: Any = None
+        error: Optional[str] = None
+        duration_ms: Optional[float] = None
+        metadata: Dict[str, Any] = field(default_factory=dict)
 
 logger = logging.getLogger(__name__)
 

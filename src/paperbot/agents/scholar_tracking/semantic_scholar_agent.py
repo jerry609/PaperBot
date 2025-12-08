@@ -82,8 +82,8 @@ class SemanticScholarAgent(BaseAgent):
             )
         return self._client
     
-    async def process(self, *args, **kwargs) -> Dict[str, Any]:
-        """基类要求的处理方法"""
+    async def _execute(self, *args, **kwargs) -> Dict[str, Any]:
+        """执行 Semantic Scholar API 操作"""
         # 默认获取论文列表
         author_id = kwargs.get("author_id")
         if author_id:
