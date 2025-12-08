@@ -4,6 +4,8 @@
 
 PaperBot 是一个专为计算机领域设计的智能论文分析框架。它不仅支持从四大安全顶会（IEEE S&P、NDSS、ACM CCS、USENIX Security）自动获取论文，还新增了**学者追踪系统**，能够自动监测指定学者的最新发表，进行多 Agent 深度分析，并生成包含影响力评分（PIS）的详细报告。
 
+此外，PaperBot 维护了一个 **AI for Science & LLM Papers Collection**，收录了相关的顶会论文与代码实现：[AI4S Repository](https://github.com/jerry609/AI4S)。
+
 ## ✨ 核心功能
 
 ### 1. 学者追踪与智能分析 (New!)
