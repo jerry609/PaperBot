@@ -63,6 +63,17 @@ class CollaborationBus:
         self._round_index += 1
         return self._round_index
 
+    # ------------------ 事件 ------------------
+    def add_stage_event(self, stage: str, event: str, metadata: Optional[dict] = None):
+        """记录阶段开始/结束等事件。"""
+        msg = AgentMessage.stage_event(stage=stage, event=event, **(metadata or {}))
+        self.add_message(msg)
+
+    def add_fallback(self, stage: str, reason: str, metadata: Optional[dict] = None):
+        """记录降级/回退事件。"""
+        msg = AgentMessage.fallback(stage=stage, reason=reason, **(metadata or {}))
+        self.add_message(msg)
+
     # ------------------ 查询 ------------------
     @property
     def messages(self) -> List[AgentMessage]:

@@ -5,6 +5,7 @@ MVP 版工作流协调器
 """
 
 import logging
+import time
 from typing import Dict, Any, Optional, List, Tuple
 from datetime import datetime
 from pathlib import Path
@@ -27,6 +28,7 @@ from core.collaboration import (
     MessageType,
 )
 from core.report_engine import ReportEngine, ReportEngineConfig
+from core.pipeline_context import PipelineContext
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +91,7 @@ class ScholarWorkflowCoordinator:
         # 复现结果占位
         self._latest_repro = None
         self._env_info = self._build_env_info()
+        self._ctx: Optional[PipelineContext] = None
     
     async def run_paper_pipeline(
         self,
@@ -112,6 +115,13 @@ class ScholarWorkflowCoordinator:
             "paper_id": paper.paper_id,
             "paper_title": paper.title,
         }
+        self._ctx = PipelineContext(
+            paper_id=paper.paper_id,
+            paper_title=paper.title,
+            env_info=self._env_info,
+            data_time=datetime.now().isoformat(),
+        )
+        self._stage_event("research", "start")
         pipeline_data = {
             "paper_id": paper.paper_id,
             "paper_title": paper.title,
@@ -132,6 +142,7 @@ class ScholarWorkflowCoordinator:
         try:
             # Stage 1: Research Agent - 扩展摘要和代码仓库发现
             self.logger.info(f"[1/5] Running ResearchAgent for: {paper.title[:50]}...")
+            t0 = time.perf_counter()
             try:
                 research_result = await self._run_research_stage(paper)
                 pipeline_data["stages"]["research"] = {
@@ -152,9 +163,17 @@ class ScholarWorkflowCoordinator:
                 self.logger.warning(f"ResearchAgent failed: {e}")
                 pipeline_data["stages"]["research"] = {"status": "failed", "error": str(e)}
                 pipeline_data["errors"].append(f"Research: {e}")
+                if self._ctx:
+                    self._ctx.add_error(str(e))
+            finally:
+                if self._ctx:
+                    self._ctx.record_timing("research", time.perf_counter() - t0)
+                self._stage_event("research", "end")
             
             # Stage 2: Code Analysis Agent - 代码分析
             self.logger.info(f"[2/5] Running CodeAnalysisAgent...")
+            t0 = time.perf_counter()
+            self._stage_event("code_analysis", "start")
             if paper.github_url or paper.has_code:
                 try:
                     code_analysis_result = await self._run_code_analysis_stage(paper)
@@ -180,6 +199,8 @@ class ScholarWorkflowCoordinator:
                         payload={"error": str(e)},
                         message_type=MessageType.ERROR,
                     )
+                    if self._ctx:
+                        self._ctx.add_error(str(e))
             else:
                 pipeline_data["stages"]["code_analysis"] = {"status": "skipped", "reason": "no code"}
                 self._emit_stage_message(
@@ -188,9 +209,14 @@ class ScholarWorkflowCoordinator:
                     payload={"reason": "no code"},
                     message_type=MessageType.RESULT,
                 )
+            if self._ctx:
+                self._ctx.record_timing("code_analysis", time.perf_counter() - t0)
+            self._stage_event("code_analysis", "end")
             
             # Stage 3: Quality Agent - 质量评估
             self.logger.info(f"[3/5] Running QualityAgent...")
+            t0 = time.perf_counter()
+            self._stage_event("quality", "start")
             try:
                 quality_result = await self._run_quality_stage(
                     paper, research_result, code_analysis_result
@@ -217,9 +243,17 @@ class ScholarWorkflowCoordinator:
                     payload={"error": str(e)},
                     message_type=MessageType.ERROR,
                 )
+                if self._ctx:
+                    self._ctx.add_error(str(e))
+            finally:
+                if self._ctx:
+                    self._ctx.record_timing("quality", time.perf_counter() - t0)
+                self._stage_event("quality", "end")
             
             # Stage 4: Influence Calculator - 影响力评分
             self.logger.info(f"[4/5] Calculating influence score...")
+            t0 = time.perf_counter()
+            self._stage_event("influence", "start")
             influence_result = self.influence_calculator.calculate(paper, code_meta)
             pipeline_data["stages"]["influence"] = {
                 "status": "success",
@@ -230,9 +264,14 @@ class ScholarWorkflowCoordinator:
                 content="InfluenceCalculator 完成",
                 payload=influence_result.to_dict(),
             )
+            if self._ctx:
+                self._ctx.record_timing("influence", time.perf_counter() - t0)
+            self._stage_event("influence", "end")
             
             # Stage 5: Report Rendering
             self.logger.info(f"[5/5] Generating report...")
+            t0 = time.perf_counter()
+            self._stage_event("documentation", "start")
             try:
                 report_markdown = await self._generate_report(
                     paper=paper,
@@ -262,9 +301,17 @@ class ScholarWorkflowCoordinator:
                     content="DocumentationAgent 完成",
                     payload={"has_report": bool(report_markdown)},
                 )
+                if self._ctx:
+                    self._ctx.add_error(str(e))
+            finally:
+                if self._ctx:
+                    self._ctx.record_timing("documentation", time.perf_counter() - t0)
+                self._stage_event("documentation", "end")
 
             # 新版 Report Engine 输出
             if self.report_engine_cfg.enabled:
+                t_re = time.perf_counter()
+                self._stage_event("report_engine", "start")
                 try:
                     re_result = self._run_report_engine(
                         topic=paper.title,
@@ -280,17 +327,29 @@ class ScholarWorkflowCoordinator:
                             "data_time": pipeline_data.get("started_at"),
                         },
                         task_id=paper.paper_id or paper.title,
+                        scenario=self.report_engine_cfg.scenario or "scholar",
                     )
                     pipeline_data["stages"]["report_engine"] = {
                         "status": "success",
                         "html": str(re_result.html_path) if re_result.html_path else None,
                         "pdf": str(re_result.pdf_path) if re_result.pdf_path else None,
                         "ir": str(re_result.ir_path) if re_result.ir_path else None,
+                        "summary": str(re_result.summary_path) if re_result.summary_path else None,
                     }
                 except Exception as exc:
                     self.logger.warning(f"ReportEngine 生成失败: {exc}")
                     pipeline_data["stages"]["report_engine"] = {"status": "failed", "error": str(exc)}
                     pipeline_data["errors"].append(f"ReportEngine: {exc}")
+                    if self._ctx:
+                        self._ctx.add_fallback("report_engine_failed")
+                finally:
+                    if self._ctx:
+                        self._ctx.record_timing("report_engine", time.perf_counter() - t_re)
+                    self._stage_event("report_engine", "end")
+            else:
+                if self._ctx:
+                    self._ctx.add_fallback("report_engine_disabled")
+                pipeline_data["stages"]["report_engine"] = {"status": "disabled"}
             
             # 持久化报告
             if report_markdown:
@@ -308,9 +367,14 @@ class ScholarWorkflowCoordinator:
                         pipeline_data["report_content"] = report_markdown
                 else:
                     pipeline_data["report_content"] = report_markdown
-            
             pipeline_data["completed_at"] = datetime.now().isoformat()
             pipeline_data["status"] = "success" if not pipeline_data["errors"] else "partial"
+            if self._ctx:
+                self._ctx.mark_completed(pipeline_data["status"])
+                pipeline_data["timings"] = self._ctx.timings
+                pipeline_data["fallbacks"] = self._ctx.fallbacks
+                pipeline_data["started_at"] = self._ctx.started_at
+                pipeline_data["completed_at"] = self._ctx.completed_at
 
             # 持久化协作日志
             pipeline_data["collab_log_path"] = str(self._persist_collab_log(paper))
@@ -321,6 +385,13 @@ class ScholarWorkflowCoordinator:
             self.logger.error(f"Pipeline failed for {paper.title}: {e}")
             pipeline_data["status"] = "failed"
             pipeline_data["errors"].append(str(e))
+            if self._ctx:
+                self._ctx.add_error(str(e))
+                self._ctx.mark_completed("failed")
+                pipeline_data["timings"] = self._ctx.timings
+                pipeline_data["fallbacks"] = self._ctx.fallbacks
+                pipeline_data["started_at"] = self._ctx.started_at
+                pipeline_data["completed_at"] = self._ctx.completed_at
             
             # 即使失败也计算影响力分数
             influence_result = self.influence_calculator.calculate(paper, None)
@@ -379,6 +450,13 @@ class ScholarWorkflowCoordinator:
         if guidance:
             self.collab_bus.add_host_message(guidance, stage=stage)
             self.collab_bus.next_round()
+
+    def _stage_event(self, stage: str, event: str, metadata: Optional[dict] = None):
+        """广播阶段事件，供订阅者使用。"""
+        try:
+            self.collab_bus.add_stage_event(stage, event, metadata)
+        except Exception:
+            pass
 
     def _persist_collab_log(self, paper: PaperMeta) -> Path:
         """持久化协作日志到 output/collab_logs 下。"""

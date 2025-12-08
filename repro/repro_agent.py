@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from .models import PaperContext, ReproductionPlan, ImplementationSpec, ReproductionResult, ReproPhase
 from .nodes import PlanningNode, AnalysisNode, GenerationNode, VerificationNode
 from .docker_executor import DockerExecutor
+from .execution_result import ExecutionResult
 
 logger = logging.getLogger(__name__)
 
@@ -183,8 +184,8 @@ class ReproAgent:
             results.append({
                 "command": cmd,
                 "exit_code": exec_result.exit_code,
-                "stdout": exec_result.stdout[:500] if exec_result.stdout else "",
-                "stderr": exec_result.stderr[:500] if exec_result.stderr else "",
+                "logs": exec_result.logs[:500] if exec_result.logs else "",
+                "runtime_meta": exec_result.runtime_meta,
             })
             
             if exec_result.exit_code != 0:

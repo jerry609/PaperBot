@@ -17,7 +17,11 @@ from .nodes.word_budget_node import WordBudgetNode
 from .nodes.chapter_generation_node import ChapterGenerationNode
 from .renderers.html_renderer import HTMLRenderer
 from .renderers.pdf_renderer import PDFRenderer
+from .renderers.base import RenderContext
 from ..llm_client import LLMClient
+from .llm_strategy import LLMStrategy
+from .compare import normalize_compare_items
+from .view_model import ViewModelBuilder
 import json
 
 
@@ -28,11 +32,16 @@ class ReportEngine:
         self.html_renderer = HTMLRenderer()
         self.pdf_renderer = PDFRenderer()
         self.llm = None
+        # 分层模型策略
+        self.llm_strategy = LLMStrategy(
+            default_model=config.model,
+            task_models=config.model_tiers or {},
+        )
         if config.enabled and config.api_key:
             try:
                 self.llm = LLMClient(
                     api_key=config.api_key,
-                    model_name=config.model,
+                    model_name=self.llm_strategy.default_model,
                     base_url=config.base_url,
                     timeout=1200,
                 )
@@ -41,10 +50,15 @@ class ReportEngine:
                 self.llm = None
                 self.config.enabled = False
 
-        self.template_node = TemplateSelectionNode(self.llm, config.template_dir)
-        self.layout_node = DocumentLayoutNode(self.llm)
-        self.budget_node = WordBudgetNode(self.llm, default_total=config.max_words)
-        self.chapter_node = ChapterGenerationNode(self.llm, self.validator)
+        scenario_cfg = self._scenario_overrides(config.scenario)
+        template_dir = scenario_cfg.get("template_dir", config.template_dir)
+        max_words = scenario_cfg.get("max_words", config.max_words)
+
+        self.template_node = TemplateSelectionNode(self._llm_for("template"), template_dir)
+        self.layout_node = DocumentLayoutNode(self._llm_for("layout"))
+        self.budget_node = WordBudgetNode(self._llm_for("budget"), default_total=max_words)
+        self.chapter_node = ChapterGenerationNode(self._llm_for("chapter"), self.validator)
+        self.vm_builder = ViewModelBuilder()
 
     def generate(
         self,
@@ -54,6 +68,7 @@ class ReportEngine:
         task_id: Optional[str] = None,
         enable_pdf: bool = True,
         compare_items: Optional[List[Dict[str, Any]]] = None,
+        scenario: Optional[str] = None,
     ) -> ReportResult:
         if not self.config.enabled:
             logger.info("ReportEngine 未启用，跳过生成")
@@ -61,10 +76,10 @@ class ReportEngine:
 
         result = ReportResult()
         try:
-            # 若是对比场景，优先使用 compare 模板
             tpl = self.template_node.run(query=topic, summary=summary)
             tpl_content = tpl["content"]
             tpl_sections = self._extract_sections(tpl_content)
+            compare_list = normalize_compare_items(compare_items)
 
             layout = self.layout_node.run(tpl_sections, topic, {"summary": summary})
             word_budget = self.budget_node.run(layout.get("toc", []), topic)
@@ -79,15 +94,18 @@ class ReportEngine:
 
             self.validator.validate_document(chapters)
 
-            html = self.html_renderer.render(
-                title=layout.get("title", topic),
-                subtitle=layout.get("subtitle", ""),
-                toc=layout.get("toc", []),
-                chapters=chapters,
+            vm = self.vm_builder.build(layout, chapters, compare_list, sections_context)
+            render_ctx = RenderContext(
+                title=vm.title or topic,
+                subtitle=vm.subtitle,
+                toc=vm.toc,
+                chapters=vm.chapters,
                 model_info=f"{self.config.model}",
-                data_time=sections_context.get("data_time", ""),
-                env_info=sections_context.get("env_info", ""),
+                data_time=vm.data_time,
+                env_info=vm.env_info,
             )
+
+            html = self.html_renderer.render(render_ctx)
 
             output_dir = self.config.output_dir
             output_dir.mkdir(parents=True, exist_ok=True)
@@ -98,14 +116,16 @@ class ReportEngine:
             ir_path.write_text(json.dumps({"chapters": chapters}, ensure_ascii=False, indent=2), encoding="utf-8")
 
             # 结构化摘要（决策/证据/复现等）
-            summary_payload = self._build_summary(sections_context, layout, word_budget, chapters)
+            summary_payload = self._build_summary(
+                sections_context, layout, word_budget, chapters, compare_list
+            )
             summary_path = output_dir / f"{base_name}_summary.json"
             summary_path.write_text(json.dumps(summary_payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
             pdf_path = None
             if enable_pdf and self.config.pdf_enabled:
                 pdf_path = output_dir / f"{base_name}.pdf"
-                pdf_written = self.pdf_renderer.render(html, pdf_path)
+                pdf_written = self.pdf_renderer.render(render_ctx, html_content=html, output_path=pdf_path)
                 if not pdf_written:
                     pdf_path = None
 
@@ -139,12 +159,59 @@ class ReportEngine:
             sections = [{"title": "内容", "slug": "content"}]
         return sections
 
+    def _scenario_overrides(self, scenario: str) -> Dict[str, Any]:
+        """
+        根据场景调整模板目录、篇幅等参数。
+        """
+        base_dir = self.config.template_dir
+        overrides = {
+            "review": {
+                "template_dir": base_dir / "",
+                "max_words": 5000,
+            },
+            "verification": {
+                "template_dir": base_dir / "",
+                "max_words": 4500,
+            },
+            "compare": {
+                "template_dir": base_dir / "",
+                "max_words": 5500,
+            },
+            "scholar": {
+                "template_dir": base_dir / "",
+                "max_words": 6000,
+            },
+        }
+        return overrides.get(scenario, {})
+
+    def _llm_for(self, task_type: str) -> Optional[LLMClient]:
+        """
+        按任务类型选择模型，若与默认一致则复用同一 client。
+        """
+        model_name = self.llm_strategy.pick(task_type)
+        if not self.config.enabled or not self.config.api_key:
+            return None
+        # 若与默认一致，复用
+        if self.llm and model_name == self.llm_strategy.default_model:
+            return self.llm
+        try:
+            return LLMClient(
+                api_key=self.config.api_key,
+                model_name=model_name,
+                base_url=self.config.base_url,
+                timeout=1200,
+            )
+        except Exception as exc:
+            logger.warning(f"LLM 初始化失败 task={task_type}, model={model_name}: {exc}")
+            return self.llm
+
     def _build_summary(
         self,
         ctx: Dict[str, Any],
         layout: Dict[str, Any],
         budget: Dict[str, Any],
         chapters: List[Dict[str, Any]],
+        compare_items: List[Any],
     ) -> Dict[str, Any]:
         """提取结构化摘要，便于下游集成。"""
         return {
@@ -157,7 +224,7 @@ class ReportEngine:
             "verification": ctx.get("verification"),
             "influence": ctx.get("influence"),
             "repro": ctx.get("repro"),
-            "compare_items": ctx.get("compare_items"),
+            "compare_items": [ci.__dict__ for ci in compare_items],
             "chapters": chapters,
             "env_info": ctx.get("env_info"),
             "data_time": ctx.get("data_time"),

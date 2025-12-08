@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import List, Dict, Any
+from .base import RenderContext, Renderer
 
 HTML_TEMPLATE = """<!DOCTYPE html>
 <html lang="zh">
@@ -39,27 +40,20 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 """
 
 
-class HTMLRenderer:
-    def render(
-        self,
-        title: str,
-        subtitle: str,
-        toc: List[Dict[str, Any]],
-        chapters: List[Dict[str, Any]],
-        model_info: str = "",
-        data_time: str = "",
-        env_info: str = "",
-    ) -> str:
-        toc_items = "\n".join([f'<li><a href="#{c.get("slug", f"sec-{i}")}">{c.get("title","")}</a></li>' for i, c in enumerate(chapters)])
-        chapters_html = "\n".join([self._render_chapter(c, idx) for idx, c in enumerate(chapters)])
+class HTMLRenderer(Renderer):
+    def render(self, ctx: RenderContext, **kwargs) -> str:
+        toc_items = "\n".join(
+            [f'<li><a href="#{c.get("slug", f"sec-{i}")}">{c.get("title","")}</a></li>' for i, c in enumerate(ctx.chapters)]
+        )
+        chapters_html = "\n".join([self._render_chapter(c, idx) for idx, c in enumerate(ctx.chapters)])
         return HTML_TEMPLATE.format(
-            title=title,
-            subtitle=subtitle,
+            title=ctx.title,
+            subtitle=ctx.subtitle,
             toc_items=toc_items,
             chapters_html=chapters_html,
-            model_info=model_info or "n/a",
-            data_time=data_time or "n/a",
-            env_info=env_info or "n/a",
+            model_info=ctx.model_info or "n/a",
+            data_time=ctx.data_time or "n/a",
+            env_info=ctx.env_info or "n/a",
         )
 
     def _render_chapter(self, chapter: Dict[str, Any], idx: int) -> str:

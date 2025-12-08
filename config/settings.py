@@ -107,6 +107,8 @@ class ReportEngineConf:
     template_dir: str = "core/report_engine/templates"
     pdf_enabled: bool = True
     max_words: int = 6000
+    scenario: str = "default"
+    model_tiers: Dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -263,6 +265,8 @@ class Settings:
         re_tpl = os.getenv('PAPERBOT_RE_TEMPLATE_DIR')
         re_pdf = os.getenv('PAPERBOT_RE_PDF_ENABLED')
         re_max = os.getenv('PAPERBOT_RE_MAX_WORDS')
+        re_scenario = os.getenv('PAPERBOT_RE_SCENARIO')
+        re_tiers = os.getenv('PAPERBOT_RE_MODEL_TIERS')  # 格式: task:model,task:model
         if re_enabled is not None:
             self.report_engine.enabled = re_enabled.lower() in ("1", "true", "yes", "on")
         if re_api:
@@ -282,6 +286,15 @@ class Settings:
                 self.report_engine.max_words = int(re_max)
             except ValueError:
                 pass
+        if re_scenario:
+            self.report_engine.scenario = re_scenario
+        if re_tiers:
+            tiers = {}
+            for pair in re_tiers.split(","):
+                if ":" in pair:
+                    k, v = pair.split(":", 1)
+                    tiers[k.strip()] = v.strip()
+            self.report_engine.model_tiers = tiers
 
         # 主持人 LLM
         host_api = os.getenv('PAPERBOT_HOST_API_KEY')

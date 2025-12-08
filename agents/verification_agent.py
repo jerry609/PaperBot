@@ -16,6 +16,7 @@ Uses Mixin pattern:
 from typing import Dict, List, Any, Optional
 from .base_agent import BaseAgent
 from .mixins import SemanticScholarMixin, TextParsingMixin
+from .mixins.json_parser import JSONParseError
 from core.report_engine import ReportEngine, ReportEngineConfig, ReportResult
 from pathlib import Path
 import os
@@ -66,12 +67,16 @@ When uncertain, acknowledge the uncertainty rather than making unfounded claims.
         
         # Step 3: Overall assessment
         overall = self._compute_overall_assessment(verification_results)
-        
-        return {
-            "paper_title": title,
-            "claims": verification_results,
-            "overall_assessment": overall
-        }
+
+        try:
+            structured = {
+                "paper_title": title,
+                "claims": verification_results,
+                "overall_assessment": overall
+            }
+            return self._parse_structured(structured)
+        except Exception as exc:
+            return self._on_failure(exc)
 
     def _post_process(self, result: Dict[str, Any]) -> Dict[str, Any]:
         result = super()._post_process(result)
@@ -103,6 +108,10 @@ When uncertain, acknowledge the uncertainty rather than making unfounded claims.
                 rendered = {"error": str(exc)}
         result["report_engine"] = rendered
         return result
+
+    def _parse_structured(self, raw: Dict[str, Any]) -> Dict[str, Any]:
+        """可覆写的结构化解析钩子，当前直接返回."""
+        return raw
 
     # ==================== Helpers ====================
     def _get_report_engine(self) -> Optional[ReportEngine]:

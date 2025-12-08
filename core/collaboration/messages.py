@@ -18,6 +18,8 @@ class MessageType(str, Enum):
     ERROR = "error"  # Agent encountered an error
     SYNTHESIS = "synthesis"  # Coordinator synthesized insights
     HOST_GUIDANCE = "host_guidance"  # Host/主持人引导语
+    STAGE_EVENT = "stage_event"  # Pipeline stage event
+    FALLBACK = "fallback"  # 降级或回退
 
 
 @dataclass
@@ -55,6 +57,26 @@ class AgentMessage:
             "round_index": self.round_index,
             "stage": self.stage,
         }
+
+    @classmethod
+    def stage_event(cls, stage: str, event: str, **metadata) -> "AgentMessage":
+        return cls(
+            sender="SYSTEM",
+            message_type=MessageType.STAGE_EVENT,
+            content=event,
+            stage=stage,
+            metadata=metadata,
+        )
+
+    @classmethod
+    def fallback(cls, stage: str, reason: str, **metadata) -> "AgentMessage":
+        return cls(
+            sender="SYSTEM",
+            message_type=MessageType.FALLBACK,
+            content=reason,
+            stage=stage,
+            metadata=metadata,
+        )
     
     @classmethod
     def insight(cls, sender: str, content: str, **metadata) -> "AgentMessage":

@@ -21,6 +21,8 @@ class ReportEngineConfig:
     template_dir: Path = Path("core/report_engine/templates")
     pdf_enabled: bool = True
     max_words: int = 6000
+    scenario: str = "default"  # default / review / verification / compare / scholar
+    model_tiers: Dict[str, str] = None  # task_type -> model name
 
 
 @dataclass

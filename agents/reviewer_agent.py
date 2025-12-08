@@ -15,6 +15,7 @@ Uses Mixin pattern:
 from typing import Dict, List, Any, Optional
 from .base_agent import BaseAgent
 from .mixins import TextParsingMixin
+from .mixins.json_parser import JSONParseError
 from core.report_engine import ReportEngine, ReportEngineConfig, ReportResult
 
 
@@ -71,9 +72,13 @@ Be direct but respectful. Prioritize scientific correctness and reproducibility.
         novelty = await self._assess_novelty(title, abstract, related_work)
         
         # Phase 4: Final Decision
-        return await self._generate_final_review(
-            title, abstract, preliminary, deep_critique, novelty
-        )
+        try:
+            structured = await self._generate_final_review(
+                title, abstract, preliminary, deep_critique, novelty
+            )
+            return self._parse_structured(structured)
+        except Exception as exc:
+            return self._on_failure(exc)
 
     def _post_process(self, result: Dict[str, Any]) -> Dict[str, Any]:
         result = super()._post_process(result)
@@ -105,6 +110,10 @@ Be direct but respectful. Prioritize scientific correctness and reproducibility.
                 rendered = {"error": str(exc)}
         result["report_engine"] = rendered
         return result
+
+    def _parse_structured(self, raw: Dict[str, Any]) -> Dict[str, Any]:
+        """可覆写的结构化解析钩子，当前直接返回."""
+        return raw
 
     # ==================== Helpers ====================
     def _get_report_engine(self) -> Optional[ReportEngine]:

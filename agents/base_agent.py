@@ -5,9 +5,10 @@ from abc import ABC, abstractmethod
 import logging
 import os
 from anthropic import AsyncAnthropic
+from .mixins.json_parser import JSONParserMixin, JSONParseError
 
 
-class BaseAgent(ABC):
+class BaseAgent(ABC, JSONParserMixin):
     """
     基础代理类，定义所有代理的通用接口。
     
@@ -73,6 +74,21 @@ class BaseAgent(ABC):
         if "status" not in result:
             result["status"] = "success"
         return result
+
+    # ==================== Hook for structured parsing ====================
+    def _parse_structured(self, raw: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        钩子：子类可覆盖以做结构化解析/清洗。
+        默认直接返回。
+        """
+        return raw
+
+    def _on_failure(self, error: Exception) -> Dict[str, Any]:
+        """
+        钩子：统一处理失败，便于子类降级。
+        """
+        self.log_error(error, {"context": "on_failure"})
+        return {"status": "error", "error": str(error)}
     
     # ==================== LLM Utilities ====================
 
