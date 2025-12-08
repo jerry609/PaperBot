@@ -1,0 +1,113 @@
+{# 学术报告模板（IMRaD 风格，适配 ExperimentManager 输出） #}
+
+# {{ report.title or "学术实验报告" }}
+
+## 摘要
+{{ report.abstract or "（自动生成摘要占位，可由 LLM 填充）" }}
+
+---
+
+## 1. 引言
+- 研究背景：{{ report.background or "（背景占位）" }}
+- 研究问题（RQ）：
+{% if report.research_questions %}
+{% for rq in report.research_questions %}
+- {{ rq }}
+{% endfor %}
+{% else %}
+- （RQ 占位）
+{% endif %}
+- 假设（可选）：{{ report.hypothesis or "（假设占位）" }}
+
+## 2. 数据集
+- 数据集名称：{{ dataset.name }}
+- 数据来源/许可：{{ dataset.license or "未注明" }}
+- 规模：{{ dataset.size }} 条
+- 标签分布：{{ dataset.label_distribution }}
+- 划分：{{ dataset.splits or "未划分 / 全量评测" }}
+- 预处理：{{ dataset.preprocessing or "（预处理说明占位）" }}
+
+## 3. 方法与配置
+- 实验名称：{{ experiment.name }}
+- 随机种子：{{ experiment.seed }}
+- 任务类型：{{ experiment.task or "classification" }}
+- 模型列表：
+{% for m in experiment.models %}
+  - {{ m.name }}（type={{ m.type }}{% if m.checkpoint %}, ckpt={{ m.checkpoint }}{% endif %})
+{% endfor %}
+- 评价指标：{{ experiment.metrics | join(", ") }}
+- 运行时间：{{ experiment.runtime or "未记录" }}
+
+## 4. 实验结果
+### 4.1 指标总览
+| 模型 | 指标 | 值 |
+|------|------|----|
+{% for r in results %}
+{% for k,v in r.metrics.items() %}
+| {{ r.model }} | {{ k }} | {{ "%.4f"|format(v) if v is number else v }} |
+{% endfor %}
+{% endfor %}
+
+### 4.2 结果解读
+{{ report.findings or "（结果解读占位，可由 LLM 生成）" }}
+
+## 4.3 复现信息
+{% if meta %}
+- Git Commit: {{ meta.git_commit or "未提供" }}
+- Pip Freeze（截断）:
+{% if meta.pip_freeze %}
+{% for dep in meta.pip_freeze[:20] %}
+  - {{ dep }}
+{% endfor %}
+{% else %}
+  - 未提供
+{% endif %}
+{% else %}
+（未提供 meta 信息）
+{% endif %}
+
+## 4.4 影响力与发表信息
+{% set academic_metrics = influence.metrics_breakdown.academic if influence.metrics_breakdown else {} %}
+{% set weights = influence.metrics_breakdown.weights if influence.metrics_breakdown else {} %}
+- 发表级别：{% if academic_metrics.venue_tier == 1 %}Tier1{% elif academic_metrics.venue_tier == 2 %}Tier2{% else %}Other{% endif %}
+- 时间衰减系数：{{ "%.2f"|format(weights.recency_factor) if weights and weights.recency_factor is not none else "1.00" }}
+- 代码信心分：{{ code_analysis.confidence if code_analysis.confidence is not none else "-" }}
+
+## 5. 可复现性验证
+{% if repro and repro.status %}
+- 状态: {{ repro.status }} (score={{ repro.score or "-" }})
+- 耗时: {{ repro.duration_sec or "-" }} 秒
+- 退出码: {{ repro.exit_code or "-" }}
+- 命令:
+{% for c in repro.commands or [] %}
+  - {{ c }}
+{% endfor %}
+- 日志摘要:
+```
+{{ repro.logs or "无" }}
+```
+{% else %}
+未执行可复现性验证
+{% endif %}
+
+## 5. 讨论
+- 主要发现：{{ report.discussion.main_points or "（占位）" }}
+- 误差或局限：{{ report.discussion.limitations or "（占位）" }}
+- 对比基线/相关工作：{{ report.discussion.related_work or "（占位）" }}
+
+## 6. 结论与未来工作
+- 结论：{{ report.conclusion or "（占位）" }}
+- 后续改进：{{ report.future_work or "（占位）" }}
+
+---
+
+## 附录
+- 实验配置：见 meta.json（config、seed、依赖版本）
+- 图表占位：
+  - 情感分布图：{{ charts.sentiment_distribution or "未生成" }}
+  - 时序曲线：{{ charts.timeline or "未生成" }}
+  - 其他：{{ charts.extra or "无" }}
+
+*报告生成时间：{{ generated_at }}*  
+*由 BettaFish Academic Edition 自动生成*  
+

@@ -40,7 +40,7 @@ class ScholarTrackingWorkflow:
         """延迟初始化协调器"""
         if self._coordinator is None:
             try:
-                from core.workflow_coordinator import ScholarWorkflowCoordinator
+                from paperbot.core.workflow_coordinator import ScholarWorkflowCoordinator
                 self._coordinator = ScholarWorkflowCoordinator(self.config)
             except ImportError as e:
                 self.logger.error(f"Failed to import ScholarWorkflowCoordinator: {e}")

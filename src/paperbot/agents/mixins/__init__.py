@@ -1,5 +1,7 @@
+# src/paperbot/agents/mixins/__init__.py
 """
-Agent Mixins - 共享功能模块。
+Mixins for PaperBot Agents.
+Provides reusable functionality following DRY principle.
 """
 
 from .semantic_scholar import SemanticScholarMixin
@@ -12,4 +14,3 @@ __all__ = [
     "JSONParserMixin",
     "JSONParseError",
 ]
-

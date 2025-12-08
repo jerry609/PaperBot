@@ -150,4 +150,3 @@ class SemanticScholarMixin:
             )
         
         return "\n".join(formatted)
-

@@ -11,7 +11,7 @@ from typing import Any, Callable, List, Optional, Dict
 try:
     from src.paperbot.core.abstractions import ExecutionResult, ensure_execution_result
 except ImportError:
-    from core.abstractions import ExecutionResult, ensure_execution_result
+    from paperbot.core.abstractions import ExecutionResult, ensure_execution_result
 
 
 @dataclass

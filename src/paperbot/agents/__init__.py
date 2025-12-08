@@ -1,44 +1,34 @@
+# src/paperbot/agents/__init__.py
 """
-Agent 层 - 所有智能代理的入口。
+PaperBot Agent 模块。
+
+提供各类 AI Agent 实现：
+- BaseAgent: Agent 基类
+- ResearchAgent: 论文研究 Agent
+- CodeAnalysisAgent: 代码分析 Agent
+- QualityAgent: 质量评估 Agent
+- DocumentationAgent: 文档生成 Agent
+- ConferenceResearchAgent: 会议论文抓取 Agent
+- ReviewerAgent: 论文评审 Agent
+- VerificationAgent: 声明验证 Agent
 """
 
 from .base import BaseAgent
-from .mixins import SemanticScholarMixin, TextParsingMixin, JSONParserMixin, JSONParseError
-
-# 为了兼容，也从根目录 agents 导出具体实现
-try:
-    from agents import (
-        ResearchAgent,
-        CodeAnalysisAgent,
-        QualityAgent,
-        DocumentationAgent,
-        ReviewerAgent,
-        VerificationAgent,
-        ConferenceResearchAgent,
-    )
-except ImportError:
-    ResearchAgent = None
-    CodeAnalysisAgent = None
-    QualityAgent = None
-    DocumentationAgent = None
-    ReviewerAgent = None
-    VerificationAgent = None
-    ConferenceResearchAgent = None
+from .research.agent import ResearchAgent
+from .code_analysis.agent import CodeAnalysisAgent
+from .quality.agent import QualityAgent
+from .documentation.agent import DocumentationAgent
+from .conference.agent import ConferenceResearchAgent
+from .review.agent import ReviewerAgent
+from .verification.agent import VerificationAgent
 
 __all__ = [
-    # 基类
     "BaseAgent",
-    # Mixins
-    "SemanticScholarMixin",
-    "TextParsingMixin",
-    "JSONParserMixin",
-    "JSONParseError",
-    # 具体 Agent（兼容）
     "ResearchAgent",
     "CodeAnalysisAgent",
     "QualityAgent",
     "DocumentationAgent",
+    "ConferenceResearchAgent",
     "ReviewerAgent",
     "VerificationAgent",
-    "ConferenceResearchAgent",
 ]

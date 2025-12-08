@@ -1,27 +1,20 @@
 # src/paperbot/agents/base.py
 """
-基础 Agent 类，定义所有代理的通用接口。
+基础代理类，定义所有代理的通用接口。
 """
 
 from typing import Any, Dict, List, Optional
 from abc import ABC, abstractmethod
 import logging
 import os
+from anthropic import AsyncAnthropic
 
-try:
-    from anthropic import AsyncAnthropic
-except ImportError:
-    AsyncAnthropic = None
-
-try:
-    from src.paperbot.core.abstractions import Executable, ExecutionResult, ensure_execution_result
-    from src.paperbot.core.di import Container
-except ImportError:
-    from core.abstractions import Executable, ExecutionResult, ensure_execution_result
-    from core.di.container import Container
+from paperbot.core.abstractions import Executable, ExecutionResult, ensure_execution_result
+from paperbot.core.di import Container
+from .mixins.json_parser import JSONParserMixin, JSONParseError
 
 
-class BaseAgent(Executable[Dict[str, Any], Dict[str, Any]], ABC):
+class BaseAgent(Executable[Dict[str, Any], Dict[str, Any]], ABC, JSONParserMixin):
     """
     基础代理类，定义所有代理的通用接口。
     
@@ -38,11 +31,12 @@ class BaseAgent(Executable[Dict[str, Any], Dict[str, Any]], ABC):
         
         # Initialize Anthropic client
         api_key = self.config.get('anthropic_api_key') or os.getenv('ANTHROPIC_API_KEY')
-        self.client = AsyncAnthropic(api_key=api_key) if AsyncAnthropic and api_key else None
+        self.client = AsyncAnthropic(api_key=api_key) if api_key else None
 
         # 可选注入的统一 LLMClient（DI）
         try:
-            from src.paperbot.infrastructure.llm import LLMClient
+            from paperbot.infrastructure.llm.base import LLMClient
+
             try:
                 self.llm_client = self.container.resolve(LLMClient)
             except Exception:
@@ -163,4 +157,3 @@ class BaseAgent(Executable[Dict[str, Any], Dict[str, Any]], ABC):
     def log_info(self, message: str, context: Optional[Dict[str, Any]] = None):
         """记录信息"""
         self.logger.info(message, extra={"context": context})
-

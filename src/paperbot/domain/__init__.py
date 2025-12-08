@@ -1,16 +1,34 @@
+# src/paperbot/domain/__init__.py
 """
-领域模型层 - 核心业务实体。
+PaperBot 领域模型层。
+
+包含核心业务实体和领域逻辑：
+- paper: 论文相关模型
+- scholar: 学者相关模型
+- influence: 影响力计算
 """
 
 from .paper import PaperMeta, CodeMeta
 from .scholar import Scholar
-from .influence import InfluenceResult, InfluenceLevel
+from .influence import (
+    InfluenceCalculator,
+    InfluenceResult,
+    AcademicMetrics,
+    EngineeringMetrics,
+    AcademicMetricsCalculator,
+    EngineeringMetricsCalculator,
+    INFLUENCE_WEIGHTS,
+)
 
 __all__ = [
     "PaperMeta",
     "CodeMeta",
     "Scholar",
+    "InfluenceCalculator",
     "InfluenceResult",
-    "InfluenceLevel",
+    "AcademicMetrics",
+    "EngineeringMetrics",
+    "AcademicMetricsCalculator",
+    "EngineeringMetricsCalculator",
+    "INFLUENCE_WEIGHTS",
 ]
-

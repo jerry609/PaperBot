@@ -145,4 +145,3 @@ class TextParsingMixin:
         if match:
             return match.group(1).strip()
         return text.strip()
-

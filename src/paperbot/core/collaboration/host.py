@@ -51,7 +51,7 @@ class HostOrchestrator:
                 )
             except ImportError:
                 try:
-                    from core.llm_client import LLMClient
+                    from paperbot.core.llm_client import LLMClient
                     self.llm = LLMClient(
                         api_key=config.api_key,
                         model_name=config.model,

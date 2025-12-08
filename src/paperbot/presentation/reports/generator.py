@@ -53,7 +53,7 @@ class ReportGenerator:
         """
         # 委托给 ReportWriter
         try:
-            from reports.writer import ReportWriter
+            from paperbot.presentation.reports.writer import ReportWriter
             writer = ReportWriter(output_dir=self.output_dir)
             
             # 从数据中提取必要信息
