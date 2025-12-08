@@ -187,6 +187,185 @@ python main.py gen-code --title "..." --abstract "..." --method "The model consi
 
 ## 📂 目录结构
 
+> **注意**: 项目正在进行架构重构，新代码位于 `src/paperbot/`，旧代码保留在根目录以保持向后兼容。
+
+### 新架构 (src/paperbot/) - 推荐
+
+```
+PaperBot/
+│
+├── src/
+│   └── paperbot/                      # 主包
+│       ├── __init__.py                # 统一导出
+│       │
+│       ├── core/                      # 核心抽象层
+│       │   ├── abstractions/          # Executable, ExecutionResult
+│       │   │   ├── __init__.py
+│       │   │   └── executable.py
+│       │   ├── pipeline/              # Pipeline 抽象
+│       │   │   ├── __init__.py
+│       │   │   ├── pipeline.py
+│       │   │   └── context.py
+│       │   ├── di/                    # 依赖注入
+│       │   │   ├── __init__.py
+│       │   │   ├── container.py
+│       │   │   └── bootstrap.py
+│       │   ├── errors/                # 统一错误
+│       │   │   ├── __init__.py
+│       │   │   └── errors.py
+│       │   ├── collaboration/         # 协作总线
+│       │   │   ├── __init__.py
+│       │   │   ├── bus.py
+│       │   │   ├── host.py
+│       │   │   └── messages.py
+│       │   ├── report_engine/         # 报告引擎
+│       │   │   ├── __init__.py
+│       │   │   ├── engine.py
+│       │   │   ├── renderers/
+│       │   │   └── templates/
+│       │   └── state.py
+│       │
+│       ├── agents/                    # Agent 层
+│       │   ├── __init__.py
+│       │   ├── base.py                # BaseAgent
+│       │   ├── mixins/                # 共享 Mixin
+│       │   │   ├── __init__.py
+│       │   │   ├── semantic_scholar.py
+│       │   │   ├── text_parsing.py
+│       │   │   └── json_parser.py
+│       │   ├── prompts/               # Prompt 模板
+│       │   │   ├── __init__.py
+│       │   │   ├── research.py
+│       │   │   ├── code_analysis.py
+│       │   │   └── quality.py
+│       │   ├── state/                 # Agent 状态
+│       │   │   ├── __init__.py
+│       │   │   └── base_state.py
+│       │   ├── research/              # ResearchAgent
+│       │   │   ├── __init__.py
+│       │   │   └── agent.py
+│       │   ├── code_analysis/         # CodeAnalysisAgent
+│       │   │   ├── __init__.py
+│       │   │   └── agent.py
+│       │   ├── quality/               # QualityAgent
+│       │   │   ├── __init__.py
+│       │   │   └── agent.py
+│       │   ├── review/                # ReviewerAgent
+│       │   │   ├── __init__.py
+│       │   │   └── agent.py
+│       │   ├── verification/          # VerificationAgent
+│       │   │   ├── __init__.py
+│       │   │   └── agent.py
+│       │   └── conference/            # ConferenceResearchAgent
+│       │       ├── __init__.py
+│       │       └── agent.py
+│       │
+│       ├── infrastructure/            # 基础设施层
+│       │   ├── __init__.py
+│       │   ├── llm/                   # LLM 客户端
+│       │   │   ├── __init__.py
+│       │   │   ├── base.py
+│       │   │   ├── anthropic.py
+│       │   │   └── openai.py
+│       │   ├── api_clients/           # 外部 API
+│       │   │   ├── __init__.py
+│       │   │   ├── base.py
+│       │   │   ├── semantic_scholar.py
+│       │   │   └── github.py
+│       │   ├── storage/               # 存储
+│       │   │   ├── __init__.py
+│       │   │   ├── cache.py
+│       │   │   └── report_store.py
+│       │   └── services/              # 业务服务
+│       │       ├── __init__.py
+│       │       ├── paper_fetcher.py
+│       │       └── scholar_tracker.py
+│       │
+│       ├── domain/                    # 领域模型层
+│       │   ├── __init__.py
+│       │   ├── paper.py               # PaperMeta, CodeMeta
+│       │   ├── scholar.py             # Scholar
+│       │   ├── influence/             # 影响力计算
+│       │   │   ├── __init__.py
+│       │   │   ├── result.py
+│       │   │   ├── calculator.py
+│       │   │   ├── metrics/
+│       │   │   └── weights.py
+│       │   └── events.py              # 领域事件
+│       │
+│       ├── workflows/                 # 工作流层
+│       │   ├── __init__.py
+│       │   ├── coordinator.py         # ScholarWorkflowCoordinator
+│       │   ├── scholar_tracking.py    # 学者追踪工作流
+│       │   ├── paper_review.py        # 论文评审工作流
+│       │   └── nodes/                 # 工作流节点
+│       │       ├── __init__.py
+│       │       ├── fetch_node.py
+│       │       ├── analysis_node.py
+│       │       └── report_node.py
+│       │
+│       ├── presentation/              # 展示层
+│       │   ├── __init__.py
+│       │   ├── cli/                   # CLI
+│       │   │   ├── __init__.py
+│       │   │   ├── main.py
+│       │   │   └── commands/
+│       │   ├── reports/               # 报告生成
+│       │   │   ├── __init__.py
+│       │   │   ├── generator.py
+│       │   │   ├── writer.py
+│       │   │   └── templates/
+│       │   └── api/                   # REST API (可选)
+│       │       ├── __init__.py
+│       │       └── routes.py
+│       │
+│       ├── repro/                     # 复现模块
+│       │   ├── __init__.py
+│       │   ├── agent.py
+│       │   ├── docker_executor.py
+│       │   ├── models.py
+│       │   └── nodes/
+│       │
+│       └── utils/                     # 工具函数
+│           ├── __init__.py
+│           ├── retry_helper.py
+│           ├── text_processing.py
+│           └── downloader.py
+│
+├── config/                            # 配置文件
+│   ├── config.yaml
+│   ├── scholar_subscriptions.yaml
+│   └── top_venues.yaml
+│
+├── tests/                             # 测试目录
+│   ├── __init__.py
+│   ├── unit/                          # 单元测试
+│   │   ├── test_abstractions.py
+│   │   ├── test_pipeline.py
+│   │   ├── test_di_container.py
+│   │   ├── test_errors.py
+│   │   ├── test_agents/
+│   │   └── test_domain/
+│   ├── integration/                   # 集成测试
+│   │   ├── test_workflow.py
+│   │   └── test_api_clients.py
+│   └── e2e/                           # 端到端测试
+│       └── test_full_pipeline.py
+│
+├── output/                            # 输出目录
+│   ├── reports/
+│   └── experiments/
+│
+├── cache/                             # 缓存目录
+│
+├── main.py                            # 入口点
+├── requirements.txt
+├── pyproject.toml                     # 包配置
+└── README.md
+```
+
+### 旧架构 (根目录) - 兼容保留
+
 ```
 PaperBot/
 ├── main.py                 # 统一入口脚本
@@ -226,6 +405,36 @@ PaperBot/
 ├── utils/                  # 通用工具
 ├── tests/                  # 测试
 └── output/                 # 生成的报告
+```
+
+### 架构设计原则
+
+新架构遵循分层设计：
+
+| 层级 | 目录 | 职责 |
+|------|------|------|
+| **Core** | `core/` | 核心抽象（Executable、Pipeline、DI、Errors） |
+| **Domain** | `domain/` | 业务实体（Paper、Scholar、Influence） |
+| **Infrastructure** | `infrastructure/` | 外部依赖封装（LLM、API、Storage） |
+| **Agents** | `agents/` | 智能代理实现 |
+| **Workflows** | `workflows/` | 业务流程编排 |
+| **Presentation** | `presentation/` | 用户接口（CLI、Reports、API） |
+
+### 使用新架构
+
+```python
+# 导入新架构组件
+from src.paperbot import (
+    ScholarTrackingWorkflow,
+    PaperMeta,
+    InfluenceResult,
+    Pipeline,
+    Container,
+)
+
+# 使用工作流
+workflow = ScholarTrackingWorkflow(config)
+result = await workflow.analyze_paper(paper)
 ```
 
 ## � 论文分析流水线
