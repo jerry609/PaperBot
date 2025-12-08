@@ -7,22 +7,23 @@ This agent:
 1. Extracts key claims from a paper abstract.
 2. Searches for evidence in related literature (via Semantic Scholar API).
 3. Labels each claim as: Supported, Refuted, Controversial, or Unverified.
+
+Uses Mixin pattern:
+- SemanticScholarMixin: S2 API search
+- TextParsingMixin: Text extraction utilities
 """
 
 from typing import Dict, List, Any, Optional
-import asyncio
-import aiohttp
 from .base_agent import BaseAgent
+from .mixins import SemanticScholarMixin, TextParsingMixin
 
 
-class VerificationAgent(BaseAgent):
+class VerificationAgent(BaseAgent, SemanticScholarMixin, TextParsingMixin):
     """
     Verifies scientific claims by retrieving corroborating or refuting evidence.
     Uses multi-perspective questioning to find balanced evidence.
     """
 
-    S2_API_BASE = "https://api.semanticscholar.org/graph/v1"
-    
     VERIFICATION_SYSTEM_PROMPT = """You are a scientific fact-checker.
 Your job is to verify claims by finding and analyzing evidence.
 Be objective and consider evidence from multiple perspectives.
@@ -30,28 +31,20 @@ When uncertain, acknowledge the uncertainty rather than making unfounded claims.
 
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         super().__init__(config)
-        self.s2_api_key = config.get('semantic_scholar_api_key') if config else None
+        self.init_s2_client(config)  # Initialize S2 mixin
 
-    async def process(self, *args, **kwargs) -> Dict[str, Any]:
-        """
-        Verify claims from a paper.
-        
-        Args (via kwargs):
-            title: Paper title
-            abstract: Paper abstract
-            num_claims: Number of claims to extract (default: 3)
-            search_limit: Number of related papers to search (default: 10)
-        
-        Returns:
-            Dictionary with extracted claims and verification results.
-        """
+    def _validate_input(self, *args, **kwargs) -> Optional[Dict[str, Any]]:
+        """Validate that title and abstract are provided."""
+        if not kwargs.get("title") or not kwargs.get("abstract"):
+            return {"status": "error", "error": "VerificationAgent requires 'title' and 'abstract' arguments."}
+        return None
+
+    async def _execute(self, *args, **kwargs) -> Dict[str, Any]:
+        """Core execution: verify claims from paper."""
         title = kwargs.get("title")
         abstract = kwargs.get("abstract")
         num_claims = kwargs.get("num_claims", 3)
         search_limit = kwargs.get("search_limit", 10)
-        
-        if not title or not abstract:
-            raise ValueError("VerificationAgent requires 'title' and 'abstract' arguments.")
         
         # Step 1: Extract key claims
         claims = await self._extract_claims(title, abstract, num_claims)
@@ -77,9 +70,7 @@ When uncertain, acknowledge the uncertainty rather than making unfounded claims.
         }
 
     async def _extract_claims(self, title: str, abstract: str, num_claims: int) -> List[str]:
-        """
-        Extract the top N verifiable claims from the abstract.
-        """
+        """Extract the top N verifiable claims from the abstract."""
         prompt = f"""Extract the {num_claims} most important **verifiable claims** from this paper.
 
 **Title:** {title}
@@ -96,15 +87,8 @@ Example format:
 
         response = await self.ask_claude(prompt, system=self.VERIFICATION_SYSTEM_PROMPT, max_tokens=500)
         
-        # Parse numbered claims
-        claims = []
-        import re
-        matches = re.findall(r'\d+\.\s*(.+?)(?=\n\d+\.|\Z)', response, re.DOTALL)
-        for match in matches[:num_claims]:
-            claim = match.strip()
-            if claim:
-                claims.append(claim)
-        
+        # Use mixin method for parsing
+        claims = self.extract_numbered_items(response, max_items=num_claims)
         return claims if claims else ["No extractable claims found."]
 
     async def _gather_evidence(self, claim: str, paper_title: str, limit: int) -> Dict[str, Any]:
@@ -116,9 +100,9 @@ Example format:
         supporting_query = await self._generate_search_query(claim, "supporting")
         refuting_query = await self._generate_search_query(claim, "refuting")
         
-        # Search Semantic Scholar
-        supporting_papers = await self._search_semantic_scholar(supporting_query, limit)
-        refuting_papers = await self._search_semantic_scholar(refuting_query, limit)
+        # Search Semantic Scholar (using mixin)
+        supporting_papers = await self.search_semantic_scholar(supporting_query, limit)
+        refuting_papers = await self.search_semantic_scholar(refuting_query, limit)
         
         return {
             "supporting_query": supporting_query,
@@ -128,9 +112,7 @@ Example format:
         }
 
     async def _generate_search_query(self, claim: str, perspective: str) -> str:
-        """
-        Generate a search query to find evidence from a specific perspective.
-        """
+        """Generate a search query to find evidence from a specific perspective."""
         prompt = f"""Generate a search query to find {perspective} evidence for this claim:
 
 **Claim:** {claim}
@@ -141,53 +123,14 @@ Do not include quotes or boolean operators."""
         response = await self.ask_claude(prompt, max_tokens=50)
         return response.strip()
 
-    async def _search_semantic_scholar(self, query: str, limit: int) -> List[Dict[str, Any]]:
-        """
-        Search Semantic Scholar for papers related to the query.
-        """
-        papers = []
-        
-        try:
-            async with aiohttp.ClientSession() as session:
-                headers = {"x-api-key": self.s2_api_key} if self.s2_api_key else {}
-                params = {
-                    "query": query,
-                    "limit": limit,
-                    "fields": "title,abstract,citationCount,year,authors"
-                }
-                
-                async with session.get(
-                    f"{self.S2_API_BASE}/paper/search",
-                    params=params,
-                    headers=headers
-                ) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        for paper in data.get("data", []):
-                            papers.append({
-                                "title": paper.get("title"),
-                                "abstract": paper.get("abstract", "")[:500] if paper.get("abstract") else "",
-                                "citation_count": paper.get("citationCount", 0),
-                                "year": paper.get("year"),
-                                "authors": [a.get("name") for a in paper.get("authors", [])[:3]]
-                            })
-                    else:
-                        self.logger.warning(f"S2 API returned status {resp.status}")
-        except Exception as e:
-            self.log_error(e, {"context": "semantic_scholar_search", "query": query})
-        
-        return papers
-
     async def _evaluate_evidence(self, claim: str, evidence: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Evaluate the gathered evidence and determine a verdict for the claim.
-        """
+        """Evaluate the gathered evidence and determine a verdict for the claim."""
         supporting = evidence.get("supporting_papers", [])
         refuting = evidence.get("refuting_papers", [])
         
-        # Format evidence for LLM
-        supporting_str = self._format_papers(supporting[:3])
-        refuting_str = self._format_papers(refuting[:3])
+        # Format evidence for LLM (using mixin)
+        supporting_str = self.format_papers_for_context(supporting[:3])
+        refuting_str = self.format_papers_for_context(refuting[:3])
         
         prompt = f"""Evaluate this scientific claim based on the evidence.
 
@@ -209,71 +152,21 @@ Be objective. If evidence is mixed or insufficient, say so."""
 
         response = await self.ask_claude(prompt, system=self.VERIFICATION_SYSTEM_PROMPT, max_tokens=600)
         
-        # Parse response
-        verdict = self._extract_verdict(response)
-        
+        # Parse response using mixin methods
         return {
-            "verdict": verdict,
-            "confidence": self._extract_confidence(response),
-            "reasoning": self._extract_field(response, "Reasoning"),
-            "key_evidence": self._extract_field(response, "Key Evidence"),
+            "verdict": self.extract_verdict(response),
+            "confidence": self.extract_confidence(response),
+            "reasoning": self.extract_field(response, "Reasoning"),
+            "key_evidence": self.extract_field(response, "Key Evidence"),
             "raw_response": response
         }
 
-    def _format_papers(self, papers: List[Dict[str, Any]]) -> str:
-        """Format papers for LLM context."""
-        if not papers:
-            return ""
-        formatted = []
-        for i, p in enumerate(papers, 1):
-            authors = ", ".join(p.get("authors", [])[:2])
-            if len(p.get("authors", [])) > 2:
-                authors += " et al."
-            formatted.append(
-                f"{i}. \"{p.get('title', 'Unknown')}\" ({p.get('year', 'N/A')})\n"
-                f"   Authors: {authors}\n"
-                f"   Citations: {p.get('citation_count', 0)}\n"
-                f"   Abstract: {p.get('abstract', 'N/A')[:200]}..."
-            )
-        return "\n".join(formatted)
-
-    def _extract_verdict(self, text: str) -> str:
-        """Extract the verdict from LLM response."""
-        import re
-        verdicts = [
-            "Strongly Supported", "Weakly Supported", "Controversial",
-            "Weakly Refuted", "Strongly Refuted", "Unverified"
-        ]
-        for v in verdicts:
-            if v.lower() in text.lower():
-                return v
-        return "Unverified"
-
-    def _extract_confidence(self, text: str) -> str:
-        """Extract confidence level from response."""
-        import re
-        for conf in ["High", "Medium", "Low"]:
-            if conf.lower() in text.lower():
-                return conf
-        return "Medium"
-
-    def _extract_field(self, text: str, field: str) -> str:
-        """Extract a text field value."""
-        import re
-        pattern = rf'{field}[:\s]*(.+?)(?=\n\*\*|\n\d\.|\Z)'
-        match = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
-        if match:
-            return match.group(1).strip()[:500]
-        return ""
-
     def _compute_overall_assessment(self, results: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """
-        Compute an overall assessment of the paper's claims.
-        """
+        """Compute an overall assessment of the paper's claims."""
         verdicts = [r.get("verdict", {}).get("verdict", "Unverified") for r in results]
         
-        supported = sum(1 for v in verdicts if "Supported" in v)
-        refuted = sum(1 for v in verdicts if "Refuted" in v)
+        supported = sum(1 for v in verdicts if "Supported" in str(v))
+        refuted = sum(1 for v in verdicts if "Refuted" in str(v))
         controversial = sum(1 for v in verdicts if v == "Controversial")
         unverified = sum(1 for v in verdicts if v == "Unverified")
         

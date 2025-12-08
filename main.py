@@ -126,25 +126,25 @@ def simple_paper_download(conference: str, year: str, url: Optional[str] = None,
             print("ℹ️  CCS 下载目前不支持智能模式，将使用稳定顺序模式。")
             smart_mode = False  # 强制为顺序模式
     else:
-    from agents.conference_research_agent import ConferenceResearchAgent
+        from agents.conference_research_agent import ConferenceResearchAgent
 
-    async def _run_download():
+        async def _run_download():
+            try:
+                agent = ConferenceResearchAgent({"download_path": f'./papers/{conference}_{year}'})
+                result = await agent.process(conference, year)
+                papers = result.get("papers", [])
+                print(f"✅ 找到 {len(papers)} 篇论文")
+                with_pdf = [p for p in papers if p.get("local_path")]
+                print(f"📝 下载成功 {len(with_pdf)} 篇；含代码链接 {sum(1 for p in papers if p.get('github_links'))}")
+            except Exception as e:
+                print(f"❌ 下载过程中出现严重错误: {e}")
+
         try:
-            agent = ConferenceResearchAgent({"download_path": f'./papers/{conference}_{year}'})
-            result = await agent.process(conference, year)
-            papers = result.get("papers", [])
-            print(f"✅ 找到 {len(papers)} 篇论文")
-            with_pdf = [p for p in papers if p.get("local_path")]
-            print(f"📝 下载成功 {len(with_pdf)} 篇；含代码链接 {sum(1 for p in papers if p.get('github_links'))}")
+            asyncio.run(_run_download())
+            print("✅ 下载任务完成")
         except Exception as e:
-            print(f"❌ 下载过程中出现严重错误: {e}")
-
-    try:
-        asyncio.run(_run_download())
-        print("✅ 下载任务完成")
-    except Exception as e:
-        print(f"❌ 异步执行失败: {e}")
-        print("💡 请确保您有网络访问权限和正确的会议信息。")
+            print(f"❌ 异步执行失败: {e}")
+            print("💡 请确保您有网络访问权限和正确的会议信息。")
         
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="SecuriPaperBot - 智能论文分析工具")
@@ -189,6 +189,26 @@ def build_parser() -> argparse.ArgumentParser:
     render_parser.add_argument('--meta', required=False, help='pipeline/实验生成的 meta.json 路径，缺省自动选最新')
     render_parser.add_argument('--template', default=None, help='报告模板名称，默认使用 meta 或 settings 中配置')
     render_parser.add_argument('--output', default=None, help='输出文件路径（可选，默认按论文ID命名写入默认目录）')
+    
+    # 🆕 深度评审命令
+    review_parser = subparsers.add_parser('review', help='论文深度评审 (ReviewerAgent)')
+    review_parser.add_argument('--title', required=True, help='论文标题')
+    review_parser.add_argument('--abstract', required=True, help='论文摘要')
+    review_parser.add_argument('--output', default=None, help='输出 JSON 文件路径')
+    
+    # 🆕 声明验证命令
+    verify_parser = subparsers.add_parser('verify', help='科学声明验证 (VerificationAgent)')
+    verify_parser.add_argument('--title', required=True, help='论文标题')
+    verify_parser.add_argument('--abstract', required=True, help='论文摘要')
+    verify_parser.add_argument('--num-claims', type=int, default=3, help='提取的声明数量')
+    verify_parser.add_argument('--output', default=None, help='输出 JSON 文件路径')
+    
+    # 🆕 Paper2Code 代码生成命令
+    gencode_parser = subparsers.add_parser('gen-code', help='Paper2Code 代码生成 (ReproAgent)')
+    gencode_parser.add_argument('--title', required=True, help='论文标题')
+    gencode_parser.add_argument('--abstract', required=True, help='论文摘要')
+    gencode_parser.add_argument('--method', default=None, help='方法章节内容（可选）')
+    gencode_parser.add_argument('--output-dir', default='./generated_code', help='输出目录')
     
     parser.add_argument('--mode', choices=['production', 'academic'], default=os.getenv("PAPERBOT_MODE", "production"),
                        help='运行模式 (production/academic)')
@@ -280,6 +300,21 @@ def main():
     # 渲染报告
     if args.command == 'render-report':
         render_report(args)
+        return
+    
+    # 🆕 深度评审
+    if args.command == 'review':
+        run_review(args)
+        return
+    
+    # 🆕 声明验证
+    if args.command == 'verify':
+        run_verify(args)
+        return
+    
+    # 🆕 Paper2Code 代码生成
+    if args.command == 'gen-code':
+        run_gencode(args)
         return
     
     if args.conference and args.year:
@@ -649,6 +684,90 @@ def run_scholar_tracking(args):
         print(f"\n❌ 追踪过程出错: {e}")
         import traceback
         traceback.print_exc()
+
+
+def run_review(args):
+    """运行论文深度评审 (ReviewerAgent)"""
+    import json
+    from agents.reviewer_agent import ReviewerAgent
+    
+    print("📝 论文深度评审...")
+    print(f"   标题: {args.title}")
+    
+    async def _run():
+        agent = ReviewerAgent({})
+        result = await agent.process(
+            title=args.title,
+            abstract=args.abstract
+        )
+        return result
+    
+    result = asyncio.run(_run())
+    
+    if args.output:
+        Path(args.output).write_text(json.dumps(result, indent=2, ensure_ascii=False))
+        print(f"✅ 评审结果已保存: {args.output}")
+    else:
+        print("\n📋 评审结果:")
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+
+
+def run_verify(args):
+    """运行科学声明验证 (VerificationAgent)"""
+    import json
+    from agents.verification_agent import VerificationAgent
+    
+    print("🔍 科学声明验证...")
+    print(f"   标题: {args.title}")
+    
+    async def _run():
+        agent = VerificationAgent({})
+        result = await agent.process(
+            title=args.title,
+            abstract=args.abstract,
+            num_claims=args.num_claims
+        )
+        return result
+    
+    result = asyncio.run(_run())
+    
+    if args.output:
+        Path(args.output).write_text(json.dumps(result, indent=2, ensure_ascii=False))
+        print(f"✅ 验证结果已保存: {args.output}")
+    else:
+        print("\n📋 验证结果:")
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+
+
+def run_gencode(args):
+    """运行 Paper2Code 代码生成 (ReproAgent)"""
+    from repro import ReproAgent, PaperContext
+    
+    print("🔧 Paper2Code 代码生成...")
+    print(f"   标题: {args.title}")
+    
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    ctx = PaperContext(
+        title=args.title,
+        abstract=args.abstract,
+        method_section=args.method or ""
+    )
+    
+    async def _run():
+        agent = ReproAgent({})
+        result = await agent.reproduce_from_paper(ctx, output_dir=output_dir)
+        return result
+    
+    result = asyncio.run(_run())
+    
+    print(f"\n📦 生成结果:")
+    print(f"   状态: {result.status}")
+    print(f"   生成文件: {list(result.generated_files.keys())}")
+    print(f"   重试次数: {result.retry_count}")
+    print(f"   输出目录: {output_dir}")
+
 
 if __name__ == "__main__":
     main()

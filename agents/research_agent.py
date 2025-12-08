@@ -3,29 +3,36 @@
 from typing import Dict, List, Any, Optional
 import re
 from .base_agent import BaseAgent
+from .mixins import SemanticScholarMixin, TextParsingMixin
 
 
-class ResearchAgent(BaseAgent):
+class ResearchAgent(BaseAgent, SemanticScholarMixin, TextParsingMixin):
     """
-    单篇论文增强 Agent：摘要总结、代码链接提取、关键贡献生成
+    单篇论文增强 Agent：摘要总结、代码链接提取、关键贡献生成、文献背景分析
     （会议抓取已拆分至 ConferenceResearchAgent）
+    
+    使用 Mixin 模式：
+    - SemanticScholarMixin: S2 API 搜索
+    - TextParsingMixin: 文本解析工具
     """
-
-    S2_API_BASE = "https://api.semanticscholar.org/graph/v1"
 
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         super().__init__(config)
-        self.s2_api_key = config.get('semantic_scholar_api_key') if config else None
+        self.init_s2_client(config)  # Initialize S2 mixin
 
-    async def process(self, *args, **kwargs) -> Dict[str, Any]:
-        """仅支持单篇论文分析"""
-        if "paper_title" in kwargs:
-            return await self._analyze_single_paper(
-                title=kwargs.get("paper_title"),
-                paper_id=kwargs.get("paper_id"),
-                abstract=kwargs.get("abstract")
-            )
-        raise ValueError("Invalid arguments for ResearchAgent.process (expect paper_title/paper_id/abstract)")
+    def _validate_input(self, *args, **kwargs) -> Optional[Dict[str, Any]]:
+        """Validate that paper_title is provided."""
+        if "paper_title" not in kwargs:
+            return {"status": "error", "error": "Missing required argument: paper_title"}
+        return None
+
+    async def _execute(self, *args, **kwargs) -> Dict[str, Any]:
+        """Core execution: analyze single paper."""
+        return await self._analyze_single_paper(
+            title=kwargs.get("paper_title"),
+            paper_id=kwargs.get("paper_id"),
+            abstract=kwargs.get("abstract")
+        )
 
     async def _analyze_single_paper(self, title: str, paper_id: str, abstract: Optional[str]) -> Dict[str, Any]:
         """分析单篇论文"""
@@ -50,40 +57,39 @@ class ResearchAgent(BaseAgent):
         
         # 3. 如果启用了 LLM，可以生成 key_contributions 和 literature_grounding
         if self.client and abstract:
-             try:
-                 # 3.1 生成关键贡献
-                 prompt = f"Based on the abstract below, list 3 key contributions of the paper '{title}'.\n\nAbstract: {abstract}"
-                 response = await self.ask_claude(prompt)
-                 contributions = [line.strip('- *') for line in response.split('\n') if line.strip()]
-                 result["key_contributions"] = contributions[:3]
-                 
-                 # 3.2 Literature Grounding (Novelty Check)
-                 result["literature_grounding"] = await self._check_novelty(title, abstract, result["key_contributions"])
-                 
-             except Exception as e:
-                 self.log_error(e, {"context": "generate_analysis"})
+            try:
+                # 3.1 生成关键贡献
+                prompt = f"Based on the abstract below, list 3 key contributions of the paper '{title}'.\n\nAbstract: {abstract}"
+                response = await self.ask_claude(prompt)
+                contributions = self.extract_numbered_items(response, max_items=3)
+                if not contributions:
+                    contributions = [line.strip('- *') for line in response.split('\n') if line.strip()][:3]
+                result["key_contributions"] = contributions
+                
+                # 3.2 Literature Grounding (Novelty Check)
+                result["literature_grounding"] = await self._check_novelty(title, abstract, result["key_contributions"])
+                
+            except Exception as e:
+                self.log_error(e, {"context": "generate_analysis"})
              
         return result
 
     async def _check_novelty(self, title: str, abstract: str, contributions: List[str]) -> Dict[str, Any]:
-        """
-        Check novelty by searching prior art on Semantic Scholar.
-        """
-        import aiohttp
-        
+        """Check novelty by searching prior art on Semantic Scholar."""
         # 1. Generate search queries for prior art
         queries = await self._generate_prior_art_queries(title, contributions)
         
-        # 2. Search Semantic Scholar
+        # 2. Search Semantic Scholar (using mixin)
         prior_art = []
-        for q in queries[:2]:  # Limit to top 2 queries
-            prior_art.extend(await self._search_s2(q, limit=5))
+        for q in queries[:2]:
+            papers = await self.search_semantic_scholar(q, limit=5)
+            prior_art.extend(papers)
             
         # Deduplicate
-        unique_art = {p['title']: p for p in prior_art}.values()
+        unique_art = list({p.get('title', ''): p for p in prior_art if p.get('title')}.values())
         
         # 3. Compare with prior art
-        grounding_report = await self._compare_with_prior_art(title, abstract, list(unique_art)[:5])
+        grounding_report = await self._compare_with_prior_art(title, abstract, unique_art[:5])
         
         return {
             "queries": queries,
@@ -94,13 +100,13 @@ class ResearchAgent(BaseAgent):
     async def _generate_prior_art_queries(self, title: str, contributions: List[str]) -> List[str]:
         """Generate keywords to find prior art."""
         contrib_str = "\n".join(contributions)
-        prompt = f"""Generate 2-3 search queries to find PRIOR ART (existing work) that is similar to this paper.
+        prompt = f"""Generate 2-3 search queries to find PRIOR ART (existing work) similar to this paper.
         
 **Title:** {title}
 **Key Contributions:**
 {contrib_str}
 
-Return ONLY 2-3 search queries (one per line). Focus on the core problem and method concepts.
+Return ONLY 2-3 search queries (one per line). Focus on core problem and method concepts.
 Example:
 "large language model agent framework"
 "automated code generation benchmarks"
@@ -108,33 +114,10 @@ Example:
         response = await self.ask_claude(prompt, max_tokens=100)
         return [line.strip().strip('"') for line in response.splitlines() if line.strip()]
 
-    async def _search_s2(self, query: str, limit: int = 5) -> List[Dict[str, Any]]:
-        """Search Semantic Scholar."""
-        import aiohttp
-        papers = []
-        try:
-            async with aiohttp.ClientSession() as session:
-                headers = {"x-api-key": self.s2_api_key} if self.s2_api_key else {}
-                params = {
-                    "query": query,
-                    "limit": limit,
-                    "fields": "title,abstract,year,citationCount"
-                }
-                async with session.get(f"{self.S2_API_BASE}/paper/search", params=params, headers=headers) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        papers = data.get("data", [])
-                    else:
-                        self.logger.warning(f"S2 search failed: {resp.status}")
-        except Exception as e:
-            self.logger.warning(f"S2 search error: {e}")
-        return papers
-
     async def _compare_with_prior_art(self, title: str, abstract: str, prior_art: List[Dict[str, Any]]) -> str:
         """Compare paper with found prior art."""
-        art_desc = ""
-        for i, p in enumerate(prior_art, 1):
-             art_desc += f"{i}. {p.get('title')} ({p.get('year')})\n   Abstract: {p.get('abstract', '')[:150]}...\n\n"
+        # Use mixin to format papers
+        art_desc = self.format_papers_for_context(prior_art, max_papers=5)
              
         prompt = f"""Assess the NOVELTY of this paper by comparing it to the retrieved prior art.
 
@@ -157,20 +140,18 @@ Output a concise "Literature Grounding Report" (3-4 sentences)."""
         """使用Claude总结摘要"""
         prompt = f"Please summarize the following academic paper abstract in 2-3 sentences:\n\n{abstract}"
         return await self.ask_claude(prompt, system="You are a helpful research assistant.")
+
     async def _extract_github_links(self, pdf_path: str) -> List[str]:
         """从PDF中提取GitHub链接"""
         github_pattern = r'https?://github\.com/[\w-]+/[\w-]+'
         links = []
 
         try:
-            # 使用pdfplumber提取文本
             import pdfplumber
             with pdfplumber.open(pdf_path) as pdf:
                 text = '\n'.join(page.extract_text() for page in pdf.pages)
                 links = re.findall(github_pattern, text)
-
-            return list(set(links))  # 去重
-
+            return list(set(links))
         except Exception as e:
             self.log_error(e, {'pdf_path': pdf_path})
             return []

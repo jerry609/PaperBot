@@ -6,8 +6,15 @@ import logging
 import os
 from anthropic import AsyncAnthropic
 
+
 class BaseAgent(ABC):
-    """基础代理类，定义所有代理的通用接口"""
+    """
+    基础代理类，定义所有代理的通用接口。
+    
+    使用 Template Method 模式：
+    - process() 定义标准流程：validate -> execute -> post_process
+    - 子类实现 _execute() 方法
+    """
 
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         self.config = config or {}
@@ -20,10 +27,54 @@ class BaseAgent(ABC):
         if not self.client:
             self.logger.warning("Anthropic API key not found. AI features will be disabled.")
 
-    @abstractmethod
+    # ==================== Template Method Pattern ====================
+    
     async def process(self, *args, **kwargs) -> Dict[str, Any]:
-        """处理方法，需要被子类实现"""
+        """
+        Template Method: 定义标准处理流程。
+        子类可以覆盖 _validate_input, _execute, _post_process 钩子。
+        """
+        # Step 1: Validate input
+        validation_result = self._validate_input(*args, **kwargs)
+        if validation_result is not None:
+            return validation_result  # Early return on validation failure
+        
+        # Step 2: Execute core logic (abstract, must be implemented)
+        try:
+            result = await self._execute(*args, **kwargs)
+        except Exception as e:
+            self.log_error(e, {"context": "execute", "args": str(args)[:100]})
+            return {"status": "error", "error": str(e)}
+        
+        # Step 3: Post-process result
+        return self._post_process(result)
+    
+    def _validate_input(self, *args, **kwargs) -> Optional[Dict[str, Any]]:
+        """
+        钩子方法：验证输入参数。
+        返回 None 表示验证通过，返回 Dict 表示错误响应。
+        子类可覆盖以实现自定义验证。
+        """
+        return None  # Default: no validation
+    
+    @abstractmethod
+    async def _execute(self, *args, **kwargs) -> Dict[str, Any]:
+        """
+        抽象方法：执行核心业务逻辑。
+        子类必须实现此方法。
+        """
         pass
+    
+    def _post_process(self, result: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        钩子方法：后处理结果。
+        子类可覆盖以添加额外处理（如日志、缓存）。
+        """
+        if "status" not in result:
+            result["status"] = "success"
+        return result
+    
+    # ==================== LLM Utilities ====================
 
     async def ask_claude(self, prompt: str, system: str = "", max_tokens: int = 1000) -> str:
         """使用Claude模型生成回答"""
@@ -48,6 +99,8 @@ class BaseAgent(ABC):
         except Exception as e:
             self.log_error(e, {"context": "ask_claude"})
             return f"Error communicating with Claude: {str(e)}"
+
+    # ==================== Logging Utilities ====================
 
     def validate_config(self) -> bool:
         """验证配置是否有效"""

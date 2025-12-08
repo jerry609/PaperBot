@@ -30,6 +30,27 @@ PaperBot 是一个专为计算机领域设计的智能论文分析框架。它�
 - 自动提取论文中的代码仓库链接。
 - 代码质量、结构与安全性分析。
 
+### 4. 深度评审 (ReviewerAgent) 🆕
+- **DeepReview 模式**: 模拟人工同行评审流程（初筛 → 深度批评 → 决策）。
+- 输出结构化评审报告：Summary、Strengths、Weaknesses、Novelty Score。
+- 支持 Accept/Reject/Borderline 决策输出。
+
+### 5. 科学声明验证 (VerificationAgent) 🆕
+- 基于 CIBER 方法，自动提取论文中的关键声明。
+- 多视角证据检索（支撑/反驳），使用 Semantic Scholar API。
+- 输出裁定：Strongly Supported / Refuted / Controversial / Unverified。
+
+### 6. 文献背景分析 (Literature Grounding) 🆕
+- **ResearchAgent 新能力**: 实时搜索相似已有工作验证"新颖性"声明。
+- 自动生成 Prior Art 搜索查询。
+- 输出 Literature Grounding Report（是否真正创新 vs 增量改进）。
+
+### 7. Paper2Code 代码生成 (ReproAgent) 🆕
+- **多阶段流水线**: Planning → Analysis → Generation → Verification。
+- 从论文方法章节自动生成代码骨架。
+- Docker 隔离执行与细粒度验证（语法检查、导入检查、单元测试、冒烟运行）。
+- 迭代修复：基于错误反馈自动重试。
+
 ## 🆚 与 AlphaXiv 的主要区别
 
 - **定位**：PaperBot 面向“论文+代码+复现”的多 Agent 深度分析与报告生成；AlphaXiv 更偏论文聚合/推荐。  
@@ -137,31 +158,75 @@ ReproAgent 可复现性验证整体流程如下图所示：
 
 ![ReproAgent Reproducibility Flow](public/asset/repoagent.png)
 
+### 7. 论文深度评审 (ReviewerAgent) 🆕
+```bash
+# 对论文进行深度评审
+python main.py review --title "Attention Is All You Need" --abstract "We propose a new architecture..."
+
+# 输出到 JSON 文件
+python main.py review --title "..." --abstract "..." --output review_result.json
+```
+
+### 8. 科学声明验证 (VerificationAgent) 🆕
+```bash
+# 验证论文中的科学声明
+python main.py verify --title "Paper Title" --abstract "Paper abstract..."
+
+# 指定提取声明数量
+python main.py verify --title "..." --abstract "..." --num-claims 5 --output verify_result.json
+```
+
+### 9. Paper2Code 代码生成 🆕
+```bash
+# 从论文生成代码骨架
+python main.py gen-code --title "Paper Title" --abstract "We propose..." --output-dir ./my_code
+
+# 提供方法章节内容以获得更好的代码生成
+python main.py gen-code --title "..." --abstract "..." --method "The model consists of..." --output-dir ./output
+```
+
 ## 📂 目录结构
 
 ```
 PaperBot/
-├── AI4S/                   # AI for Science & LLM Papers Collection
 ├── main.py                 # 统一入口脚本
 ├── config/                 # 配置文件
 │   ├── scholar_subscriptions.yaml
 │   └── settings.py
+├── agents/                 # 🔧 智能 Agent 模块
+│   ├── base_agent.py              # Agent 基类 (Template Method)
+│   ├── mixins/                    # 共享 Mixin
+│   │   ├── semantic_scholar.py    # S2 API 客户端
+│   │   └── text_parsing.py        # 文本解析工具
+│   ├── state/                     # 🆕 状态管理 (BettaFish 启发)
+│   │   ├── base_state.py          # 状态基类
+│   │   └── research_state.py      # 研究状态 (段落级进度)
+│   ├── research_agent.py          # 论文分析 + 文献背景
+│   ├── reviewer_agent.py          # 深度评审 (DeepReview)
+│   ├── verification_agent.py      # 声明验证 (CIBER)
+│   ├── code_analysis_agent.py     # 代码质量分析
+│   ├── quality_agent.py           # 综合质量评估
+│   └── conference_research_agent.py
+├── repro/                  # Paper2Code 代码复现模块
+│   ├── repro_agent.py             # 复现主控
+│   ├── planning_agent.py          # 规划 Agent
+│   ├── generation_agent.py        # 代码生成 Agent
+│   ├── nodes/                     # 🆕 节点管线
+│   │   └── base_node.py           # 节点基类 (重试/钩子)
+│   ├── docker_executor.py         # Docker 沙箱执行
+│   └── models.py                  # 数据模型
 ├── core/                   # 核心工作流
-│   └── workflow_coordinator.py
+│   ├── workflow_coordinator.py
+│   └── collaboration/             # 🆕 Agent 协作
+│       ├── coordinator.py         # 协调器
+│       └── messages.py            # 消息模型
 ├── scholar_tracking/       # 学者追踪核心
-│   ├── agents/             # 追踪相关 Agent
-│   ├── services/           # 缓存与订阅服务
-│   └── models/             # 数据模型
-├── agents/                 # 通用分析 Agent
-│   ├── research_agent.py
-│   ├── code_analysis_agent.py
-│   └── quality_agent.py
 ├── influence/              # 影响力评分计算
 ├── reports/                # 报告生成
-│   ├── templates/          # Jinja2 模板
-│   └── writer.py
-├── output/reports/         # 生成的分析报告
-└── cache/                  # 数据缓存
+├── utils/                  # 通用工具
+├── tests/                  # 测试
+├── AI4S/                   # AI for Science 论文集
+└── output/                 # 生成的报告
 ```
 
 ## � 论文分析流水线

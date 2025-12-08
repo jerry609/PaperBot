@@ -48,7 +48,8 @@ class TestLiteratureGrounding(unittest.TestCase):
             __aenter__=AsyncMock(return_value=mock_session),
             __aexit__=AsyncMock(return_value=None)
         )):
-            papers = asyncio.run(self.agent._search_s2("query"))
+            # Use new mixin method name
+            papers = asyncio.run(self.agent.search_semantic_scholar("query"))
             # Due to mocking complexity, just verify no crash
             self.assertIsInstance(papers, list)
 
