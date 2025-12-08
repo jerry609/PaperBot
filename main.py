@@ -14,15 +14,16 @@ from pathlib import Path
 from typing import Optional
 import logging
 
-from core.di.bootstrap import bootstrap_dependencies
+from paperbot.core.di.bootstrap import bootstrap_dependencies
 
 # 解决 Windows 上 curl_cffi 的兼容性问题
 if sys.platform == 'win32':
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
-# 添加当前目录到Python路径，解决导入问题
+# 添加当前目录和src目录到Python路径，解决导入问题
 current_dir = Path(__file__).parent.absolute()
 sys.path.insert(0, str(current_dir))
+sys.path.insert(0, str(current_dir / "src"))
 
 def check_python_version():
     """检查Python版本"""
@@ -122,13 +123,13 @@ def simple_paper_download(conference: str, year: str, url: Optional[str] = None,
     
     # 根据会议类型选择下载器
     if is_ccs:
-        from utils.downloader_ccs import PaperDownloader as DownloaderClass
+        from paperbot.utils.downloader_ccs import PaperDownloader as DownloaderClass
         print("📚 目标会议: CCS (使用专用解析逻辑)")
         if smart_mode:
             print("ℹ️  CCS 下载目前不支持智能模式，将使用稳定顺序模式。")
             smart_mode = False  # 强制为顺序模式
     else:
-        from agents.conference_research_agent import ConferenceResearchAgent
+        from paperbot.agents.conference.agent import ConferenceResearchAgent
 
         async def _run_download():
             try:
@@ -375,9 +376,9 @@ def render_report(args):
     """根据 meta.json 渲染报告（paper/academic 模板兼容）"""
     import json
     from config.settings import settings
-    from reports.writer import ReportWriter
-    from scholar_tracking.models import PaperMeta
-    from scholar_tracking.models.influence import InfluenceResult
+    from paperbot.presentation.reports.writer import ReportWriter
+    from paperbot.domain.paper import PaperMeta
+    from paperbot.domain.influence.result import InfluenceResult
     from pathlib import Path
     import glob
 
@@ -488,11 +489,12 @@ def run_scholar_tracking(args):
         return
 
     async def _run_tracking():
-        from scholar_tracking import PaperTrackerAgent, ScholarProfileAgent
-        from scholar_tracking.models import PaperMeta
-        from core.workflow_coordinator import ScholarWorkflowCoordinator
+        from paperbot.agents.scholar_tracking.paper_tracker_agent import PaperTrackerAgent
+        from paperbot.agents.scholar_tracking.scholar_profile_agent import ScholarProfileAgent
+        from paperbot.domain.paper import PaperMeta
+        from paperbot.core.workflow_coordinator import ScholarWorkflowCoordinator
         from config.settings import settings
-        from repro import ReproAgent
+        from paperbot.repro import ReproAgent
         import tempfile, shutil, git
 
         overrides = {"subscriptions_config_path": str(config_path)}
@@ -692,7 +694,7 @@ def run_scholar_tracking(args):
 def run_review(args):
     """运行论文深度评审 (ReviewerAgent)"""
     import json
-    from agents.reviewer_agent import ReviewerAgent
+    from paperbot.agents.review.agent import ReviewerAgent
     
     print("📝 论文深度评审...")
     print(f"   标题: {args.title}")
@@ -718,7 +720,7 @@ def run_review(args):
 def run_verify(args):
     """运行科学声明验证 (VerificationAgent)"""
     import json
-    from agents.verification_agent import VerificationAgent
+    from paperbot.agents.verification.agent import VerificationAgent
     
     print("🔍 科学声明验证...")
     print(f"   标题: {args.title}")
@@ -744,7 +746,7 @@ def run_verify(args):
 
 def run_gencode(args):
     """运行 Paper2Code 代码生成 (ReproAgent)"""
-    from repro import ReproAgent, PaperContext
+    from paperbot.repro import ReproAgent, PaperContext
     
     print("🔧 Paper2Code 代码生成...")
     print(f"   标题: {args.title}")

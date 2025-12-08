@@ -10,8 +10,10 @@ import logging
 from typing import Dict, Any, Optional, List, Tuple
 from pathlib import Path
 
-from src.paperbot.core import Pipeline, PipelineStage, ExecutionResult
-from src.paperbot.domain import PaperMeta, CodeMeta, InfluenceResult
+from paperbot.core.pipeline import Pipeline, PipelineStage
+from paperbot.core.abstractions import ExecutionResult
+from paperbot.domain.paper import PaperMeta, CodeMeta
+from paperbot.domain.influence.result import InfluenceResult
 
 logger = logging.getLogger(__name__)
 

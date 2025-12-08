@@ -1,15 +1,14 @@
+# paperbot/__init__.py
 """
-PaperBot - 学者追踪与论文分析系统
+PaperBot - 顶会论文分析与学者追踪框架
 
-这是新的分层架构入口点，提供向后兼容的导出。
-
-目录结构:
-- core/: 核心抽象 (Executable, Pipeline, DI, Errors)
-- agents/: Agent 实现
-- infrastructure/: 基础设施 (LLM, API, Storage)
-- domain/: 领域模型 (Paper, Scholar, Influence)
-- workflows/: 工作流定义
-- presentation/: 展示层 (CLI, Reports)
+一个专为计算机领域设计的智能论文分析框架，支持：
+- 学者追踪与智能分析
+- 顶会论文获取
+- 代码深度分析
+- 深度评审 (ReviewerAgent)
+- 科学声明验证 (VerificationAgent)
+- Paper2Code 代码生成 (ReproAgent)
 """
 
 from __future__ import annotations
@@ -17,90 +16,138 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-# 确保项目根目录在 sys.path 中，以便兼容旧的导入方式
+# 确保 src 目录在 Python 路径中
 ROOT = Path(__file__).resolve().parents[2]
+SRC_DIR = ROOT / "src"
+
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
 
-__version__ = "1.0.0"
+__version__ = "2.0.0"
+__author__ = "PaperBot Team"
 
-# 核心抽象
-from .core import (
-    Executable,
-    ExecutionResult,
-    ensure_execution_result,
-    Pipeline,
-    PipelineStage,
-    PipelineResult,
-    StageResult,
-    Container,
-    inject,
-    bootstrap_dependencies,
-    ErrorSeverity,
-    PaperBotError,
-    LLMError,
-    APIError,
-    ValidationError,
-    Result,
-)
+# 延迟导入以避免循环依赖
+def __getattr__(name: str):
+    """延迟导入模块"""
+    
+    # Core 模块
+    if name == "Pipeline":
+        from paperbot.core.pipeline import Pipeline
+        return Pipeline
+    if name == "PipelineStage":
+        from paperbot.core.pipeline import PipelineStage
+        return PipelineStage
+    if name == "ExecutionResult":
+        from paperbot.core.abstractions import ExecutionResult
+        return ExecutionResult
+    if name == "Executable":
+        from paperbot.core.abstractions import Executable
+        return Executable
+    if name == "Container":
+        from paperbot.core.di import Container
+        return Container
+    if name == "inject":
+        from paperbot.core.di import inject
+        return inject
+    if name == "LLMClient":
+        from paperbot.core.llm_client import LLMClient
+        return LLMClient
+    
+    # Domain 模块
+    if name == "PaperMeta":
+        from paperbot.domain.paper import PaperMeta
+        return PaperMeta
+    if name == "CodeMeta":
+        from paperbot.domain.paper import CodeMeta
+        return CodeMeta
+    if name == "Scholar":
+        from paperbot.domain.scholar import Scholar
+        return Scholar
+    if name == "InfluenceResult":
+        from paperbot.domain.influence.result import InfluenceResult
+        return InfluenceResult
+    if name == "InfluenceCalculator":
+        from paperbot.domain.influence.calculator import InfluenceCalculator
+        return InfluenceCalculator
+    
+    # Workflows 模块
+    if name == "ScholarTrackingWorkflow":
+        from paperbot.workflows.scholar_tracking import ScholarTrackingWorkflow
+        return ScholarTrackingWorkflow
+    if name == "ScholarWorkflowCoordinator":
+        from paperbot.core.workflow_coordinator import ScholarWorkflowCoordinator
+        return ScholarWorkflowCoordinator
+    
+    # Agents 模块
+    if name == "BaseAgent":
+        from paperbot.agents.base import BaseAgent
+        return BaseAgent
+    if name == "ResearchAgent":
+        from paperbot.agents.research.agent import ResearchAgent
+        return ResearchAgent
+    if name == "CodeAnalysisAgent":
+        from paperbot.agents.code_analysis.agent import CodeAnalysisAgent
+        return CodeAnalysisAgent
+    if name == "QualityAgent":
+        from paperbot.agents.quality.agent import QualityAgent
+        return QualityAgent
+    if name == "ReviewerAgent":
+        from paperbot.agents.review.agent import ReviewerAgent
+        return ReviewerAgent
+    if name == "VerificationAgent":
+        from paperbot.agents.verification.agent import VerificationAgent
+        return VerificationAgent
+    if name == "ConferenceResearchAgent":
+        from paperbot.agents.conference.agent import ConferenceResearchAgent
+        return ConferenceResearchAgent
+    
+    # Repro 模块
+    if name == "ReproAgent":
+        from paperbot.repro.repro_agent import ReproAgent
+        return ReproAgent
+    if name == "PaperContext":
+        from paperbot.repro.models import PaperContext
+        return PaperContext
+    
+    raise AttributeError(f"module 'paperbot' has no attribute '{name}'")
 
-# 领域模型
-from .domain import (
-    PaperMeta,
-    CodeMeta,
-    Scholar,
-    InfluenceResult,
-    InfluenceLevel,
-)
-
-# 工作流
-from .workflows import ScholarTrackingWorkflow
-
-# 基础设施
-from .infrastructure import (
-    LLMClient,
-    APIClient,
-    SemanticScholarClient,
-    CacheService,
-)
-
-# 展示层
-from .presentation import run_cli, ReportGenerator
 
 __all__ = [
     # 版本
     "__version__",
-    # 核心抽象
-    "Executable",
-    "ExecutionResult",
-    "ensure_execution_result",
+    
+    # Core
     "Pipeline",
     "PipelineStage",
-    "PipelineResult",
-    "StageResult",
+    "ExecutionResult",
+    "Executable",
     "Container",
     "inject",
-    "bootstrap_dependencies",
-    "ErrorSeverity",
-    "PaperBotError",
-    "LLMError",
-    "APIError",
-    "ValidationError",
-    "Result",
-    # 领域模型
+    "LLMClient",
+    
+    # Domain
     "PaperMeta",
     "CodeMeta",
     "Scholar",
     "InfluenceResult",
-    "InfluenceLevel",
-    # 工作流
+    "InfluenceCalculator",
+    
+    # Workflows
     "ScholarTrackingWorkflow",
-    # 基础设施
-    "LLMClient",
-    "APIClient",
-    "SemanticScholarClient",
-    "CacheService",
-    # 展示层
-    "run_cli",
-    "ReportGenerator",
+    "ScholarWorkflowCoordinator",
+    
+    # Agents
+    "BaseAgent",
+    "ResearchAgent",
+    "CodeAnalysisAgent",
+    "QualityAgent",
+    "ReviewerAgent",
+    "VerificationAgent",
+    "ConferenceResearchAgent",
+    
+    # Repro
+    "ReproAgent",
+    "PaperContext",
 ]
