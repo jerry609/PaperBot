@@ -1,11 +1,10 @@
 # repro/__init__.py
 """
-Paper2Code-style reproduction pipeline.
+Paper2Code-style reproduction pipeline with node-based architecture.
 
 Modules:
 - models: Data models (PaperContext, ReproductionPlan, etc.)
-- planning_agent: Planning and Analysis phases
-- generation_agent: Code generation with refinement
+- nodes: Node-based processing pipeline
 - repro_agent: Main orchestrator
 - docker_executor: Docker execution environment
 """
@@ -20,13 +19,21 @@ from repro.models import (
     VerificationStep,
     ReproPhase,
 )
-from repro.planning_agent import PlanningAgent
-from repro.generation_agent import GenerationAgent
+from repro.nodes import (
+    BaseNode,
+    NodeResult,
+    PlanningNode,
+    AnalysisNode,
+    GenerationNode,
+    VerificationNode,
+)
 from repro.docker_executor import DockerExecutor
 
 __all__ = [
+    # Main Agent
     "ReproAgent",
     "DockerExecutor",
+    # Data Models
     "PaperContext",
     "ReproductionPlan",
     "ImplementationSpec",
@@ -34,6 +41,11 @@ __all__ = [
     "VerificationResult",
     "VerificationStep",
     "ReproPhase",
-    "PlanningAgent",
-    "GenerationAgent",
+    # Nodes
+    "BaseNode",
+    "NodeResult",
+    "PlanningNode",
+    "AnalysisNode",
+    "GenerationNode",
+    "VerificationNode",
 ]

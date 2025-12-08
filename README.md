@@ -198,34 +198,33 @@ PaperBot/
 │   ├── mixins/                    # 共享 Mixin
 │   │   ├── semantic_scholar.py    # S2 API 客户端
 │   │   └── text_parsing.py        # 文本解析工具
-│   ├── state/                     # 🆕 状态管理 (BettaFish 启发)
+│   ├── state/                     # 状态管理 (BettaFish 启发)
 │   │   ├── base_state.py          # 状态基类
 │   │   └── research_state.py      # 研究状态 (段落级进度)
-│   ├── research_agent.py          # 论文分析 + 文献背景
+│   ├── research_agent.py          # 论文分析 + State 集成
 │   ├── reviewer_agent.py          # 深度评审 (DeepReview)
 │   ├── verification_agent.py      # 声明验证 (CIBER)
-│   ├── code_analysis_agent.py     # 代码质量分析
-│   ├── quality_agent.py           # 综合质量评估
-│   └── conference_research_agent.py
-├── repro/                  # Paper2Code 代码复现模块
-│   ├── repro_agent.py             # 复现主控
-│   ├── planning_agent.py          # 规划 Agent
-│   ├── generation_agent.py        # 代码生成 Agent
-│   ├── nodes/                     # 🆕 节点管线
-│   │   └── base_node.py           # 节点基类 (重试/钩子)
-│   ├── docker_executor.py         # Docker 沙箱执行
+│   └── ...
+├── repro/                  # Paper2Code 代码复现 (Node 管线)
+│   ├── repro_agent.py             # 管线协调器
+│   ├── nodes/                     # 🆕 4阶段节点
+│   │   ├── base_node.py           # 节点基类
+│   │   ├── planning_node.py       # Phase 1: 规划
+│   │   ├── analysis_node.py       # Phase 2: 分析
+│   │   ├── generation_node.py     # Phase 3: 生成
+│   │   └── verification_node.py   # Phase 4: 验证
+│   ├── docker_executor.py         # Docker 沙箱
 │   └── models.py                  # 数据模型
 ├── core/                   # 核心工作流
 │   ├── workflow_coordinator.py
-│   └── collaboration/             # 🆕 Agent 协作
+│   └── collaboration/             # Agent 协作
 │       ├── coordinator.py         # 协调器
 │       └── messages.py            # 消息模型
-├── scholar_tracking/       # 学者追踪核心
-├── influence/              # 影响力评分计算
+├── scholar_tracking/       # 学者追踪
+├── influence/              # 影响力评分
 ├── reports/                # 报告生成
 ├── utils/                  # 通用工具
 ├── tests/                  # 测试
-├── AI4S/                   # AI for Science 论文集
 └── output/                 # 生成的报告
 ```
 

@@ -4,6 +4,7 @@ from typing import Dict, List, Any, Optional
 import re
 from .base_agent import BaseAgent
 from .mixins import SemanticScholarMixin, TextParsingMixin
+from .state import ResearchState
 
 
 class ResearchAgent(BaseAgent, SemanticScholarMixin, TextParsingMixin):
@@ -14,11 +15,15 @@ class ResearchAgent(BaseAgent, SemanticScholarMixin, TextParsingMixin):
     使用 Mixin 模式：
     - SemanticScholarMixin: S2 API 搜索
     - TextParsingMixin: 文本解析工具
+    
+    使用 State 管理：
+    - ResearchState: 跟踪进度、搜索历史
     """
 
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         super().__init__(config)
         self.init_s2_client(config)  # Initialize S2 mixin
+        self.state = ResearchState()  # Initialize state management
 
     def _validate_input(self, *args, **kwargs) -> Optional[Dict[str, Any]]:
         """Validate that paper_title is provided."""
@@ -27,12 +32,22 @@ class ResearchAgent(BaseAgent, SemanticScholarMixin, TextParsingMixin):
         return None
 
     async def _execute(self, *args, **kwargs) -> Dict[str, Any]:
-        """Core execution: analyze single paper."""
-        return await self._analyze_single_paper(
-            title=kwargs.get("paper_title"),
-            paper_id=kwargs.get("paper_id"),
-            abstract=kwargs.get("abstract")
-        )
+        """Core execution: analyze single paper with state tracking."""
+        self.state.mark_running()
+        self.state.add_paragraph("Paper Analysis", kwargs.get("paper_title", ""))
+        
+        try:
+            result = await self._analyze_single_paper(
+                title=kwargs.get("paper_title"),
+                paper_id=kwargs.get("paper_id"),
+                abstract=kwargs.get("abstract")
+            )
+            self.state.mark_completed()
+            result["state"] = self.state.to_dict()
+            return result
+        except Exception as e:
+            self.state.mark_failed(str(e))
+            raise
 
     async def _analyze_single_paper(self, title: str, paper_id: str, abstract: Optional[str]) -> Dict[str, Any]:
         """分析单篇论文"""

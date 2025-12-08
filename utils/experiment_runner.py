@@ -10,7 +10,7 @@ from typing import Any, Dict, Iterable, List, Sequence
 
 import yaml
 
-from ExperimentManager.metrics import compute_metrics
+from utils.experiment_metrics import compute_metrics
 
 # 配置日志
 logging.basicConfig(
