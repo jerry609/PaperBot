@@ -54,8 +54,8 @@ class ReproAgent:
         # Initialize Docker executor for legacy mode
         self.executor = DockerExecutor(
             image=self.config.get("docker_image", "python:3.10-slim"),
-            timeout=self.config.get("timeout_sec", 120),
         )
+        self.timeout_sec = self.config.get("timeout_sec", 120)
     
     # ==================== Paper2Code Mode ====================
     
@@ -88,7 +88,7 @@ class ReproAgent:
             self.logger.info(f"Phase 1: Planning for '{paper_context.title}'")
             plan_result = await self.planning_node.run(paper_context)
             if not plan_result.success:
-                return self._fail_result(result, ReproPhase.PLANNING, plan_result.error)
+                return self._fail_result(result, ReproPhase.PLANNING, plan_result.error or "")
             plan: ReproductionPlan = plan_result.data
             
             # Phase 2: Analysis
@@ -96,7 +96,7 @@ class ReproAgent:
             result.status = ReproPhase.ANALYSIS
             analysis_result = await self.analysis_node.run((paper_context, plan))
             if not analysis_result.success:
-                return self._fail_result(result, ReproPhase.ANALYSIS, analysis_result.error)
+                return self._fail_result(result, ReproPhase.ANALYSIS, analysis_result.error or "")
             spec: ImplementationSpec = analysis_result.data
             
             # Phase 3: Generation
@@ -104,7 +104,7 @@ class ReproAgent:
             result.status = ReproPhase.GENERATION
             gen_result = await self.generation_node.run((paper_context, plan, spec))
             if not gen_result.success:
-                return self._fail_result(result, ReproPhase.GENERATION, gen_result.error)
+                return self._fail_result(result, ReproPhase.GENERATION, gen_result.error or "")
             files: Dict[str, str] = gen_result.data
             
             # Write files to disk
@@ -178,20 +178,17 @@ class ReproAgent:
         """Legacy: Run verification on existing repo."""
         plan = await self.generate_plan(repo_path)
         
-        results = []
-        for cmd in plan["commands"]:
-            exec_result = self.executor.run(cmd, volume_path=repo_path)
-            results.append({
-                "command": cmd,
-                "exit_code": exec_result.exit_code,
-                "logs": exec_result.logs[:500] if exec_result.logs else "",
-                "runtime_meta": exec_result.runtime_meta,
-            })
-            
-            if exec_result.exit_code != 0:
-                break
+        commands = plan["commands"]
+        exec_result = self.executor.run(workdir=repo_path, commands=commands)
         
-        passed = all(r["exit_code"] == 0 for r in results)
+        results = [{
+            "commands": commands,
+            "exit_code": exec_result.exit_code,
+            "logs": exec_result.logs[:500] if exec_result.logs else "",
+            "runtime_meta": exec_result.runtime_meta,
+        }]
+        
+        passed = exec_result.exit_code == 0
         return {
             "passed": passed,
             "results": results,

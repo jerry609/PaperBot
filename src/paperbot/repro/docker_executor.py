@@ -34,7 +34,7 @@ class DockerExecutor:
         self.network_disabled = not network
         self.client = None
         
-        if HAS_DOCKER:
+        if HAS_DOCKER and docker is not None:
             try:
                 self.client = docker.from_env()
             except DockerException as e:

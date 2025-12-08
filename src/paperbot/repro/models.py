@@ -14,6 +14,8 @@ class ReproPhase(Enum):
     ANALYSIS = "analysis"
     GENERATION = "generation"
     VERIFICATION = "verification"
+    COMPLETED = "completed"
+    FAILED = "failed"
 
 
 class VerificationStep(Enum):
@@ -147,7 +149,7 @@ class ReproductionResult:
     Final output of the entire reproduction pipeline.
     """
     paper_title: str
-    status: str  # "success", "partial", "failed"
+    status: ReproPhase = ReproPhase.PLANNING
     
     # Phase outputs
     plan: Optional[ReproductionPlan] = None
@@ -156,6 +158,7 @@ class ReproductionResult:
     
     # Verification details
     verification_results: List[VerificationResult] = field(default_factory=list)
+    verification: Dict[str, Any] = field(default_factory=dict)
     
     # Metrics
     overall_score: int = 0  # 0-100
@@ -165,6 +168,7 @@ class ReproductionResult:
     
     # Errors
     error: Optional[str] = None
+    errors: List[str] = field(default_factory=list)
     
     def compute_score(self) -> int:
         """Compute overall score based on verification results."""
@@ -189,13 +193,15 @@ class ReproductionResult:
     def to_dict(self) -> Dict[str, Any]:
         return {
             "paper_title": self.paper_title,
-            "status": self.status,
+            "status": self.status.value if isinstance(self.status, ReproPhase) else self.status,
             "overall_score": self.overall_score,
             "phases_completed": self.phases_completed,
             "verification_results": [vr.to_dict() for vr in self.verification_results],
+            "verification": self.verification,
             "retry_count": self.retry_count,
             "total_duration_sec": self.total_duration_sec,
             "error": self.error,
+            "errors": self.errors,
             "generated_files": list(self.generated_files.keys())
         }
 

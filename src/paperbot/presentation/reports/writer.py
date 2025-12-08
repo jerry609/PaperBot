@@ -4,10 +4,12 @@
 负责将生成的报告写入文件系统
 """
 
+from __future__ import annotations
+
 import logging
 import re
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, TYPE_CHECKING
 from datetime import datetime
 
 try:
@@ -16,18 +18,9 @@ try:
 except ImportError:
     HAS_JINJA2 = False
 
-# 使用相对导入以支持新架构
-try:
+if TYPE_CHECKING:
     from paperbot.domain.paper import PaperMeta
     from paperbot.domain.influence.result import InfluenceResult
-except ImportError:
-    # 回退到原始导入路径
-    try:
-        from paperbot.domain.paper import PaperMeta
-        from paperbot.domain.influence.result import InfluenceResult
-    except ImportError:
-        PaperMeta = None
-        InfluenceResult = None
 
 logger = logging.getLogger(__name__)
 
@@ -243,7 +236,7 @@ class ReportWriter:
 
 ## 📝 摘要
 
-{paper.tldr or paper.abstract or '暂无摘要'}
+{paper.abstract or '暂无摘要'}
 
 ---
 

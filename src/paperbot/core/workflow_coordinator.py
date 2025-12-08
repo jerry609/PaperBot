@@ -121,7 +121,7 @@ class ScholarWorkflowCoordinator:
                 from paperbot.presentation.reports.writer import ReportWriter
                 self._report_writer = ReportWriter(
                     template_name=self.report_template,
-                    output_dir=str(self.output_dir),
+                    output_dir=self.output_dir,
                 )
             except ImportError as e:
                 logger.warning(f"Failed to import ReportWriter: {e}")
@@ -252,11 +252,10 @@ class ScholarWorkflowCoordinator:
                 try:
                     from paperbot.domain.paper import CodeMeta
                     code_meta = CodeMeta(
-                        github_url=getattr(ctx.paper, 'github_url', ''),
+                        repo_url=getattr(ctx.paper, 'github_url', '') or '',
                         stars=ctx.code_analysis_result.get('stars', 0),
                         forks=ctx.code_analysis_result.get('forks', 0),
                         has_readme=ctx.code_analysis_result.get('has_readme', False),
-                        has_tests=ctx.code_analysis_result.get('has_tests', False),
                         last_commit_date=ctx.code_analysis_result.get('last_commit_date'),
                     )
                 except ImportError:
@@ -298,14 +297,13 @@ class ScholarWorkflowCoordinator:
     def _create_default_influence(self):
         """创建默认影响力结果"""
         try:
-            from paperbot.domain.influence.result import InfluenceResult, Recommendation
+            from paperbot.domain.influence.result import InfluenceResult
             return InfluenceResult(
                 total_score=0.0,
                 academic_score=0.0,
                 engineering_score=0.0,
                 explanation="No influence data available.",
                 metrics_breakdown={},
-                recommendation=Recommendation.LOW,
             )
         except ImportError:
             # 返回简单字典

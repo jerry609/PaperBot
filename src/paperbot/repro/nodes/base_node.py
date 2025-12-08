@@ -82,7 +82,7 @@ class BaseNode(ABC, Generic[T]):
     
     def __init__(
         self,
-        node_name: str = None,
+        node_name: Optional[str] = None,
         max_retries: int = 0,
         on_success: Optional[Callable[[NodeResult], None]] = None,
         on_failure: Optional[Callable[[NodeResult], None]] = None,
@@ -237,7 +237,7 @@ class LLMNode(BaseNode[T]):
     def __init__(
         self,
         llm_client: Any = None,
-        node_name: str = None,
+        node_name: Optional[str] = None,
         max_retries: int = 0,
         **kwargs
     ):

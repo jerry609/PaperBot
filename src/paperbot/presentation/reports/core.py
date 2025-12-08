@@ -123,7 +123,7 @@ class DocumentComposer:
         for idx, chapter in enumerate(ordered, start=1):
             chapter.setdefault("chapterId", f"S{idx}")
             
-            chapter_id = chapter.get("chapterId")
+            chapter_id = chapter.get("chapterId") or ""
             anchor = (
                 toc_anchor_map.get(chapter_id) or
                 chapter.get("anchor") or
