@@ -11,7 +11,7 @@ import argparse
 import asyncio
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Dict, Any
 import logging
 
 from paperbot.core.di.bootstrap import bootstrap_dependencies
@@ -29,7 +29,6 @@ def check_python_version():
     """检查Python版本"""
     if sys.version_info < (3, 8):
         print(f"❌ 错误: 需要Python 3.8+，当前版本: {sys.version}")
-            # 异步执行下载（与其他会议相同的逻辑）
         return False
     return True
 
@@ -495,9 +494,10 @@ def run_scholar_tracking(args):
         from paperbot.core.workflow_coordinator import ScholarWorkflowCoordinator
         from config.settings import settings
         from paperbot.repro import ReproAgent
-        import tempfile, shutil, git
+        import tempfile, shutil
+        from git.repo import Repo as GitRepo
 
-        overrides = {"subscriptions_config_path": str(config_path)}
+        overrides: Dict[str, Any] = {"subscriptions_config_path": str(config_path)}
         mode = getattr(args, "mode", None) or getattr(settings, "mode", "production")
         overrides["mode"] = mode
         overrides["offline"] = args.offline or getattr(settings, "offline", False)
@@ -617,8 +617,8 @@ def run_scholar_tracking(args):
                             repo_url = paper.github_url
                             if repo_url:
                                 print(f"    🔁 Repro: cloning {repo_url}")
-                                git.Repo.clone_from(repo_url, tmp_dir)
-                                repro_agent = ReproAgent({"repro": settings.repro})
+                                GitRepo.clone_from(repo_url, tmp_dir)
+                                repro_agent = ReproAgent({"repro": settings.get("repro", {})})
                                 repro_result = await repro_agent.run(tmp_dir)
                             else:
                                 repro_result = {"status": "skipped", "reason": "no_repo"}
@@ -633,18 +633,19 @@ def run_scholar_tracking(args):
 
                         # 重新渲染报告，写回
                         try:
-                            md = coordinator.report_writer.render_template(
-                                paper=paper,
-                                influence=influence,
-                                research_result=pipeline_data.get("stages", {}).get("research", {}).get("result", {}),
-                                code_analysis_result=pipeline_data.get("stages", {}).get("code_analysis", {}).get("result", {}),
-                                quality_result=pipeline_data.get("stages", {}).get("quality", {}).get("result", {}),
-                                scholar_name=scholar_name,
-                                repro_result=repro_result,
-                                meta=None,
-                            )
-                            path = coordinator.report_writer.write_report(md, paper, scholar_name)
-                            pipeline_data["report_path"] = str(path)
+                            if coordinator.report_writer is not None:
+                                md = coordinator.report_writer.render_template(
+                                    paper=paper,
+                                    influence=influence,
+                                    research_result=pipeline_data.get("stages", {}).get("research", {}).get("result", {}),
+                                    code_analysis_result=pipeline_data.get("stages", {}).get("code_analysis", {}).get("result", {}),
+                                    quality_result=pipeline_data.get("stages", {}).get("quality", {}).get("result", {}),
+                                    scholar_name=scholar_name,
+                                    repro_result=repro_result,
+                                    meta=None,
+                                )
+                                path = coordinator.report_writer.write_report(md, paper, scholar_name)
+                                pipeline_data["report_path"] = str(path)
                         except Exception as e:
                             print(f"    ⚠️ 重渲染报告失败: {e}")
 

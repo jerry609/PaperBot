@@ -279,7 +279,8 @@ class ScholarFilter:
         results = []
         
         for scholar in scholars:
-            if self._match_scholar(scholar, criteria, papers_map.get(scholar.semantic_scholar_id, [])):
+            scholar_id = scholar.semantic_scholar_id or ""
+            if self._match_scholar(scholar, criteria, papers_map.get(scholar_id, [])):
                 results.append(scholar)
         
         return results
@@ -574,11 +575,11 @@ class FilterService:
     def advanced_filter(
         self,
         scholars: List[Scholar],
-        scholar_types: List[str] = None,
-        affiliations: List[str] = None,
-        keywords: List[str] = None,
-        min_citations: int = None,
-        min_h_index: int = None,
+        scholar_types: Optional[List[str]] = None,
+        affiliations: Optional[List[str]] = None,
+        keywords: Optional[List[str]] = None,
+        min_citations: Optional[int] = None,
+        min_h_index: Optional[int] = None,
         papers_map: Optional[Dict[str, List[PaperMeta]]] = None,
     ) -> List[Scholar]:
         """高级筛选"""

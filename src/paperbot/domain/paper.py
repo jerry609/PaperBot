@@ -23,6 +23,8 @@ class PaperMeta:
     url: Optional[str] = None
     doi: Optional[str] = None
     keywords: List[str] = field(default_factory=list)
+    fields_of_study: List[str] = field(default_factory=list)  # 研究领域
+    publication_date: Optional[str] = None  # 发布日期 (ISO 格式)
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     
@@ -41,6 +43,8 @@ class PaperMeta:
             "url": self.url,
             "doi": self.doi,
             "keywords": self.keywords,
+            "fields_of_study": self.fields_of_study,
+            "publication_date": self.publication_date,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
@@ -61,6 +65,8 @@ class PaperMeta:
             url=data.get("url"),
             doi=data.get("doi"),
             keywords=data.get("keywords", []),
+            fields_of_study=data.get("fields_of_study", []),
+            publication_date=data.get("publication_date"),
         )
     
     @classmethod
@@ -100,6 +106,8 @@ class PaperMeta:
                     has_code = True
                     break
         
+        fields_of_study = data.get("fieldsOfStudy", []) or []
+        
         return cls(
             paper_id=data.get("paperId", ""),
             title=data.get("title", ""),
@@ -112,7 +120,9 @@ class PaperMeta:
             has_code=has_code,
             url=data.get("url"),
             doi=data.get("externalIds", {}).get("DOI"),
-            keywords=data.get("fieldsOfStudy", []) or [],
+            keywords=fields_of_study,
+            fields_of_study=fields_of_study,
+            publication_date=data.get("publicationDate"),
         )
 
 

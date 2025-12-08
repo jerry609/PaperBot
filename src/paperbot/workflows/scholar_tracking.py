@@ -110,7 +110,16 @@ class ScholarTrackingWorkflow:
             影响力评分结果
         """
         coordinator = self._get_coordinator()
-        return coordinator.influence_calculator.calculate(paper, code_meta)
+        calculator = coordinator.influence_calculator
+        if calculator is None:
+            return InfluenceResult(
+                total_score=0.0,
+                academic_score=0.0,
+                engineering_score=0.0,
+                explanation="InfluenceCalculator not available",
+                metrics_breakdown={},
+            )
+        return calculator.calculate(paper, code_meta)
     
     def create_paper_from_dict(self, data: Dict[str, Any]) -> PaperMeta:
         """

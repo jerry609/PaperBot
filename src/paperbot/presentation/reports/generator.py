@@ -57,13 +57,14 @@ class ReportGenerator:
             writer = ReportWriter(output_dir=self.output_dir)
             
             # 从数据中提取必要信息
-            from src.paperbot.domain import PaperMeta, InfluenceResult
+            from paperbot.domain.paper import PaperMeta
+            from paperbot.domain.influence.result import InfluenceResult
             
             paper = PaperMeta.from_dict(data.get("paper", {}))
             influence = InfluenceResult.from_dict(data.get("influence", {}))
             
             return writer.write_report(
-                content=self._render_basic_report(data),
+                report_content=self._render_basic_report(data),
                 paper=paper,
                 scholar_name=data.get("scholar_name"),
             )

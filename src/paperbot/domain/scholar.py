@@ -15,6 +15,7 @@ class Scholar:
     name: str
     affiliations: List[str] = field(default_factory=list)
     research_fields: List[str] = field(default_factory=list)
+    keywords: List[str] = field(default_factory=list)  # 研究关键词
     h_index: Optional[int] = None
     citation_count: int = 0
     paper_count: int = 0
@@ -32,6 +33,7 @@ class Scholar:
             "name": self.name,
             "affiliations": self.affiliations,
             "research_fields": self.research_fields,
+            "keywords": self.keywords,
             "h_index": self.h_index,
             "citation_count": self.citation_count,
             "paper_count": self.paper_count,
@@ -51,6 +53,7 @@ class Scholar:
             name=data.get("name", ""),
             affiliations=data.get("affiliations", []),
             research_fields=data.get("research_fields", []),
+            keywords=data.get("keywords", []),
             h_index=data.get("h_index"),
             citation_count=data.get("citation_count", 0),
             paper_count=data.get("paper_count", 0),
