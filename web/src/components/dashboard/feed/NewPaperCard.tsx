@@ -1,10 +1,9 @@
 "use client"
 
-import { Card, CardContent, CardHeader } from "@/components/ui/card"
+import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Calendar, BarChart2, Code2, ArrowUpRight, X } from "lucide-react"
+import { BarChart, Star, Laptop, ArrowRight } from "lucide-react"
 import { Activity } from "@/lib/types"
 
 interface NewPaperCardProps {
@@ -15,66 +14,77 @@ export function NewPaperCard({ activity }: NewPaperCardProps) {
     if (!activity.paper || !activity.scholar) return null
 
     return (
-        <Card className="hover:shadow-md transition-shadow">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <div className="flex items-center gap-3">
-                    {activity.paper.is_influential && (
-                        <Badge variant="default" className="bg-blue-500 hover:bg-blue-600">NEW</Badge>
-                    )}
-                    <span className="text-sm font-medium text-foreground">
-                        {activity.scholar.name} published a new paper
-                    </span>
-                </div>
-                <span className="text-xs text-muted-foreground">{activity.timestamp}</span>
-            </CardHeader>
-            <CardContent className="pt-2">
-                <div className="flex flex-col gap-4">
-                    {/* Paper Title & Info */}
-                    <div>
-                        <h3 className="text-lg font-bold leading-tight mb-2">
-                            {activity.paper.title}
-                        </h3>
-                        <div className="flex flex-wrap gap-2 text-sm text-muted-foreground mb-3">
-                            <span className="flex items-center gap-1">
-                                <Calendar className="h-3 w-3" /> {activity.paper.venue} {activity.paper.year}
-                            </span>
-                            <span>•</span>
-                            <span>{activity.paper.citations} citations</span>
-                        </div>
-                        <p className="text-sm text-muted-foreground line-clamp-2">
-                            {activity.paper.abstract_snippet}
-                        </p>
-                    </div>
+        <Card className="bg-white rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-shadow">
+            <CardContent className="p-6 flex flex-col gap-4">
 
-                    {/* Tags */}
-                    <div className="flex flex-wrap gap-2">
-                        {activity.paper.tags.map(tag => (
-                            <Badge key={tag} variant="secondary" className="bg-blue-50 text-blue-700 hover:bg-blue-100 dark:bg-blue-900/20 dark:text-blue-300">
-                                {tag}
-                            </Badge>
-                        ))}
-                    </div>
-
-                    {/* Footer Actions */}
-                    <div className="flex items-center justify-between pt-2 border-t mt-1">
-                        <div className="flex gap-4">
-                            <div className="flex items-center gap-1 text-xs font-semibold text-green-600 dark:text-green-400">
-                                <BarChart2 className="h-3 w-3" /> {activity.paper.citations} citations
-                            </div>
-                            <div className="flex items-center gap-1 text-xs font-semibold text-teal-600 dark:text-teal-400">
-                                <Code2 className="h-3 w-3" /> Code available
-                            </div>
-                        </div>
-                        <div className="flex gap-2 text-sm">
-                            <Button variant="ghost" size="sm" className="h-8 text-muted-foreground hover:text-foreground">
-                                <X className="h-3 w-3 mr-1" /> Ignore
-                            </Button>
-                            <Button variant="ghost" size="sm" className="h-8 text-primary hover:text-primary/90 font-medium">
-                                View paper <ArrowUpRight className="ml-1 h-3 w-3" />
-                            </Button>
-                        </div>
+                {/* Header Section */}
+                <div>
+                    <h3 className="text-lg font-bold text-slate-800 leading-tight">
+                        {activity.paper.title}
+                    </h3>
+                    <div className="flex items-center gap-2 mt-1">
+                        <span className="text-sm text-slate-500">
+                            {activity.scholar.name}, {activity.paper.venue} · {activity.scholar.affiliation}
+                        </span>
+                        {/* Optional Affiliation Badge */}
+                        <Badge variant="secondary" className="hidden sm:inline-flex h-5 rounded-full px-2 text-[10px] bg-blue-50 text-blue-700 font-normal hover:bg-blue-100">
+                            {activity.scholar.affiliation}
+                        </Badge>
                     </div>
                 </div>
+
+                {/* Abstract Preview */}
+                <p className="text-sm text-slate-500 leading-relaxed line-clamp-2">
+                    {activity.paper.abstract_snippet || "No abstract available for this paper."}...
+                </p>
+
+                {/* Tags Row */}
+                <div className="flex flex-wrap gap-2">
+                    <Badge variant="secondary" className="rounded-full bg-blue-100 text-blue-800 hover:bg-blue-200 border-none font-medium px-3">
+                        {activity.paper.venue}
+                    </Badge>
+                    <Badge variant="secondary" className="rounded-full bg-slate-100 text-slate-600 hover:bg-slate-200 border-none font-medium px-3">
+                        {activity.paper.year}
+                    </Badge>
+                    {/* Add a static field tag as example since it's in the design spec but not in mock data explicitly */}
+                    <Badge variant="secondary" className="rounded-full bg-teal-100 text-teal-800 hover:bg-teal-200 border-none font-medium px-3">
+                        Security
+                    </Badge>
+                </div>
+
+                {/* Metrics Row */}
+                <div className="flex items-center gap-6 py-1">
+                    <div className="flex items-center gap-1.5 text-slate-600">
+                        <BarChart className="h-4 w-4 text-teal-600" />
+                        <span className="text-xs font-medium">{activity.paper.citations} citations</span>
+                    </div>
+
+                    {/* Mock influential count since it's not in Activity type yet, or derive it */}
+                    <div className="flex items-center gap-1.5 text-slate-600">
+                        <Star className="h-4 w-4 text-teal-600" />
+                        <span className="text-xs font-medium">45 influential</span>
+                    </div>
+
+                    <div className="flex items-center gap-1.5 text-slate-600">
+                        <Laptop className="h-4 w-4 text-teal-600" />
+                        <span className="text-xs font-medium">Code available</span>
+                    </div>
+                </div>
+
+                {/* Footer Section */}
+                <div className="flex items-center justify-between pt-2">
+                    <div className="text-xs text-slate-400">
+                        Published: {activity.timestamp} · Indexed: Today
+                    </div>
+                    <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-teal-600 hover:text-teal-700 hover:bg-teal-50 px-0 h-auto font-medium"
+                    >
+                        View details <ArrowRight className="ml-1 h-3.5 w-3.5" />
+                    </Button>
+                </div>
+
             </CardContent>
         </Card>
     )
