@@ -185,17 +185,8 @@ paperbot review --title "..." --abstract "..."
 ```
 
 **CLI 界面预览**：
-```
-╭──────────────────────────────────────────────────╮
-│  PaperBot │ Interactive Chat          ● connected │
-╰──────────────────────────────────────────────────╯
 
-System:
-  Welcome to PaperBot! Ask me about papers, scholars, or research topics.
-
-You:
-  What are the key contributions of the Transformer paper?
-```
+![PaperBot CLI Demo](asset/ui/paperbot%20cli%20demo.jpg)
 
 ### 3. 学者追踪 (Scholar Tracking)
 
@@ -568,33 +559,29 @@ analysis = reasoning.invoke_simple("Analyze this paper", abstract)
 
 ![Scholar Tracking Workflow](public/asset/scholar.png)
 
-## 🎨 学者追踪 UI 设计预览
+## 🎨 Web UI 预览
 
-> 下图为 PaperBot 学者追踪系统的初版 UI 设计稿，用于展示 Dashboard、论文卡片、学者卡片、信息流事件和筛选面板等关键界面。
+> 下图为 PaperBot Web Dashboard 的实际界面截图。
 
-1. 主控制台 Dashboard 概览
+1. 主控制台 Dashboard
 
-  ![PaperBot UI 1](asset/ui/1.png)
+   ![Dashboard](asset/ui/dashboard.jpg)
 
-2. 论文信息卡片与列表视图
+2. 论文深度分析视图
 
-  ![PaperBot UI 2](asset/ui/2.png)
+   ![Paper Analysis](asset/ui/paper.jpg)
 
-3. 学者画像与统计指标视图
+3. 学者画像与统计指标
 
-  ![PaperBot UI 3](asset/ui/3.png)
+   ![Scholar Profile](asset/ui/scholar2.jpg)
 
-4. 学者动态信息流与事件 Feed
+4. Wiki 知识库
 
-  ![PaperBot UI 4](asset/ui/4.png)
+   ![Wiki Knowledge Base](asset/ui/wiki.jpg)
 
-5. 高级筛选条件与研究领域面板
+5. DeepCode Studio 代码复现
 
-  ![PaperBot UI 5](asset/ui/5.png)
-
-6. 综合样例界面 / 交互细节补充
-
-  ![PaperBot UI 6](asset/ui/6.png)
+   ![DeepCode Studio](asset/ui/deepcode.jpg)
 
 ## 🛠 配置说明
 
@@ -682,7 +669,6 @@ pytest tests/unit/repro/ tests/integration/test_repro_deepcode.py -v
 | **进度显示** | ink-spinner + 自定义进度条 | ✅ |
 | **多命令支持** | meow CLI parser | ✅ |
 
-![PaperBot CLI Demo](asset/ui/paperbot%20cli%20demo.jpg)
 
 **已实现功能**：
 - `paperbot` - 交互式聊天
