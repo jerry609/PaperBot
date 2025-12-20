@@ -1,4 +1,4 @@
-import { Activity, Paper, PaperDetails, Scholar, ScholarDetails, Stats, WikiConcept, TrendingTopic } from "./types"
+import { Activity, Paper, PaperDetails, Scholar, ScholarDetails, Stats, WikiConcept, TrendingTopic, PipelineTask, ReadingQueueItem, LLMUsageRecord } from "./types"
 
 const API_BASE_URL = "http://localhost:8000/api"
 
@@ -56,6 +56,34 @@ export async function fetchTrendingTopics(): Promise<TrendingTopic[]> {
         { text: "Diffusion Models", value: 70 },
         { text: "Prompt Engineering", value: 40 },
         { text: "Ethics", value: 30 }
+    ]
+}
+
+export async function fetchPipelineTasks(): Promise<PipelineTask[]> {
+    return [
+        { id: "1", paper_title: "Attention Is All You Need", status: "testing", progress: 80, started_at: "5m ago" },
+        { id: "2", paper_title: "ResNet: Deep Residual Learning", status: "building", progress: 45, started_at: "12m ago" },
+        { id: "3", paper_title: "BERT Pretraining", status: "failed", progress: 100, started_at: "1h ago" }
+    ]
+}
+
+export async function fetchReadingQueue(): Promise<ReadingQueueItem[]> {
+    return [
+        { id: "1", paper_id: "attention-is-all-you-need", title: "Attention Is All You Need", estimated_time: "15 min", priority: 1 },
+        { id: "2", paper_id: "bert-pretraining", title: "BERT Pretraining", estimated_time: "20 min", priority: 2 },
+        { id: "3", paper_id: "resnet", title: "ResNet Paper", estimated_time: "10 min", priority: 3 }
+    ]
+}
+
+export async function fetchLLMUsage(): Promise<LLMUsageRecord[]> {
+    return [
+        { date: "Mon", gpt4: 12000, claude: 8000, ollama: 3000 },
+        { date: "Tue", gpt4: 15000, claude: 9500, ollama: 4000 },
+        { date: "Wed", gpt4: 10000, claude: 7000, ollama: 5000 },
+        { date: "Thu", gpt4: 18000, claude: 12000, ollama: 2000 },
+        { date: "Fri", gpt4: 14000, claude: 10000, ollama: 6000 },
+        { date: "Sat", gpt4: 8000, claude: 5000, ollama: 1000 },
+        { date: "Sun", gpt4: 6000, claude: 4000, ollama: 500 }
     ]
 }
 

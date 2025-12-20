@@ -76,3 +76,26 @@ export interface WikiConcept {
     related_papers: string[]
     category: "Method" | "Task" | "Metric"
 }
+
+export interface PipelineTask {
+    id: string
+    paper_title: string
+    status: "downloading" | "analyzing" | "building" | "testing" | "success" | "failed"
+    progress: number
+    started_at: string
+}
+
+export interface ReadingQueueItem {
+    id: string
+    paper_id: string
+    title: string
+    estimated_time: string
+    priority: number
+}
+
+export interface LLMUsageRecord {
+    date: string
+    gpt4: number
+    claude: number
+    ollama: number
+}
