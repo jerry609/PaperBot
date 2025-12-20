@@ -20,6 +20,10 @@ class MessageType(str, Enum):
     HOST_GUIDANCE = "host_guidance"  # Host/主持人引导语
     STAGE_EVENT = "stage_event"  # Pipeline stage event
     FALLBACK = "fallback"  # 降级或回退
+    # P3 新增
+    SCORE_UPDATE = "score_update"  # 阶段评分更新
+    SKIP_DECISION = "skip_decision"  # Fail-Fast 跳过决策
+    CHECKPOINT = "checkpoint"  # 人工检查点
 
 
 @dataclass

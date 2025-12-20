@@ -3,6 +3,10 @@
 学者追踪工作流协调器
 
 负责协调论文分析流水线的各个阶段。
+
+P3 增强:
+- ScoreShareBus 评分共享
+- FailFastEvaluator 快速失败
 """
 
 from __future__ import annotations
@@ -11,6 +15,9 @@ import logging
 from typing import Dict, Any, Optional, List, Tuple
 from pathlib import Path
 from dataclasses import dataclass, field
+
+from .collaboration.score_bus import ScoreShareBus, StageScore, create_research_score, create_code_score
+from .fail_fast import FailFastEvaluator, FailFastConfig
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +34,9 @@ class PipelineContext:
     stages: Dict[str, Any] = field(default_factory=lambda: {})
     status: str = "pending"
     error: Optional[str] = None
+    # P3 新增
+    skipped_stages: List[str] = field(default_factory=list)
+    score_bus: Optional[ScoreShareBus] = None
 
 
 class ScholarWorkflowCoordinator:
@@ -39,6 +49,10 @@ class ScholarWorkflowCoordinator:
     3. 质量评估 (QualityAgent)
     4. 影响力计算 (InfluenceCalculator)
     5. 报告生成 (ReportWriter)
+    
+    P3 增强:
+    - 评分共享总线 (ScoreShareBus)
+    - Fail-Fast 早期中断
     """
     
     def __init__(self, config: Optional[Dict[str, Any]] = None):
@@ -51,6 +65,8 @@ class ScholarWorkflowCoordinator:
                 - report_template: 报告模板名称
                 - use_documentation_agent: 是否使用文档Agent
                 - mode: 运行模式 (production/academic)
+                - enable_fail_fast: 是否启用 Fail-Fast
+                - fail_fast: Fail-Fast 配置
         """
         self.config = config or {}
         self.output_dir = Path(self.config.get("output_dir", "./output/reports"))
@@ -60,6 +76,11 @@ class ScholarWorkflowCoordinator:
         self.use_documentation_agent = self.config.get("use_documentation_agent", False)
         self.mode = self.config.get("mode", "production")
         
+        # P3: Fail-Fast 配置
+        self.enable_fail_fast = self.config.get("enable_fail_fast", True)
+        fail_fast_config = FailFastConfig.from_dict(self.config.get("fail_fast", {}))
+        self.fail_fast_evaluator = FailFastEvaluator(fail_fast_config)
+        
         # 延迟初始化组件
         self._research_agent = None
         self._code_analysis_agent = None
@@ -67,7 +88,7 @@ class ScholarWorkflowCoordinator:
         self._influence_calculator = None
         self._report_writer = None
         
-        logger.info(f"ScholarWorkflowCoordinator initialized with mode={self.mode}")
+        logger.info(f"ScholarWorkflowCoordinator initialized with mode={self.mode}, fail_fast={self.enable_fail_fast}")
     
     @property
     def research_agent(self):
@@ -144,18 +165,47 @@ class ScholarWorkflowCoordinator:
         Returns:
             (报告路径, 影响力结果, 流水线数据)
         """
-        ctx = PipelineContext(paper=paper, scholar_name=scholar_name)
+        paper_id = getattr(paper, 'paper_id', 'unknown')
+        
+        # P3: 初始化评分共享总线
+        score_bus = ScoreShareBus(paper_id=paper_id)
+        ctx = PipelineContext(paper=paper, scholar_name=scholar_name, score_bus=score_bus)
         
         try:
             # 1. 研究分析
             ctx = await self._run_research_stage(ctx)
             
+            # P3: 发布研究评分
+            self._publish_research_score(ctx)
+            
+            # 检查是否有代码
+            has_code = bool(paper.github_url or getattr(paper, 'has_code', False))
+            
             # 2. 代码分析（如果有代码）
-            if paper.github_url or getattr(paper, 'has_code', False):
-                ctx = await self._run_code_analysis_stage(ctx)
+            if has_code:
+                # P3: Fail-Fast 检查
+                if self.enable_fail_fast:
+                    skip_decision = self.fail_fast_evaluator.should_skip_stage("code", score_bus, has_code)
+                    if skip_decision.should_skip:
+                        logger.info(f"⚡ Fail-Fast: 跳过代码分析 - {skip_decision.reason}")
+                        ctx.skipped_stages.append("code")
+                    else:
+                        ctx = await self._run_code_analysis_stage(ctx)
+                        self._publish_code_score(ctx)
+                else:
+                    ctx = await self._run_code_analysis_stage(ctx)
+                    self._publish_code_score(ctx)
             
             # 3. 质量评估
-            ctx = await self._run_quality_stage(ctx)
+            if self.enable_fail_fast:
+                skip_decision = self.fail_fast_evaluator.should_skip_stage("quality", score_bus, has_code)
+                if skip_decision.should_skip:
+                    logger.info(f"⚡ Fail-Fast: 跳过质量评估 - {skip_decision.reason}")
+                    ctx.skipped_stages.append("quality")
+                else:
+                    ctx = await self._run_quality_stage(ctx)
+            else:
+                ctx = await self._run_quality_stage(ctx)
             
             # 4. 影响力计算
             ctx = await self._run_influence_stage(ctx)
@@ -170,13 +220,37 @@ class ScholarWorkflowCoordinator:
             return report_path, ctx.influence_result, self._build_pipeline_data(ctx)
             
         except Exception as e:
-            logger.error(f"Pipeline failed for paper {paper.paper_id}: {e}")
+            logger.error(f"Pipeline failed for paper {paper_id}: {e}")
             ctx.status = "error"
             ctx.error = str(e)
             
             # 返回默认影响力结果
             default_influence = self._create_default_influence()
             return None, default_influence, self._build_pipeline_data(ctx)
+    
+    def _publish_research_score(self, ctx: PipelineContext) -> None:
+        """发布研究阶段评分到总线"""
+        if not ctx.score_bus:
+            return
+        
+        citation_count = getattr(ctx.paper, 'citation_count', 0) or 0
+        venue_tier = ctx.research_result.get("venue_tier")
+        
+        score = create_research_score(citation_count, venue_tier)
+        ctx.score_bus.publish_score(score)
+    
+    def _publish_code_score(self, ctx: PipelineContext) -> None:
+        """发布代码分析阶段评分到总线"""
+        if not ctx.score_bus:
+            return
+        
+        code_result = ctx.code_analysis_result
+        has_code = bool(code_result)
+        health_score = code_result.get("health_score", 0.0) if code_result else 0.0
+        is_empty = code_result.get("is_empty_repo", False) if code_result else False
+        
+        score = create_code_score(has_code, health_score, is_empty)
+        ctx.score_bus.publish_score(score)
     
     async def _run_research_stage(self, ctx: PipelineContext) -> PipelineContext:
         """运行研究分析阶段"""
