@@ -142,11 +142,62 @@ Orchestrator Pipeline (New):
 
 ### 1. 环境准备
 ```bash
-# 安装依赖
+# 安装 Python 依赖
 pip install -r requirements.txt
+
+# 安装 CLI (可选，需要 Node.js 18+)
+cd cli && npm install && npm run build
 ```
 
-### 2. 学者追踪 (Scholar Tracking)
+### 2. 终端 CLI (New)
+
+PaperBot 提供了基于 [Ink](https://github.com/vadimdemedes/ink) 构建的现代终端界面，灵感来自 Gemini CLI 和 Claude Code：
+
+```bash
+# 启动 API 服务器（在一个终端）
+uvicorn src.paperbot.api.main:app --reload --port 8000
+
+# 启动交互式 CLI（在另一个终端）
+cd cli && npm start
+
+# 或使用开发模式（热重载）
+cd cli && npm run dev
+```
+
+**CLI 命令**：
+```bash
+# 交互式聊天模式（默认）
+paperbot
+
+# 学者追踪
+paperbot track --scholar "Dawn Song"
+paperbot track -s 1741101  # 使用 Semantic Scholar ID
+
+# 论文分析
+paperbot analyze --title "Attention Is All You Need"
+paperbot analyze --doi "10.48550/arXiv.1706.03762"
+
+# Paper2Code 代码生成
+paperbot gen-code --title "..." --abstract "..."
+
+# 深度评审
+paperbot review --title "..." --abstract "..."
+```
+
+**CLI 界面预览**：
+```
+╭──────────────────────────────────────────────────╮
+│  PaperBot │ Interactive Chat          ● connected │
+╰──────────────────────────────────────────────────╯
+
+System:
+  Welcome to PaperBot! Ask me about papers, scholars, or research topics.
+
+You:
+  What are the key contributions of the Transformer paper?
+```
+
+### 3. 学者追踪 (Scholar Tracking)
 
 **配置订阅**:
 编辑 `config/scholar_subscriptions.yaml` 添加你想追踪的学者：
@@ -187,7 +238,7 @@ python main.py track --mode academic --report-template academic_report.md.j2
 python main.py track --mode academic --data-source local --dataset-path datasets/processed/sample_sentiment.csv
 ```
 
-### 3. 会议论文下载
+### 4. 会议论文下载
 
 ```bash
 # 下载 CCS 2023 论文（使用 ConferenceResearchAgent）
@@ -197,7 +248,7 @@ python main.py --conference ccs --year 23
 python main.py --conference ndss --year 23
 ```
 
-### 4. 实验与报告渲染
+### 5. 实验与报告渲染
 ```bash
 # 运行实验
 python main.py run-exp --config config/experiments/exp_sentiment.yaml
@@ -209,13 +260,13 @@ python main.py render-report --template academic_report.md.j2
 python main.py render-report --meta output/experiments/xxx_meta.json --template paper_report.md.j2
 ```
 
-### 5. 数据集校验
+### 6. 数据集校验
 ```bash
 python validate_datasets.py
 # 检查 datasets/processed/*.csv 是否包含 text/label，metadata 是否含 license/source
 ```
 
-### 6. 可复现性验证（Repro）
+### 7. 可复现性验证（Repro）
 ```bash
 # 学者追踪时启用可复现性验证（需 Docker、本地镜像可配置）
 python main.py track --mode academic --repro
@@ -248,7 +299,7 @@ ReproAgent 可复现性验证整体流程如下图所示：
 
 ![ReproAgent Reproducibility Flow](public/asset/repoagent.png)
 
-### 7. 论文深度评审 (ReviewerAgent)
+### 8. 论文深度评审 (ReviewerAgent)
 ```bash
 # 对论文进行深度评审
 python main.py review --title "Attention Is All You Need" --abstract "We propose a new architecture..."
@@ -257,7 +308,7 @@ python main.py review --title "Attention Is All You Need" --abstract "We propose
 python main.py review --title "..." --abstract "..." --output review_result.json
 ```
 
-### 8. 科学声明验证 (VerificationAgent)
+### 9. 科学声明验证 (VerificationAgent)
 ```bash
 # 验证论文中的科学声明
 python main.py verify --title "Paper Title" --abstract "Paper abstract..."
@@ -266,7 +317,7 @@ python main.py verify --title "Paper Title" --abstract "Paper abstract..."
 python main.py verify --title "..." --abstract "..." --num-claims 5 --output verify_result.json
 ```
 
-### 9. Paper2Code 代码生成
+### 10. Paper2Code 代码生成
 ```bash
 # 从论文生成代码骨架（Legacy 模式）
 python main.py gen-code --title "Paper Title" --abstract "We propose..." --output-dir ./my_code
@@ -339,6 +390,16 @@ PaperBot/
 │       │   ├── storage/               # 存储
 │       │   └── services/              # 业务服务
 │       │
+│       ├── api/                       # FastAPI 后端 (New)
+│       │   ├── main.py                # FastAPI 应用
+│       │   ├── streaming.py           # SSE 流式工具
+│       │   └── routes/                # API 路由
+│       │       ├── track.py           # 学者追踪
+│       │       ├── analyze.py         # 论文分析
+│       │       ├── gen_code.py        # Paper2Code
+│       │       ├── review.py          # 深度评审
+│       │       └── chat.py            # AI 对话
+│       │
 │       ├── domain/                    # 领域模型层
 │       │   ├── paper.py               # PaperMeta, CodeMeta
 │       │   ├── scholar.py             # Scholar
@@ -393,6 +454,22 @@ PaperBot/
 │           ├── retry_helper.py
 │           ├── json_parser.py
 │           └── text_processing.py
+│
+├── cli/                               # Node.js 终端 UI (New)
+│   ├── src/
+│   │   ├── index.tsx                  # 入口点
+│   │   ├── components/                # React/Ink 组件
+│   │   │   ├── App.tsx
+│   │   │   ├── ChatView.tsx
+│   │   │   ├── TrackView.tsx
+│   │   │   ├── AnalyzeView.tsx
+│   │   │   └── GenCodeView.tsx
+│   │   ├── hooks/                     # React Hooks
+│   │   └── utils/                     # 工具函数
+│   │       ├── api.ts                 # API 客户端
+│   │       └── banner.ts              # oh-my-logo 横幅
+│   ├── package.json
+│   └── tsconfig.json
 │
 ├── config/                            # 配置文件
 │   ├── config.yaml
@@ -589,34 +666,36 @@ pytest tests/unit/repro/ tests/integration/test_repro_deepcode.py -v
 | **Multi-Agent Orchestrator** | ✅ | 4 专用 Agent 并行执行 |
 | **Self-Healing Debugger** | ✅ | 错误分类 + LLM 自动修复循环 |
 
-### Phase 2: UI/UX 现代化 (计划中)
+### Phase 2: UI/UX 现代化 (进行中)
 
-基于 [Vercel AI SDK](https://ai-sdk.dev/) 和 [Gemini CLI](https://github.com/google-gemini/gemini-cli) 的设计理念，计划推出两套交互界面：
+基于 [Vercel AI SDK](https://ai-sdk.dev/) 和 [Gemini CLI](https://github.com/google-gemini/gemini-cli) 的设计理念，推出两套交互界面：
 
-#### 2.1 终端 UI (Node.js CLI)
+#### 2.1 终端 UI (Node.js CLI) ✅ 已实现
 
-受 Gemini CLI 启发，构建类似 Claude Code 的终端交互体验：
+基于 Ink (React for CLI) 构建的现代终端界面：
 
-| 特性 | 技术栈 | 描述 |
+| 特性 | 技术栈 | 状态 |
 |------|--------|------|
-| **富终端渲染** | [Ink](https://github.com/vadimdemedes/ink) | React for CLI，渐进式流输出 |
-| **流式响应** | WebSocket / SSE | 实时显示分析进度 |
-| **MCP 支持** | [Model Context Protocol](https://modelcontextprotocol.io/) | 可扩展工具集成 |
-| **多模型路由** | LLM 后端 | 自动选择最优模型 |
+| **富终端渲染** | [Ink](https://github.com/vadimdemedes/ink) | ✅ |
+| **流式响应** | SSE (Server-Sent Events) | ✅ |
+| **交互式输入** | ink-text-input | ✅ |
+| **进度显示** | ink-spinner + 自定义进度条 | ✅ |
+| **多命令支持** | meow CLI parser | ✅ |
 
-**预期命令示例**：
+**已实现功能**：
+- `paperbot` - 交互式聊天
+- `paperbot track` - 学者追踪
+- `paperbot analyze` - 论文分析
+- `paperbot gen-code` - Paper2Code
+- `paperbot review` - 深度评审
+
+**安装与使用**：
 ```bash
-# 交互式学者追踪
-paperbot track --interactive
-
-# 流式论文分析
-paperbot analyze --paper "Attention Is All You Need" --stream
-
-# Paper2Code 生成
-paperbot gen-code --title "..." --abstract "..." --live
+cd cli && npm install && npm run build
+npm start  # 或 npm run dev
 ```
 
-#### 2.2 Web UI (Next.js + Vercel AI SDK)
+#### 2.2 Web UI (Next.js + Vercel AI SDK) 📋 计划中
 
 基于 [Vercel AI SDK](https://vercel.com/docs/ai-sdk) 构建现代 Web 界面：
 
@@ -633,25 +712,45 @@ paperbot gen-code --title "..." --abstract "..." --live
 - **流式传输**: `streamText`, `streamObject`
 - **后端通信**: REST API / tRPC 调用 Python 服务
 
-#### 2.3 架构设计
+#### 2.3 FastAPI 后端 ✅ 已实现
+
+为 CLI 和 Web UI 提供统一的 API 网关：
+
+```bash
+# 启动 API 服务器
+uvicorn src.paperbot.api.main:app --reload --port 8000
+```
+
+**已实现端点**：
+| 端点 | 方法 | 描述 |
+|------|------|------|
+| `/health` | GET | 健康检查 |
+| `/api/track` | GET | 学者追踪 (SSE) |
+| `/api/analyze` | POST | 论文分析 (SSE) |
+| `/api/gen-code` | POST | Paper2Code (SSE) |
+| `/api/review` | POST | 深度评审 (SSE) |
+| `/api/chat` | POST | AI 对话 (SSE) |
+
+#### 2.4 架构设计
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                     UI 层 (Node.js/Next.js)                  │
 ├────────────────────────┬────────────────────────────────────┤
-│   Terminal UI (Ink)    │        Web UI (Next.js)            │
+│   Terminal UI (Ink) ✅ │        Web UI (Next.js) 📋        │
 │   - 流式输出            │   - useChat streaming              │
-│   - MCP Tools          │   - React Server Components        │
+│   - oh-my-logo 横幅    │   - React Server Components        │
 │   - 键盘导航            │   - Dashboard 可视化               │
 └────────────────────────┴────────────────────────────────────┘
-                              ↓ HTTP/WebSocket ↓
+                              ↓ HTTP/SSE ↓
 ┌─────────────────────────────────────────────────────────────┐
-│                   API Gateway (Python/FastAPI)               │
+│               API Gateway (Python/FastAPI) ✅                │
 ├─────────────────────────────────────────────────────────────┤
-│   /api/track       - 学者追踪                                │
-│   /api/analyze     - 论文分析 (SSE 流)                       │
-│   /api/gen-code    - Paper2Code                             │
-│   /api/review      - 深度评审                                │
+│   /api/track       - 学者追踪 (SSE)                         │
+│   /api/analyze     - 论文分析 (SSE)                         │
+│   /api/gen-code    - Paper2Code (SSE)                       │
+│   /api/review      - 深度评审 (SSE)                         │
+│   /api/chat        - AI 对话 (SSE)                          │
 └─────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────┐
@@ -676,6 +775,7 @@ paperbot gen-code --title "..." --abstract "..." --live
 - [Vercel AI SDK Documentation](https://ai-sdk.dev/docs/introduction)
 - [Gemini CLI GitHub](https://github.com/google-gemini/gemini-cli)
 - [Ink - React for CLIs](https://github.com/vadimdemedes/ink)
+- [oh-my-logo - ASCII Art Logo Generator](https://github.com/shinshin86/oh-my-logo)
 - [Model Context Protocol](https://modelcontextprotocol.io/)
 
 ## 🙏 致谢

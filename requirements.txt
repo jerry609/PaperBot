@@ -56,3 +56,8 @@ e2b-code-interpreter>=1.0.0
 # Report Engine
 weasyprint>=62.3
 json-repair>=0.22.0
+
+# FastAPI backend for CLI/Web
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+sse-starlette>=2.1.0
