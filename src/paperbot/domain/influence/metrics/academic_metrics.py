@@ -1,6 +1,9 @@
 # src/paperbot/domain/influence/metrics/academic_metrics.py
 """
 学术影响力指标计算器
+
+P2 增强:
+- 集成 DynamicPISCalculator 计算引用增速
 """
 
 import logging
@@ -14,24 +17,38 @@ from ..weights import (
     VENUE_SCORES,
     get_citation_score,
 )
+from ..analyzers.dynamic_pis import DynamicPISCalculator
 
 logger = logging.getLogger(__name__)
 
 
 class AcademicMetricsCalculator:
-    """学术影响力指标计算器"""
+    """
+    学术影响力指标计算器
     
-    def __init__(self, venues_config_path: Optional[Path] = None, recency_half_life_years: Optional[int] = None):
+    P2 增强: 集成引用增速分析
+    """
+    
+    def __init__(
+        self, 
+        venues_config_path: Optional[Path] = None, 
+        recency_half_life_years: Optional[int] = None,
+        enable_velocity: bool = True,
+    ):
         """
         初始化计算器
         
         Args:
             venues_config_path: 顶会配置文件路径
             recency_half_life_years: 时间衰减半衰期
+            enable_velocity: 是否启用引用增速计算
         """
         self.weights = dict(INFLUENCE_WEIGHTS["academic"])
         if recency_half_life_years is not None:
             self.weights["recency_half_life_years"] = recency_half_life_years
+        
+        # P2: 初始化动态PIS计算器
+        self.dynamic_calc = DynamicPISCalculator() if enable_velocity else None
         
         # 加载顶会配置
         if venues_config_path is None:
@@ -41,6 +58,7 @@ class AcademicMetricsCalculator:
         self.tier1_venues: Set[str] = set()
         self.tier2_venues: Set[str] = set()
         self._load_venues_config(venues_config_path)
+
     
     def _load_venues_config(self, config_path: Path):
         """加载顶会配置"""
@@ -102,6 +120,16 @@ class AcademicMetricsCalculator:
             metrics.venue_score = VENUE_SCORES["tier2"]
         else:
             metrics.venue_score = VENUE_SCORES["other"]
+        
+        # 3. P2: 计算引用增速
+        if self.dynamic_calc:
+            citation_history = getattr(paper, 'citation_history', None)
+            metrics.citation_velocity = self.dynamic_calc.compute_citation_velocity(
+                paper, citation_history
+            )
+            metrics.momentum_score = self.dynamic_calc.compute_momentum_score(
+                metrics.citation_velocity
+            )
         
         return metrics
     

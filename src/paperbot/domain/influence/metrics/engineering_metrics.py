@@ -1,6 +1,9 @@
 # src/paperbot/domain/influence/metrics/engineering_metrics.py
 """
 工程影响力指标计算器
+
+P2 增强:
+- 集成 CodeHealthAnalyzer 进行深度代码健康检查
 """
 
 import logging
@@ -13,16 +16,28 @@ from ..weights import (
     CODE_AVAILABILITY_SCORES,
     get_stars_score,
 )
+from ..analyzers.code_health import CodeHealthAnalyzer
 
 logger = logging.getLogger(__name__)
 
 
 class EngineeringMetricsCalculator:
-    """工程影响力指标计算器"""
+    """
+    工程影响力指标计算器
     
-    def __init__(self):
-        """初始化计算器"""
+    P2 增强: 集成代码健康检查
+    """
+    
+    def __init__(self, enable_health_check: bool = True):
+        """
+        初始化计算器
+        
+        Args:
+            enable_health_check: 是否启用代码健康检查
+        """
         self.weights = dict(INFLUENCE_WEIGHTS["engineering"])
+        # P2: 初始化代码健康分析器
+        self.health_analyzer = CodeHealthAnalyzer() if enable_health_check else None
     
     def compute(
         self,
@@ -69,6 +84,15 @@ class EngineeringMetricsCalculator:
             # 活跃度评分
             metrics.is_recently_updated = self._is_recently_updated(code_meta)
             metrics.activity_score = self._compute_activity_score(code_meta)
+            
+            # P2: 代码健康检查
+            if self.health_analyzer:
+                metrics.health = self.health_analyzer.analyze(github_url, code_meta)
+                
+                # 空壳仓库大幅降权
+                if metrics.health.is_empty_repo:
+                    metrics.reproducibility_score *= 0.3
+                    logger.warning(f"Empty repo detected, reducing reproducibility score")
         else:
             # 没有代码仓库信息
             metrics.repo_stars = 0
@@ -78,6 +102,7 @@ class EngineeringMetricsCalculator:
             metrics.activity_score = 0
         
         return metrics
+
     
     def _estimate_reproducibility(self, code_meta) -> float:
         """
