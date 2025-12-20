@@ -10,8 +10,9 @@ export async function showBanner(): Promise<void> {
     const logo = await renderFilled('PaperBot', {
       palette: 'ocean',
     });
-    console.log(logo);
-    console.log();
+    if (logo) {
+      console.log(logo);
+    }
   } catch {
     // Fallback to simple text banner if oh-my-logo fails
     console.log('\n  ╔═══════════════════════════════════╗');

@@ -682,6 +682,8 @@ pytest tests/unit/repro/ tests/integration/test_repro_deepcode.py -v
 | **进度显示** | ink-spinner + 自定义进度条 | ✅ |
 | **多命令支持** | meow CLI parser | ✅ |
 
+![PaperBot CLI Demo](asset/ui/paperbot%20cli%20demo.jpg)
+
 **已实现功能**：
 - `paperbot` - 交互式聊天
 - `paperbot track` - 学者追踪
