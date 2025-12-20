@@ -15,33 +15,47 @@ export async function fetchStats(): Promise<Stats> {
 }
 
 export async function fetchActivities(): Promise<Activity[]> {
-    // TODO: Replace with real API call
-    // const res = await fetch(`${API_BASE_URL}/activities`)
-    // return res.json()
     return [
         {
-            author: "Dawn Song",
-            action: "published",
-            paper: "LLM Security: A Comprehensive Survey",
-            venue: "S&P 2025",
-            time: "2h ago",
-            type: "paper"
+            id: "act-1",
+            type: "published",
+            timestamp: "Dec 3, 2025 · 12:00 PM",
+            scholar: {
+                name: "Dawn Song",
+                avatar: "https://avatar.vercel.sh/dawn.png",
+                affiliation: "UC Berkeley"
+            },
+            paper: {
+                title: "Large Language Models for Academic Research: A Comprehensive Review",
+                venue: "NeurIPS",
+                year: "2024",
+                citations: 127,
+                tags: ["Security", "LLM"],
+                abstract_snippet: "This paper provides a comprehensive review of recent advancements in large language models (LLMs) specifically tailored for academic research applications.",
+                is_influential: true
+            }
         },
         {
-            author: "PaperBot",
-            action: "alert",
-            paper: "Attention Is All You Need",
-            detail: "Citation velocity increased by 50%",
-            time: "4h ago",
-            type: "alert"
+            id: "act-2",
+            type: "milestone",
+            timestamp: "2h ago",
+            milestone: {
+                title: "Citation Milestone Reached: 1,000 Citations",
+                description: "Your tracked scholar, Andrew Ng, has reached a total of 1,000 citations across all publications.",
+                current_value: 1000,
+                trend: "up"
+            }
         },
         {
-            author: "System",
-            action: "repro",
-            paper: "FlashAttention V3",
-            detail: "Reproduction failed (Exit Code 1)",
-            time: "6h ago",
-            type: "repro"
+            id: "act-3",
+            type: "conference",
+            timestamp: "5h ago",
+            conference: {
+                name: "ICML 2025",
+                location: "Vancouver, Canada",
+                date: "July 2025",
+                deadline_countdown: "5 days, 14 hours"
+            }
         }
     ]
 }
@@ -210,22 +224,56 @@ export async function fetchWikiConcepts(): Promise<WikiConcept[]> {
             id: "transformer",
             name: "Transformer",
             description: "A deep learning model architecture relying on self-attention mechanisms.",
-            related_papers: ["Attention Is All You Need", "BERT"],
-            category: "Method"
+            definition: "The Transformer architecture processes input sequences in parallel using self-attention, allowing it to capture long-range dependencies more effectively than RNNs. It consists of encoder and decoder stacks, each containing multi-head attention and feed-forward layers.",
+            related_papers: ["Attention Is All You Need", "BERT", "GPT-3"],
+            related_concepts: ["Self-Attention", "Positional Encoding", "Multi-Head Attention"],
+            examples: ["GPT-4", "Claude", "LLaMA"],
+            category: "Architecture",
+            icon: "layers"
         },
         {
             id: "rlhf",
             name: "RLHF",
-            description: "Reinforcement Learning from Human Feedback, used to align LLMs.",
-            related_papers: ["InstructGPT"],
-            category: "Method"
+            description: "Reinforcement Learning from Human Feedback, used to align LLMs with human preferences.",
+            definition: "RLHF trains a reward model on human preference data, then fine-tunes the language model using PPO to maximize the reward. This alignment technique helps reduce harmful outputs and improve helpfulness.",
+            related_papers: ["InstructGPT", "Constitutional AI"],
+            related_concepts: ["PPO", "Reward Model", "Alignment"],
+            examples: ["ChatGPT alignment", "Claude training"],
+            category: "Method",
+            icon: "target"
         },
         {
             id: "bleu",
             name: "BLEU Score",
             description: "A metric for evaluating the quality of machine translated text.",
-            related_papers: [],
-            category: "Metric"
+            definition: "BLEU (Bilingual Evaluation Understudy) compares n-gram overlaps between generated and reference translations. Scores range from 0 to 1, with higher scores indicating better translation quality.",
+            related_papers: ["BLEU: a Method for Automatic Evaluation"],
+            related_concepts: ["ROUGE", "METEOR", "BERTScore"],
+            examples: ["MT evaluation", "Summarization scoring"],
+            category: "Metric",
+            icon: "bar-chart"
+        },
+        {
+            id: "diffusion",
+            name: "Diffusion Models",
+            description: "Generative models that learn to reverse a gradual noising process.",
+            definition: "Diffusion models add Gaussian noise to data over multiple steps, then learn to reverse this process. They achieve state-of-the-art image generation by iteratively denoising random noise into coherent samples.",
+            related_papers: ["DDPM", "Stable Diffusion", "DALL-E 2"],
+            related_concepts: ["Denoising", "Score Matching", "Latent Diffusion"],
+            examples: ["Midjourney", "Stable Diffusion XL"],
+            category: "Method",
+            icon: "waves"
+        },
+        {
+            id: "imagenet",
+            name: "ImageNet",
+            description: "Large-scale visual database for object recognition research.",
+            definition: "ImageNet contains over 14 million images annotated with 20,000+ categories. The ILSVRC subset (1000 classes) became the standard benchmark for image classification, driving major advances in CNNs.",
+            related_papers: ["ImageNet Classification with Deep CNNs"],
+            related_concepts: ["Transfer Learning", "Fine-tuning", "Pretraining"],
+            examples: ["ResNet-50 on ImageNet", "ViT benchmarks"],
+            category: "Dataset",
+            icon: "image"
         }
     ]
 }

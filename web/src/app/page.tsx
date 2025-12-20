@@ -4,7 +4,8 @@ import { PipelineStatus } from "@/components/dashboard/PipelineStatus"
 import { ReadingQueue } from "@/components/dashboard/ReadingQueue"
 import { LLMUsageChart } from "@/components/dashboard/LLMUsageChart"
 import { QuickActions } from "@/components/dashboard/QuickActions"
-import { Users, FileText, Zap, BookOpen, Download, Search } from "lucide-react"
+import { QuickFilters } from "@/components/dashboard/QuickFilters"
+import { Users, FileText, Zap, BookOpen, Search, TrendingUp } from "lucide-react"
 import { fetchStats, fetchTrendingTopics, fetchPipelineTasks, fetchReadingQueue, fetchLLMUsage } from "@/lib/api"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -21,7 +22,7 @@ export default async function DashboardPage() {
   ])
 
   return (
-    <div className="flex-1 p-8 pt-6 space-y-6 bg-slate-50/50 dark:bg-slate-950/50 min-h-screen">
+    <div className="flex-1 p-6 space-y-4 min-h-screen">
       {/* Premium Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
@@ -68,7 +69,7 @@ export default async function DashboardPage() {
       </div>
 
       {/* Bento Grid Layout */}
-      <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-7 gap-4 auto-rows-[minmax(180px,auto)]">
+      <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-7 gap-3 auto-rows-[minmax(160px,auto)]">
 
         {/* Large Item: Activity Feed (2 Cols, 2 Rows) */}
         <div className="md:col-span-2 lg:col-span-4 row-span-2">
@@ -99,7 +100,7 @@ export default async function DashboardPage() {
         <Card className="md:col-span-3 lg:col-span-7 bg-muted/20 border-dashed">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium flex items-center gap-2">
-              🔥 Trending Concepts
+              <TrendingUp className="h-4 w-4 text-orange-500" /> Trending Concepts
             </CardTitle>
           </CardHeader>
           <CardContent>

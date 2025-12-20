@@ -38,14 +38,40 @@ export interface TrendingTopic {
 }
 
 
+export type ActivityType = "published" | "alert" | "repro" | "milestone" | "conference"
+
 export interface Activity {
-    author: string
-    action: "published" | "alert" | "repro"
-    paper: string
-    venue?: string
-    detail?: string
-    time: string
-    type: "paper" | "alert" | "repro"
+    id: string
+    type: ActivityType
+    timestamp: string
+    // Type-specific fields
+    paper?: {
+        title: string
+        venue: string
+        year: string
+        citations: number
+        tags: string[]
+        abstract_snippet: string
+        is_influential?: boolean
+    }
+    scholar?: {
+        name: string
+        avatar: string
+        affiliation: string
+    }
+    milestone?: {
+        title: string
+        description: string
+        current_value: number
+        target_value?: number
+        trend: "up" | "down" | "flat"
+    }
+    conference?: {
+        name: string
+        location: string
+        date: string
+        deadline_countdown: string
+    }
 }
 
 export interface Stats {
@@ -73,8 +99,12 @@ export interface WikiConcept {
     id: string
     name: string
     description: string
+    definition: string
     related_papers: string[]
-    category: "Method" | "Task" | "Metric"
+    related_concepts: string[]
+    examples: string[]
+    category: "Method" | "Task" | "Metric" | "Architecture" | "Dataset"
+    icon: string // Lucide icon name or identifier
 }
 
 export interface PipelineTask {
