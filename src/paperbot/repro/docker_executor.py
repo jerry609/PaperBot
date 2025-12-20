@@ -13,12 +13,13 @@ except ImportError:
     APIError = Exception
     HAS_DOCKER = False
 
+from .base_executor import BaseExecutor
 from .execution_result import ExecutionResult
 
 logger = logging.getLogger(__name__)
 
 
-class DockerExecutor:
+class DockerExecutor(BaseExecutor):
     """
     轻量 Docker 执行器
     - 挂载代码目录只读

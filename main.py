@@ -211,6 +211,10 @@ def build_parser() -> argparse.ArgumentParser:
     gencode_parser.add_argument('--abstract', required=True, help='论文摘要')
     gencode_parser.add_argument('--method', default=None, help='方法章节内容（可选）')
     gencode_parser.add_argument('--output-dir', default='./generated_code', help='输出目录')
+    gencode_parser.add_argument('--use-orchestrator', action='store_true',
+                                help='启用多 Agent 协调模式（Blueprint + CodeMemory + RAG）')
+    gencode_parser.add_argument('--no-rag', action='store_true',
+                                help='禁用 CodeRAG 模式检索')
     
     parser.add_argument('--mode', choices=['production', 'academic'], default=os.getenv("PAPERBOT_MODE", "production"),
                        help='运行模式 (production/academic)')
@@ -748,26 +752,39 @@ def run_verify(args):
 def run_gencode(args):
     """运行 Paper2Code 代码生成 (ReproAgent)"""
     from paperbot.repro import ReproAgent, PaperContext
-    
+
     print("🔧 Paper2Code 代码生成...")
     print(f"   标题: {args.title}")
-    
+
+    # 显示模式信息
+    if args.use_orchestrator:
+        print("   模式: 多 Agent 协调模式 (Blueprint + CodeMemory + RAG)")
+    else:
+        print("   模式: Legacy 节点流水线模式")
+
+    if args.no_rag:
+        print("   RAG: 已禁用")
+
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    
+
     ctx = PaperContext(
         title=args.title,
         abstract=args.abstract,
         method_section=args.method or ""
     )
-    
+
     async def _run():
-        agent = ReproAgent({})
+        config = {
+            "use_orchestrator": args.use_orchestrator,
+            "use_rag": not args.no_rag,
+        }
+        agent = ReproAgent(config)
         result = await agent.reproduce_from_paper(ctx, output_dir=output_dir)
         return result
-    
+
     result = asyncio.run(_run())
-    
+
     print(f"\n📦 生成结果:")
     print(f"   状态: {result.status}")
     print(f"   生成文件: {list(result.generated_files.keys())}")

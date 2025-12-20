@@ -10,6 +10,7 @@ from .analysis_node import AnalysisNode
 from .generation_node import GenerationNode
 from .verification_node import VerificationNode, VerificationResult
 from .environment_node import EnvironmentInferenceNode
+from .blueprint_node import BlueprintDistillationNode
 
 __all__ = [
     "BaseNode",
@@ -22,5 +23,6 @@ __all__ = [
     "VerificationNode",
     "VerificationResult",
     "EnvironmentInferenceNode",
+    "BlueprintDistillationNode",
 ]
 

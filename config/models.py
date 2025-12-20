@@ -30,6 +30,12 @@ class ReproConfig(BaseModel):
     cpu_shares: int = 1024
     mem_limit: str = "512m"
     network: bool = False
+    # Executor selection: "docker", "e2b", or "auto"
+    executor: Literal["docker", "e2b", "auto"] = "auto"
+    # E2B configuration
+    e2b_api_key: Optional[str] = None
+    e2b_template: str = "Python3"
+    e2b_timeout: int = 300
 
 
 class PipelineConfig(BaseModel):

@@ -71,14 +71,55 @@ PaperBot 是一个专为计算机领域设计的智能论文分析框架。它�
 - 从论文方法章节自动生成代码骨架。
 - Docker 隔离执行与细粒度验证。
 
-## 🆚 与 AlphaXiv 的主要区别
+#### DeepCode 架构增强 (v2.0)
+基于 [DeepCode](https://arxiv.org/abs/2512.07921) 论文的设计理念，ReproAgent 新增以下核心能力：
 
-- **定位**：PaperBot 面向"论文+代码+复现"的多 Agent 深度分析与报告生成；AlphaXiv 更偏论文聚合/推荐。  
-- **代码与工程维度**：PaperBot 会自动发现/分析仓库，输出工程影响力（stars、last commit、可复现性）；AlphaXiv 主要提供论文元信息/摘要。  
-- **学者追踪与报告**：支持学者订阅、自动检测新论文、生成 Markdown/学术模板报告（含影响力评分、代码要点）；AlphaXiv 无学者追踪与工程报告链路。  
-- **可复现/实验**：内置 ExperimentManager，记录 git commit、依赖快照，支持学术模式/本地数据源、数据集校验脚本；AlphaXiv 不提供实验与复现闭环。  
-- **会议抓取与代码提取**：ConferenceResearchAgent 直接抓取顶会论文并尝试提取 GitHub 链接，带并发/重试/兜底；AlphaXiv 不聚焦抓取代码资源。  
+| 模块 | 功能描述 |
+|------|----------|
+| **Blueprint Distillation** | 将论文压缩为结构化 Blueprint（~2000 tokens），包含架构类型、模块层次、核心算法等 |
+| **Stateful Code Memory** | 跨文件上下文追踪，基于 AST 的符号索引，依赖感知的文件生成顺序 |
+| **CodeRAG** | 关键词匹配的代码模式检索，内置 10+ PyTorch/Transformer 模板 |
+| **Multi-Agent Orchestrator** | 4 个专用 Agent 协调：Planning、Coding、Debugging、Verification |
+| **Self-Healing Debugger** | 错误分类（语法/依赖/逻辑）+ LLM 自动修复循环 |
+
+**架构对比**:
+
+```
+Legacy Pipeline:
+  PaperContext → PlanningNode → AnalysisNode → GenerationNode → VerificationNode
+
+Orchestrator Pipeline (New):
+  PaperContext → BlueprintDistillation → PlanningAgent → CodingAgent ⟷ DebuggingAgent
+                                              ↓               ↓
+                                        CodeMemory + RAG    VerificationAgent
+```
+
+## 🆚 与 AlphaXiv / DeepCode 的主要区别
+
+### vs AlphaXiv
+- **定位**：PaperBot 面向"论文+代码+复现"的多 Agent 深度分析与报告生成；AlphaXiv 更偏论文聚合/推荐。
+- **代码与工程维度**：PaperBot 会自动发现/分析仓库，输出工程影响力（stars、last commit、可复现性）；AlphaXiv 主要提供论文元信息/摘要。
+- **学者追踪与报告**：支持学者订阅、自动检测新论文、生成 Markdown/学术模板报告（含影响力评分、代码要点）；AlphaXiv 无学者追踪与工程报告链路。
+- **可复现/实验**：内置 ExperimentManager，记录 git commit、依赖快照，支持学术模式/本地数据源、数据集校验脚本；AlphaXiv 不提供实验与复现闭环。
+- **会议抓取与代码提取**：ConferenceResearchAgent 直接抓取顶会论文并尝试提取 GitHub 链接，带并发/重试/兜底；AlphaXiv 不聚焦抓取代码资源。
 - **模板与模式**：学术/生产模式切换，paper/academic 模板可选，render-report 支持 meta 自动发现；AlphaXiv 模板化/报告定制能力有限。
+
+### vs DeepCode (HKUDS)
+[DeepCode](https://github.com/HKUDS/DeepCode) 是港大数据智能实验室发布的开源 Paper2Code 框架，在 PaperBench 基准上达到 73.5% 的 SOTA 性能。
+
+| 特性 | PaperBot | DeepCode |
+|------|----------|----------|
+| **核心定位** | 学者追踪 + 论文分析 + 代码复现 | 纯 Paper2Code 生成 |
+| **Agent 架构** | 多 Agent 协作（Research/Code/Quality） | 模块化 Agent 流水线 |
+| **执行后端** | Docker + E2B 云沙箱 | 本地执行 |
+| **影响力分析** | PIS 评分、引用速度、情感分析 | 无 |
+| **学者追踪** | 支持 | 不支持 |
+| **自愈调试** | VerificationNode 错误分类修复 | Error Correction 模块 |
+| **Blueprint 蒸馏** | ✅ 已集成 | ✅ 原创设计 |
+| **状态化代码记忆** | ✅ CodeMemory + AST 索引 | ✅ Stateful Memory |
+| **知识注入 (RAG)** | ✅ 关键词匹配（无向量依赖） | ✅ 向量检索 |
+
+**PaperBot v2.0 已完整借鉴并实现 DeepCode 的核心设计**，同时保持了自身的多 Agent 学者追踪能力。
 
 ## 🏗️ 系统架构
 
@@ -187,6 +228,19 @@ python main.py track --mode academic --repro --report-template academic_report.m
 - `repro.cpu_shares` / `repro.mem_limit`: 资源限制
 - `repro.timeout_sec`: 超时（秒）
 - `repro.network`: 是否允许容器出网（默认禁用）
+- `repro.executor`: 执行器选择 `docker` / `e2b` / `auto`（默认 auto）
+
+**E2B 云沙箱配置**（可选）：
+- `E2B_API_KEY`: E2B API 密钥（从 [e2b.dev](https://e2b.dev) 获取）
+- `PAPERBOT_EXECUTOR`: 强制指定执行器 (`docker`/`e2b`/`auto`)
+- `PAPERBOT_E2B_TEMPLATE`: E2B 沙箱模板（默认 `Python3`）
+- `PAPERBOT_E2B_TIMEOUT`: E2B 沙箱超时秒数（默认 300）
+
+使用 E2B 的优势：
+- 无需本地安装 Docker
+- 基于 microVM 的更强隔离
+- 云端弹性扩展
+- 预装常用 ML 库
 
 报告中会追加"可复现性验证"区块，展示状态、命令、耗时、日志摘要。
 
@@ -214,12 +268,26 @@ python main.py verify --title "..." --abstract "..." --num-claims 5 --output ver
 
 ### 9. Paper2Code 代码生成
 ```bash
-# 从论文生成代码骨架
+# 从论文生成代码骨架（Legacy 模式）
 python main.py gen-code --title "Paper Title" --abstract "We propose..." --output-dir ./my_code
+
+# 使用 DeepCode 增强模式（Blueprint + CodeMemory + RAG）
+python main.py gen-code --title "..." --abstract "..." --use-orchestrator --output-dir ./output
 
 # 提供方法章节内容以获得更好的代码生成
 python main.py gen-code --title "..." --abstract "..." --method "The model consists of..." --output-dir ./output
+
+# 禁用 RAG 模式检索
+python main.py gen-code --title "..." --abstract "..." --use-orchestrator --no-rag --output-dir ./output
 ```
+
+**CLI 选项说明**:
+| 选项 | 描述 |
+|------|------|
+| `--use-orchestrator` | 启用多 Agent 协调模式（Blueprint + CodeMemory + RAG） |
+| `--no-rag` | 禁用 CodeRAG 模式检索 |
+| `--method` | 提供论文方法章节内容 |
+| `--output-dir` | 输出目录（默认 ./generated_code） |
 
 ## 📂 目录结构
 
@@ -296,11 +364,28 @@ PaperBot/
 │       │   ├── cli/                   # CLI
 │       │   └── reports/               # 报告生成
 │       │
-│       ├── repro/                     # 复现模块
-│       │   ├── repro_agent.py
-│       │   ├── docker_executor.py
-│       │   ├── models.py
-│       │   └── nodes/
+│       ├── repro/                     # 复现模块 (DeepCode 增强)
+│       │   ├── repro_agent.py         # 主 Agent（支持 Legacy/Orchestrator 模式）
+│       │   ├── orchestrator.py        # 多 Agent 协调器
+│       │   ├── docker_executor.py     # Docker 执行器
+│       │   ├── e2b_executor.py        # E2B 云沙箱执行器
+│       │   ├── models.py              # 数据模型（Blueprint, PaperContext 等）
+│       │   ├── nodes/                 # 处理节点
+│       │   │   ├── blueprint_node.py  # Blueprint 蒸馏节点
+│       │   │   ├── planning_node.py   # 规划节点
+│       │   │   ├── generation_node.py # 代码生成节点（集成 Memory+RAG）
+│       │   │   └── verification_node.py # 验证节点
+│       │   ├── agents/                # 专用 Agent
+│       │   │   ├── planning_agent.py  # 规划 Agent
+│       │   │   ├── coding_agent.py    # 编码 Agent
+│       │   │   ├── debugging_agent.py # 调试 Agent
+│       │   │   └── verification_agent.py # 验证 Agent
+│       │   ├── memory/                # 状态化代码记忆
+│       │   │   ├── code_memory.py     # 跨文件上下文
+│       │   │   └── symbol_index.py    # AST 符号索引
+│       │   └── rag/                   # 代码知识检索
+│       │       ├── knowledge_base.py  # 关键词匹配知识库
+│       │       └── patterns/          # 内置代码模式
 │       │
 │       └── utils/                     # 工具函数
 │           ├── logger.py
@@ -452,6 +537,12 @@ analysis = reasoning.invoke_simple("Analyze this paper", abstract)
 
 #### GitHub 与外部服务
 - `GITHUB_TOKEN`: 用于 GitHub API 调用（提高限流阈值）
+
+#### E2B 云沙箱（可选）
+- `E2B_API_KEY`: E2B API 密钥（[e2b.dev](https://e2b.dev) 注册获取）
+- `PAPERBOT_EXECUTOR`: 执行器选择 (`docker`/`e2b`/`auto`，默认 auto)
+- `PAPERBOT_E2B_TEMPLATE`: E2B 沙箱模板（默认 Python3）
+- `PAPERBOT_E2B_TIMEOUT`: E2B 沙箱超时（秒）
 
 #### 协作主持人（可选，默认关闭）
 - `PAPERBOT_HOST_ENABLED`: 是否启用主持人协作（true/false）

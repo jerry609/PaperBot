@@ -153,6 +153,12 @@ class Settings:
         "mem_limit": "1g",
         "timeout_sec": 300,
         "network": False,  # 禁用网络，True 表示允许
+        # Executor selection: "docker", "e2b", or "auto"
+        "executor": "auto",
+        # E2B configuration
+        "e2b_api_key": None,
+        "e2b_template": "Python3",
+        "e2b_timeout": 300,
     })
     offline: bool = False  # 离线/私有模式开关
     conferences: Dict[str, ConferenceConfig] = field(default_factory=dict)
@@ -253,6 +259,24 @@ class Settings:
         env_repro_image = os.getenv('PAPERBOT_REPRO_IMAGE')
         if env_repro_image:
             self.repro['docker_image'] = env_repro_image
+
+        # E2B configuration
+        env_e2b_key = os.getenv('E2B_API_KEY')
+        if env_e2b_key:
+            self.repro['e2b_api_key'] = env_e2b_key
+        env_e2b_template = os.getenv('PAPERBOT_E2B_TEMPLATE')
+        if env_e2b_template:
+            self.repro['e2b_template'] = env_e2b_template
+        env_e2b_timeout = os.getenv('PAPERBOT_E2B_TIMEOUT')
+        if env_e2b_timeout:
+            try:
+                self.repro['e2b_timeout'] = int(env_e2b_timeout)
+            except ValueError:
+                pass
+        env_executor = os.getenv('PAPERBOT_EXECUTOR')
+        if env_executor and env_executor in ('docker', 'e2b', 'auto'):
+            self.repro['executor'] = env_executor
+
         env_offline = os.getenv('PAPERBOT_OFFLINE')
         if env_offline is not None:
             self.offline = env_offline.lower() in ("1", "true", "yes", "on")
@@ -357,6 +381,10 @@ def to_app_config(settings: Settings) -> AppConfig:
         cpu_shares=int(settings.repro.get("cpu_shares", 1)),
         mem_limit=settings.repro.get("mem_limit", "1g"),
         network=bool(settings.repro.get("network", False)),
+        executor=settings.repro.get("executor", "auto"),
+        e2b_api_key=settings.repro.get("e2b_api_key"),
+        e2b_template=settings.repro.get("e2b_template", "Python3"),
+        e2b_timeout=int(settings.repro.get("e2b_timeout", 300)),
     )
     pipeline_cfg = PipelineConfig(
         mode=settings.mode,

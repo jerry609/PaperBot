@@ -1,10 +1,17 @@
 # repro/models.py
 """
 Data models for Paper2Code-style reproduction pipeline.
+
+Includes:
+- Blueprint: Distilled paper structure for efficient context
+- PaperContext: Raw paper information
+- ReproductionPlan: High-level implementation plan
+- ImplementationSpec: Detailed specs for code generation
+- ReproductionResult: Final pipeline output
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 from enum import Enum
 
 
@@ -33,6 +40,181 @@ class ErrorType(Enum):
     DEPENDENCY = "dependency"   # ImportError/ModuleNotFoundError - update requirements
     LOGIC = "logic"             # Runtime errors - regenerate module
     UNKNOWN = "unknown"
+
+
+# ============================================================================
+# Blueprint - Distilled Paper Structure (DeepCode-inspired)
+# ============================================================================
+
+@dataclass
+class AlgorithmSpec:
+    """Specification for a core algorithm."""
+    name: str
+    pseudocode: str = ""
+    complexity: str = ""  # e.g., "O(n^2)", "O(n log n)"
+    inputs: List[str] = field(default_factory=list)
+    outputs: List[str] = field(default_factory=list)
+
+
+@dataclass
+class Blueprint:
+    """
+    Distilled paper structure for efficient LLM context.
+
+    Inspired by DeepCode's Blueprint Distillation, this class compresses
+    paper information into a structured format that maximizes signal
+    while minimizing token usage.
+
+    Attributes:
+        # Architecture Layer
+        architecture_type: Main architecture (transformer, cnn, gnn, hybrid)
+        module_hierarchy: Module tree, e.g., {"model": ["encoder", "decoder"]}
+        data_flow: Data flow graph, e.g., [("input", "encoder"), ...]
+
+        # Algorithm Layer
+        core_algorithms: List of algorithm specifications
+        loss_functions: Loss function names/formulas
+        optimization_strategy: Training strategy description
+
+        # Implementation Layer
+        key_hyperparameters: Extracted hyperparameters
+        input_output_spec: I/O specifications
+
+        # Metadata
+        paper_year: Publication year (for version inference)
+        framework_hints: Detected frameworks ["pytorch", "tensorflow", ...]
+    """
+    # Architecture Layer
+    architecture_type: str = "unknown"  # transformer/cnn/gnn/rnn/hybrid
+    module_hierarchy: Dict[str, List[str]] = field(default_factory=dict)
+    data_flow: List[Tuple[str, str]] = field(default_factory=list)
+
+    # Algorithm Layer
+    core_algorithms: List[AlgorithmSpec] = field(default_factory=list)
+    loss_functions: List[str] = field(default_factory=list)
+    optimization_strategy: str = ""
+
+    # Implementation Layer
+    key_hyperparameters: Dict[str, Any] = field(default_factory=dict)
+    input_output_spec: Dict[str, Any] = field(default_factory=dict)
+
+    # Metadata
+    paper_title: str = ""
+    paper_year: int = 2024
+    framework_hints: List[str] = field(default_factory=list)
+    domain: str = ""  # nlp/cv/audio/multimodal/rl
+
+    def to_compressed_context(self, max_tokens: int = 2000) -> str:
+        """
+        Generate compressed context string for LLM prompts.
+
+        Prioritizes information by importance:
+        1. Architecture type and main components
+        2. Core algorithms with pseudocode
+        3. Key hyperparameters
+        4. I/O specifications
+
+        Args:
+            max_tokens: Approximate token budget
+
+        Returns:
+            Compressed context string
+        """
+        sections = []
+        char_budget = max_tokens * 4  # Approximate chars per token
+
+        # Header
+        header = f"## Blueprint: {self.paper_title} ({self.paper_year})\n"
+        header += f"Architecture: {self.architecture_type}\n"
+        header += f"Domain: {self.domain}\n"
+        if self.framework_hints:
+            header += f"Frameworks: {', '.join(self.framework_hints)}\n"
+        sections.append(header)
+        char_budget -= len(header)
+
+        # Module hierarchy
+        if self.module_hierarchy and char_budget > 200:
+            hierarchy = "### Module Structure\n"
+            for parent, children in self.module_hierarchy.items():
+                hierarchy += f"- {parent}: {', '.join(children)}\n"
+            sections.append(hierarchy)
+            char_budget -= len(hierarchy)
+
+        # Core algorithms
+        if self.core_algorithms and char_budget > 500:
+            algos = "### Core Algorithms\n"
+            for algo in self.core_algorithms[:3]:  # Limit to top 3
+                algos += f"**{algo.name}**"
+                if algo.complexity:
+                    algos += f" ({algo.complexity})"
+                algos += "\n"
+                if algo.pseudocode and char_budget > 300:
+                    algos += f"```\n{algo.pseudocode[:500]}\n```\n"
+            sections.append(algos)
+            char_budget -= len(algos)
+
+        # Hyperparameters
+        if self.key_hyperparameters and char_budget > 100:
+            params = "### Hyperparameters\n"
+            for key, value in list(self.key_hyperparameters.items())[:10]:
+                params += f"- {key}: {value}\n"
+            sections.append(params)
+            char_budget -= len(params)
+
+        # Loss functions
+        if self.loss_functions and char_budget > 50:
+            losses = f"### Loss: {', '.join(self.loss_functions[:3])}\n"
+            sections.append(losses)
+
+        # I/O spec
+        if self.input_output_spec and char_budget > 100:
+            io_spec = "### I/O Specification\n"
+            for key, spec in self.input_output_spec.items():
+                io_spec += f"- {key}: {spec}\n"
+            sections.append(io_spec)
+
+        return "\n".join(sections)
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for serialization."""
+        return {
+            "architecture_type": self.architecture_type,
+            "module_hierarchy": self.module_hierarchy,
+            "data_flow": self.data_flow,
+            "core_algorithms": [
+                {"name": a.name, "pseudocode": a.pseudocode, "complexity": a.complexity}
+                for a in self.core_algorithms
+            ],
+            "loss_functions": self.loss_functions,
+            "optimization_strategy": self.optimization_strategy,
+            "key_hyperparameters": self.key_hyperparameters,
+            "input_output_spec": self.input_output_spec,
+            "paper_title": self.paper_title,
+            "paper_year": self.paper_year,
+            "framework_hints": self.framework_hints,
+            "domain": self.domain,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "Blueprint":
+        """Create Blueprint from dictionary."""
+        algorithms = [
+            AlgorithmSpec(**algo) for algo in data.get("core_algorithms", [])
+        ]
+        return cls(
+            architecture_type=data.get("architecture_type", "unknown"),
+            module_hierarchy=data.get("module_hierarchy", {}),
+            data_flow=data.get("data_flow", []),
+            core_algorithms=algorithms,
+            loss_functions=data.get("loss_functions", []),
+            optimization_strategy=data.get("optimization_strategy", ""),
+            key_hyperparameters=data.get("key_hyperparameters", {}),
+            input_output_spec=data.get("input_output_spec", {}),
+            paper_title=data.get("paper_title", ""),
+            paper_year=data.get("paper_year", 2024),
+            framework_hints=data.get("framework_hints", []),
+            domain=data.get("domain", ""),
+        )
 
 
 @dataclass

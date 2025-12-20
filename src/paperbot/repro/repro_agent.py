@@ -8,12 +8,22 @@ Enhanced architecture using 5 nodes:
 - AnalysisNode: Extract implementation specs with hyperparameters
 - GenerationNode: Generate code files
 - VerificationNode: Verify generated code with self-healing
+
+Multi-Agent Mode (new):
+- Uses Orchestrator for parallel agent execution
+- Blueprint distillation for efficient context
+- CodeMemory for cross-file awareness
+- CodeRAG for pattern injection
+
+Execution Backends:
+- DockerExecutor: Local Docker-based execution
+- E2BExecutor: Cloud-based E2B sandbox execution
 """
 
 import logging
 import tempfile
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Literal
 
 from .models import (
     PaperContext, ReproductionPlan, ImplementationSpec,
@@ -23,9 +33,15 @@ from .nodes import (
     PlanningNode, AnalysisNode, GenerationNode, VerificationNode,
     EnvironmentInferenceNode
 )
+from .base_executor import BaseExecutor
 from .docker_executor import DockerExecutor
+from .e2b_executor import E2BExecutor
+from .orchestrator import Orchestrator, OrchestratorConfig
 
 logger = logging.getLogger(__name__)
+
+# Executor type alias
+ExecutorType = Literal["docker", "e2b", "auto"]
 
 # Legacy default commands
 DEFAULT_PLAN = [
@@ -38,25 +54,33 @@ DEFAULT_PLAN = [
 class ReproAgent:
     """
     Paper2Code-style reproduction agent with enhanced node-based pipeline.
-    
+
     Modes:
     1. Paper2Code mode: Full reproduction from paper context
-    2. Legacy mode: Run commands on existing repo
-    
+    2. Multi-Agent mode: Uses Orchestrator with Blueprint, CodeMemory, RAG
+    3. Legacy mode: Run commands on existing repo
+
     Enhanced Features:
     - Environment inference (Python/PyTorch/TensorFlow version detection)
     - Hyperparameter extraction from paper
     - Config.yaml and Dockerfile generation
     - Self-healing verification with error classification
+    - Multiple execution backends (Docker/E2B)
+    - Blueprint distillation for efficient LLM context
+    - CodeMemory for cross-file context awareness
+    - CodeRAG for pattern injection
     """
-    
+
     MAX_RETRIES = 3
-    
+
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         self.config = config or {}
         self.logger = logging.getLogger(self.__class__.__name__)
-        
-        # Initialize nodes
+
+        # Multi-agent mode flag
+        self.use_orchestrator = self.config.get("use_orchestrator", False)
+
+        # Initialize nodes (for legacy mode)
         self.planning_node = PlanningNode()
         self.environment_node = EnvironmentInferenceNode(
             prefer_conda=self.config.get("prefer_conda", False)
@@ -67,15 +91,101 @@ class ReproAgent:
             max_repair_attempts=self.config.get("max_repair_attempts", 3),
             enable_self_healing=self.config.get("enable_self_healing", True),
         )
-        
-        # Initialize Docker executor for legacy mode
-        self.executor = DockerExecutor(
-            image=self.config.get("docker_image", "python:3.10-slim"),
-        )
+
+        # Initialize executor based on config
+        self.executor = self._create_executor()
         self.timeout_sec = self.config.get("timeout_sec", 120)
-    
+
+        # Initialize orchestrator for multi-agent mode
+        self._orchestrator: Optional[Orchestrator] = None
+
+    def _create_executor(self) -> BaseExecutor:
+        """
+        Create the appropriate executor based on configuration.
+
+        Config options:
+        - executor: "docker" | "e2b" | "auto" (default: "auto")
+        - e2b_api_key: E2B API key (or use E2B_API_KEY env var)
+        - docker_image: Docker image for local execution
+
+        "auto" mode tries E2B first if configured, falls back to Docker.
+        """
+        executor_type: ExecutorType = self.config.get("executor", "auto")
+
+        if executor_type == "e2b":
+            return self._create_e2b_executor()
+        elif executor_type == "docker":
+            return self._create_docker_executor()
+        else:  # auto
+            # Try E2B first if API key is available
+            e2b_executor = self._create_e2b_executor()
+            if e2b_executor.available():
+                self.logger.info("Using E2B executor (cloud sandbox)")
+                return e2b_executor
+
+            # Fall back to Docker
+            docker_executor = self._create_docker_executor()
+            if docker_executor.available():
+                self.logger.info("Using Docker executor (local)")
+                return docker_executor
+
+            # Neither available, return Docker with warning
+            self.logger.warning(
+                "Neither E2B nor Docker available. "
+                "Set E2B_API_KEY or install Docker for code execution."
+            )
+            return docker_executor
+
+    def _create_e2b_executor(self) -> E2BExecutor:
+        """Create E2B executor from config."""
+        return E2BExecutor(
+            api_key=self.config.get("e2b_api_key"),
+            template=self.config.get("e2b_template", "Python3"),
+            timeout_sandbox=self.config.get("e2b_timeout", 300),
+        )
+
+    def _create_docker_executor(self) -> DockerExecutor:
+        """Create Docker executor from config."""
+        return DockerExecutor(
+            image=self.config.get("docker_image", "python:3.10-slim"),
+            cpu_shares=self.config.get("cpu_shares", 1),
+            mem_limit=self.config.get("mem_limit", "1g"),
+            network=self.config.get("network", False),
+        )
+
+    def switch_executor(self, executor_type: ExecutorType) -> None:
+        """
+        Switch to a different executor at runtime.
+
+        Args:
+            executor_type: "docker", "e2b", or "auto"
+        """
+        self.config["executor"] = executor_type
+        self.executor = self._create_executor()
+        self.logger.info(f"Switched to {self.executor.executor_type} executor")
+
+    def get_orchestrator(self, output_dir: Optional[Path] = None) -> Orchestrator:
+        """
+        Get or create the multi-agent orchestrator.
+
+        Args:
+            output_dir: Output directory for generated code
+
+        Returns:
+            Configured Orchestrator instance
+        """
+        if self._orchestrator is None or (output_dir and self._orchestrator.config.output_dir != output_dir):
+            config = OrchestratorConfig(
+                max_repair_loops=self.config.get("max_repair_attempts", 3),
+                output_dir=output_dir,
+                use_rag=self.config.get("use_rag", True),
+                max_context_tokens=self.config.get("max_context_tokens", 8000),
+            )
+            self._orchestrator = Orchestrator(config=config)
+        return self._orchestrator
+
     # ==================== Paper2Code Mode ====================
-    
+
     async def reproduce_from_paper(
         self,
         paper_context: PaperContext,
@@ -83,8 +193,72 @@ class ReproAgent:
     ) -> ReproductionResult:
         """
         Full Paper2Code reproduction from paper context.
-        
-        Enhanced Pipeline:
+
+        If use_orchestrator=True (set in config), uses the new multi-agent
+        pipeline with Blueprint distillation, CodeMemory, and CodeRAG.
+
+        Otherwise uses the legacy node-based pipeline.
+
+        Enhanced Pipeline (Orchestrator mode):
+        1. PlanningAgent: Blueprint distillation + plan generation
+        2. CodingAgent: Code generation with memory and RAG
+        3. VerificationAgent: Verify code
+        4. DebuggingAgent: Self-healing repair loop
+
+        Legacy Pipeline:
+        1. PlanningNode: Generate plan
+        2. EnvironmentInferenceNode: Infer execution environment
+        3. AnalysisNode: Extract specs with hyperparameters
+        4. GenerationNode: Generate code
+        5. VerificationNode: Verify code with self-healing
+        """
+        # Ensure output directory
+        if output_dir is None:
+            output_dir = Path(tempfile.mkdtemp(prefix="repro_"))
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        # Use orchestrator mode if enabled
+        if self.use_orchestrator:
+            return await self._reproduce_with_orchestrator(paper_context, output_dir)
+
+        # Legacy mode
+        return await self._reproduce_legacy(paper_context, output_dir)
+
+    async def _reproduce_with_orchestrator(
+        self,
+        paper_context: PaperContext,
+        output_dir: Path
+    ) -> ReproductionResult:
+        """
+        Reproduce using the multi-agent orchestrator.
+
+        Features:
+        - Blueprint distillation for efficient LLM context
+        - CodeMemory for cross-file awareness
+        - CodeRAG for pattern injection
+        - Parallel agent execution where possible
+        """
+        self.logger.info(f"Reproducing '{paper_context.title}' with multi-agent orchestrator")
+
+        orchestrator = self.get_orchestrator(output_dir)
+        result = await orchestrator.run(paper_context)
+
+        # Write environment files if we have the plan
+        if result.plan:
+            env_spec = EnvironmentSpec()  # Use defaults
+            self._write_environment_files(output_dir, env_spec, result.spec or ImplementationSpec())
+
+        return result
+
+    async def _reproduce_legacy(
+        self,
+        paper_context: PaperContext,
+        output_dir: Path
+    ) -> ReproductionResult:
+        """
+        Legacy Paper2Code reproduction using node-based pipeline.
+
+        Pipeline:
         1. PlanningNode: Generate plan
         2. EnvironmentInferenceNode: Infer execution environment
         3. AnalysisNode: Extract specs with hyperparameters
@@ -95,11 +269,6 @@ class ReproAgent:
             status=ReproPhase.PLANNING,
             paper_title=paper_context.title,
         )
-        
-        # Ensure output directory
-        if output_dir is None:
-            output_dir = Path(tempfile.mkdtemp(prefix="repro_"))
-        output_dir.mkdir(parents=True, exist_ok=True)
         
         try:
             # Phase 1: Planning
