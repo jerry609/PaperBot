@@ -1,4 +1,4 @@
-import { Activity, Paper, PaperDetails, Scholar, ScholarDetails, Stats, WikiConcept } from "./types"
+import { Activity, Paper, PaperDetails, Scholar, ScholarDetails, Stats, WikiConcept, TrendingTopic } from "./types"
 
 const API_BASE_URL = "http://localhost:8000/api"
 
@@ -45,6 +45,20 @@ export async function fetchActivities(): Promise<Activity[]> {
         }
     ]
 }
+
+export async function fetchTrendingTopics(): Promise<TrendingTopic[]> {
+    return [
+        { text: "Large Language Models", value: 100 },
+        { text: "Transformer", value: 80 },
+        { text: "Reinforcement Learning", value: 60 },
+        { text: "Generative AI", value: 90 },
+        { text: "Computer Vision", value: 50 },
+        { text: "Diffusion Models", value: 70 },
+        { text: "Prompt Engineering", value: 40 },
+        { text: "Ethics", value: 30 }
+    ]
+}
+
 
 export async function fetchScholars(): Promise<Scholar[]> {
     // Mock data for now

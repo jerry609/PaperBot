@@ -18,6 +18,26 @@ export interface Paper {
     tags: string[]
 }
 
+export interface PaperDetails extends Paper {
+    abstract: string
+    tldr: string
+    pis_score: number
+    impact_radar: { subject: string; A: number; fullMark: number }[]
+    sentiment_analysis: { name: string; value: number; fill: string }[]
+    citation_velocity: { month: string; citations: number }[]
+    reproduction: {
+        status: string
+        logs: string[]
+        dockerfile: string
+    }
+}
+
+export interface TrendingTopic {
+    text: string
+    value: number
+}
+
+
 export interface Activity {
     author: string
     action: "published" | "alert" | "repro"
