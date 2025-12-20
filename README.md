@@ -15,7 +15,10 @@ PaperBot 是一个专为计算机领域设计的智能论文分析框架。它�
   - **Research Agent**: 提取论文核心贡献与摘要。
   - **Code Analysis Agent**: 自动发现并分析关联 GitHub 仓库，评估代码质量与可复现性。
   - **Quality Agent**: 综合评估论文质量。
-- **影响力评分 (PIS)**: 基于学术指标（引用、顶会）与工程指标（代码、Stars）计算 PaperBot Impact Score。
+- **影响力评分 (PIS)**: 
+  - **静态指标**: 基于引用数、顶会等级、GitHub Stars 计算。
+  - **动态指标 (New)**: 引入 **Citation Velocity** (引用增速) 和 **Momentum Score** (动量评分)，识别上升期论文。
+  - **情感分析 (New)**: 基于 LLM 分析引用语境，区分正面/负面引用。
 - **自动化报告**: 生成包含关键指标、代码要点及推荐评级的 Markdown 报告。
 
 ### 2. 顶会论文获取
@@ -29,6 +32,10 @@ PaperBot 是一个专为计算机领域设计的智能论文分析框架。它�
 ### 3. 代码深度分析
 - 自动提取论文中的代码仓库链接。
 - 代码质量、结构与安全性分析。
+- **深度健康检查 (New)**:
+  - **空壳检测**: 自动识别仅含有 README 的"占位"仓库。
+  - **文档覆盖率**: 评估 README 质量、API 文档及示例代码完整性。
+  - **依赖风险扫描**: 检查过时或高风险依赖包。
 
 ### 4. 深度评审 (ReviewerAgent)
 - **DeepReview 模式**: 模拟人工同行评审流程（初筛 → 深度批评 → 决策）。
@@ -46,10 +53,12 @@ PaperBot 是一个专为计算机领域设计的智能论文分析框架。它�
 - 输出 Literature Grounding Report（是否真正创新 vs 增量改进）。
 
 ### 7. Paper2Code 代码生成 (ReproAgent)
-- **多阶段流水线**: Planning → Analysis → Generation → Verification。
+- **多阶段流水线**: Planning → **Environment Inference** → Analysis → Generation → Verification。
+- **环境自动推断 (New)**: 基于论文年份和代码特征，自动推断 PyTorch/TensorFlow 版本并生成 `Dockerfile` 或 `conda environment.yaml`。
+- **超参智能提取 (New)**: 深度解析附录与实验章节，提取微调超参生成 structured `config.yaml`。
+- **自愈调试 (New)**: `VerificationNode` 集成 Self-Healing Debugger，自动分类错误（语法/依赖/逻辑）并利用 LLM 尝试修复。
 - 从论文方法章节自动生成代码骨架。
-- Docker 隔离执行与细粒度验证（语法检查、导入检查、单元测试、冒烟运行）。
-- 迭代修复：基于错误反馈自动重试。
+- Docker 隔离执行与细粒度验证。
 
 ## 🆚 与 AlphaXiv 的主要区别
 
@@ -63,6 +72,11 @@ PaperBot 是一个专为计算机领域设计的智能论文分析框架。它�
 ## 🏗️ 系统架构
 
 ![System Architecture](public/asset/arcv2.png)
+
+> **P3 架构升级 (Coordinator v2)**: 
+> 引入了 `ScoreShareBus` (评分共享总线) 和 `FailFastEvaluator` (快速失败评估器)。
+> - 支持阶段间评分共享与订阅。
+> - 在流水线早期自动拦截低质量/无代码/空壳仓库论文，节省计算资源。
 
 ## 🚀 快速开始
 
