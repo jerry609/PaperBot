@@ -7,27 +7,28 @@ import { RefreshCw, Download, FileText, Sparkles } from "lucide-react"
 export function QuickActions() {
     return (
         <Card>
-            <CardHeader>
-                <CardTitle className="text-sm font-medium">Quick Actions</CardTitle>
+            <CardHeader className="p-3 pb-2">
+                <CardTitle className="text-xs font-medium">Actions</CardTitle>
             </CardHeader>
-            <CardContent className="grid grid-cols-2 gap-2">
-                <Button variant="outline" className="h-auto py-3 flex-col gap-1">
-                    <RefreshCw className="h-5 w-5" />
-                    <span className="text-xs">Update Scholars</span>
+            <CardContent className="p-3 pt-0 grid grid-cols-2 gap-1.5">
+                <Button variant="outline" size="sm" className="h-auto py-2 flex-col gap-0.5 text-xs">
+                    <RefreshCw className="h-3.5 w-3.5" />
+                    <span className="text-[10px]">Update</span>
                 </Button>
-                <Button variant="outline" className="h-auto py-3 flex-col gap-1">
-                    <Download className="h-5 w-5" />
-                    <span className="text-xs">Import List</span>
+                <Button variant="outline" size="sm" className="h-auto py-2 flex-col gap-0.5 text-xs">
+                    <Download className="h-3.5 w-3.5" />
+                    <span className="text-[10px]">Import</span>
                 </Button>
-                <Button variant="outline" className="h-auto py-3 flex-col gap-1">
-                    <FileText className="h-5 w-5" />
-                    <span className="text-xs">Weekly Report</span>
+                <Button variant="outline" size="sm" className="h-auto py-2 flex-col gap-0.5 text-xs">
+                    <FileText className="h-3.5 w-3.5" />
+                    <span className="text-[10px]">Report</span>
                 </Button>
-                <Button variant="outline" className="h-auto py-3 flex-col gap-1">
-                    <Sparkles className="h-5 w-5" />
-                    <span className="text-xs">AI Summary</span>
+                <Button variant="outline" size="sm" className="h-auto py-2 flex-col gap-0.5 text-xs">
+                    <Sparkles className="h-3.5 w-3.5" />
+                    <span className="text-[10px]">AI</span>
                 </Button>
             </CardContent>
         </Card>
     )
 }
+

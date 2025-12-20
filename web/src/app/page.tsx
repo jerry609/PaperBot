@@ -4,7 +4,6 @@ import { PipelineStatus } from "@/components/dashboard/PipelineStatus"
 import { ReadingQueue } from "@/components/dashboard/ReadingQueue"
 import { LLMUsageChart } from "@/components/dashboard/LLMUsageChart"
 import { QuickActions } from "@/components/dashboard/QuickActions"
-import { QuickFilters } from "@/components/dashboard/QuickFilters"
 import { Users, FileText, Zap, BookOpen, Search, TrendingUp } from "lucide-react"
 import { fetchStats, fetchTrendingTopics, fetchPipelineTasks, fetchReadingQueue, fetchLLMUsage } from "@/lib/api"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -22,95 +21,64 @@ export default async function DashboardPage() {
   ])
 
   return (
-    <div className="flex-1 p-6 space-y-4 min-h-screen">
-      {/* Premium Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+    <div className="flex-1 p-4 space-y-3 min-h-screen">
+      {/* Compact Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h2 className="text-3xl font-bold tracking-tight bg-gradient-to-r from-primary to-blue-600 bg-clip-text text-transparent">Hello, Researcher</h2>
-          <p className="text-muted-foreground mt-1">Here is your daily intelligence briefing.</p>
+          <h2 className="text-2xl font-bold tracking-tight">Hello, Researcher</h2>
+          <p className="text-sm text-muted-foreground">Daily intelligence briefing</p>
         </div>
-        <div className="flex w-full md:max-w-md items-center gap-2 bg-background p-1 rounded-lg border shadow-sm">
+        <div className="flex w-full sm:max-w-sm items-center gap-1.5 bg-muted/50 p-1 rounded-md border">
           <Search className="ml-2 h-4 w-4 text-muted-foreground" />
           <Input
             type="text"
-            placeholder="Paste arXiv ID, URL or search papers..."
-            className="border-none shadow-none focus-visible:ring-0"
+            placeholder="arXiv ID, URL or search..."
+            className="h-8 border-none bg-transparent shadow-none focus-visible:ring-0 text-sm"
           />
-          <Button slot="append" size="sm">Import</Button>
+          <Button size="sm" className="h-7 text-xs">Import</Button>
         </div>
       </div>
 
-      {/* Stats Overview - Premium Cards */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <StatsCard
-          title="Tracked Scholars"
-          value={stats.tracked_scholars.toString()}
-          description="+4 this week"
-          icon={Users}
-        />
-        <StatsCard
-          title="New Papers"
-          value={stats.new_papers.toString()}
-          description="Last 24 hours"
-          icon={FileText}
-        />
-        <StatsCard
-          title="LLM Usage"
-          value={stats.llm_usage}
-          description="Tokens used today"
-          icon={Zap}
-        />
-        <StatsCard
-          title="Read Later"
-          value={stats.read_later.toString()}
-          description="From 3 venues"
-          icon={BookOpen}
-        />
+      {/* Stats Row - Compact */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+        <StatsCard title="Scholars" value={stats.tracked_scholars.toString()} description="+4" icon={Users} />
+        <StatsCard title="Papers" value={stats.new_papers.toString()} description="24h" icon={FileText} />
+        <StatsCard title="LLM" value={stats.llm_usage} description="tokens" icon={Zap} />
+        <StatsCard title="Queue" value={stats.read_later.toString()} description="to read" icon={BookOpen} />
       </div>
 
-      {/* Bento Grid Layout */}
-      <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-7 gap-3 auto-rows-[minmax(160px,auto)]">
-
-        {/* Large Item: Activity Feed (2 Cols, 2 Rows) */}
-        <div className="md:col-span-2 lg:col-span-4 row-span-2">
+      {/* Main Grid - 12 Column Dense Layout */}
+      <div className="grid grid-cols-12 gap-2">
+        {/* Activity Feed - Main Content */}
+        <div className="col-span-12 lg:col-span-8">
           <ActivityFeed />
         </div>
 
-        {/* Tall Item: Pipeline Status (1 Col, 2 Rows) */}
-        <div className="md:col-span-1 lg:col-span-3 row-span-2 h-full">
+        {/* Right Sidebar */}
+        <div className="col-span-12 lg:col-span-4 space-y-2">
           <PipelineStatus tasks={tasks} />
-        </div>
-
-        {/* Medium: LLM Chart (2 Cols) */}
-        <div className="md:col-span-2 lg:col-span-3">
-          <LLMUsageChart data={llmUsage} />
-        </div>
-
-        {/* Medium: Reading Queue (2 Cols) */}
-        <div className="md:col-span-1 lg:col-span-2">
           <ReadingQueue items={readingQueue} />
-        </div>
-
-        {/* Small: Quick Actions (1 Col) */}
-        <div className="md:col-span-1 lg:col-span-2">
           <QuickActions />
         </div>
 
-        {/* Trending Word Cloud (Wide or Flexible) */}
-        <Card className="md:col-span-3 lg:col-span-7 bg-muted/20 border-dashed">
-          <CardHeader className="pb-2">
+        {/* Bottom Row */}
+        <div className="col-span-12 lg:col-span-6">
+          <LLMUsageChart data={llmUsage} />
+        </div>
+
+        <Card className="col-span-12 lg:col-span-6">
+          <CardHeader className="py-3 px-4">
             <CardTitle className="text-sm font-medium flex items-center gap-2">
-              <TrendingUp className="h-4 w-4 text-orange-500" /> Trending Concepts
+              <TrendingUp className="h-4 w-4 text-orange-500" /> Trending
             </CardTitle>
           </CardHeader>
-          <CardContent>
-            <div className="flex flex-wrap justify-center gap-3">
+          <CardContent className="py-2 px-4">
+            <div className="flex flex-wrap gap-1.5">
               {trends.map((topic, i) => (
                 <Badge
                   key={i}
                   variant="secondary"
-                  className="py-1 px-3 cursor-pointer hover:scale-105 transition-transform hover:bg-primary hover:text-primary-foreground"
-                  style={{ fontSize: `${Math.max(0.8, topic.value / 60)}rem`, opacity: Math.max(0.6, topic.value / 100) }}
+                  className="text-xs cursor-pointer hover:bg-primary hover:text-primary-foreground transition-colors"
                 >
                   {topic.text}
                 </Badge>

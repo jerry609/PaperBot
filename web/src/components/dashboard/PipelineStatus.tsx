@@ -12,42 +12,36 @@ interface PipelineStatusProps {
 }
 
 const statusIcons = {
-    downloading: <Loader2 className="h-4 w-4 animate-spin text-blue-500" />,
-    analyzing: <Loader2 className="h-4 w-4 animate-spin text-yellow-500" />,
-    building: <Loader2 className="h-4 w-4 animate-spin text-orange-500" />,
-    testing: <Loader2 className="h-4 w-4 animate-spin text-purple-500" />,
-    success: <CheckCircle2 className="h-4 w-4 text-green-500" />,
-    failed: <AlertCircle className="h-4 w-4 text-red-500" />
+    downloading: <Loader2 className="h-3 w-3 animate-spin text-blue-500" />,
+    analyzing: <Loader2 className="h-3 w-3 animate-spin text-yellow-500" />,
+    building: <Loader2 className="h-3 w-3 animate-spin text-orange-500" />,
+    testing: <Loader2 className="h-3 w-3 animate-spin text-purple-500" />,
+    success: <CheckCircle2 className="h-3 w-3 text-green-500" />,
+    failed: <AlertCircle className="h-3 w-3 text-red-500" />
 }
 
 export function PipelineStatus({ tasks }: PipelineStatusProps) {
     return (
         <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Reproduction Pipeline</CardTitle>
-                <Badge variant="outline">{tasks.length} Active</Badge>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 p-3 pb-2">
+                <CardTitle className="text-xs font-medium">Pipeline</CardTitle>
+                <Badge variant="outline" className="text-[10px] px-1.5 py-0">{tasks.length}</Badge>
             </CardHeader>
-            <CardContent className="space-y-4">
+            <CardContent className="p-3 pt-0 space-y-2">
                 {tasks.map((task) => (
-                    <div key={task.id} className="space-y-2">
-                        <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2">
+                    <div key={task.id} className="space-y-1">
+                        <div className="flex items-center justify-between text-xs">
+                            <div className="flex items-center gap-1.5">
                                 {statusIcons[task.status]}
-                                <span className="text-sm font-medium truncate max-w-[200px]">{task.paper_title}</span>
+                                <span className="font-medium truncate max-w-[140px]">{task.paper_title}</span>
                             </div>
-                            <div className="flex items-center gap-2">
-                                <span className="text-xs text-muted-foreground">{task.started_at}</span>
-                                {task.status === "failed" && (
-                                    <Button size="icon" variant="ghost" className="h-6 w-6">
-                                        <RefreshCw className="h-3 w-3" />
-                                    </Button>
-                                )}
-                            </div>
+                            <span className="text-muted-foreground text-[10px]">{task.started_at}</span>
                         </div>
-                        <Progress value={task.progress} className={task.status === "failed" ? "bg-red-100" : ""} />
+                        <Progress value={task.progress} className="h-1" />
                     </div>
                 ))}
             </CardContent>
         </Card>
     )
 }
+
