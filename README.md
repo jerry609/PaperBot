@@ -52,7 +52,18 @@ PaperBot 是一个专为计算机领域设计的智能论文分析框架。它�
 - 自动生成 Prior Art 搜索查询。
 - 输出 Literature Grounding Report（是否真正创新 vs 增量改进）。
 
-### 7. Paper2Code 代码生成 (ReproAgent)
+### 7. HuggingFace 模型集成 (New)
+- **HuggingFaceAgent**: 自动搜索论文关联的 HuggingFace 模型。
+- 获取模型下载量、点赞数、Model Card 元数据。
+- 自动检测是否存在官方实现 (meta-llama, google, openai 等)。
+
+### 8. OpenReview 审稿意见(New)
+- **OpenReviewAgent**: 从 OpenReview 获取论文审稿评分与意见。
+- 支持 ICLR, NeurIPS, ICML, AAAI 等顶会。
+- 自动计算平均评分，提取决策结果 (Accept/Reject)。
+- 使用 LLM 总结审稿人指出的薄弱点和优点。
+
+### 9. Paper2Code 代码生成 (ReproAgent)
 - **多阶段流水线**: Planning → **Environment Inference** → Analysis → Generation → Verification。
 - **环境自动推断 (New)**: 基于论文年份和代码特征，自动推断 PyTorch/TensorFlow 版本并生成 `Dockerfile` 或 `conda environment.yaml`。
 - **超参智能提取 (New)**: 深度解析附录与实验章节，提取微调超参生成 structured `config.yaml`。
