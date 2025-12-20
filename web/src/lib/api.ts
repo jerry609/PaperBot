@@ -1,4 +1,4 @@
-import { Activity, Paper, Scholar, Stats } from "./types"
+import { Activity, Paper, PaperDetails, Scholar, Stats } from "./types"
 
 const API_BASE_URL = "http://localhost:8000/api"
 
@@ -77,6 +77,55 @@ export async function fetchScholars(): Promise<Scholar[]> {
             status: "idle"
         }
     ]
+}
+
+export async function fetchPaperDetails(id: string): Promise<PaperDetails> {
+    // Mock data
+    return {
+        id,
+        title: "Attention Is All You Need",
+        venue: "NeurIPS 2017",
+        authors: "Vaswani et al.",
+        citations: "100k+",
+        status: "Reproduced",
+        tags: ["Transformer", "NLP"],
+        abstract: "The dominant sequence transduction models are based on complex recurrent or convolutional neural networks that include an encoder and a decoder. The best performing models also connect the encoder and decoder through an attention mechanism. We propose a new simple network architecture, the Transformer, based solely on attention mechanisms, dispensing with recurrence and convolutions entirely.",
+        tldr: "PROPOSED the Transformer, a novel network architecture based solely on attention mechanisms, which achieves state-of-the-art results in machine translation tasks while being parallelizable and requiring significantly less training time.",
+        pis_score: 98,
+        impact_radar: [
+            { subject: 'Novelty', A: 120, fullMark: 150 },
+            { subject: 'Accessibility', A: 98, fullMark: 150 },
+            { subject: 'Rigor', A: 86, fullMark: 150 },
+            { subject: 'Reproducibility', A: 99, fullMark: 150 },
+            { subject: 'Impact', A: 145, fullMark: 150 },
+            { subject: 'Clarity', A: 110, fullMark: 150 },
+        ],
+        sentiment_analysis: [
+            { name: 'Positive', value: 400, fill: '#4ade80' },
+            { name: 'Neutral', value: 300, fill: '#94a3b8' },
+            { name: 'Critical', value: 50, fill: '#f87171' },
+        ],
+        citation_velocity: [
+            { month: 'Jan', citations: 400 },
+            { month: 'Feb', citations: 800 },
+            { month: 'Mar', citations: 1200 },
+            { month: 'Apr', citations: 2000 },
+            { month: 'May', citations: 3500 },
+            { month: 'Jun', citations: 5000 },
+        ],
+        reproduction: {
+            status: "Success",
+            logs: [
+                "[INFO] Environment inferred: PyTorch 2.1, CUDA 12.1",
+                "[INFO] Installing dependencies...",
+                "[SUCCESS] Dependencies installed",
+                "[INFO] Starting training loop...",
+                "[INFO] Epoch 1: Loss 2.45",
+                "[SUCCESS] Reproduction verification passed (BLEU > 28.0)"
+            ],
+            dockerfile: "FROM pytorch/pytorch:2.1.0-cuda12.1-cudnn8-runtime\nRUN pip install transformers datasets\nCOPY . /app\nWORKDIR /app\nCMD [\"python\", \"train.py\"]"
+        }
+    }
 }
 
 export async function fetchPapers(): Promise<Paper[]> {
