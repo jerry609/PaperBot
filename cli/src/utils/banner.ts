@@ -2,15 +2,13 @@
  * Banner utility - Display PaperBot ASCII art logo
  */
 
-import { renderLogo } from 'oh-my-logo';
+import { renderFilled } from 'oh-my-logo';
 
 export async function showBanner(): Promise<void> {
   try {
-    // Render PaperBot logo with ocean gradient
-    const logo = renderLogo('PaperBot', {
+    // Render PaperBot logo with ocean gradient (filled mode)
+    const logo = await renderFilled('PaperBot', {
       palette: 'ocean',
-      filled: true,
-      font: 'block',
     });
     console.log(logo);
     console.log();
