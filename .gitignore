@@ -23,7 +23,7 @@ Thumbs.db
 
 # Project Specific
 logs/
-papers/
+/papers/
 debug_*.txt
 debug_*.json
 response.html
