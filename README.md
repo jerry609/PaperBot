@@ -125,12 +125,12 @@ Orchestrator Pipeline (New):
 
 ![System Architecture](public/asset/arcv2.png)
 
-> **P3 架构升级 (Coordinator v2)**: 
+> **Coordinator v2 (架构升级)**: 
 > 引入了 `ScoreShareBus` (评分共享总线) 和 `FailFastEvaluator` (快速失败评估器)。
 > - 支持阶段间评分共享与订阅。
 > - 在流水线早期自动拦截低质量/无代码/空壳仓库论文，节省计算资源。
 
-> **P4 多后端 LLM 架构 (New)**:
+> **Multi-LLM Backend (多后端架构)**:
 > 支持多种 LLM 后端与成本路由：
 > - **OpenAI / DeepSeek**: GPT-4o, GPT-4o-mini, DeepSeek-V3
 > - **Anthropic**: Claude 3.5 Sonnet, Claude 3 Opus (Native SDK)
@@ -329,8 +329,8 @@ PaperBot/
 │       ├── infrastructure/            # 基础设施层
 │       │   ├── llm/                   # LLM 客户端
 │       │   │   ├── base.py            # LLMClient 兼容层
-│       │   │   ├── router.py          # P4: ModelRouter
-│       │   │   └── providers/         # P4: 多后端提供商
+│       │   │   ├── router.py          # ModelRouter (成本路由)
+│       │   │   └── providers/         # 多后端适配器 (OpenAI, Anthropic, Ollama)
 │       │   │       ├── base.py        # LLMProvider ABC
 │       │   │       ├── openai_provider.py
 │       │   │       ├── anthropic_provider.py
@@ -346,7 +346,7 @@ PaperBot/
 │       │       ├── result.py
 │       │       ├── calculator.py
 │       │       ├── metrics/
-│       │       ├── analyzers/         # P2: 动态分析器
+│       │       ├── analyzers/         # 动态分析器 (Citation Context, PIS)
 │       │       │   ├── citation_context.py
 │       │       │   ├── dynamic_pis.py
 │       │       │   └── code_health.py
@@ -444,8 +444,8 @@ PaperBot 采用分层架构设计，遵循关注点分离原则：
 - **Pipeline**: 声明式流水线，支持阶段编排
 - **Container**: 轻量级依赖注入容器
 - **Result**: 函数式错误处理（类似 Rust 的 Result 类型）
-- **LLMProvider**: P4 新增，统一的 LLM 后端抽象接口
-- **ModelRouter**: P4 新增，基于任务类型的成本路由器
+- **LLMProvider**: 统一的 LLM 后端抽象接口 (Provider Adapter 模式)
+- **ModelRouter**: 基于任务类型的成本路由器
 
 ### 使用示例
 
