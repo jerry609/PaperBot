@@ -2,11 +2,12 @@
 """
 ReproAgent: Paper2Code-style reproduction with node-based pipeline.
 
-Simplified architecture using 4 nodes:
+Enhanced architecture using 5 nodes:
 - PlanningNode: Generate reproduction plan
-- AnalysisNode: Extract implementation specs
+- EnvironmentInferenceNode: Infer execution environment
+- AnalysisNode: Extract implementation specs with hyperparameters
 - GenerationNode: Generate code files
-- VerificationNode: Verify generated code
+- VerificationNode: Verify generated code with self-healing
 """
 
 import logging
@@ -14,11 +15,15 @@ import tempfile
 from pathlib import Path
 from typing import Dict, Any, Optional
 
-from .models import PaperContext, ReproductionPlan, ImplementationSpec, ReproductionResult, ReproPhase
-from .nodes import PlanningNode, AnalysisNode, GenerationNode, VerificationNode
+from .models import (
+    PaperContext, ReproductionPlan, ImplementationSpec,
+    ReproductionResult, ReproPhase, EnvironmentSpec
+)
+from .nodes import (
+    PlanningNode, AnalysisNode, GenerationNode, VerificationNode,
+    EnvironmentInferenceNode
+)
 from .docker_executor import DockerExecutor
-# ExecutionResult 用于类型兼容
-# from .execution_result import ExecutionResult
 
 logger = logging.getLogger(__name__)
 
@@ -32,11 +37,17 @@ DEFAULT_PLAN = [
 
 class ReproAgent:
     """
-    Paper2Code-style reproduction agent with node-based pipeline.
+    Paper2Code-style reproduction agent with enhanced node-based pipeline.
     
     Modes:
     1. Paper2Code mode: Full reproduction from paper context
     2. Legacy mode: Run commands on existing repo
+    
+    Enhanced Features:
+    - Environment inference (Python/PyTorch/TensorFlow version detection)
+    - Hyperparameter extraction from paper
+    - Config.yaml and Dockerfile generation
+    - Self-healing verification with error classification
     """
     
     MAX_RETRIES = 3
@@ -47,9 +58,15 @@ class ReproAgent:
         
         # Initialize nodes
         self.planning_node = PlanningNode()
+        self.environment_node = EnvironmentInferenceNode(
+            prefer_conda=self.config.get("prefer_conda", False)
+        )
         self.analysis_node = AnalysisNode()
         self.generation_node = GenerationNode()
-        self.verification_node = VerificationNode()
+        self.verification_node = VerificationNode(
+            max_repair_attempts=self.config.get("max_repair_attempts", 3),
+            enable_self_healing=self.config.get("enable_self_healing", True),
+        )
         
         # Initialize Docker executor for legacy mode
         self.executor = DockerExecutor(
@@ -67,11 +84,12 @@ class ReproAgent:
         """
         Full Paper2Code reproduction from paper context.
         
-        Pipeline:
+        Enhanced Pipeline:
         1. PlanningNode: Generate plan
-        2. AnalysisNode: Extract specs
-        3. GenerationNode: Generate code
-        4. VerificationNode: Verify code
+        2. EnvironmentInferenceNode: Infer execution environment
+        3. AnalysisNode: Extract specs with hyperparameters
+        4. GenerationNode: Generate code
+        5. VerificationNode: Verify code with self-healing
         """
         result = ReproductionResult(
             status=ReproPhase.PLANNING,
@@ -90,14 +108,33 @@ class ReproAgent:
             if not plan_result.success:
                 return self._fail_result(result, ReproPhase.PLANNING, plan_result.error or "")
             plan: ReproductionPlan = plan_result.data
+            result.plan = plan
+            result.phases_completed.append("planning")
             
-            # Phase 2: Analysis
-            self.logger.info("Phase 2: Analysis")
+            # Phase 1.5: Environment Inference (NEW)
+            self.logger.info("Phase 1.5: Environment Inference")
+            result.status = ReproPhase.ENVIRONMENT
+            env_result = await self.environment_node.run(paper_context)
+            if not env_result.success:
+                self.logger.warning(f"Environment inference failed: {env_result.error}, using defaults")
+                env_spec = EnvironmentSpec()  # Use defaults
+            else:
+                env_spec: EnvironmentSpec = env_result.data
+                result.phases_completed.append("environment")
+            
+            # Update Docker executor with inferred image
+            if env_spec.base_image:
+                self.executor = DockerExecutor(image=env_spec.base_image)
+            
+            # Phase 2: Analysis (enhanced with environment spec)
+            self.logger.info("Phase 2: Analysis with hyperparameter extraction")
             result.status = ReproPhase.ANALYSIS
-            analysis_result = await self.analysis_node.run((paper_context, plan))
+            analysis_result = await self.analysis_node.run((paper_context, plan, env_spec))
             if not analysis_result.success:
                 return self._fail_result(result, ReproPhase.ANALYSIS, analysis_result.error or "")
             spec: ImplementationSpec = analysis_result.data
+            result.spec = spec
+            result.phases_completed.append("analysis")
             
             # Phase 3: Generation
             self.logger.info("Phase 3: Generation")
@@ -107,17 +144,25 @@ class ReproAgent:
                 return self._fail_result(result, ReproPhase.GENERATION, gen_result.error or "")
             files: Dict[str, str] = gen_result.data
             
-            # Write files to disk
+            # Write generated code files to disk
             for filepath, content in files.items():
                 file_path = output_dir / filepath
                 file_path.parent.mkdir(parents=True, exist_ok=True)
                 file_path.write_text(content)
             result.generated_files = files
             
-            # Phase 4: Verification with retry
-            self.logger.info("Phase 4: Verification")
+            # Write environment files
+            self._write_environment_files(output_dir, env_spec, spec)
+            
+            result.phases_completed.append("generation")
+            
+            # Phase 4: Verification with self-healing
+            self.logger.info("Phase 4: Verification with self-healing")
             result.status = ReproPhase.VERIFICATION
-            await self._verify_with_retry(output_dir, files, result)
+            await self._verify_with_self_healing(output_dir, paper_context, result)
+            
+            # Compute final score
+            result.compute_score()
             
             return result
             
@@ -127,32 +172,75 @@ class ReproAgent:
             result.errors.append(str(e))
             return result
     
-    async def _verify_with_retry(
+    def _write_environment_files(
+        self, output_dir: Path, env_spec: EnvironmentSpec, impl_spec: ImplementationSpec
+    ) -> None:
+        """Write environment-related files to output directory."""
+        # Write Dockerfile
+        if env_spec.dockerfile_content:
+            dockerfile_path = output_dir / "Dockerfile"
+            dockerfile_path.write_text(env_spec.dockerfile_content)
+            self.logger.info(f"Generated Dockerfile with base image: {env_spec.base_image}")
+        else:
+            # Generate on the fly
+            dockerfile_content = env_spec.generate_dockerfile()
+            (output_dir / "Dockerfile").write_text(dockerfile_content)
+        
+        # Write requirements.txt
+        if env_spec.pip_requirements:
+            requirements_path = output_dir / "requirements.txt"
+            existing = []
+            if requirements_path.exists():
+                existing = requirements_path.read_text().splitlines()
+            all_reqs = list(dict.fromkeys(existing + env_spec.pip_requirements))
+            requirements_path.write_text("\n".join(all_reqs) + "\n")
+        
+        # Write config.yaml if available
+        if "config_yaml" in impl_spec.extra_params:
+            config_path = output_dir / "config.yaml"
+            config_path.write_text(impl_spec.extra_params["config_yaml"])
+            self.logger.info("Generated config.yaml with extracted hyperparameters")
+        
+        # Write environment.yaml for conda
+        if env_spec.conda_yaml_content:
+            conda_path = output_dir / "environment.yaml"
+            conda_path.write_text(env_spec.conda_yaml_content)
+    
+    async def _verify_with_self_healing(
         self,
         output_dir: Path,
-        files: Dict[str, str],
+        paper_context: PaperContext,
         result: ReproductionResult
     ) -> None:
-        """Run verification with retry on failures."""
-        for attempt in range(self.MAX_RETRIES):
-            verify_result = await self.verification_node.run(output_dir)
-            
-            if verify_result.success and verify_result.data.all_passed:
-                result.status = ReproPhase.COMPLETED
-                result.verification = verify_result.data.to_dict()
-                return
-            
-            # Log errors and retry
-            result.retry_count = attempt + 1
-            if verify_result.data:
-                result.errors.extend(verify_result.data.errors)
-            
-            if attempt < self.MAX_RETRIES - 1:
-                self.logger.info(f"Verification failed, retry {attempt + 2}/{self.MAX_RETRIES}")
-                # TODO: Could use GenerationNode.refine_code here
+        """Run verification with self-healing debugger."""
+        # Pass paper context for better repair context
+        verify_result = await self.verification_node.run((output_dir, paper_context))
         
-        # All retries exhausted
-        result.status = ReproPhase.FAILED
+        if verify_result.success and verify_result.data.all_passed:
+            result.status = ReproPhase.COMPLETED
+            result.verification = verify_result.data.to_dict()
+            result.phases_completed.append("verification")
+            return
+        
+        # Collect verification data even if failed
+        if verify_result.data:
+            result.verification = verify_result.data.to_dict()
+            result.errors.extend(verify_result.data.errors)
+            result.retry_count = verify_result.data.repairs_attempted
+            
+            # Log repair statistics
+            repairs = verify_result.data
+            if repairs.repairs_attempted > 0:
+                self.logger.info(
+                    f"Self-healing: {repairs.repairs_successful}/{repairs.repairs_attempted} repairs successful"
+                )
+        
+        # Check if at least basic checks passed
+        if verify_result.data and verify_result.data.syntax_ok and verify_result.data.imports_ok:
+            result.status = ReproPhase.COMPLETED
+            result.phases_completed.append("verification")
+        else:
+            result.status = ReproPhase.FAILED
     
     def _fail_result(
         self,

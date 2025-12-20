@@ -9,6 +9,7 @@ from .planning_node import PlanningNode
 from .analysis_node import AnalysisNode
 from .generation_node import GenerationNode
 from .verification_node import VerificationNode, VerificationResult
+from .environment_node import EnvironmentInferenceNode
 
 __all__ = [
     "BaseNode",
@@ -20,5 +21,6 @@ __all__ = [
     "GenerationNode",
     "VerificationNode",
     "VerificationResult",
+    "EnvironmentInferenceNode",
 ]
 

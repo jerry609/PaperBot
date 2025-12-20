@@ -3,9 +3,9 @@
 Paper2Code-style reproduction pipeline with node-based architecture.
 
 Modules:
-- models: Data models (PaperContext, ReproductionPlan, etc.)
+- models: Data models (PaperContext, ReproductionPlan, EnvironmentSpec, etc.)
 - nodes: Node-based processing pipeline
-- repro_agent: Main orchestrator
+- repro_agent: Main orchestrator with self-healing
 - docker_executor: Docker execution environment
 """
 
@@ -18,6 +18,8 @@ from .models import (
     VerificationResult,
     VerificationStep,
     ReproPhase,
+    EnvironmentSpec,
+    ErrorType,
 )
 from .nodes import (
     BaseNode,
@@ -26,6 +28,7 @@ from .nodes import (
     AnalysisNode,
     GenerationNode,
     VerificationNode,
+    EnvironmentInferenceNode,
 )
 from .docker_executor import DockerExecutor
 from .execution_result import ExecutionResult
@@ -42,6 +45,8 @@ __all__ = [
     "VerificationResult",
     "VerificationStep",
     "ReproPhase",
+    "EnvironmentSpec",
+    "ErrorType",
     # Nodes
     "BaseNode",
     "NodeResult",
@@ -49,6 +54,7 @@ __all__ = [
     "AnalysisNode",
     "GenerationNode",
     "VerificationNode",
+    "EnvironmentInferenceNode",
     # Execution
     "ExecutionResult",
 ]
