@@ -78,6 +78,14 @@ PaperBot 是一个专为计算机领域设计的智能论文分析框架。它�
 > - 支持阶段间评分共享与订阅。
 > - 在流水线早期自动拦截低质量/无代码/空壳仓库论文，节省计算资源。
 
+> **P4 多后端 LLM 架构 (New)**:
+> 支持多种 LLM 后端与成本路由：
+> - **OpenAI / DeepSeek**: GPT-4o, GPT-4o-mini, DeepSeek-V3
+> - **Anthropic**: Claude 3.5 Sonnet, Claude 3 Opus (Native SDK)
+> - **Ollama**: 本地 Llama3, DeepSeek-Coder (免费)
+>
+> 使用 `ModelRouter` 根据任务类型自动选择最优模型。
+
 ## 🚀 快速开始
 
 ### 1. 环境准备
@@ -241,6 +249,13 @@ PaperBot/
 │       │
 │       ├── infrastructure/            # 基础设施层
 │       │   ├── llm/                   # LLM 客户端
+│       │   │   ├── base.py            # LLMClient 兼容层
+│       │   │   ├── router.py          # P4: ModelRouter
+│       │   │   └── providers/         # P4: 多后端提供商
+│       │   │       ├── base.py        # LLMProvider ABC
+│       │   │       ├── openai_provider.py
+│       │   │       ├── anthropic_provider.py
+│       │   │       └── ollama_provider.py
 │       │   ├── api_clients/           # 外部 API
 │       │   ├── storage/               # 存储
 │       │   └── services/              # 业务服务
@@ -252,6 +267,10 @@ PaperBot/
 │       │       ├── result.py
 │       │       ├── calculator.py
 │       │       ├── metrics/
+│       │       ├── analyzers/         # P2: 动态分析器
+│       │       │   ├── citation_context.py
+│       │       │   ├── dynamic_pis.py
+│       │       │   └── code_health.py
 │       │       └── weights.py
 │       │
 │       ├── workflows/                 # 工作流层
@@ -329,6 +348,8 @@ PaperBot 采用分层架构设计，遵循关注点分离原则：
 - **Pipeline**: 声明式流水线，支持阶段编排
 - **Container**: 轻量级依赖注入容器
 - **Result**: 函数式错误处理（类似 Rust 的 Result 类型）
+- **LLMProvider**: P4 新增，统一的 LLM 后端抽象接口
+- **ModelRouter**: P4 新增，基于任务类型的成本路由器
 
 ### 使用示例
 
@@ -346,6 +367,24 @@ report_path, influence, data = await workflow.analyze_paper(paper)
 from paperbot.domain.influence.calculator import InfluenceCalculator
 calculator = InfluenceCalculator()
 result = calculator.calculate(paper, code_meta)
+```
+
+### P4 多模型路由示例
+
+```python
+# 使用 ModelRouter 进行任务化成本优化
+from paperbot.infrastructure.llm import ModelRouter, TaskType
+
+# 从环境变量创建路由器
+router = ModelRouter.from_env()
+
+# 实体提取使用便宜模型 (gpt-4o-mini)
+provider = router.get_provider(TaskType.EXTRACTION)
+result = provider.invoke_simple("Extract entities", text)
+
+# 复杂推理使用强模型 (Claude 3.5)
+reasoning = router.get_provider(TaskType.REASONING)
+analysis = reasoning.invoke_simple("Analyze this paper", abstract)
 ```
 
 ## 📊 论文分析流水线
@@ -392,22 +431,32 @@ result = calculator.calculate(paper, code_meta)
 - `settings.py`: Python 配置模块。
 
 ### 环境变量
-- `OPENAI_API_KEY`: 用于 LLM 分析（可选）。
-- `GITHUB_TOKEN`: 用于 GitHub API 调用（提高限流阈值）。
-- 协作主持人（可选，默认关闭）：
-  - `PAPERBOT_HOST_ENABLED`: 是否启用主持人协作（true/false）
-  - `PAPERBOT_HOST_API_KEY`: 主持人 LLM Key（未设置则回落到 OPENAI_API_KEY）
-  - `PAPERBOT_HOST_MODEL`: 主持人模型名称（默认 gpt-4o-mini）
-  - `PAPERBOT_HOST_BASE_URL`: 主持人 LLM Base URL（可为空）
-- 报告引擎（可选，生成 HTML/PDF）：
-  - `PAPERBOT_RE_ENABLED`: 是否启用 ReportEngine
-  - `PAPERBOT_RE_API_KEY`: LLM Key（未设置则回落到 OPENAI_API_KEY）
-  - `PAPERBOT_RE_MODEL`: 模型名称（默认 gpt-4o-mini）
-  - `PAPERBOT_RE_BASE_URL`: 自定义 Base URL
-  - `PAPERBOT_RE_OUTPUT_DIR`: 输出目录（默认 output/reports）
-  - `PAPERBOT_RE_TEMPLATE_DIR`: 模板目录（默认 core/report_engine/templates）
-  - `PAPERBOT_RE_PDF_ENABLED`: PDF 导出开关（true/false）
-  - `PAPERBOT_RE_MAX_WORDS`: 总字数预算
+
+#### LLM 配置 (必选其一)
+- `OPENAI_API_KEY`: OpenAI / DeepSeek API Key
+- `ANTHROPIC_API_KEY`: Anthropic Claude API Key (可选)
+- `LLM_DEFAULT_MODEL`: 默认模型 (default: gpt-4o-mini)
+- `LLM_REASONING_MODEL`: 推理模型 (default: claude-3-5-sonnet-20241022)
+- `LLM_REQUEST_TIMEOUT`: 请求超时秒数 (default: 1800)
+
+#### GitHub 与外部服务
+- `GITHUB_TOKEN`: 用于 GitHub API 调用（提高限流阈值）
+
+#### 协作主持人（可选，默认关闭）
+- `PAPERBOT_HOST_ENABLED`: 是否启用主持人协作（true/false）
+- `PAPERBOT_HOST_API_KEY`: 主持人 LLM Key（未设置则回落到 OPENAI_API_KEY）
+- `PAPERBOT_HOST_MODEL`: 主持人模型名称（默认 gpt-4o-mini）
+- `PAPERBOT_HOST_BASE_URL`: 主持人 LLM Base URL（可为空）
+
+#### 报告引擎（可选，生成 HTML/PDF）
+- `PAPERBOT_RE_ENABLED`: 是否启用 ReportEngine
+- `PAPERBOT_RE_API_KEY`: LLM Key（未设置则回落到 OPENAI_API_KEY）
+- `PAPERBOT_RE_MODEL`: 模型名称（默认 gpt-4o-mini）
+- `PAPERBOT_RE_BASE_URL`: 自定义 Base URL
+- `PAPERBOT_RE_OUTPUT_DIR`: 输出目录（默认 output/reports）
+- `PAPERBOT_RE_TEMPLATE_DIR`: 模板目录（默认 core/report_engine/templates）
+- `PAPERBOT_RE_PDF_ENABLED`: PDF 导出开关（true/false）
+- `PAPERBOT_RE_MAX_WORDS`: 总字数预算
 
 ## 🧪 测试
 
