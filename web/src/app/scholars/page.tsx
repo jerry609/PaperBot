@@ -10,38 +10,11 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import Link from "next/link"
+import { fetchScholars } from "@/lib/api"
 
-const scholars = [
-    {
-        id: "dawn-song",
-        name: "Dawn Song",
-        affiliation: "UC Berkeley",
-        h_index: 120,
-        papers_tracked: 45,
-        recent_activity: "Published 2 days ago",
-        status: "active"
-    },
-    {
-        id: "kaiming-he",
-        name: "Kaiming He",
-        affiliation: "MIT",
-        h_index: 145,
-        papers_tracked: 28,
-        recent_activity: "Cited 500+ times this week",
-        status: "active"
-    },
-    {
-        id: "yann-lecun",
-        name: "Yann LeCun",
-        affiliation: "Meta AI / NYU",
-        h_index: 180,
-        papers_tracked: 15,
-        recent_activity: "New interview",
-        status: "idle"
-    }
-]
+export default async function ScholarsPage() {
+    const scholars = await fetchScholars()
 
-export default function ScholarsPage() {
     return (
         <div className="flex-1 space-y-4 p-8 pt-6">
             <div className="flex items-center justify-between space-y-2">
@@ -66,7 +39,7 @@ export default function ScholarsPage() {
                             <TableRow key={scholar.id}>
                                 <TableCell>
                                     <Avatar>
-                                        <AvatarImage src={`/scholars/${scholar.id}.png`} />
+                                        <AvatarImage src={`https://avatar.vercel.sh/${scholar.id}.png`} />
                                         <AvatarFallback>{scholar.name[0]}</AvatarFallback>
                                     </Avatar>
                                 </TableCell>

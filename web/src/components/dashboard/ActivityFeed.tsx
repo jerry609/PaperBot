@@ -1,35 +1,11 @@
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { fetchActivities } from "@/lib/api"
 
-const activities = [
-    {
-        author: "Dawn Song",
-        action: "published",
-        paper: "LLM Security: A Comprehensive Survey",
-        venue: "S&P 2025",
-        time: "2h ago",
-        type: "paper"
-    },
-    {
-        author: "PaperBot",
-        action: "alert",
-        paper: "Attention Is All You Need",
-        detail: "Citation velocity increased by 50%",
-        time: "4h ago",
-        type: "alert"
-    },
-    {
-        author: "System",
-        action: "repro",
-        paper: "FlashAttention V3",
-        detail: "Reproduction failed (Exit Code 1)",
-        time: "6h ago",
-        type: "repro"
-    }
-]
+export async function ActivityFeed() {
+    const activities = await fetchActivities()
 
-export function ActivityFeed() {
     return (
         <Card className="col-span-4 lg:col-span-3">
             <CardHeader>
@@ -40,7 +16,7 @@ export function ActivityFeed() {
                     {activities.map((activity, index) => (
                         <div key={index} className="flex items-start gap-4">
                             <Avatar className="h-9 w-9">
-                                <AvatarImage src={`/avatars/${index}.png`} alt="Avatar" />
+                                <AvatarImage src={`https://avatar.vercel.sh/${activity.author}.png`} alt="Avatar" />
                                 <AvatarFallback>{activity.author[0]}</AvatarFallback>
                             </Avatar>
                             <div className="space-y-1">
