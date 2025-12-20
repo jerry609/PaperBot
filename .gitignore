@@ -38,3 +38,9 @@ output/reports/**/*.md
 !output/reports/.gitkeep
 !logs/.gitkeep
 BettaFish/
+
+# Node.js
+node_modules/
+cli/dist/
+npm-debug.log
+
