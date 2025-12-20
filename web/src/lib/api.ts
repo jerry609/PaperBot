@@ -1,4 +1,4 @@
-import { Activity, Paper, PaperDetails, Scholar, Stats } from "./types"
+import { Activity, Paper, PaperDetails, Scholar, ScholarDetails, Stats, WikiConcept } from "./types"
 
 const API_BASE_URL = "http://localhost:8000/api"
 
@@ -126,6 +126,66 @@ export async function fetchPaperDetails(id: string): Promise<PaperDetails> {
             dockerfile: "FROM pytorch/pytorch:2.1.0-cuda12.1-cudnn8-runtime\nRUN pip install transformers datasets\nCOPY . /app\nWORKDIR /app\nCMD [\"python\", \"train.py\"]"
         }
     }
+}
+
+export async function fetchScholarDetails(id: string): Promise<ScholarDetails> {
+    const papers = await fetchPapers()
+
+    return {
+        id,
+        name: id.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' '),
+        affiliation: "University of California, Berkeley",
+        h_index: 120,
+        papers_tracked: 45,
+        recent_activity: "Published 2 days ago",
+        status: "active",
+        bio: "Dawn Song is a Professor in the Department of Electrical Engineering and Computer Science at UC Berkeley. Her research interest lies in deep learning, security, and blockchain.",
+        location: "Berkeley, CA",
+        website: "https://dawnsong.io",
+        expertise_radar: [
+            { subject: 'Security', A: 100, fullMark: 100 },
+            { subject: 'Deep Learning', A: 90, fullMark: 100 },
+            { subject: 'Blockchain', A: 80, fullMark: 100 },
+            { subject: 'Systems', A: 85, fullMark: 100 },
+            { subject: 'Privacy', A: 95, fullMark: 100 },
+        ],
+        publications: papers,
+        co_authors: [
+            { name: "Dan Hendrycks", avatar: "https://avatar.vercel.sh/dan.png" },
+            { name: "Kevin Eykholt", avatar: "https://avatar.vercel.sh/kevin.png" }
+        ],
+        stats: {
+            total_citations: 54321,
+            papers_count: 230,
+            h_index: 120
+        }
+    }
+}
+
+export async function fetchWikiConcepts(): Promise<WikiConcept[]> {
+    return [
+        {
+            id: "transformer",
+            name: "Transformer",
+            description: "A deep learning model architecture relying on self-attention mechanisms.",
+            related_papers: ["Attention Is All You Need", "BERT"],
+            category: "Method"
+        },
+        {
+            id: "rlhf",
+            name: "RLHF",
+            description: "Reinforcement Learning from Human Feedback, used to align LLMs.",
+            related_papers: ["InstructGPT"],
+            category: "Method"
+        },
+        {
+            id: "bleu",
+            name: "BLEU Score",
+            description: "A metric for evaluating the quality of machine translated text.",
+            related_papers: [],
+            category: "Metric"
+        }
+    ]
 }
 
 export async function fetchPapers(): Promise<Paper[]> {

@@ -34,3 +34,25 @@ export interface Stats {
     llm_usage: string
     read_later: number
 }
+
+export interface ScholarDetails extends Scholar {
+    bio: string
+    location: string
+    website: string
+    expertise_radar: { subject: string; A: number; fullMark: number }[]
+    publications: Paper[]
+    co_authors: { name: string; avatar: string }[]
+    stats: {
+        total_citations: number
+        papers_count: number
+        h_index: number
+    }
+}
+
+export interface WikiConcept {
+    id: string
+    name: string
+    description: string
+    related_papers: string[]
+    category: "Method" | "Task" | "Metric"
+}
