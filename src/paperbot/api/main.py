@@ -6,8 +6,10 @@ Supports Server-Sent Events (SSE) for streaming responses
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .routes import track, analyze, gen_code, review, chat
+from .routes import track, analyze, gen_code, review, chat, runs
 from paperbot.infrastructure.event_log.logging_event_log import LoggingEventLog
+from paperbot.infrastructure.event_log.composite_event_log import CompositeEventLog
+from paperbot.infrastructure.event_log.sqlalchemy_event_log import SqlAlchemyEventLog
 
 app = FastAPI(
     title="PaperBot API",
@@ -37,12 +39,17 @@ app.include_router(analyze.router, prefix="/api", tags=["Paper Analysis"])
 app.include_router(gen_code.router, prefix="/api", tags=["Paper2Code"])
 app.include_router(review.router, prefix="/api", tags=["Review"])
 app.include_router(chat.router, prefix="/api", tags=["Chat"])
+app.include_router(runs.router, prefix="/api", tags=["Runs"])
 
 @app.on_event("startup")
 async def _startup_eventlog():
     # Phase-0: create a single event log backend and store on app.state.
     # Per-request run_id/trace_id are generated in handlers.
-    app.state.event_log = LoggingEventLog()
+    try:
+        app.state.event_log = CompositeEventLog([LoggingEventLog(), SqlAlchemyEventLog()])
+    except Exception:
+        # If SQLAlchemy isn't available or DB init fails, fall back to logging only.
+        app.state.event_log = LoggingEventLog()
 
 
 if __name__ == "__main__":

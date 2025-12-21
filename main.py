@@ -501,6 +501,8 @@ def run_scholar_tracking(args):
         import tempfile, shutil
         from git.repo import Repo as GitRepo
         from paperbot.infrastructure.event_log.logging_event_log import LoggingEventLog
+        from paperbot.infrastructure.event_log.composite_event_log import CompositeEventLog
+        from paperbot.infrastructure.event_log.sqlalchemy_event_log import SqlAlchemyEventLog
         from paperbot.application.collaboration.message_schema import new_run_id, new_trace_id
 
         overrides: Dict[str, Any] = {"subscriptions_config_path": str(config_path)}
@@ -542,7 +544,10 @@ def run_scholar_tracking(args):
         )
 
         # Phase-0: event log + run id for end-to-end traceability
-        event_log = LoggingEventLog()
+        try:
+            event_log = CompositeEventLog([LoggingEventLog(), SqlAlchemyEventLog()])
+        except Exception:
+            event_log = LoggingEventLog()
         session_run_id = new_run_id()
 
         # 强制模式

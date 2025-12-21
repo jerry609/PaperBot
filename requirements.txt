@@ -61,3 +61,7 @@ json-repair>=0.22.0
 fastapi>=0.115.0
 uvicorn[standard]>=0.32.0
 sse-starlette>=2.1.0
+
+# Run/Event persistence (Phase 1A)
+SQLAlchemy>=2.0.0
+alembic>=1.13.0
