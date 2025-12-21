@@ -131,7 +131,7 @@ Orchestrator Pipeline:
 
 ![DeepCode Studio](asset/ui/deepcode.jpg)
 
-## 与 AlphaXiv / DeepCode 的主要区别（对标）
+## 与 AlphaXiv / DeepCode 的主要区别（参考）
 
 ### vs AlphaXiv
 
