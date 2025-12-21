@@ -13,7 +13,7 @@ datasets/
 
 ## 示例数据集
 
-- `processed/sample_sentiment.csv`：一个极简的中文情感分类示例，包含 `text` 与 `label` 两列，可用于验证 ExperimentManager 的情感模型对比管线是否运行正常。
+- `processed/sample_sentiment.csv`：一个极简的中文情感分类示例，包含 `text` 与 `label` 两列，可用于验证 ExperimentRunner 的情感模型对比流程是否运行正常。
 - `metadata/sample_sentiment.yaml`：配套的元信息文件，说明数据来源、字段含义及许可要求。
 
 ## 使用提示
@@ -26,7 +26,7 @@ datasets/
 ## 下一步
 
 - MindSpider / 爬虫导出脚本可将在线数据整理后写入 `raw/`，再通过清洗脚本写入 `processed/`。
-- `ExperimentManager` 默认会在 `processed/` 中查找与配置名匹配的 CSV 文件；如需自定义路径，可在实验配置中显式设置 `dataset_path` 字段。
+- `ExperimentRunner` 默认会在 `processed/` 中查找与配置名匹配的 CSV 文件；如需自定义路径，可在实验配置中显式设置 `dataset_path` 字段。
 
-准备好数据集后，即可通过 `python -m ExperimentManager.runner --config <yaml>` 运行实验并生成统一的结果文件。
+准备好数据集后，即可通过 `python main.py run-exp --config <yaml>` 运行实验并生成统一的结果文件（或 `python -m paperbot.utils.experiment_runner --config <yaml>`）。
 

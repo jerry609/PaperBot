@@ -32,6 +32,7 @@ class TaskType(str, Enum):
     REASONING = "reasoning"        # 复杂推理
     CODE = "code"                  # 代码生成/分析
     REVIEW = "review"              # 论文评审
+    CHAT = "chat"                  # 对话/助手
 
 
 @dataclass
@@ -99,6 +100,7 @@ class ModelRouter:
         TaskType.REASONING: "reasoning",
         TaskType.CODE: "code",
         TaskType.REVIEW: "reasoning",
+        TaskType.CHAT: "default",
     }
     
     def __init__(self, config: RouterConfig):

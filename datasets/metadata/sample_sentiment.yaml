@@ -1,5 +1,5 @@
 name: sample_sentiment
-description: 极简中文情感分类示例数据，用于验证 ExperimentManager 管线。
+description: 极简中文情感分类示例数据，用于验证 ExperimentRunner 管线。
 source: "合成示例，用于本地自测"
 collection_time: "2025-01-01"
 license: "CC-BY-SA 4.0（示例数据，实际使用请替换为合规数据集）"

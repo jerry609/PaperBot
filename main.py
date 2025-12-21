@@ -182,8 +182,8 @@ def build_parser() -> argparse.ArgumentParser:
     track_parser.add_argument('--repro', action='store_true',
                                help='启用可复现性验证（需 Docker）')
 
-    # 运行实验（ExperimentManager）
-    exp_parser = subparsers.add_parser('run-exp', help='运行实验配置 (ExperimentManager)')
+    # 运行实验（ExperimentRunner）
+    exp_parser = subparsers.add_parser('run-exp', help='运行实验配置 (ExperimentRunner)')
     exp_parser.add_argument('--config', required=True, help='实验配置文件路径 (YAML)')
 
     # 渲染报告（从 meta.json + 模板）
@@ -358,8 +358,8 @@ def main():
 
 
 def run_experiment(args):
-    """运行 ExperimentManager 实验"""
-    from ExperimentManager.runner import ExperimentRunner
+    """运行 ExperimentRunner 实验"""
+    from paperbot.utils.experiment_runner import ExperimentRunner
 
     cfg_path = Path(args.config).expanduser()
     if not cfg_path.is_absolute():
