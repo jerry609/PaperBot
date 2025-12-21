@@ -9,7 +9,14 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import List, Dict, Any, Optional, Callable, Awaitable
+
+from typing import TYPE_CHECKING
 from .messages import AgentMessage, AgentResult, MessageType
+
+from paperbot.application.collaboration.message_schema import new_run_id, new_trace_id, make_event
+
+if TYPE_CHECKING:
+    from paperbot.application.ports.event_log_port import EventLogPort
 
 logger = logging.getLogger(__name__)
 
@@ -48,15 +55,49 @@ class AgentCoordinator:
     def __init__(
         self,
         synthesizer: Optional[Callable[[List[AgentResult]], Awaitable[str]]] = None,
+        *,
+        event_log: "Optional[EventLogPort]" = None,
+        run_id: Optional[str] = None,
+        trace_id: Optional[str] = None,
+        workflow: str = "",
     ):
         self.agents: Dict[str, RegisteredAgent] = {}
         self.messages: List[AgentMessage] = []
         self.results: List[AgentResult] = []
         self._synthesizer = synthesizer
         self._message_subscribers: List[Callable[[AgentMessage], None]] = []
-    
+
+        # Phase-0 observability: optional event log + trace identifiers.
+        self._event_log = event_log
+        self._workflow = workflow
+        self._run_id = run_id or new_run_id()
+        self._trace_id = trace_id or new_trace_id()
+
+    def _emit_event(self, message: AgentMessage) -> None:
+        if not self._event_log:
+            return
+        try:
+            evt = make_event(
+                run_id=self._run_id,
+                trace_id=self._trace_id,
+                workflow=self._workflow,
+                stage=message.stage or "",
+                attempt=message.round_index or 0,
+                agent_name=message.sender,
+                role="system" if message.sender == "SYSTEM" else "worker",
+                type=message.message_type.value,
+                payload={
+                    "message": message.to_dict(),
+                },
+                tags={
+                    "conversation_id": message.conversation_id,
+                },
+            )
+            self._event_log.append(evt)
+        except Exception as e:
+            logger.debug(f"Event log emission failed: {e}")
     # ==================== Agent Management ====================
-    
+
     def register(self, name: str, capabilities: List[str] = None) -> None:
         """Register an agent with the coordinator."""
         self.agents[name] = RegisteredAgent(
@@ -88,6 +129,9 @@ class AgentCoordinator:
         """
         self.messages.append(message)
         logger.debug(f"[{message.sender}] {message.message_type.value}: {str(message.content)[:100]}")
+
+        # Phase-0: emit unified event envelope (optional).
+        self._emit_event(message)
         
         # Notify subscribers
         for subscriber in self._message_subscribers:

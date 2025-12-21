@@ -13,7 +13,12 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Dict, Any, Optional, List, Callable
+from typing import Dict, Any, Optional, List, Callable, TYPE_CHECKING
+
+from paperbot.application.collaboration.message_schema import new_run_id, new_trace_id, make_event
+
+if TYPE_CHECKING:
+    from paperbot.application.ports.event_log_port import EventLogPort
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +71,15 @@ class ScoreShareBus:
     - 空壳仓库降低整体评分
     """
     
-    def __init__(self, paper_id: Optional[str] = None):
+    def __init__(
+        self,
+        paper_id: Optional[str] = None,
+        *,
+        event_log: "Optional[EventLogPort]" = None,
+        run_id: Optional[str] = None,
+        trace_id: Optional[str] = None,
+        workflow: str = "scholar_pipeline",
+    ):
         """
         初始化评分总线
         
@@ -78,6 +91,12 @@ class ScoreShareBus:
         self._subscribers: List[Callable[[StageScore], None]] = []
         self._history: List[StageScore] = []
         self.logger = logging.getLogger(self.__class__.__name__)
+
+        # Phase-0 observability (optional)
+        self._event_log = event_log
+        self._workflow = workflow
+        self._run_id = run_id or new_run_id()
+        self._trace_id = trace_id or new_trace_id()
     
     def publish_score(self, score: StageScore) -> None:
         """
@@ -93,6 +112,27 @@ class ScoreShareBus:
             f"[{self.paper_id}] Stage '{score.stage}' score: {score.score:.1f} "
             f"(confidence: {score.confidence:.2f})"
         )
+
+        # Phase-0: emit unified event envelope (optional)
+        if self._event_log:
+            try:
+                evt = make_event(
+                    run_id=self._run_id,
+                    trace_id=self._trace_id,
+                    workflow=self._workflow,
+                    stage=score.stage,
+                    attempt=len(self._history),
+                    agent_name="ScoreShareBus",
+                    role="system",
+                    type="score_update",
+                    payload={
+                        "paper_id": self.paper_id,
+                        "score": score.to_dict(),
+                    },
+                )
+                self._event_log.append(evt)
+            except Exception as e:
+                logger.debug(f"Event log emission failed: {e}")
         
         # 通知订阅者
         for callback in self._subscribers:

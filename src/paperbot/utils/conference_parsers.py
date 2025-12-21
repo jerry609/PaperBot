@@ -170,62 +170,75 @@ class ConferenceParsers:
 
     async def parse_usenix_papers(self, base_url: str, year: str, session: AsyncSession) -> List[Dict[str, Any]]:
         """解析USENIX Security论文列表"""
-        papers = []
+        papers: List[Dict[str, Any]] = []
         url = f"https://www.usenix.org/conference/usenixsecurity{year}/technical-sessions"
-        
+
         print(f"🌐 正在解析 USENIX Security {year} 论文列表...")
-        
+
         headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/91.0.4472.124 Safari/537.36"
+            )
         }
-        
+
         try:
             response = await session.get(url, headers=headers)
-            if response.status_code == 200:
-                print(f"✅ 页面访问成功，开始解析...")
-                html = response.text
-                soup = BeautifulSoup(html, 'html.parser')
-                    
+            status_code = getattr(response, "status_code", None)
+
+            if status_code == 200:
+                print("✅ 页面访问成功，开始解析...")
+                html = getattr(response, "text", "")
+                soup = BeautifulSoup(html, "html.parser")
+
                 # 使用多种选择器查找论文节点
-                paper_nodes = soup.find_all(['article', 'div'], class_=['node-paper', 'paper-item'])
-                
+                paper_nodes = soup.find_all(["article", "div"], class_=["node-paper", "paper-item"])
                 print(f"📚 找到 {len(paper_nodes)} 个论文节点")
-                
+
                 if not paper_nodes:
                     print("⚠️ 未找到论文节点，尝试备用选择器...")
-                    paper_nodes = soup.find_all(['div', 'article'], class_=['paper', 'technical-paper'])
-                
+                    paper_nodes = soup.find_all(["div", "article"], class_=["paper", "technical-paper"])
+
                 for idx, node in enumerate(paper_nodes, 1):
                     try:
-                        # 查找标题
-                        title_elem = node.find(['h2', 'h3'], class_=['node-title', 'paper-title']) or \
-                                   node.find('div', class_='field-title')
+                        title_elem = (
+                            node.find(["h2", "h3"], class_=["node-title", "paper-title"])
+                            or node.find("div", class_="field-title")
+                        )
                         if not title_elem:
                             continue
-                        
+
                         title = title_elem.text.strip()
-                        
-                        # 查找PDF链接
                         pdf_url = await self._get_usenix_pdf_url(node)
-                        if pdf_url:
-                            papers.append({
-                                'title': title,
-                                'url': pdf_url,
-                                'conference': 'USENIX',
-                                'year': year
-                            })
-                            
-                            print(f"\r📄 处理论文 {idx}/{len(paper_nodes)}: {title[:50]}...", end='', flush=True)
-                
+                        if not pdf_url:
+                            continue
+
+                        papers.append(
+                            {
+                                "title": title,
+                                "url": pdf_url,
+                                "conference": "USENIX",
+                                "year": year,
+                            }
+                        )
+                        print(
+                            f"\r📄 处理论文 {idx}/{len(paper_nodes)}: {title[:50]}...",
+                            end="",
+                            flush=True,
+                        )
+                    except Exception:
+                        continue
+
                 print(f"\n✅ USENIX解析完成: {len(papers)} 篇论文")
                 return papers
-                
-            elif response.status_code == 404:
+
+            if status_code == 404:
                 print(f"❌ USENIX {year} 页面不存在")
                 return []
-            else:
-                raise Exception(f"HTTP {response.status_code}")
-                    
+
+            raise Exception(f"HTTP {status_code}")
+
         except Exception as e:
             print(f"❌ USENIX解析错误: {str(e)}")
             return []

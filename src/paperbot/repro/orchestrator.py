@@ -14,7 +14,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Callable
+from typing import Any, Dict, List, Optional, Callable, TYPE_CHECKING
 from enum import Enum
 
 from .agents import (
@@ -29,6 +29,11 @@ from .agents import (
 from .models import PaperContext, ReproductionResult, ReproPhase
 
 logger = logging.getLogger(__name__)
+
+from paperbot.application.collaboration.message_schema import new_run_id, new_trace_id, make_event
+
+if TYPE_CHECKING:
+    from paperbot.application.ports.event_log_port import EventLogPort
 
 
 class PipelineStage(Enum):
@@ -99,6 +104,11 @@ class Orchestrator:
         self,
         config: Optional[OrchestratorConfig] = None,
         on_progress: Optional[Callable[[PipelineProgress], None]] = None,
+        *,
+        event_log: "Optional[EventLogPort]" = None,
+        run_id: Optional[str] = None,
+        trace_id: Optional[str] = None,
+        workflow: str = "paper2code",
     ):
         self.config = config or OrchestratorConfig()
         self.on_progress = on_progress
@@ -117,6 +127,12 @@ class Orchestrator:
         # Shared context
         self.context: Dict[str, Any] = {}
 
+        # Phase-0 observability (optional)
+        self._event_log = event_log
+        self._workflow = workflow
+        self._run_id = run_id or ""
+        self._trace_id = trace_id or ""
+
     async def run(self, paper_context: PaperContext) -> ReproductionResult:
         """
         Run the full Paper2Code pipeline.
@@ -129,7 +145,17 @@ class Orchestrator:
         """
         self.progress = PipelineProgress()
         self.progress.start_time = datetime.now()
-        self.context = {"paper_context": paper_context}
+        # Assign per-run identifiers if not already set
+        if not self._run_id:
+            self._run_id = new_run_id()
+        if not self._trace_id:
+            self._trace_id = new_trace_id()
+
+        self.context = {
+            "paper_context": paper_context,
+            "run_id": self._run_id,
+            "trace_id": self._trace_id,
+        }
 
         result = ReproductionResult(paper_title=paper_context.title)
 
@@ -267,6 +293,27 @@ class Orchestrator:
             self.progress.stages_completed.append(self.progress.current_stage.value)
         self.progress.current_stage = stage
         self._notify_progress()
+
+        # Phase-0: emit unified event envelope (optional)
+        if self._event_log:
+            try:
+                evt = make_event(
+                    run_id=self._run_id or "",
+                    trace_id=self._trace_id or "",
+                    workflow=self._workflow,
+                    stage=stage.value,
+                    attempt=int(self.progress.repair_loop_count or 0),
+                    agent_name="Orchestrator",
+                    role="orchestrator",
+                    type="stage_event",
+                    payload={
+                        "stage": stage.value,
+                        "progress": self.progress.to_dict(),
+                    },
+                )
+                self._event_log.append(evt)
+            except Exception as e:
+                logger.debug(f"Event log emission failed: {e}")
 
     def _notify_progress(self) -> None:
         """Notify progress callback if set."""
