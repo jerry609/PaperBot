@@ -59,4 +59,13 @@ class ScholarPipeline:
     def new_run_id() -> str:
         return new_run_id()
 
+    @property
+    def report_writer(self):
+        """
+        Expose report writer via application boundary.
+
+        This keeps CLI/API from reaching into core coordinator internals.
+        """
+        return getattr(self._coordinator, "report_writer", None)
+
 

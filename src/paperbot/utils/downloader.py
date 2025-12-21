@@ -36,9 +36,18 @@ class PaperDownloader:
         self.max_retries = self.config.get('max_retries', 3)
         self.retry_delay = self.config.get('retry_delay', 3)  # 增加到3秒
 
-        # 完全关闭并发 - 使用单线程确保稳定性
-        max_concurrent = 1  # 强制设为1，不使用并发
-        self.semaphore = asyncio.Semaphore(max_concurrent)
+        # 并发控制：默认 1（稳定优先），但允许通过配置开启并发。
+        # NOTE: 上层（ConferenceResearchAgent/SmartDownloadManager）也有并发控制；这里作为最后一道兜底。
+        max_concurrent = (
+            self.config.get("max_concurrent_downloads")
+            or self.config.get("max_concurrency")
+            or 1
+        )
+        try:
+            max_concurrent = int(max_concurrent)
+        except Exception:
+            max_concurrent = 1
+        self.semaphore = asyncio.Semaphore(max(1, max_concurrent))
 
         # 会议URL模板
         self.conference_urls = {

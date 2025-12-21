@@ -1,0 +1,50 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.9"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install deps (CI minimal)
+        run: |
+          python -m pip install -U pip
+          python -m pip install -r requirements-ci.txt
+
+      - name: Run offline UT/IT/E2E gates
+        env:
+          PYTHONPATH: src
+          PAPERBOT_DB_URL: sqlite:///data/paperbot-ci.db
+        run: |
+          python -m pytest -q \
+            tests/unit/test_scholar_from_config.py \
+            tests/unit/test_source_registry_modes.py \
+            tests/unit/test_arq_worker_settings.py \
+            tests/unit/test_jobs_routes_import.py \
+            tests/integration/test_eventlog_sqlalchemy.py \
+            tests/integration/test_crawler_contract_parsers.py \
+            tests/integration/test_arxiv_connector_fixture.py \
+            tests/integration/test_reddit_connector_fixture.py \
+            tests/integration/test_x_importer_fixture.py \
+            tests/e2e/test_api_track_fullstack_offline.py
+
+      - name: Run eval smokes
+        env:
+          PYTHONPATH: src
+        run: |
+          python evals/runners/run_scholar_pipeline_smoke.py
+          python evals/runners/run_track_pipeline_smoke.py
+          python evals/runners/run_eventlog_replay_smoke.py
+

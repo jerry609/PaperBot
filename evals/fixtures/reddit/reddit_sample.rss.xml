@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>r/MachineLearning</title>
+    <item>
+      <title>[D] Sample Reddit Post One</title>
+      <link>https://www.reddit.com/r/MachineLearning/comments/abc123/sample_post_one/</link>
+      <guid>t3_abc123</guid>
+      <pubDate>Mon, 01 Jan 2025 00:00:00 GMT</pubDate>
+    </item>
+    <item>
+      <title>[R] Sample Reddit Post Two</title>
+      <link>https://www.reddit.com/r/MachineLearning/comments/def456/sample_post_two/</link>
+      <guid>t3_def456</guid>
+      <pubDate>Tue, 02 Jan 2025 00:00:00 GMT</pubDate>
+    </item>
+  </channel>
+</rss>
+
+

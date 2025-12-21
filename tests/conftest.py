@@ -7,11 +7,16 @@ Adds src/paperbot to sys.path so imports work correctly.
 import sys
 from pathlib import Path
 
-# Add src/paperbot to path so 'repro' imports work
 project_root = Path(__file__).parent.parent
-src_path = project_root / "src" / "paperbot"
-if str(src_path) not in sys.path:
-    sys.path.insert(0, str(src_path))
+# Add src to path so `import paperbot` works
+src_root = project_root / "src"
+if str(src_root) not in sys.path:
+    sys.path.insert(0, str(src_root))
+
+# Keep legacy behavior: add src/paperbot so `import repro` style tests keep working
+legacy_src_path = src_root / "paperbot"
+if str(legacy_src_path) not in sys.path:
+    sys.path.insert(0, str(legacy_src_path))
 
 # Also add project root
 if str(project_root) not in sys.path:

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>arXiv Query: cs.AI</title>
+  <entry>
+    <id>http://arxiv.org/abs/2501.00001v1</id>
+    <updated>2025-01-02T00:00:00Z</updated>
+    <published>2025-01-02T00:00:00Z</published>
+    <title>Sample arXiv Paper Title</title>
+    <summary>This is a sample summary for offline fixture testing.</summary>
+    <author><name>Alice</name></author>
+    <author><name>Bob</name></author>
+    <link rel="alternate" type="text/html" href="http://arxiv.org/abs/2501.00001v1"/>
+    <link title="pdf" rel="related" type="application/pdf" href="http://arxiv.org/pdf/2501.00001v1.pdf"/>
+  </entry>
+</feed>
+
+

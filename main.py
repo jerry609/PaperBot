@@ -653,8 +653,8 @@ def run_scholar_tracking(args):
 
                         # 重新渲染报告，写回
                         try:
-                            if pipeline._coordinator.report_writer is not None:
-                                md = pipeline._coordinator.report_writer.render_template(
+                            if pipeline.report_writer is not None:
+                                md = pipeline.report_writer.render_template(
                                     paper=paper,
                                     influence=influence,
                                     research_result=pipeline_data.get("stages", {}).get("research", {}).get("result", {}),
@@ -664,7 +664,7 @@ def run_scholar_tracking(args):
                                     repro_result=repro_result,
                                     meta=None,
                                 )
-                                path = pipeline._coordinator.report_writer.write_report(md, paper, scholar_name)
+                                path = pipeline.report_writer.write_report(md, paper, scholar_name)
                                 pipeline_data["report_path"] = str(path)
                         except Exception as e:
                             print(f"    ⚠️ 重渲染报告失败: {e}")

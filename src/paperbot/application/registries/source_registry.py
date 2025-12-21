@@ -1,7 +1,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import Any, Dict, Optional, Callable
+
+
+class AcquisitionMode(str, Enum):
+    api_first = "api_first"
+    http_static = "http_static"
+    restricted = "restricted"
+    high_risk_dynamic = "high_risk_dynamic"
+    import_only = "import_only"
 
 
 @dataclass
@@ -11,6 +20,8 @@ class SourceDescriptor:
     reliability: float = 0.5  # 0..1
     rate_limit_rps: Optional[float] = None
     auth: str = "none"  # none/api_key/oauth/cookie/...
+    acquisition_mode: AcquisitionMode = AcquisitionMode.api_first
+    enabled_by_default: bool = True
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 

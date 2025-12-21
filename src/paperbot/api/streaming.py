@@ -3,7 +3,7 @@ Streaming utilities for Server-Sent Events (SSE)
 """
 
 import json
-from typing import Any, AsyncGenerator
+from typing import Any, AsyncGenerator, Optional
 from dataclasses import dataclass
 
 
@@ -12,7 +12,7 @@ class StreamEvent:
     """SSE event structure"""
     type: str  # progress, result, error, done
     data: Any = None
-    message: str | None = None
+    message: Optional[str] = None
 
     def to_sse(self) -> str:
         """Convert to SSE format"""
