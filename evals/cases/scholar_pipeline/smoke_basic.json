@@ -1,0 +1,20 @@
+{
+  "paper": {
+    "paper_id": "smoke_paper_001",
+    "title": "Smoke Test Paper",
+    "authors": ["Alice", "Bob"],
+    "abstract": "This is a smoke test. No network calls should be required.",
+    "year": 2025,
+    "venue": "TestConf",
+    "citation_count": 12,
+    "github_url": null,
+    "has_code": false
+  },
+  "scholar_name": "SmokeScholar",
+  "expect": {
+    "status": "success",
+    "min_total_score": 0.0
+  }
+}
+
+

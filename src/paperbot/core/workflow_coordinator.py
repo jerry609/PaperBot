@@ -12,7 +12,7 @@ P3 增强:
 from __future__ import annotations
 
 import logging
-from typing import Dict, Any, Optional, List, Tuple
+from typing import Dict, Any, Optional, List, Tuple, TYPE_CHECKING
 from pathlib import Path
 from dataclasses import dataclass, field
 
@@ -20,6 +20,9 @@ from .collaboration.score_bus import ScoreShareBus, StageScore, create_research_
 from .fail_fast import FailFastEvaluator, FailFastConfig
 
 logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from paperbot.application.ports.event_log_port import EventLogPort
 
 
 @dataclass
@@ -153,6 +156,10 @@ class ScholarWorkflowCoordinator:
         paper: Any,
         scholar_name: Optional[str] = None,
         persist_report: bool = True,
+        *,
+        event_log: "Optional[EventLogPort]" = None,
+        run_id: Optional[str] = None,
+        trace_id: Optional[str] = None,
     ) -> Tuple[Optional[Path], Any, Dict[str, Any]]:
         """
         运行论文分析流水线
@@ -168,7 +175,13 @@ class ScholarWorkflowCoordinator:
         paper_id = getattr(paper, 'paper_id', 'unknown')
         
         # P3: 初始化评分共享总线
-        score_bus = ScoreShareBus(paper_id=paper_id)
+        score_bus = ScoreShareBus(
+            paper_id=paper_id,
+            event_log=event_log,
+            run_id=run_id,
+            trace_id=trace_id,
+            workflow="scholar_pipeline",
+        )
         ctx = PipelineContext(paper=paper, scholar_name=scholar_name, score_bus=score_bus)
         
         try:
@@ -403,6 +416,9 @@ class ScholarWorkflowCoordinator:
         self,
         papers: List[Any],
         scholar_name: Optional[str] = None,
+        *,
+        event_log: "Optional[EventLogPort]" = None,
+        run_id: Optional[str] = None,
     ) -> List[Tuple[Optional[Path], Any, Dict[str, Any]]]:
         """
         批量运行论文分析流水线
@@ -420,6 +436,9 @@ class ScholarWorkflowCoordinator:
                 paper=paper,
                 scholar_name=scholar_name,
                 persist_report=True,
+                event_log=event_log,
+                run_id=run_id,
+                trace_id=None,
             )
             results.append(result)
         return results

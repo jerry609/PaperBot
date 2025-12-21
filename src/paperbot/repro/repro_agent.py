@@ -23,7 +23,7 @@ Execution Backends:
 import logging
 import tempfile
 from pathlib import Path
-from typing import Dict, Any, Optional, Literal
+from typing import Dict, Any, Optional, Literal, TYPE_CHECKING
 
 from .models import (
     PaperContext, ReproductionPlan, ImplementationSpec,
@@ -39,6 +39,9 @@ from .e2b_executor import E2BExecutor
 from .orchestrator import Orchestrator, OrchestratorConfig
 
 logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from paperbot.application.ports.event_log_port import EventLogPort
 
 # Executor type alias
 ExecutorType = Literal["docker", "e2b", "auto"]
@@ -164,7 +167,13 @@ class ReproAgent:
         self.executor = self._create_executor()
         self.logger.info(f"Switched to {self.executor.executor_type} executor")
 
-    def get_orchestrator(self, output_dir: Optional[Path] = None) -> Orchestrator:
+    def get_orchestrator(
+        self,
+        output_dir: Optional[Path] = None,
+        *,
+        event_log: "Optional[EventLogPort]" = None,
+        workflow: str = "paper2code",
+    ) -> Orchestrator:
         """
         Get or create the multi-agent orchestrator.
 
@@ -181,7 +190,7 @@ class ReproAgent:
                 use_rag=self.config.get("use_rag", True),
                 max_context_tokens=self.config.get("max_context_tokens", 8000),
             )
-            self._orchestrator = Orchestrator(config=config)
+            self._orchestrator = Orchestrator(config=config, event_log=event_log, workflow=workflow)
         return self._orchestrator
 
     # ==================== Paper2Code Mode ====================
@@ -189,7 +198,11 @@ class ReproAgent:
     async def reproduce_from_paper(
         self,
         paper_context: PaperContext,
-        output_dir: Optional[Path] = None
+        output_dir: Optional[Path] = None,
+        *,
+        event_log: "Optional[EventLogPort]" = None,
+        run_id: Optional[str] = None,
+        trace_id: Optional[str] = None,
     ) -> ReproductionResult:
         """
         Full Paper2Code reproduction from paper context.
@@ -219,7 +232,13 @@ class ReproAgent:
 
         # Use orchestrator mode if enabled
         if self.use_orchestrator:
-            return await self._reproduce_with_orchestrator(paper_context, output_dir)
+            return await self._reproduce_with_orchestrator(
+                paper_context,
+                output_dir,
+                event_log=event_log,
+                run_id=run_id,
+                trace_id=trace_id,
+            )
 
         # Legacy mode
         return await self._reproduce_legacy(paper_context, output_dir)
@@ -227,7 +246,11 @@ class ReproAgent:
     async def _reproduce_with_orchestrator(
         self,
         paper_context: PaperContext,
-        output_dir: Path
+        output_dir: Path,
+        *,
+        event_log: "Optional[EventLogPort]" = None,
+        run_id: Optional[str] = None,
+        trace_id: Optional[str] = None,
     ) -> ReproductionResult:
         """
         Reproduce using the multi-agent orchestrator.
@@ -240,8 +263,8 @@ class ReproAgent:
         """
         self.logger.info(f"Reproducing '{paper_context.title}' with multi-agent orchestrator")
 
-        orchestrator = self.get_orchestrator(output_dir)
-        result = await orchestrator.run(paper_context)
+        orchestrator = self.get_orchestrator(output_dir, event_log=event_log)
+        result = await orchestrator.run(paper_context, run_id=run_id, trace_id=trace_id)
 
         # Write environment files if we have the plan
         if result.plan:

@@ -495,11 +495,13 @@ def run_scholar_tracking(args):
         from paperbot.agents.scholar_tracking.paper_tracker_agent import PaperTrackerAgent
         from paperbot.agents.scholar_tracking.scholar_profile_agent import ScholarProfileAgent
         from paperbot.domain.paper import PaperMeta
-        from paperbot.core.workflow_coordinator import ScholarWorkflowCoordinator
+        from paperbot.application.workflows.scholar_pipeline import ScholarPipeline
         from config.settings import settings
         from paperbot.repro import ReproAgent
         import tempfile, shutil
         from git.repo import Repo as GitRepo
+        from paperbot.infrastructure.event_log.logging_event_log import LoggingEventLog
+        from paperbot.application.collaboration.message_schema import new_run_id, new_trace_id
 
         overrides: Dict[str, Any] = {"subscriptions_config_path": str(config_path)}
         mode = getattr(args, "mode", None) or getattr(settings, "mode", "production")
@@ -528,14 +530,20 @@ def run_scholar_tracking(args):
         min_score = settings.get("min_influence_score", 0)
 
         tracker_agent = PaperTrackerAgent({**overrides, "api": settings.get("api", {}), "data_source": settings.get("data_source", {})})
-        coordinator = ScholarWorkflowCoordinator(
+        pipeline = ScholarPipeline(
             {
                 "output_dir": str(profile_agent.get_output_dir()),
-                "report_template": reporting_cfg.get("template", overrides.get("report_template", "paper_report.md.j2")),
-                "use_documentation_agent": False, # 禁用 DocumentationAgent 以避免接口不匹配
+                "report_template": reporting_cfg.get(
+                    "template", overrides.get("report_template", "paper_report.md.j2")
+                ),
+                "use_documentation_agent": False,  # 禁用 DocumentationAgent 以避免接口不匹配
                 "mode": mode,
             }
         )
+
+        # Phase-0: event log + run id for end-to-end traceability
+        event_log = LoggingEventLog()
+        session_run_id = new_run_id()
 
         # 强制模式
         if args.force and args.scholar_id:
@@ -601,10 +609,13 @@ def run_scholar_tracking(args):
 
             for paper in papers:
                 try:
-                    report_path, influence, pipeline_data = await coordinator.run_paper_pipeline(
+                    report_path, influence, pipeline_data = await pipeline.analyze_paper(
                         paper,
                         scholar_name,
                         persist_report=persist_reports,
+                        event_log=event_log,
+                        run_id=session_run_id,
+                        trace_id=new_trace_id(),
                     )
 
                     pis = f"{influence.total_score:.1f}/100 ({influence.recommendation.value})"
@@ -637,8 +648,8 @@ def run_scholar_tracking(args):
 
                         # 重新渲染报告，写回
                         try:
-                            if coordinator.report_writer is not None:
-                                md = coordinator.report_writer.render_template(
+                            if pipeline._coordinator.report_writer is not None:
+                                md = pipeline._coordinator.report_writer.render_template(
                                     paper=paper,
                                     influence=influence,
                                     research_result=pipeline_data.get("stages", {}).get("research", {}).get("result", {}),
@@ -648,7 +659,7 @@ def run_scholar_tracking(args):
                                     repro_result=repro_result,
                                     meta=None,
                                 )
-                                path = coordinator.report_writer.write_report(md, paper, scholar_name)
+                                path = pipeline._coordinator.report_writer.write_report(md, paper, scholar_name)
                                 pipeline_data["report_path"] = str(path)
                         except Exception as e:
                             print(f"    ⚠️ 重渲染报告失败: {e}")

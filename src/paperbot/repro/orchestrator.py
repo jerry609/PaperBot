@@ -133,7 +133,13 @@ class Orchestrator:
         self._run_id = run_id or ""
         self._trace_id = trace_id or ""
 
-    async def run(self, paper_context: PaperContext) -> ReproductionResult:
+    async def run(
+        self,
+        paper_context: PaperContext,
+        *,
+        run_id: Optional[str] = None,
+        trace_id: Optional[str] = None,
+    ) -> ReproductionResult:
         """
         Run the full Paper2Code pipeline.
 
@@ -145,11 +151,12 @@ class Orchestrator:
         """
         self.progress = PipelineProgress()
         self.progress.start_time = datetime.now()
-        # Assign per-run identifiers if not already set
-        if not self._run_id:
-            self._run_id = new_run_id()
-        if not self._trace_id:
-            self._trace_id = new_trace_id()
+        # Assign per-run identifiers.
+        # NOTE: Orchestrator instances may be cached/reused by ReproAgent; we must not
+        # reuse IDs across independent runs. If caller provides IDs (from entrypoint),
+        # use them for end-to-end correlation.
+        self._run_id = run_id or new_run_id()
+        self._trace_id = trace_id or new_trace_id()
 
         self.context = {
             "paper_context": paper_context,

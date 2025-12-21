@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 from typing import Dict, Any, Optional, List, Tuple
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 # Pipeline 用于类型提示和未来扩展
 # from paperbot.core.pipeline import Pipeline
@@ -16,6 +17,9 @@ from paperbot.domain.paper import PaperMeta, CodeMeta
 from paperbot.domain.influence.result import InfluenceResult
 
 logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from paperbot.application.ports.event_log_port import EventLogPort
 
 
 class ScholarTrackingWorkflow:
@@ -39,11 +43,11 @@ class ScholarTrackingWorkflow:
         self._coordinator = None
     
     def _get_coordinator(self):
-        """延迟初始化协调器"""
+        """延迟初始化协调器（Phase-0: application wrapper boundary）"""
         if self._coordinator is None:
             try:
-                from paperbot.core.workflow_coordinator import ScholarWorkflowCoordinator
-                self._coordinator = ScholarWorkflowCoordinator(self.config)
+                from paperbot.application.workflows.scholar_pipeline import ScholarPipeline
+                self._coordinator = ScholarPipeline(self.config)
             except ImportError as e:
                 self.logger.error(f"Failed to import ScholarWorkflowCoordinator: {e}")
                 raise
@@ -54,6 +58,10 @@ class ScholarTrackingWorkflow:
         paper: PaperMeta,
         scholar_name: Optional[str] = None,
         persist_report: bool = True,
+        *,
+        event_log: Optional["EventLogPort"] = None,
+        run_id: Optional[str] = None,
+        trace_id: Optional[str] = None,
     ) -> Tuple[Optional[Path], InfluenceResult, Dict[str, Any]]:
         """
         分析单篇论文
@@ -67,16 +75,22 @@ class ScholarTrackingWorkflow:
             (报告路径, 影响力结果, 流水线数据)
         """
         coordinator = self._get_coordinator()
-        return await coordinator.run_paper_pipeline(
+        return await coordinator.analyze_paper(
             paper=paper,
             scholar_name=scholar_name,
             persist_report=persist_report,
+            event_log=event_log,
+            run_id=run_id,
+            trace_id=trace_id,
         )
     
     async def analyze_papers(
         self,
         papers: List[PaperMeta],
         scholar_name: Optional[str] = None,
+        *,
+        event_log: Optional["EventLogPort"] = None,
+        run_id: Optional[str] = None,
     ) -> List[Tuple[Optional[Path], InfluenceResult, Dict[str, Any]]]:
         """
         批量分析论文
@@ -89,9 +103,11 @@ class ScholarTrackingWorkflow:
             结果列表
         """
         coordinator = self._get_coordinator()
-        return await coordinator.run_batch_pipeline(
+        return await coordinator.analyze_papers(
             papers=papers,
             scholar_name=scholar_name,
+            event_log=event_log,
+            run_id=run_id,
         )
     
     async def quick_score(

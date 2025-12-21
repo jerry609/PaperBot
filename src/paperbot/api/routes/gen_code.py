@@ -2,7 +2,7 @@
 Paper2Code Generation API Route
 """
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import Optional
@@ -10,6 +10,7 @@ from pathlib import Path
 import tempfile
 
 from ..streaming import StreamEvent, wrap_generator
+from paperbot.application.collaboration.message_schema import new_run_id, new_trace_id
 
 router = APIRouter()
 
@@ -23,12 +24,22 @@ class GenCodeRequest(BaseModel):
     output_dir: Optional[str] = None
 
 
-async def gen_code_stream(request: GenCodeRequest):
+async def gen_code_stream(request: GenCodeRequest, *, event_log=None, run_id: str = "", trace_id: str = ""):
     """Stream code generation progress"""
     try:
+        if not run_id:
+            run_id = new_run_id()
+        if not trace_id:
+            trace_id = new_trace_id()
+
         yield StreamEvent(
             type="progress",
-            data={"phase": "Initializing", "message": "Setting up code generation..."},
+            data={
+                "phase": "Initializing",
+                "message": "Setting up code generation...",
+                "run_id": run_id,
+                "trace_id": trace_id,
+            },
         )
 
         # Import repro modules
@@ -47,10 +58,12 @@ async def gen_code_stream(request: GenCodeRequest):
         )
 
         # Initialize agent
-        agent = ReproAgent({
-            "use_orchestrator": request.use_orchestrator,
-            "use_rag": request.use_rag,
-        })
+        agent = ReproAgent(
+            {
+                "use_orchestrator": request.use_orchestrator,
+                "use_rag": request.use_rag,
+            }
+        )
 
         # Use temp directory if no output specified
         output_dir = Path(request.output_dir) if request.output_dir else Path(tempfile.mkdtemp())
@@ -66,7 +79,13 @@ async def gen_code_stream(request: GenCodeRequest):
         )
 
         # Run generation
-        result = await agent.reproduce_from_paper(paper_context, output_dir=output_dir)
+        result = await agent.reproduce_from_paper(
+            paper_context,
+            output_dir=output_dir,
+            event_log=event_log,
+            run_id=run_id,
+            trace_id=trace_id,
+        )
 
         # Report file generation progress
         total_files = len(result.generated_files)
@@ -135,14 +154,17 @@ async def gen_code_stream(request: GenCodeRequest):
 
 
 @router.post("/gen-code")
-async def generate_code(request: GenCodeRequest):
+async def generate_code(request: GenCodeRequest, http_request: Request):
     """
     Generate code from paper and stream progress.
 
     Returns Server-Sent Events with generation updates.
     """
+    event_log = getattr(http_request.app.state, "event_log", None)
+    run_id = new_run_id()
+    trace_id = new_trace_id()
     return StreamingResponse(
-        wrap_generator(gen_code_stream(request)),
+        wrap_generator(gen_code_stream(request, event_log=event_log, run_id=run_id, trace_id=trace_id)),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
