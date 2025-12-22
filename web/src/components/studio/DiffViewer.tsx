@@ -22,6 +22,8 @@ interface DiffViewerProps {
     onApply?: () => void;
     onReject?: () => void;
     onClose?: () => void;
+    applyLabel?: string;
+    rejectLabel?: string;
     splitView?: boolean;
 }
 
@@ -121,6 +123,8 @@ export function DiffViewer({
     onApply,
     onReject,
     onClose,
+    applyLabel,
+    rejectLabel,
 }: DiffViewerProps) {
     const diff = useMemo(() => {
         const oldLines = oldValue.split('\n');
@@ -155,12 +159,12 @@ export function DiffViewer({
                 <div className="flex items-center gap-2">
                     {onApply && (
                         <Button size="sm" variant="default" onClick={onApply} className="h-7 text-xs">
-                            <Check className="h-3 w-3 mr-1" /> Apply
+                            <Check className="h-3 w-3 mr-1" /> {applyLabel || "Apply"}
                         </Button>
                     )}
                     {onReject && (
                         <Button size="sm" variant="outline" onClick={onReject} className="h-7 text-xs">
-                            <X className="h-3 w-3 mr-1" /> Reject
+                            <X className="h-3 w-3 mr-1" /> {rejectLabel || "Reject"}
                         </Button>
                     )}
                     {onClose && (

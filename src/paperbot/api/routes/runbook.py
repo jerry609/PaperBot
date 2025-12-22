@@ -65,6 +65,18 @@ def _allowed_workdir(workdir: Path) -> bool:
     return False
 
 
+def _resolve_under_root(root: Path, relative_path: str) -> Path:
+    """
+    Resolve a relative path within a root directory.
+    Rejects path traversal.
+    """
+    target = (root / relative_path).resolve()
+    root_resolved = root.resolve()
+    if not (target == root_resolved or str(target).startswith(str(root_resolved) + os.sep)):
+        raise HTTPException(status_code=400, detail="invalid path")
+    return target
+
+
 class SmokeRequest(BaseModel):
     project_dir: str = Field(..., description="Project directory on the API host (typically /tmp/... from gen-code)")
     executor: ExecutorType = Field("docker", description="Execution backend: docker (local) or e2b (remote)")
@@ -338,10 +350,7 @@ async def diff_file(
         raise HTTPException(status_code=404, detail="file not found in snapshot")
     old_content = files[path].get("content", "")
 
-    target = (root / path).resolve()
-    root_resolved = root.resolve()
-    if not (target == root_resolved or str(target).startswith(str(root_resolved) + os.sep)):
-        raise HTTPException(status_code=400, detail="invalid path")
+    target = _resolve_under_root(root, path)
     if not target.exists() or not target.is_file():
         raise HTTPException(status_code=404, detail="file not found on disk")
 
@@ -378,10 +387,7 @@ async def revert_file(body: RevertFileRequest):
         raise HTTPException(status_code=404, detail="file not found in snapshot")
     old_content = files[body.path].get("content", "")
 
-    target = (root / body.path).resolve()
-    root_resolved = root.resolve()
-    if not (target == root_resolved or str(target).startswith(str(root_resolved) + os.sep)):
-        raise HTTPException(status_code=400, detail="invalid path")
+    target = _resolve_under_root(root, body.path)
 
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(old_content, encoding="utf-8")
@@ -462,10 +468,7 @@ async def read_project_file(
     if not _allowed_workdir(root):
         raise HTTPException(status_code=403, detail="project_dir is not allowed")
 
-    target = (root / path).resolve()
-    root_resolved = root.resolve()
-    if not (target == root_resolved or str(target).startswith(str(root_resolved) + os.sep)):
-        raise HTTPException(status_code=400, detail="invalid path")
+    target = _resolve_under_root(root, path)
     if not target.exists() or not target.is_file():
         raise HTTPException(status_code=404, detail="file not found")
 
@@ -496,15 +499,160 @@ async def write_project_file(body: WriteFileRequest):
     if not _allowed_workdir(root):
         raise HTTPException(status_code=403, detail="project_dir is not allowed")
 
-    target = (root / body.path).resolve()
-    root_resolved = root.resolve()
-    if not (target == root_resolved or str(target).startswith(str(root_resolved) + os.sep)):
-        raise HTTPException(status_code=400, detail="invalid path")
+    target = _resolve_under_root(root, body.path)
 
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(body.content, encoding="utf-8")
 
     return {"ok": True, "path": body.path}
+
+
+@router.get("/runbook/changes")
+async def list_changes(
+    snapshot_id: int = Query(...),
+    project_dir: str = Query(...),
+    max_files: int = Query(5000, ge=1, le=20000),
+):
+    """
+    Compute file-level changes between a snapshot and the current project directory.
+
+    Returns lists of changed/unchanged/added/removed files.
+    """
+    root = Path(project_dir)
+    if not root.exists() or not root.is_dir():
+        raise HTTPException(status_code=400, detail="project_dir must be an existing directory")
+    if not _allowed_workdir(root):
+        raise HTTPException(status_code=403, detail="project_dir is not allowed")
+
+    snapshot = _load_snapshot(snapshot_id)
+    snap_files = snapshot.get("files") or {}
+    snap_paths = set(snap_files.keys())
+
+    ignore_dirs = {".git", ".next", "node_modules", ".venv", "__pycache__", ".pytest_cache", ".mypy_cache"}
+    allowed_ext = {".py", ".md", ".txt", ".json", ".yaml", ".yml", ".toml", ".sh", ".ini", ".cfg"}
+
+    changed: List[str] = []
+    unchanged: List[str] = []
+    removed: List[str] = []
+
+    for rel in sorted(snap_paths):
+        target = _resolve_under_root(root, rel)
+        if not target.exists() or not target.is_file():
+            removed.append(rel)
+            continue
+        try:
+            content = target.read_text(encoding="utf-8")
+        except Exception:
+            content = target.read_text(errors="ignore")
+        current_sha = _sha256_text(content)
+        if current_sha != snap_files.get(rel, {}).get("sha256"):
+            changed.append(rel)
+        else:
+            unchanged.append(rel)
+
+    current_files: List[str] = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in ignore_dirs]
+        for name in filenames:
+            if len(current_files) >= max_files:
+                break
+            p = Path(dirpath) / name
+            ext = p.suffix.lower()
+            if ext and ext not in allowed_ext:
+                continue
+            rel = os.path.relpath(str(p), str(root))
+            current_files.append(rel)
+        if len(current_files) >= max_files:
+            break
+
+    added = sorted([p for p in current_files if p not in snap_paths])
+
+    return {
+        "snapshot_id": snapshot_id,
+        "project_dir": str(root.resolve()),
+        "changed": changed,
+        "unchanged": unchanged,
+        "added": added,
+        "removed": removed,
+    }
+
+
+class DeleteFileRequest(BaseModel):
+    project_dir: str
+    path: str
+
+
+@router.post("/runbook/delete")
+async def delete_file(body: DeleteFileRequest):
+    """Delete a single file under project_dir."""
+    root = Path(body.project_dir)
+    if not root.exists() or not root.is_dir():
+        raise HTTPException(status_code=400, detail="project_dir must be an existing directory")
+    if not _allowed_workdir(root):
+        raise HTTPException(status_code=403, detail="project_dir is not allowed")
+
+    target = _resolve_under_root(root, body.path)
+    if not target.exists():
+        return {"ok": True, "path": body.path, "deleted": False}
+    if target.is_dir():
+        raise HTTPException(status_code=400, detail="cannot delete a directory")
+
+    target.unlink()
+    return {"ok": True, "path": body.path, "deleted": True}
+
+
+class RevertProjectRequest(BaseModel):
+    snapshot_id: int
+    project_dir: str
+    delete_added: bool = True
+
+
+@router.post("/runbook/revert-project")
+async def revert_project(body: RevertProjectRequest):
+    """Revert project files back to a snapshot (file-level)."""
+    root = Path(body.project_dir)
+    if not root.exists() or not root.is_dir():
+        raise HTTPException(status_code=400, detail="project_dir must be an existing directory")
+    if not _allowed_workdir(root):
+        raise HTTPException(status_code=403, detail="project_dir is not allowed")
+
+    snapshot = _load_snapshot(body.snapshot_id)
+    snap_files = snapshot.get("files") or {}
+    snap_paths = set(snap_files.keys())
+
+    restored = 0
+    for rel, info in snap_files.items():
+        target = _resolve_under_root(root, rel)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(info.get("content", ""), encoding="utf-8")
+        restored += 1
+
+    deleted = 0
+    if body.delete_added:
+        ignore_dirs = {".git", ".next", "node_modules", ".venv", "__pycache__", ".pytest_cache", ".mypy_cache"}
+        allowed_ext = {".py", ".md", ".txt", ".json", ".yaml", ".yml", ".toml", ".sh", ".ini", ".cfg"}
+        current_files: List[str] = []
+        for dirpath, dirnames, filenames in os.walk(root):
+            dirnames[:] = [d for d in dirnames if d not in ignore_dirs]
+            for name in filenames:
+                p = Path(dirpath) / name
+                ext = p.suffix.lower()
+                if ext and ext not in allowed_ext:
+                    continue
+                rel = os.path.relpath(str(p), str(root))
+                current_files.append(rel)
+        for rel in current_files:
+            if rel in snap_paths:
+                continue
+            try:
+                target = _resolve_under_root(root, rel)
+                if target.exists() and target.is_file():
+                    target.unlink()
+                    deleted += 1
+            except Exception:
+                continue
+
+    return {"ok": True, "restored": restored, "deleted": deleted}
 
 
 @router.get("/runbook/runs/{run_id}", response_model=RunStatusResponse)
