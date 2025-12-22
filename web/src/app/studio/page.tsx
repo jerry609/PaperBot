@@ -7,7 +7,7 @@ import { TasksPanel } from "@/components/studio/TasksPanel"
 import { ExecutionLog } from "@/components/studio/ExecutionLog"
 import { PromptInput } from "@/components/studio/PromptInput"
 import { MCPSettings } from "@/components/studio/MCPSettings"
-import { DeepCodeEditor } from "@/components/studio/DeepCodeEditor"
+import { WorkspacePanel } from "@/components/studio/WorkspacePanel"
 import { RunbookPanel } from "@/components/studio/RunbookPanel"
 import { BlueprintPanel } from "@/components/studio/BlueprintPanel"
 import { MCPProvider } from "@/lib/mcp"
@@ -340,9 +340,7 @@ function StudioContent() {
                         minSize="30"
                         onResize={({ inPixels }) => setCollapsedKey("workspace", inPixels < 2)}
                     >
-                        <div className="h-full min-w-0 min-h-0 bg-background">
-                            <DeepCodeEditor />
-                        </div>
+                        <WorkspacePanel />
                     </ResizablePanel>
 
                     <ResizableHandle withHandle />
@@ -472,7 +470,7 @@ function StudioContent() {
                         </TabsTrigger>
                     </TabsList>
                     <TabsContent value="workspace" className="flex-1 min-h-0 m-0 overflow-hidden">
-                        <DeepCodeEditor />
+                        <WorkspacePanel />
                     </TabsContent>
                     <TabsContent value="runbook" className="flex-1 min-h-0 m-0 overflow-hidden">
                         <RunbookPanel />

@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from paperbot.application.collaboration.message_schema import new_run_id
@@ -151,6 +151,125 @@ async def start_smoke(body: SmokeRequest) -> SmokeStartResponse:
 
     asyncio.create_task(_run_smoke_async(run_id, workdir, body))
     return SmokeStartResponse(run_id=run_id, status="running")
+
+
+@router.get("/runbook/files")
+async def list_project_files(
+    project_dir: str = Query(..., description="Project directory on the API host"),
+    recursive: bool = Query(True, description="List files recursively"),
+    max_files: int = Query(2000, ge=1, le=20000),
+):
+    """
+    List files under a project directory (best-effort).
+
+    Notes:
+    - This endpoint is intentionally restrictive and will only serve allowed roots.
+    - Large directories (e.g. node_modules) are skipped by default.
+    """
+    root = Path(project_dir)
+    if not root.exists() or not root.is_dir():
+        raise HTTPException(status_code=400, detail="project_dir must be an existing directory")
+    if not _allowed_workdir(root):
+        raise HTTPException(status_code=403, detail="project_dir is not allowed")
+
+    ignore_dirs = {".git", ".next", "node_modules", ".venv", "__pycache__", ".pytest_cache", ".mypy_cache"}
+
+    files: List[str] = []
+    directories: List[str] = []
+
+    if not recursive:
+        for p in root.iterdir():
+            if p.is_dir():
+                directories.append(p.name)
+            elif p.is_file():
+                files.append(p.name)
+        return {"project_dir": str(root), "files": sorted(files), "directories": sorted(directories)}
+
+    for dirpath, dirnames, filenames in os.walk(root):
+        # prune
+        dirnames[:] = [d for d in dirnames if d not in ignore_dirs]
+        rel_dir = os.path.relpath(dirpath, root)
+        if rel_dir != ".":
+            directories.append(rel_dir)
+
+        for name in filenames:
+            if len(files) >= max_files:
+                break
+            rel = os.path.relpath(os.path.join(dirpath, name), root)
+            files.append(rel)
+        if len(files) >= max_files:
+            break
+
+    return {
+        "project_dir": str(root),
+        "files": sorted(files),
+        "directories": sorted(set(directories)),
+        "truncated": len(files) >= max_files,
+        "max_files": max_files,
+    }
+
+
+class ReadFileResponse(BaseModel):
+    path: str
+    content: str
+
+
+@router.get("/runbook/file", response_model=ReadFileResponse)
+async def read_project_file(
+    project_dir: str = Query(..., description="Project directory on the API host"),
+    path: str = Query(..., description="Relative file path within project_dir"),
+    max_bytes: int = Query(2_000_000, ge=1, le=20_000_000),
+):
+    """Read a single file under project_dir (UTF-8 best effort)."""
+    root = Path(project_dir)
+    if not root.exists() or not root.is_dir():
+        raise HTTPException(status_code=400, detail="project_dir must be an existing directory")
+    if not _allowed_workdir(root):
+        raise HTTPException(status_code=403, detail="project_dir is not allowed")
+
+    target = (root / path).resolve()
+    root_resolved = root.resolve()
+    if not (target == root_resolved or str(target).startswith(str(root_resolved) + os.sep)):
+        raise HTTPException(status_code=400, detail="invalid path")
+    if not target.exists() or not target.is_file():
+        raise HTTPException(status_code=404, detail="file not found")
+
+    size = target.stat().st_size
+    if size > max_bytes:
+        raise HTTPException(status_code=413, detail=f"file too large ({size} bytes)")
+
+    try:
+        content = target.read_text(encoding="utf-8")
+    except Exception:
+        content = target.read_text(errors="ignore")
+
+    return ReadFileResponse(path=path, content=content)
+
+
+class WriteFileRequest(BaseModel):
+    project_dir: str
+    path: str
+    content: str
+
+
+@router.post("/runbook/file")
+async def write_project_file(body: WriteFileRequest):
+    """Write a file under project_dir (creates parents)."""
+    root = Path(body.project_dir)
+    if not root.exists() or not root.is_dir():
+        raise HTTPException(status_code=400, detail="project_dir must be an existing directory")
+    if not _allowed_workdir(root):
+        raise HTTPException(status_code=403, detail="project_dir is not allowed")
+
+    target = (root / body.path).resolve()
+    root_resolved = root.resolve()
+    if not (target == root_resolved or str(target).startswith(str(root_resolved) + os.sep)):
+        raise HTTPException(status_code=400, detail="invalid path")
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(body.content, encoding="utf-8")
+
+    return {"ok": True, "path": body.path}
 
 
 @router.get("/runbook/runs/{run_id}", response_model=RunStatusResponse)

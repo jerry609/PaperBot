@@ -34,6 +34,7 @@ class AgentRunModel(Base):
     logs = relationship("ExecutionLogModel", back_populates="run", cascade="all, delete-orphan")
     metrics = relationship("ResourceMetricModel", back_populates="run", cascade="all, delete-orphan")
     runbook_steps = relationship("RunbookStepModel", back_populates="run", cascade="all, delete-orphan")
+    artifacts = relationship("ArtifactModel", back_populates="run", cascade="all, delete-orphan")
 
     def set_metadata(self, data: Dict[str, Any]) -> None:
         self.metadata_json = json.dumps(data or {}, ensure_ascii=False)
@@ -156,4 +157,28 @@ class RunbookStepModel(Base):
 
     run = relationship("AgentRunModel", back_populates="runbook_steps")
 
+
+class ArtifactModel(Base):
+    """
+    Artifact index for evidence tracking.
+
+    This table stores references (paths/URIs) to outputs produced during a run/step:
+    - logs (raw/filtered), metrics snapshots, reports, figures, exported evidence packs, etc.
+    """
+    __tablename__ = "artifacts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[str] = mapped_column(String(64), ForeignKey("agent_runs.run_id"), index=True)
+    step_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("runbook_steps.id"), nullable=True, index=True)
+
+    type: Mapped[str] = mapped_column(String(32), index=True)  # log/metric/report/file/zip/...
+    path_or_uri: Mapped[str] = mapped_column(Text, default="")
+    mime: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    size_bytes: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    sha256: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    metadata_json: Mapped[str] = mapped_column(Text, default="{}")
+
+    run = relationship("AgentRunModel", back_populates="artifacts")
+    step = relationship("RunbookStepModel")
 

@@ -1,0 +1,42 @@
+export const runtime = "nodejs"
+
+function apiBaseUrl() {
+  return process.env.PAPERBOT_API_BASE_URL || "http://127.0.0.1:8000"
+}
+
+export async function GET(req: Request) {
+  const url = new URL(req.url)
+  const upstream = await fetch(`${apiBaseUrl()}/api/runbook/file?${url.searchParams.toString()}`, {
+    method: "GET",
+    headers: { Accept: "application/json" },
+  })
+  const text = await upstream.text()
+  return new Response(text, {
+    status: upstream.status,
+    headers: {
+      "Content-Type": upstream.headers.get("content-type") || "application/json",
+      "Cache-Control": "no-cache",
+    },
+  })
+}
+
+export async function POST(req: Request) {
+  const body = await req.text()
+  const upstream = await fetch(`${apiBaseUrl()}/api/runbook/file`, {
+    method: "POST",
+    headers: {
+      "Content-Type": req.headers.get("content-type") || "application/json",
+      Accept: "application/json",
+    },
+    body,
+  })
+  const text = await upstream.text()
+  return new Response(text, {
+    status: upstream.status,
+    headers: {
+      "Content-Type": upstream.headers.get("content-type") || "application/json",
+      "Cache-Control": "no-cache",
+    },
+  })
+}
+

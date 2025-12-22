@@ -25,7 +25,7 @@
 ### 1) 数据模型与存储（Run / Step / Artifact / Snapshot）
 
 - [x] `RunbookStepModel`（runbook_steps）表：step 生命周期与配置
-- [ ] 新增 `ArtifactModel` 表（产物索引）
+- [x] 新增 `ArtifactModel` 表（产物索引）
   - [ ] 字段：`run_id`、`step_id`(可空)、`type`(log/metric/report/file/zip)、
     `path_or_uri`、`mime`、`size_bytes`、`sha256`、`metadata_json`、`created_at`
   - [ ] DoD：可记录 outputDir、报告、曲线图、导出的 evidence 包
@@ -52,12 +52,13 @@
 
 - [ ] 后端：文件系统 API（严格限制在允许目录）
   - [ ] `GET /api/runbook/projects`（可选：列出最近项目/输出目录）
-  - [ ] `GET /api/runbook/projects/{id}/files`（树）
-  - [ ] `GET /api/runbook/projects/{id}/file?path=...`（读）
-  - [ ] `POST /api/runbook/projects/{id}/file`（写：只允许 workspace 内）
+  - [x] `GET /api/runbook/files?project_dir=...`（索引）
+  - [x] `GET /api/runbook/file?project_dir=...&path=...`（读）
+  - [x] `POST /api/runbook/file`（写：只允许 workspace 内）
   - [ ] 安全：路径规范化、防穿越、白名单根目录
-- [ ] 前端：文件树组件（左侧或 Workspace 顶部）
-  - [ ] 支持搜索/最近文件/仅显示改动
+- [x] 前端：文件树组件（Workspace 左侧）
+  - [x] 支持搜索 + 刷新索引 + 打开文件到 Editor
+  - [x] Save Active（写回后端文件）
 - [ ] Diff Staging（必须）
   - [ ] 生成 diff（基于“原始快照 vs 当前”）
   - [ ] Apply/Reject（按文件/按 hunk）
@@ -126,3 +127,4 @@
 ## Progress Log（每次完成请追加）
 
 - YYYY-MM-DD: ...
+- 2025-12-22: Add ArtifactModel + Runbook file APIs + Workspace real file explorer (open/save) + panel collapse controls.
