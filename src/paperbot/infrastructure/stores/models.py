@@ -4,7 +4,7 @@ import json
 from datetime import datetime
 from typing import Any, Dict, Optional
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -22,9 +22,17 @@ class AgentRunModel(Base):
     ended_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     status: Mapped[str] = mapped_column(String(32), default="running")
 
+    # Sandbox-specific fields
+    executor_type: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)  # e2b/docker/local
+    timeout_seconds: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    paper_url: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    paper_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+
     metadata_json: Mapped[str] = mapped_column(Text, default="{}")
 
     events = relationship("AgentEventModel", back_populates="run", cascade="all, delete-orphan")
+    logs = relationship("ExecutionLogModel", back_populates="run", cascade="all, delete-orphan")
+    metrics = relationship("ResourceMetricModel", back_populates="run", cascade="all, delete-orphan")
 
     def set_metadata(self, data: Dict[str, Any]) -> None:
         self.metadata_json = json.dumps(data or {}, ensure_ascii=False)
@@ -89,5 +97,35 @@ class AgentEventModel(Base):
             return json.loads(self.tags_json or "{}")
         except Exception:
             return {}
+
+
+class ExecutionLogModel(Base):
+    """Execution log entries for sandbox runs"""
+    __tablename__ = "execution_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[str] = mapped_column(String(64), ForeignKey("agent_runs.run_id"), index=True)
+
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    level: Mapped[str] = mapped_column(String(16), default="info")  # debug/info/warning/error
+    message: Mapped[str] = mapped_column(Text, default="")
+    source: Mapped[str] = mapped_column(String(32), default="system")  # stdout/stderr/executor/system
+
+    run = relationship("AgentRunModel", back_populates="logs")
+
+
+class ResourceMetricModel(Base):
+    """Resource usage metrics for sandbox runs"""
+    __tablename__ = "resource_metrics"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[str] = mapped_column(String(64), ForeignKey("agent_runs.run_id"), index=True)
+
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    cpu_percent: Mapped[float] = mapped_column(Float, default=0.0)
+    memory_mb: Mapped[float] = mapped_column(Float, default=0.0)
+    memory_limit_mb: Mapped[float] = mapped_column(Float, default=4096.0)
+
+    run = relationship("AgentRunModel", back_populates="metrics")
 
 

@@ -19,6 +19,7 @@ const cli = meow(`
     analyze         Analyze a paper by title/DOI
     gen-code        Generate code from paper (Paper2Code)
     review          Deep review a paper
+    sandbox         Manage sandbox jobs and view logs
     chat            Interactive chat mode (default)
 
   Options
@@ -27,6 +28,7 @@ const cli = meow(`
     --doi, -d       Paper DOI
     --abstract, -a  Paper abstract
     --output, -o    Output directory
+    --run-id        Run ID for sandbox logs
     --stream        Enable streaming output
     --no-banner     Disable startup banner
 
@@ -35,6 +37,8 @@ const cli = meow(`
     $ paperbot track --scholar "Dawn Song"
     $ paperbot analyze --title "Attention Is All You Need"
     $ paperbot gen-code --title "..." --abstract "..."
+    $ paperbot sandbox
+    $ paperbot sandbox --run-id <run_id>
 `, {
   importMeta: import.meta,
   flags: {

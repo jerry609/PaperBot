@@ -1,80 +1,211 @@
 "use client"
 
-import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { useState, useRef, useEffect } from "react"
 import { Badge } from "@/components/ui/badge"
-import { Play, Code, Terminal, AlertTriangle } from "lucide-react"
+import { PanelsTopLeft, Settings, List, Play } from "lucide-react"
+import { TasksPanel } from "@/components/studio/TasksPanel"
+import { ExecutionLog } from "@/components/studio/ExecutionLog"
+import { PromptInput } from "@/components/studio/PromptInput"
+import { useStudioStore } from "@/lib/store/studio-store"
+import { Button } from "@/components/ui/button"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { useChat } from "@ai-sdk/react"
 
 export default function DeepCodeStudioPage() {
+    const { addTask, addAction, updateTaskStatus, tasks, activeTaskId } = useStudioStore()
+    const [leftPanelWidth, setLeftPanelWidth] = useState(240)
+    const currentTaskIdRef = useRef<string | null>(null)
+
+    const { messages, status, sendMessage, setMessages } = useChat({
+        api: '/api/chat',
+        onResponse: (response) => {
+            // When we get a response, mark task as running
+            if (currentTaskIdRef.current) {
+                updateTaskStatus(currentTaskIdRef.current, 'running')
+            }
+        },
+        onFinish: () => {
+            // Mark task as completed
+            if (currentTaskIdRef.current) {
+                updateTaskStatus(currentTaskIdRef.current, 'completed')
+                addAction(currentTaskIdRef.current, {
+                    type: 'complete',
+                    content: 'Task completed'
+                })
+            }
+        },
+        onError: (error) => {
+            if (currentTaskIdRef.current) {
+                updateTaskStatus(currentTaskIdRef.current, 'error')
+                addAction(currentTaskIdRef.current, {
+                    type: 'error',
+                    content: error.message
+                })
+            }
+        }
+    })
+
+    // Process messages and extract tool calls for display
+    useEffect(() => {
+        if (!currentTaskIdRef.current || messages.length === 0) return
+
+        const lastMessage = messages[messages.length - 1]
+        if (lastMessage.role === 'assistant' && lastMessage.parts) {
+            for (const part of lastMessage.parts) {
+                if (part.type === 'tool-invocation') {
+                    const toolCall = part as { type: 'tool-invocation'; toolInvocation: { toolName: string; args: Record<string, unknown>; result?: unknown } }
+
+                    // Add function call action
+                    addAction(currentTaskIdRef.current, {
+                        type: 'function_call',
+                        content: `Called ${toolCall.toolInvocation.toolName}`,
+                        metadata: {
+                            functionName: toolCall.toolInvocation.toolName,
+                            params: toolCall.toolInvocation.args,
+                            result: toolCall.toolInvocation.result
+                        }
+                    })
+
+                    // If it's a file operation, also add file_change action
+                    if (['write_file', 'edit_file'].includes(toolCall.toolInvocation.toolName)) {
+                        const result = toolCall.toolInvocation.result as { data?: { path?: string; linesAdded?: number; linesDeleted?: number; linesWritten?: number } }
+                        if (result?.data) {
+                            addAction(currentTaskIdRef.current, {
+                                type: 'file_change',
+                                content: `Modified file`,
+                                metadata: {
+                                    filename: result.data.path,
+                                    linesAdded: result.data.linesAdded || result.data.linesWritten || 0,
+                                    linesDeleted: result.data.linesDeleted || 0,
+                                }
+                            })
+                        }
+                    }
+                } else if (part.type === 'text') {
+                    const textPart = part as { type: 'text'; text: string }
+                    // Add thinking/text action
+                    if (textPart.text.trim()) {
+                        addAction(currentTaskIdRef.current, {
+                            type: 'thinking',
+                            content: textPart.text
+                        })
+                    }
+                }
+            }
+        }
+    }, [messages, addAction])
+
+    const handlePromptSubmit = async (prompt: string, model: string) => {
+        // Create a new task
+        const taskId = addTask(prompt.slice(0, 50) + (prompt.length > 50 ? '...' : ''))
+        currentTaskIdRef.current = taskId
+
+        // Add initial thinking action
+        addAction(taskId, {
+            type: 'thinking',
+            content: `Processing: "${prompt}"`
+        })
+
+        // Clear previous messages and send new one
+        setMessages([])
+
+        // Send message with model selection
+        sendMessage({
+            content: prompt,
+            data: { model }
+        })
+    }
+
+    const isProcessing = status === 'streaming' || status === 'submitted'
+
     return (
         <div className="flex h-[calc(100vh-theme(spacing.16))] flex-col">
-            <div className="border-b bg-background p-4 flex items-center justify-between">
+            {/* Top Bar */}
+            <div className="border-b bg-background p-3 px-4 flex items-center justify-between shrink-0">
                 <div className="flex items-center gap-4">
-                    <h2 className="text-xl font-semibold">DeepCode Studio</h2>
-                    <Badge variant="outline">Attention Is All You Need</Badge>
-                    <Badge variant="secondary">PyTorch 2.0</Badge>
+                    <h2 className="text-lg font-semibold flex items-center gap-2">
+                        <PanelsTopLeft className="h-5 w-5" /> DeepCode Studio
+                    </h2>
+                    <Badge variant="secondary" className="bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300">
+                        v3 Beta
+                    </Badge>
                 </div>
-                <div className="flex items-center gap-2">
-                    <Button size="sm" variant="outline">
-                        <Code className="mr-2 h-4 w-4" /> Generate Blueprint
-                    </Button>
-                    <Button size="sm">
-                        <Play className="mr-2 h-4 w-4" /> Run Reproduction
-                    </Button>
-                </div>
+                <Button variant="ghost" size="icon">
+                    <Settings className="h-4 w-4" />
+                </Button>
             </div>
 
-            <div className="flex-1 grid grid-cols-12 bg-muted/20">
-                {/* Blueprint / Code Viewer */}
-                <div className="col-span-8 p-4 border-r bg-background">
-                    <Card className="h-full border-dashed shadow-none">
-                        <CardHeader>
-                            <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-                                <Code className="h-4 w-4" /> generated_model.py
-                            </CardTitle>
-                        </CardHeader>
-                        <CardContent>
-                            <pre className="text-sm font-mono text-muted-foreground">
-                                {`class Transformer(nn.Module):
-    def __init__(self, d_model=512, nhead=8, num_encoder_layers=6):
-        super().__init__()
-        self.encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=nhead)
-        ...
-# TODO: Implement Multi-Head Attention logic
-                        `}
-                            </pre>
-                        </CardContent>
-                    </Card>
+            {/* Main Workspace */}
+            <div className="flex-1 overflow-hidden flex">
+                {/* Left Sidebar */}
+                <div
+                    className="border-r bg-muted/10 shrink-0 flex flex-col"
+                    style={{ width: leftPanelWidth }}
+                >
+                    <Tabs defaultValue="tasks" className="h-full flex flex-col">
+                        <TabsList className="w-full justify-start rounded-none border-b bg-transparent p-0">
+                            <TabsTrigger
+                                value="tasks"
+                                className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent"
+                            >
+                                <List className="h-4 w-4 mr-1" />
+                                Tasks
+                            </TabsTrigger>
+                            <TabsTrigger
+                                value="sandbox"
+                                className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent"
+                            >
+                                <Play className="h-4 w-4 mr-1" />
+                                Sandbox
+                            </TabsTrigger>
+                        </TabsList>
+                        <TabsContent value="tasks" className="flex-1 m-0 overflow-hidden">
+                            <TasksPanel />
+                        </TabsContent>
+                        <TabsContent value="sandbox" className="flex-1 m-0 overflow-hidden">
+                            <div className="p-4 text-center text-muted-foreground text-sm">
+                                <div className="py-8 space-y-2">
+                                    <Play className="h-8 w-8 mx-auto opacity-30" />
+                                    <p>Sandbox Management</p>
+                                    <p className="text-xs">Coming soon (Phase 5)</p>
+                                </div>
+                            </div>
+                        </TabsContent>
+                    </Tabs>
                 </div>
 
-                {/* Terminal / Logs */}
-                <div className="col-span-4 p-4 flex flex-col gap-4">
-                    <Card className="h-1/2 bg-black border-zinc-800">
-                        <CardHeader className="p-3 border-b border-zinc-800">
-                            <CardTitle className="text-xs font-mono text-zinc-400 flex items-center gap-2">
-                                <Terminal className="h-3 w-3" /> E2B Sandbox Terminal
-                            </CardTitle>
-                        </CardHeader>
-                        <CardContent className="p-3 font-mono text-xs text-green-400">
-                            <p>$ pip install torch transformers</p>
-                            <p className="text-zinc-500">Requirement already satisfied: torch...</p>
-                            <p>$ python train.py</p>
-                            <p>Epoch 1/10: Loss 2.3412</p>
-                            <p>Epoch 2/10: Loss 1.9832</p>
-                        </CardContent>
-                    </Card>
+                {/* Resize Handle */}
+                <div
+                    className="w-1 bg-border hover:bg-primary/50 cursor-col-resize transition-colors shrink-0"
+                    onMouseDown={(e) => {
+                        e.preventDefault()
+                        const startX = e.clientX
+                        const startWidth = leftPanelWidth
 
-                    <Card className="h-1/2 border-orange-200 bg-orange-50 dark:bg-orange-950/20 dark:border-orange-900">
-                        <CardHeader className="p-3">
-                            <CardTitle className="text-xs font-medium text-orange-600 dark:text-orange-400 flex items-center gap-2">
-                                <AlertTriangle className="h-3 w-3" /> Self-Healing Debugger
-                            </CardTitle>
-                        </CardHeader>
-                        <CardContent className="p-3 text-xs">
-                            <p className="mb-2">No active errors detected.</p>
-                            <p className="text-muted-foreground">Ready to catch exceptions during runtime.</p>
-                        </CardContent>
-                    </Card>
+                        const onMouseMove = (moveEvent: MouseEvent) => {
+                            const newWidth = Math.max(180, Math.min(400, startWidth + moveEvent.clientX - startX))
+                            setLeftPanelWidth(newWidth)
+                        }
+
+                        const onMouseUp = () => {
+                            document.removeEventListener('mousemove', onMouseMove)
+                            document.removeEventListener('mouseup', onMouseUp)
+                        }
+
+                        document.addEventListener('mousemove', onMouseMove)
+                        document.addEventListener('mouseup', onMouseUp)
+                    }}
+                />
+
+                {/* Center Panel: Execution Log + Prompt */}
+                <div className="flex-1 flex flex-col min-w-0">
+                    <div className="flex-1 overflow-hidden">
+                        <ExecutionLog />
+                    </div>
+                    <PromptInput
+                        onSubmit={handlePromptSubmit}
+                        isLoading={isProcessing}
+                    />
                 </div>
             </div>
         </div>

@@ -8,6 +8,7 @@ import { ChatView } from './ChatView.js';
 import { TrackView } from './TrackView.js';
 import { AnalyzeView } from './AnalyzeView.js';
 import { GenCodeView } from './GenCodeView.js';
+import { SandboxView } from './SandboxView.js';
 import { StatusBar } from './StatusBar.js';
 import { client } from '../utils/api.js';
 
@@ -18,6 +19,7 @@ export interface AppFlags {
   abstract?: string;
   output?: string;
   stream?: boolean;
+  runId?: string;
 }
 
 interface AppProps {
@@ -59,6 +61,8 @@ export const App: React.FC<AppProps> = ({ command, flags }) => {
         );
       case 'review':
         return <AnalyzeView title={flags.title} doi={flags.doi} mode="review" />;
+      case 'sandbox':
+        return <SandboxView runId={flags.runId} />;
       case 'chat':
       default:
         return <ChatView />;
