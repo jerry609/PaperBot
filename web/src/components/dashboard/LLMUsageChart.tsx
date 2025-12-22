@@ -20,7 +20,7 @@ export function LLMUsageChart({ data }: LLMUsageChartProps) {
                         <CartesianGrid strokeDasharray="3 3" />
                         <XAxis dataKey="date" fontSize={12} />
                         <YAxis fontSize={12} tickFormatter={(v) => `${v / 1000}k`} />
-                        <Tooltip formatter={(value: number) => `${value.toLocaleString()} tokens`} />
+                        <Tooltip formatter={(value) => value !== undefined ? `${Number(value).toLocaleString()} tokens` : ''} />
                         <Legend />
                         <Bar dataKey="gpt4" name="GPT-4" fill="#10b981" stackId="a" />
                         <Bar dataKey="claude" name="Claude" fill="#8b5cf6" stackId="a" />

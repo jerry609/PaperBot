@@ -35,10 +35,26 @@ export interface Task {
     createdAt: Date
 }
 
+export type GenCodeResult = {
+    success?: boolean
+    outputDir?: string
+    files?: Array<{ name: string; lines: number; purpose: string }>
+    blueprint?: { architectureType?: string; domain?: string }
+    verificationPassed?: boolean
+}
+
+export type PaperDraft = {
+    title: string
+    abstract: string
+    methodSection: string
+}
+
 interface StudioState {
     tasks: Task[]
     activeTaskId: string | null
     selectedFileForDiff: string | null
+    paperDraft: PaperDraft
+    lastGenCodeResult: GenCodeResult | null
 
     // Actions
     addTask: (name: string) => string
@@ -46,12 +62,16 @@ interface StudioState {
     addAction: (taskId: string, action: Omit<AgentAction, 'id' | 'timestamp'>) => void
     setActiveTask: (taskId: string | null) => void
     setSelectedFileForDiff: (filename: string | null) => void
+    setPaperDraft: (partial: Partial<PaperDraft>) => void
+    setLastGenCodeResult: (result: GenCodeResult | null) => void
 }
 
-export const useStudioStore = create<StudioState>((set, get) => ({
+export const useStudioStore = create<StudioState>((set, _get) => ({
     tasks: [],
     activeTaskId: null,
     selectedFileForDiff: null,
+    paperDraft: { title: "", abstract: "", methodSection: "" },
+    lastGenCodeResult: null,
 
     addTask: (name) => {
         const id = `task-${Date.now()}`
@@ -92,5 +112,11 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     },
 
     setActiveTask: (taskId) => set({ activeTaskId: taskId }),
-    setSelectedFileForDiff: (filename) => set({ selectedFileForDiff: filename })
+    setSelectedFileForDiff: (filename) => set({ selectedFileForDiff: filename }),
+
+    setPaperDraft: (partial) => set((state) => ({
+        paperDraft: { ...state.paperDraft, ...partial }
+    })),
+
+    setLastGenCodeResult: (result) => set({ lastGenCodeResult: result }),
 }))

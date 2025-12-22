@@ -1,6 +1,6 @@
 import { google } from '@ai-sdk/google';
 import { anthropic } from '@ai-sdk/anthropic';
-import { streamText, convertToModelMessages, UIMessage, tool } from 'ai';
+import { streamText, convertToModelMessages, UIMessage } from 'ai';
 import { z } from 'zod';
 import { AVAILABLE_MODELS, DEFAULT_MODEL } from '@/lib/models';
 import {
@@ -59,55 +59,38 @@ function getModel(modelId: string) {
     }
 }
 
-// Build AI SDK tools from our tool definitions
+// Define tools using the AI SDK v5 interface
 const aiTools = {
-    search_codebase: tool({
+    search_codebase: {
         description: 'Search the codebase for relevant code snippets or files',
-        parameters: searchCodebaseSchema,
-        execute: async (params: z.infer<typeof searchCodebaseSchema>) => {
-            return await searchCodebase(params);
-        },
-    }),
-
-    read_file: tool({
+        inputSchema: searchCodebaseSchema,
+        execute: searchCodebase,
+    },
+    read_file: {
         description: 'Read the contents of a file',
-        parameters: readFileSchema,
-        execute: async (params: z.infer<typeof readFileSchema>) => {
-            return await readFile(params);
-        },
-    }),
-
-    write_file: tool({
+        inputSchema: readFileSchema,
+        execute: readFile,
+    },
+    write_file: {
         description: 'Create or overwrite a file with new content',
-        parameters: writeFileSchema,
-        execute: async (params: z.infer<typeof writeFileSchema>) => {
-            return await writeFile(params);
-        },
-    }),
-
-    edit_file: tool({
+        inputSchema: writeFileSchema,
+        execute: writeFile,
+    },
+    edit_file: {
         description: 'Edit a file by finding and replacing content',
-        parameters: editFileSchema,
-        execute: async (params: z.infer<typeof editFileSchema>) => {
-            return await editFile(params);
-        },
-    }),
-
-    list_files: tool({
+        inputSchema: editFileSchema,
+        execute: editFile,
+    },
+    list_files: {
         description: 'List files and directories in a path',
-        parameters: listFilesSchema,
-        execute: async (params: z.infer<typeof listFilesSchema>) => {
-            return await listFiles(params);
-        },
-    }),
-
-    run_command: tool({
+        inputSchema: listFilesSchema,
+        execute: listFiles,
+    },
+    run_command: {
         description: 'Execute a shell command',
-        parameters: runCommandSchema,
-        execute: async (params: z.infer<typeof runCommandSchema>) => {
-            return await runCommand(params);
-        },
-    }),
+        inputSchema: runCommandSchema,
+        execute: runCommand,
+    },
 };
 
 export async function POST(req: Request) {

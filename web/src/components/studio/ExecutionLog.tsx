@@ -49,7 +49,7 @@ function ActionItem({ action, onViewDiff, isLast }: ActionItemProps) {
     const Icon = actionIcons[iconKey] || actionIcons[action.type] || Bot
     const colors = actionColors[iconKey] || actionColors[action.type] || actionColors.text
 
-    const hasExpandableContent = action.metadata?.params || action.metadata?.result || action.metadata?.mcpResult
+    const hasExpandableContent = Boolean(action.metadata?.params || action.metadata?.result || action.metadata?.mcpResult)
 
     return (
         <div className="relative flex gap-3">
@@ -106,7 +106,7 @@ function ActionItem({ action, onViewDiff, isLast }: ActionItemProps) {
                                 </div>
                                 {expanded && (
                                     <div className="mt-2 space-y-2">
-                                        {action.metadata.params && (
+                                        {Boolean(action.metadata.params) && (
                                             <div className="rounded-md border bg-muted/30 p-2">
                                                 <div className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1">Args</div>
                                                 <pre className="text-xs font-mono overflow-x-auto whitespace-pre-wrap break-all text-muted-foreground">
@@ -114,7 +114,7 @@ function ActionItem({ action, onViewDiff, isLast }: ActionItemProps) {
                                                 </pre>
                                             </div>
                                         )}
-                                        {action.metadata.result && (
+                                        {Boolean(action.metadata.result) && (
                                             <div className="rounded-md border border-green-200 dark:border-green-800 bg-green-50/50 dark:bg-green-950/20 p-2">
                                                 <div className="text-[10px] font-medium text-green-600 dark:text-green-400 uppercase tracking-wider mb-1">Result</div>
                                                 <pre className="text-xs font-mono overflow-x-auto whitespace-pre-wrap break-all text-muted-foreground">
@@ -134,7 +134,7 @@ function ActionItem({ action, onViewDiff, isLast }: ActionItemProps) {
                                     <code className={cn("text-xs font-mono px-1.5 py-0.5 rounded", colors.bg, colors.text)}>
                                         {action.metadata.mcpTool}
                                     </code>
-                                    {action.metadata.mcpResult && (
+                                    {Boolean(action.metadata.mcpResult) && (
                                         <button
                                             onClick={() => setExpanded(!expanded)}
                                             className="text-muted-foreground hover:text-foreground transition-colors"
@@ -143,7 +143,7 @@ function ActionItem({ action, onViewDiff, isLast }: ActionItemProps) {
                                         </button>
                                     )}
                                 </div>
-                                {expanded && action.metadata.mcpResult && (
+                                {expanded && Boolean(action.metadata.mcpResult) && (
                                     <div className="mt-2 rounded-md border bg-muted/30 p-2">
                                         <pre className="text-xs font-mono overflow-x-auto whitespace-pre-wrap break-all text-muted-foreground">
                                             {typeof action.metadata.mcpResult === 'string'

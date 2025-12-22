@@ -33,6 +33,7 @@ class AgentRunModel(Base):
     events = relationship("AgentEventModel", back_populates="run", cascade="all, delete-orphan")
     logs = relationship("ExecutionLogModel", back_populates="run", cascade="all, delete-orphan")
     metrics = relationship("ResourceMetricModel", back_populates="run", cascade="all, delete-orphan")
+    runbook_steps = relationship("RunbookStepModel", back_populates="run", cascade="all, delete-orphan")
 
     def set_metadata(self, data: Dict[str, Any]) -> None:
         self.metadata_json = json.dumps(data or {}, ensure_ascii=False)
@@ -127,5 +128,32 @@ class ResourceMetricModel(Base):
     memory_limit_mb: Mapped[float] = mapped_column(Float, default=4096.0)
 
     run = relationship("AgentRunModel", back_populates="metrics")
+
+
+class RunbookStepModel(Base):
+    """
+    Structured Runbook step records.
+
+    Logs and metrics are stored separately (execution_logs/resource_metrics) keyed by run_id.
+    This table provides step-level lifecycle and configuration for long-term evidence tracking.
+    """
+    __tablename__ = "runbook_steps"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[str] = mapped_column(String(64), ForeignKey("agent_runs.run_id"), index=True)
+
+    step_name: Mapped[str] = mapped_column(String(64), index=True)  # smoke/install/data/train/eval/report/...
+    status: Mapped[str] = mapped_column(String(32), default="running")  # running/success/failed/error
+    executor_type: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)  # docker/e2b/ssh_docker/...
+
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    ended_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    command: Mapped[str] = mapped_column(Text, default="")
+    exit_code: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    metadata_json: Mapped[str] = mapped_column(Text, default="{}")
+
+    run = relationship("AgentRunModel", back_populates="runbook_steps")
 
 

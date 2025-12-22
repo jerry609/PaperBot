@@ -6,7 +6,7 @@ Supports Server-Sent Events (SSE) for streaming responses
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .routes import track, analyze, gen_code, review, chat, runs, jobs, sandbox
+from .routes import track, analyze, gen_code, review, chat, runs, jobs, sandbox, runbook
 from paperbot.infrastructure.event_log.logging_event_log import LoggingEventLog
 from paperbot.infrastructure.event_log.composite_event_log import CompositeEventLog
 from paperbot.infrastructure.event_log.sqlalchemy_event_log import SqlAlchemyEventLog
@@ -42,6 +42,7 @@ app.include_router(chat.router, prefix="/api", tags=["Chat"])
 app.include_router(runs.router, prefix="/api", tags=["Runs"])
 app.include_router(jobs.router, prefix="/api", tags=["Jobs"])
 app.include_router(sandbox.router, prefix="/api", tags=["Sandbox"])
+app.include_router(runbook.router, prefix="/api", tags=["Runbook"])
 
 @app.on_event("startup")
 async def _startup_eventlog():

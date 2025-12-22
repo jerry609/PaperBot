@@ -202,8 +202,8 @@ export async function runCommand(
     // In real implementation, this would call backend API
 
     let stdout = '';
-    let stderr = '';
-    let exitCode = 0;
+    const stderr = '';
+    const exitCode = 0;
 
     if (command.startsWith('pip install')) {
         stdout = `Installing dependencies...\nSuccessfully installed packages.`;

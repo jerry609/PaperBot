@@ -2,12 +2,14 @@
 
 import { useState, useRef, useEffect } from "react"
 import { Badge } from "@/components/ui/badge"
-import { PanelsTopLeft, Settings, List, Play, Plug, Code2, ChevronLeft, ChevronRight, Activity, Box, Clock } from "lucide-react"
+import { PanelsTopLeft, Settings, List, Play, Plug, Sparkles, Activity, Box, Clock, LayoutPanelLeft, LayoutPanelTop, PanelRight, PanelLeftClose, PanelLeftOpen } from "lucide-react"
 import { TasksPanel } from "@/components/studio/TasksPanel"
 import { ExecutionLog } from "@/components/studio/ExecutionLog"
 import { PromptInput } from "@/components/studio/PromptInput"
 import { MCPSettings } from "@/components/studio/MCPSettings"
-import { DiffViewer } from "@/components/studio/DiffViewer"
+import { DeepCodeEditor } from "@/components/studio/DeepCodeEditor"
+import { RunbookPanel } from "@/components/studio/RunbookPanel"
+import { BlueprintPanel } from "@/components/studio/BlueprintPanel"
 import { MCPProvider } from "@/lib/mcp"
 import { useStudioStore } from "@/lib/store/studio-store"
 import { Button } from "@/components/ui/button"
@@ -15,7 +17,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable"
 import { useChat } from "@ai-sdk/react"
+import { DefaultChatTransport } from "ai"
 import { cn } from "@/lib/utils"
+import { usePanelRef } from "react-resizable-panels"
 
 // Sandbox status component
 function SandboxStatus() {
@@ -114,22 +118,24 @@ function SandboxStatus() {
 }
 
 function StudioContent() {
-    const { addTask, addAction, updateTaskStatus, tasks, activeTaskId, selectedFileForDiff, setSelectedFileForDiff } = useStudioStore()
-    const [leftCollapsed, setLeftCollapsed] = useState(false)
-    const [rightCollapsed, setRightCollapsed] = useState(true)
+    const { addTask, addAction, updateTaskStatus } = useStudioStore()
     const currentTaskIdRef = useRef<string | null>(null)
+    const workspacePanelRef = usePanelRef()
+    const opsPanelRef = usePanelRef()
+    const runbookPanelRef = usePanelRef()
+    const timelinePanelRef = usePanelRef()
+    const blueprintPanelRef = usePanelRef()
 
-    // Sample diff data (would come from actual file changes in real implementation)
-    const [diffData, setDiffData] = useState<{ oldValue: string; newValue: string } | null>(null)
+    const [collapsed, setCollapsed] = useState({
+        workspace: false,
+        ops: false,
+        runbook: false,
+        timeline: false,
+        blueprint: false,
+    })
 
     const { messages, status, sendMessage, setMessages } = useChat({
-        api: '/api/chat',
-        onResponse: () => {
-            // When we get a response, mark task as running
-            if (currentTaskIdRef.current) {
-                updateTaskStatus(currentTaskIdRef.current, 'running')
-            }
-        },
+        transport: new DefaultChatTransport({ api: '/api/chat' }),
         onFinish: () => {
             // Mark task as completed
             if (currentTaskIdRef.current) {
@@ -151,17 +157,12 @@ function StudioContent() {
         }
     })
 
-    // Handle file selection for diff
+    // Update task status when chat status changes
     useEffect(() => {
-        if (selectedFileForDiff) {
-            setRightCollapsed(false)
-            // In real implementation, fetch the actual diff
-            setDiffData({
-                oldValue: '// Original code\nfunction hello() {\n  console.log("Hello");\n}',
-                newValue: '// Modified code\nfunction hello() {\n  console.log("Hello, World!");\n}\n\n// New function\nfunction goodbye() {\n  console.log("Goodbye!");\n}'
-            })
+        if (currentTaskIdRef.current && status === 'streaming') {
+            updateTaskStatus(currentTaskIdRef.current, 'running')
         }
-    }, [selectedFileForDiff])
+    }, [status, updateTaskStatus])
 
     // Process messages and extract tool calls for display
     useEffect(() => {
@@ -170,23 +171,32 @@ function StudioContent() {
         const lastMessage = messages[messages.length - 1]
         if (lastMessage.role === 'assistant' && lastMessage.parts) {
             for (const part of lastMessage.parts) {
-                if (part.type === 'tool-invocation') {
-                    const toolCall = part as { type: 'tool-invocation'; toolInvocation: { toolName: string; args: Record<string, unknown>; result?: unknown } }
+                // Check if this is a tool part (type starts with 'tool-')
+                if (part.type.startsWith('tool-')) {
+                    const toolPart = part as {
+                        type: string;
+                        toolCallId: string;
+                        state: string;
+                        input?: unknown;
+                        output?: unknown;
+                        errorText?: string;
+                    }
+                    const toolName = part.type.replace('tool-', '')
 
                     // Add function call action
                     addAction(currentTaskIdRef.current, {
                         type: 'function_call',
-                        content: `Called ${toolCall.toolInvocation.toolName}`,
+                        content: `Called ${toolName}`,
                         metadata: {
-                            functionName: toolCall.toolInvocation.toolName,
-                            params: toolCall.toolInvocation.args,
-                            result: toolCall.toolInvocation.result
+                            functionName: toolName,
+                            params: toolPart.input as Record<string, unknown>,
+                            result: toolPart.output
                         }
                     })
 
                     // If it's a file operation, also add file_change action
-                    if (['write_file', 'edit_file'].includes(toolCall.toolInvocation.toolName)) {
-                        const result = toolCall.toolInvocation.result as { data?: { path?: string; linesAdded?: number; linesDeleted?: number; linesWritten?: number } }
+                    if (['write_file', 'edit_file'].includes(toolName)) {
+                        const result = toolPart.output as { data?: { path?: string; linesAdded?: number; linesDeleted?: number; linesWritten?: number } } | undefined
                         if (result?.data) {
                             addAction(currentTaskIdRef.current, {
                                 type: 'file_change',
@@ -229,15 +239,27 @@ function StudioContent() {
 
         // Send message with model selection
         sendMessage({
-            content: prompt,
-            data: { model }
+            text: prompt,
+        }, {
+            body: { model }
         })
     }
 
     const isProcessing = status === 'streaming' || status === 'submitted'
+    const setCollapsedKey = (key: keyof typeof collapsed, value: boolean) =>
+        setCollapsed((prev) => (prev[key] === value ? prev : { ...prev, [key]: value }))
+
+    const togglePanel = (key: keyof typeof collapsed, ref: ReturnType<typeof usePanelRef>) => {
+        try {
+            if (collapsed[key]) ref.current?.expand()
+            else ref.current?.collapse()
+        } catch {
+            // Ignore
+        }
+    }
 
     return (
-        <div className="flex h-[calc(100vh-theme(spacing.16))] flex-col">
+        <div className="flex h-[calc(100vh_-_theme(spacing.16))] min-h-0 flex-col">
             {/* Top Bar */}
             <div className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 p-2.5 px-4 flex items-center justify-between shrink-0">
                 <div className="flex items-center gap-3">
@@ -249,131 +271,228 @@ function StudioContent() {
                     </Badge>
                 </div>
                 <div className="flex items-center gap-1">
-                    <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-7 px-2 text-xs"
-                        onClick={() => setLeftCollapsed(!leftCollapsed)}
-                    >
-                        {leftCollapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronLeft className="h-3.5 w-3.5" />}
-                        <span className="ml-1">Panel</span>
-                    </Button>
-                    <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-7 px-2 text-xs"
-                        onClick={() => setRightCollapsed(!rightCollapsed)}
-                    >
-                        <Code2 className="h-3.5 w-3.5" />
-                        <span className="ml-1">Preview</span>
-                        {!rightCollapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronLeft className="h-3.5 w-3.5" />}
-                    </Button>
-                    <div className="w-px h-4 bg-border mx-1" />
+                    <div className="hidden xl:flex items-center gap-1 mr-1">
+                        <Button
+                            variant={collapsed.workspace ? "outline" : "secondary"}
+                            size="sm"
+                            className="h-7 px-2 text-xs"
+                            onClick={() => togglePanel("workspace", workspacePanelRef)}
+                            title="Toggle Workspace"
+                        >
+                            <LayoutPanelLeft className="h-3.5 w-3.5 mr-1.5" />
+                            Workspace
+                        </Button>
+                        <Button
+                            variant={collapsed.runbook ? "outline" : "secondary"}
+                            size="sm"
+                            className="h-7 px-2 text-xs"
+                            onClick={() => togglePanel("runbook", runbookPanelRef)}
+                            title="Toggle Runbook"
+                        >
+                            <LayoutPanelTop className="h-3.5 w-3.5 mr-1.5" />
+                            Runbook
+                        </Button>
+                        <Button
+                            variant={collapsed.timeline ? "outline" : "secondary"}
+                            size="sm"
+                            className="h-7 px-2 text-xs"
+                            onClick={() => togglePanel("timeline", timelinePanelRef)}
+                            title="Toggle Timeline"
+                        >
+                            <LayoutPanelTop className="h-3.5 w-3.5 mr-1.5" />
+                            Timeline
+                        </Button>
+                        <Button
+                            variant={collapsed.blueprint ? "outline" : "secondary"}
+                            size="sm"
+                            className="h-7 px-2 text-xs"
+                            onClick={() => togglePanel("blueprint", blueprintPanelRef)}
+                            title="Toggle Blueprint"
+                        >
+                            <PanelRight className="h-3.5 w-3.5 mr-1.5" />
+                            Blueprint
+                        </Button>
+                        <Button
+                            variant={collapsed.ops ? "outline" : "ghost"}
+                            size="icon"
+                            className="h-7 w-7"
+                            onClick={() => togglePanel("ops", opsPanelRef)}
+                            title="Toggle Ops Column"
+                        >
+                            {collapsed.ops ? <PanelLeftOpen className="h-3.5 w-3.5" /> : <PanelLeftClose className="h-3.5 w-3.5" />}
+                        </Button>
+                    </div>
                     <Button variant="ghost" size="icon" className="h-7 w-7">
                         <Settings className="h-3.5 w-3.5" />
                     </Button>
                 </div>
             </div>
 
-            {/* Main Workspace with Resizable Panels */}
-            <ResizablePanelGroup direction="horizontal" className="flex-1">
-                {/* Left Sidebar */}
-                {!leftCollapsed && (
-                    <>
-                        <ResizablePanel defaultSize={18} minSize={15} maxSize={30}>
-                            <div className="h-full bg-muted/5 flex flex-col">
-                                <Tabs defaultValue="tasks" className="h-full flex flex-col">
-                                    <TabsList className="w-full justify-start rounded-none border-b bg-transparent p-0 h-9">
-                                        <TabsTrigger
-                                            value="tasks"
-                                            className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none text-xs h-9 px-3"
-                                        >
-                                            <List className="h-3 w-3 mr-1.5" />
-                                            Tasks
-                                        </TabsTrigger>
-                                        <TabsTrigger
-                                            value="mcp"
-                                            className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none text-xs h-9 px-3"
-                                        >
-                                            <Plug className="h-3 w-3 mr-1.5" />
-                                            MCP
-                                        </TabsTrigger>
-                                        <TabsTrigger
-                                            value="sandbox"
-                                            className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none text-xs h-9 px-3"
-                                        >
-                                            <Play className="h-3 w-3 mr-1.5" />
-                                            Sandbox
-                                        </TabsTrigger>
-                                    </TabsList>
-                                    <TabsContent value="tasks" className="flex-1 m-0 overflow-hidden">
-                                        <TasksPanel />
-                                    </TabsContent>
-                                    <TabsContent value="mcp" className="flex-1 m-0 overflow-hidden">
-                                        <MCPSettings />
-                                    </TabsContent>
-                                    <TabsContent value="sandbox" className="flex-1 m-0 overflow-hidden">
-                                        <SandboxStatus />
-                                    </TabsContent>
-                                </Tabs>
-                            </div>
-                        </ResizablePanel>
-                        <ResizableHandle withHandle />
-                    </>
-                )}
-
-                {/* Center Panel: Execution Log + Prompt */}
-                <ResizablePanel defaultSize={rightCollapsed ? 82 : 52} minSize={35}>
-                    <div className="h-full flex flex-col bg-background">
-                        <div className="flex-1 overflow-hidden">
-                            <ExecutionLog />
+            {/* Desktop: resizable 3 columns (Workspace / Ops / Blueprint) */}
+            <div className="hidden xl:flex flex-1 min-h-0">
+                <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0">
+                    <ResizablePanel
+                        id="workspace"
+                        panelRef={workspacePanelRef}
+                        collapsible
+                        collapsedSize={0}
+                        defaultSize="48"
+                        minSize="30"
+                        onResize={({ inPixels }) => setCollapsedKey("workspace", inPixels < 2)}
+                    >
+                        <div className="h-full min-w-0 min-h-0 bg-background">
+                            <DeepCodeEditor />
                         </div>
-                        <PromptInput
-                            onSubmit={handlePromptSubmit}
-                            isLoading={isProcessing}
-                        />
-                    </div>
-                </ResizablePanel>
+                    </ResizablePanel>
 
-                {/* Right Panel: Code Preview / Diff */}
-                {!rightCollapsed && (
-                    <>
-                        <ResizableHandle withHandle />
-                        <ResizablePanel defaultSize={30} minSize={20} maxSize={50}>
-                            <div className="h-full bg-muted/5 flex flex-col">
-                                {selectedFileForDiff && diffData ? (
-                                    <DiffViewer
-                                        oldValue={diffData.oldValue}
-                                        newValue={diffData.newValue}
-                                        filename={selectedFileForDiff}
-                                        onClose={() => {
-                                            setSelectedFileForDiff(null)
-                                            setDiffData(null)
-                                        }}
-                                        onApply={() => {
-                                            // Apply changes logic
-                                            setSelectedFileForDiff(null)
-                                            setDiffData(null)
-                                        }}
-                                        onReject={() => {
-                                            setSelectedFileForDiff(null)
-                                            setDiffData(null)
-                                        }}
-                                    />
-                                ) : (
-                                    <div className="h-full flex flex-col items-center justify-center text-muted-foreground text-sm p-6">
-                                        <Code2 className="h-12 w-12 mb-4 opacity-20" />
-                                        <p className="font-medium">Code Preview</p>
-                                        <p className="text-xs mt-1 text-center">
-                                            Click on a file change in the execution log to view the diff
-                                        </p>
+                    <ResizableHandle withHandle />
+
+                    <ResizablePanel
+                        id="ops"
+                        panelRef={opsPanelRef}
+                        collapsible
+                        collapsedSize={0}
+                        defaultSize="32"
+                        minSize="26"
+                        onResize={({ inPixels }) => setCollapsedKey("ops", inPixels < 2)}
+                    >
+                        <ResizablePanelGroup orientation="vertical" className="h-full min-h-0">
+                            <ResizablePanel
+                                id="runbook"
+                                panelRef={runbookPanelRef}
+                                collapsible
+                                collapsedSize={0}
+                                defaultSize="40"
+                                minSize="20"
+                                onResize={({ inPixels }) => setCollapsedKey("runbook", inPixels < 2)}
+                            >
+                                <RunbookPanel />
+                            </ResizablePanel>
+                            <ResizableHandle withHandle />
+                            <ResizablePanel
+                                id="timeline"
+                                panelRef={timelinePanelRef}
+                                collapsible
+                                collapsedSize={0}
+                                defaultSize="60"
+                                minSize="25"
+                                onResize={({ inPixels }) => setCollapsedKey("timeline", inPixels < 2)}
+                            >
+                                <div className="h-full flex flex-col bg-background min-w-0 min-h-0">
+                                    <div className="flex-1 min-h-0 overflow-hidden">
+                                        <Tabs defaultValue="timeline" className="h-full flex flex-col min-h-0">
+                                            <TabsList className="w-full justify-start rounded-none border-b bg-transparent p-0 h-9 shrink-0">
+                                                <TabsTrigger
+                                                    value="timeline"
+                                                    className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none text-xs h-9 px-2.5"
+                                                >
+                                                    <Sparkles className="h-3 w-3 mr-1.5" />
+                                                    Timeline
+                                                </TabsTrigger>
+                                                <TabsTrigger
+                                                    value="tasks"
+                                                    className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none text-xs h-9 px-2.5"
+                                                >
+                                                    <List className="h-3 w-3 mr-1.5" />
+                                                    Tasks
+                                                </TabsTrigger>
+                                                <TabsTrigger
+                                                    value="mcp"
+                                                    className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none text-xs h-9 px-2.5"
+                                                >
+                                                    <Plug className="h-3 w-3 mr-1.5" />
+                                                    MCP
+                                                </TabsTrigger>
+                                                <TabsTrigger
+                                                    value="sandbox"
+                                                    className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none text-xs h-9 px-2.5"
+                                                >
+                                                    <Play className="h-3 w-3 mr-1.5" />
+                                                    Sandbox
+                                                </TabsTrigger>
+                                            </TabsList>
+                                            <TabsContent value="timeline" className="flex-1 min-h-0 m-0 overflow-hidden">
+                                                <div className="h-full flex flex-col min-h-0">
+                                                    <div className="flex-1 min-h-0 overflow-hidden">
+                                                        <ExecutionLog />
+                                                    </div>
+                                                    <PromptInput
+                                                        onSubmit={handlePromptSubmit}
+                                                        isLoading={isProcessing}
+                                                    />
+                                                </div>
+                                            </TabsContent>
+                                            <TabsContent value="tasks" className="flex-1 min-h-0 m-0 overflow-hidden">
+                                                <TasksPanel />
+                                            </TabsContent>
+                                            <TabsContent value="mcp" className="flex-1 min-h-0 m-0 overflow-hidden">
+                                                <MCPSettings />
+                                            </TabsContent>
+                                            <TabsContent value="sandbox" className="flex-1 min-h-0 m-0 overflow-hidden">
+                                                <SandboxStatus />
+                                            </TabsContent>
+                                        </Tabs>
                                     </div>
-                                )}
+                                </div>
+                            </ResizablePanel>
+                        </ResizablePanelGroup>
+                    </ResizablePanel>
+
+                    <ResizableHandle withHandle />
+                    <ResizablePanel
+                        id="blueprint"
+                        panelRef={blueprintPanelRef}
+                        collapsible
+                        collapsedSize={0}
+                        defaultSize="20"
+                        minSize="16"
+                        maxSize="40"
+                        onResize={({ inPixels }) => setCollapsedKey("blueprint", inPixels < 2)}
+                    >
+                        <BlueprintPanel />
+                    </ResizablePanel>
+                </ResizablePanelGroup>
+            </div>
+
+            {/* Small screens: switch via tabs to avoid visual crowding */}
+            <div className="flex xl:hidden flex-1 min-h-0">
+                <Tabs defaultValue="workspace" className="h-full w-full flex flex-col min-h-0">
+                    <TabsList className="w-full justify-start rounded-none border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 p-0 h-10 shrink-0">
+                        <TabsTrigger value="workspace" className="rounded-none text-xs h-10 px-3 data-[state=active]:bg-transparent">
+                            Workspace
+                        </TabsTrigger>
+                        <TabsTrigger value="runbook" className="rounded-none text-xs h-10 px-3 data-[state=active]:bg-transparent">
+                            Runbook
+                        </TabsTrigger>
+                        <TabsTrigger value="timeline" className="rounded-none text-xs h-10 px-3 data-[state=active]:bg-transparent">
+                            Timeline
+                        </TabsTrigger>
+                        <TabsTrigger value="blueprint" className="rounded-none text-xs h-10 px-3 data-[state=active]:bg-transparent">
+                            Blueprint
+                        </TabsTrigger>
+                    </TabsList>
+                    <TabsContent value="workspace" className="flex-1 min-h-0 m-0 overflow-hidden">
+                        <DeepCodeEditor />
+                    </TabsContent>
+                    <TabsContent value="runbook" className="flex-1 min-h-0 m-0 overflow-hidden">
+                        <RunbookPanel />
+                    </TabsContent>
+                    <TabsContent value="timeline" className="flex-1 min-h-0 m-0 overflow-hidden">
+                        <div className="h-full flex flex-col min-h-0">
+                            <div className="flex-1 min-h-0 overflow-hidden">
+                                <ExecutionLog />
                             </div>
-                        </ResizablePanel>
-                    </>
-                )}
-            </ResizablePanelGroup>
+                            <PromptInput
+                                onSubmit={handlePromptSubmit}
+                                isLoading={isProcessing}
+                            />
+                        </div>
+                    </TabsContent>
+                    <TabsContent value="blueprint" className="flex-1 min-h-0 m-0 overflow-hidden">
+                        <BlueprintPanel />
+                    </TabsContent>
+                </Tabs>
+            </div>
         </div>
     )
 }
