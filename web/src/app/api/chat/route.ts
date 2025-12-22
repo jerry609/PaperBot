@@ -1,9 +1,15 @@
 import { google } from '@ai-sdk/google';
 import { anthropic } from '@ai-sdk/anthropic';
 import { streamText, convertToModelMessages, UIMessage, tool } from 'ai';
+import { z } from 'zod';
 import { AVAILABLE_MODELS, DEFAULT_MODEL } from '@/lib/models';
 import {
-    TOOLS,
+    searchCodebase,
+    readFile,
+    writeFile,
+    editFile,
+    listFiles,
+    runCommand,
     searchCodebaseSchema,
     readFileSchema,
     writeFileSchema,
@@ -20,7 +26,7 @@ You help users reproduce research papers by generating and debugging code.
 You have access to the following tools:
 - search_codebase: Search for relevant code in the project
 - read_file: Read file contents
-- write_file: Create or overwrite files  
+- write_file: Create or overwrite files
 - edit_file: Make targeted edits to files
 - list_files: List files in a directory
 - run_command: Execute shell commands
@@ -56,56 +62,50 @@ function getModel(modelId: string) {
 // Build AI SDK tools from our tool definitions
 const aiTools = {
     search_codebase: tool({
-        description: TOOLS.search_codebase.description,
+        description: 'Search the codebase for relevant code snippets or files',
         parameters: searchCodebaseSchema,
-        execute: async (params) => {
-            const result = await TOOLS.search_codebase.execute(params);
-            return result;
+        execute: async (params: z.infer<typeof searchCodebaseSchema>) => {
+            return await searchCodebase(params);
         },
     }),
 
     read_file: tool({
-        description: TOOLS.read_file.description,
+        description: 'Read the contents of a file',
         parameters: readFileSchema,
-        execute: async (params) => {
-            const result = await TOOLS.read_file.execute(params);
-            return result;
+        execute: async (params: z.infer<typeof readFileSchema>) => {
+            return await readFile(params);
         },
     }),
 
     write_file: tool({
-        description: TOOLS.write_file.description,
+        description: 'Create or overwrite a file with new content',
         parameters: writeFileSchema,
-        execute: async (params) => {
-            const result = await TOOLS.write_file.execute(params);
-            return result;
+        execute: async (params: z.infer<typeof writeFileSchema>) => {
+            return await writeFile(params);
         },
     }),
 
     edit_file: tool({
-        description: TOOLS.edit_file.description,
+        description: 'Edit a file by finding and replacing content',
         parameters: editFileSchema,
-        execute: async (params) => {
-            const result = await TOOLS.edit_file.execute(params);
-            return result;
+        execute: async (params: z.infer<typeof editFileSchema>) => {
+            return await editFile(params);
         },
     }),
 
     list_files: tool({
-        description: TOOLS.list_files.description,
+        description: 'List files and directories in a path',
         parameters: listFilesSchema,
-        execute: async (params) => {
-            const result = await TOOLS.list_files.execute(params);
-            return result;
+        execute: async (params: z.infer<typeof listFilesSchema>) => {
+            return await listFiles(params);
         },
     }),
 
     run_command: tool({
-        description: TOOLS.run_command.description,
+        description: 'Execute a shell command',
         parameters: runCommandSchema,
-        execute: async (params) => {
-            const result = await TOOLS.run_command.execute(params);
-            return result;
+        execute: async (params: z.infer<typeof runCommandSchema>) => {
+            return await runCommand(params);
         },
     }),
 };

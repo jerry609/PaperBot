@@ -14,6 +14,8 @@ export interface AgentAction {
         linesAdded?: number
         linesDeleted?: number
         diff?: string
+        oldContent?: string
+        newContent?: string
         // For function_call
         functionName?: string
         params?: Record<string, unknown>
