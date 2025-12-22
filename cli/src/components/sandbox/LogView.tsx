@@ -28,6 +28,14 @@ interface ResourceMetrics {
   status: string;
 }
 
+interface LogsResponse {
+  logs?: LogEntry[];
+}
+
+interface MetricsResponse extends ResourceMetrics {
+  error?: string;
+}
+
 interface LogViewProps {
   runId: string;
   onBack: () => void;
@@ -48,7 +56,7 @@ export const LogView: React.FC<LogViewProps> = ({ runId, onBack }) => {
   useEffect(() => {
     const fetchLogs = async () => {
       try {
-        const data = await client.fetchJson(`/api/sandbox/runs/${runId}/logs?limit=100`);
+        const data = await client.fetchJson<LogsResponse>(`/api/sandbox/runs/${runId}/logs?limit=100`);
         setLogs(data.logs || []);
         setLoading(false);
       } catch (err) {
@@ -66,7 +74,7 @@ export const LogView: React.FC<LogViewProps> = ({ runId, onBack }) => {
 
     const pollLogs = async () => {
       try {
-        const data = await client.fetchJson(`/api/sandbox/runs/${runId}/logs?limit=200`);
+        const data = await client.fetchJson<LogsResponse>(`/api/sandbox/runs/${runId}/logs?limit=200`);
         const newLogs = data.logs || [];
         if (newLogs.length > logs.length) {
           setLogs(newLogs);
@@ -87,7 +95,7 @@ export const LogView: React.FC<LogViewProps> = ({ runId, onBack }) => {
   useEffect(() => {
     const pollMetrics = async () => {
       try {
-        const data = await client.fetchJson(`/api/sandbox/runs/${runId}/metrics`);
+        const data = await client.fetchJson<MetricsResponse>(`/api/sandbox/runs/${runId}/metrics`);
         if (data && !data.error) {
           setMetrics(data);
           // Stop streaming if completed

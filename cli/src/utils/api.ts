@@ -221,7 +221,14 @@ export class PaperBotClient {
       throw new Error(`HTTP ${response.status}: ${response.statusText}`);
     }
 
-    return response.json();
+    return response.json() as Promise<T>;
+  }
+
+  /**
+   * Fetch JSON (alias for request with better error handling)
+   */
+  async fetchJson<T = unknown>(path: string, init: RequestInit = {}): Promise<T> {
+    return this.request<T>(path, init) as Promise<T>;
   }
 }
 

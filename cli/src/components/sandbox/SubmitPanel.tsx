@@ -19,10 +19,17 @@ interface SubmitPanelProps {
 
 type FormField = 'url' | 'executor' | 'timeout';
 
+interface SubmitResponse {
+  status: string;
+  job_id?: string;
+  run_id?: string;
+  error?: string;
+}
+
 export const SubmitPanel: React.FC<SubmitPanelProps> = ({ onJobSubmitted }) => {
   const [paperUrl, setPaperUrl] = useState('');
   const [executor, setExecutor] = useState<'e2b' | 'docker'>('e2b');
-  const [timeout, setTimeout] = useState('600');
+  const [timeoutValue, setTimeoutValue] = useState('600');
   const [activeField, setActiveField] = useState<FormField>('url');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -68,7 +75,7 @@ export const SubmitPanel: React.FC<SubmitPanelProps> = ({ onJobSubmitted }) => {
     setSuccess(null);
 
     try {
-      const result = await client.fetchJson('/api/sandbox/submit', {
+      const result = await client.fetchJson<SubmitResponse>('/api/sandbox/submit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -77,16 +84,16 @@ export const SubmitPanel: React.FC<SubmitPanelProps> = ({ onJobSubmitted }) => {
           paper_id: !paperUrl.includes('://') ? paperUrl : undefined,
           executor: executor,
           options: {
-            timeout: parseInt(timeout) || 600,
+            timeout: parseInt(timeoutValue) || 600,
           },
         }),
       });
 
-      if (result.status === 'enqueued') {
+      if (result.status === 'enqueued' && result.job_id && result.run_id) {
         setSuccess({ job_id: result.job_id, run_id: result.run_id });
         // Navigate to logs after a short delay
-        setTimeout(() => {
-          onJobSubmitted(result.run_id);
+        globalThis.setTimeout(() => {
+          onJobSubmitted(result.run_id!);
         }, 1500);
       } else {
         setError(result.error || 'Submission failed');
@@ -163,8 +170,8 @@ export const SubmitPanel: React.FC<SubmitPanelProps> = ({ onJobSubmitted }) => {
         >
           <Text color="cyan">{'> '}</Text>
           <TextInput
-            value={timeout}
-            onChange={setTimeout}
+            value={timeoutValue}
+            onChange={setTimeoutValue}
             placeholder="600"
             focus={activeField === 'timeout'}
           />

@@ -41,7 +41,7 @@ export const HistoryPanel: React.FC<HistoryPanelProps> = ({ onViewLogs }) => {
       if (statusFilter) {
         url += `&status=${statusFilter}`;
       }
-      const data = await client.fetchJson(url);
+      const data = await client.fetchJson<{ runs?: RunInfo[] }>(url);
       setRuns(data.runs || []);
       setError(null);
     } catch (err) {

@@ -44,7 +44,7 @@ export const SandboxView: React.FC<SandboxViewProps> = ({
   useEffect(() => {
     const fetchStatus = async () => {
       try {
-        const status = await client.fetchJson('/api/sandbox/status');
+        const status = await client.fetchJson<SystemStatusData>('/api/sandbox/status');
         setSystemStatus(status);
       } catch {
         // Ignore errors

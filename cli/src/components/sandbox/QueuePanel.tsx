@@ -47,7 +47,7 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({ onViewLogs }) => {
   // Fetch queue status
   const fetchQueue = async () => {
     try {
-      const data = await client.fetchJson('/api/sandbox/queue');
+      const data = await client.fetchJson<QueueData>('/api/sandbox/queue');
       setQueue(data);
       setError(null);
     } catch (err) {
@@ -127,7 +127,7 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({ onViewLogs }) => {
     // Retry job
     if (input === 'r' && (activeSection === 'completed' || activeSection === 'pending')) {
       try {
-        const result = await client.fetchJson(`/api/sandbox/jobs/${selectedJob.job_id}/retry`, {
+        const result = await client.fetchJson<{ new_job_id?: string }>(`/api/sandbox/jobs/${selectedJob.job_id}/retry`, {
           method: 'POST',
         });
         setActionMessage(`Retried job, new ID: ${result.new_job_id?.slice(0, 8)}...`);
@@ -135,7 +135,7 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({ onViewLogs }) => {
       } catch (err) {
         setActionMessage(`Failed to retry: ${err}`);
       }
-      setTimeout(() => setActionMessage(null), 3000);
+      globalThis.setTimeout(() => setActionMessage(null), 3000);
     }
 
     // View logs

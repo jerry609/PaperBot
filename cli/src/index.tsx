@@ -63,6 +63,9 @@ const cli = meow(`
       shortFlag: 'o',
       default: './output',
     },
+    runId: {
+      type: 'string',
+    },
     stream: {
       type: 'boolean',
       default: true,

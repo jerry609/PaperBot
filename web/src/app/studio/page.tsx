@@ -2,10 +2,11 @@
 
 import { useState, useRef, useEffect } from "react"
 import { Badge } from "@/components/ui/badge"
-import { PanelsTopLeft, Settings, List, Play } from "lucide-react"
+import { PanelsTopLeft, Settings, List, Play, Plug } from "lucide-react"
 import { TasksPanel } from "@/components/studio/TasksPanel"
 import { ExecutionLog } from "@/components/studio/ExecutionLog"
 import { PromptInput } from "@/components/studio/PromptInput"
+import { MCPSettings } from "@/components/studio/MCPSettings"
 import { useStudioStore } from "@/lib/store/studio-store"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -146,21 +147,31 @@ export default function DeepCodeStudioPage() {
                         <TabsList className="w-full justify-start rounded-none border-b bg-transparent p-0">
                             <TabsTrigger
                                 value="tasks"
-                                className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent"
+                                className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent text-xs"
                             >
-                                <List className="h-4 w-4 mr-1" />
+                                <List className="h-3.5 w-3.5 mr-1" />
                                 Tasks
                             </TabsTrigger>
                             <TabsTrigger
-                                value="sandbox"
-                                className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent"
+                                value="mcp"
+                                className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent text-xs"
                             >
-                                <Play className="h-4 w-4 mr-1" />
+                                <Plug className="h-3.5 w-3.5 mr-1" />
+                                MCP
+                            </TabsTrigger>
+                            <TabsTrigger
+                                value="sandbox"
+                                className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent text-xs"
+                            >
+                                <Play className="h-3.5 w-3.5 mr-1" />
                                 Sandbox
                             </TabsTrigger>
                         </TabsList>
                         <TabsContent value="tasks" className="flex-1 m-0 overflow-hidden">
                             <TasksPanel />
+                        </TabsContent>
+                        <TabsContent value="mcp" className="flex-1 m-0 overflow-hidden">
+                            <MCPSettings />
                         </TabsContent>
                         <TabsContent value="sandbox" className="flex-1 m-0 overflow-hidden">
                             <div className="p-4 text-center text-muted-foreground text-sm">

@@ -9,7 +9,7 @@ export async function showBanner(): Promise<void> {
     // Render PaperBot logo with ocean gradient (filled mode)
     const logo = await renderFilled('PaperBot', {
       palette: 'ocean',
-    });
+    }) as unknown as string | undefined;
     if (logo) {
       console.log(logo);
     }
