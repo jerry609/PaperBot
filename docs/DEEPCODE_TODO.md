@@ -26,7 +26,7 @@
 
 - [x] `RunbookStepModel`（runbook_steps）表：step 生命周期与配置
 - [x] 新增 `ArtifactModel` 表（产物索引）
-  - [ ] 字段：`run_id`、`step_id`(可空)、`type`(log/metric/report/file/zip)、
+  - [x] 字段：`run_id`、`step_id`(可空)、`type`(log/metric/report/file/zip)、
     `path_or_uri`、`mime`、`size_bytes`、`sha256`、`metadata_json`、`created_at`
   - [ ] DoD：可记录 outputDir、报告、曲线图、导出的 evidence 包
 - [ ] 新增 `SnapshotModel`（可选，或复用 Artifact）
@@ -60,9 +60,9 @@
   - [x] 支持搜索 + 刷新索引 + 打开文件到 Editor
   - [x] Save Active（写回后端文件）
 - [ ] Diff Staging（必须）
-  - [ ] 生成 diff（基于“原始快照 vs 当前”）
+  - [x] 生成 diff（基于“原始快照 vs 当前”）— baseline snapshot + file diff
   - [ ] Apply/Reject（按文件/按 hunk）
-  - [ ] 一键回滚到某次 step 的快照
+  - [x] 一键回滚到 baseline（后续扩展到 step 快照）
 
 ### 4) Evidence Timeline：按 Run/Step 组织 + 过滤
 
@@ -128,3 +128,4 @@
 
 - YYYY-MM-DD: ...
 - 2025-12-22: Add ArtifactModel + Runbook file APIs + Workspace real file explorer (open/save) + panel collapse controls.
+- 2025-12-22: Add baseline snapshot + file diff + revert (Diff Staging v0).

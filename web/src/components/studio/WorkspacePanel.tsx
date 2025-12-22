@@ -8,7 +8,8 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { useStudioStore } from "@/lib/store/studio-store"
 import { useProjectContext } from "@/lib/store/project-context"
 import { cn } from "@/lib/utils"
-import { FileText, Folder, RefreshCw, Save, Search } from "lucide-react"
+import { FileText, Folder, RefreshCw, Save, Search, Camera, GitCompare, Undo2 } from "lucide-react"
+import { DiffModal } from "@/components/studio/DiffViewer"
 
 type FileIndexResponse = {
   project_dir: string
@@ -32,7 +33,7 @@ function languageForPath(path: string): string {
 }
 
 export function WorkspacePanel() {
-  const { lastGenCodeResult } = useStudioStore()
+  const { lastGenCodeResult, workspaceSnapshotId, setWorkspaceSnapshotId } = useStudioStore()
   const projectDir = lastGenCodeResult?.outputDir || ""
   const { files, activeFile, addFile } = useProjectContext()
 
@@ -41,6 +42,10 @@ export function WorkspacePanel() {
   const [query, setQuery] = useState("")
   const [saving, setSaving] = useState(false)
   const [lastError, setLastError] = useState<string | null>(null)
+  const [diffOpen, setDiffOpen] = useState(false)
+  const [diffOld, setDiffOld] = useState("")
+  const [diffNew, setDiffNew] = useState("")
+  const [diffFile, setDiffFile] = useState<string | undefined>(undefined)
 
   const filteredFiles = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -118,6 +123,68 @@ export function WorkspacePanel() {
     }
   }
 
+  const createBaseline = async () => {
+    if (!projectDir) return
+    setLastError(null)
+    try {
+      const res = await fetch(`/api/runbook/snapshots`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ project_dir: projectDir, label: "baseline" }),
+      })
+      if (!res.ok) {
+        const text = await res.text()
+        throw new Error(`Failed to create snapshot (${res.status}): ${text}`)
+      }
+      const data = (await res.json()) as { snapshot_id: number }
+      setWorkspaceSnapshotId(data.snapshot_id)
+    } catch (e) {
+      setLastError(e instanceof Error ? e.message : String(e))
+    }
+  }
+
+  const viewDiff = async () => {
+    if (!projectDir || !activeFile || !workspaceSnapshotId) return
+    setLastError(null)
+    try {
+      const res = await fetch(
+        `/api/runbook/diff?snapshot_id=${encodeURIComponent(String(workspaceSnapshotId))}&project_dir=${encodeURIComponent(projectDir)}&path=${encodeURIComponent(activeFile)}`
+      )
+      if (!res.ok) {
+        const text = await res.text()
+        throw new Error(`Failed to diff (${res.status}): ${text}`)
+      }
+      const data = (await res.json()) as { old: string; new: string; path: string }
+      setDiffOld(data.old || "")
+      setDiffNew(files[activeFile]?.content ?? data.new ?? "")
+      setDiffFile(data.path)
+      setDiffOpen(true)
+    } catch (e) {
+      setLastError(e instanceof Error ? e.message : String(e))
+    }
+  }
+
+  const revertToBaseline = async () => {
+    if (!projectDir || !activeFile || !workspaceSnapshotId) return
+    setLastError(null)
+    try {
+      const res = await fetch(`/api/runbook/revert`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ snapshot_id: workspaceSnapshotId, project_dir: projectDir, path: activeFile }),
+      })
+      if (!res.ok) {
+        const text = await res.text()
+        throw new Error(`Failed to revert (${res.status}): ${text}`)
+      }
+      // reload file from disk
+      await openFile(activeFile)
+      setDiffOpen(false)
+    } catch (e) {
+      setLastError(e instanceof Error ? e.message : String(e))
+    }
+  }
+
   return (
     <div className="h-full min-w-0 min-h-0 bg-background flex flex-col">
       <div className="border-b px-4 py-3 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 flex items-center justify-between gap-3">
@@ -128,6 +195,39 @@ export function WorkspacePanel() {
           </div>
         </div>
         <div className="flex items-center gap-2 shrink-0">
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 text-xs"
+            onClick={createBaseline}
+            disabled={!projectDir}
+            title="Create a baseline snapshot for diff/revert"
+          >
+            <Camera className="h-3.5 w-3.5 mr-2" />
+            Baseline
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 text-xs"
+            onClick={viewDiff}
+            disabled={!projectDir || !activeFile || !workspaceSnapshotId}
+            title="Compare active file against baseline"
+          >
+            <GitCompare className="h-3.5 w-3.5 mr-2" />
+            Diff
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 text-xs"
+            onClick={revertToBaseline}
+            disabled={!projectDir || !activeFile || !workspaceSnapshotId}
+            title="Revert active file to baseline"
+          >
+            <Undo2 className="h-3.5 w-3.5 mr-2" />
+            Revert
+          </Button>
           <Button variant="outline" size="sm" className="h-8 text-xs" onClick={refreshIndex} disabled={!projectDir || loadingIndex}>
             <RefreshCw className={cn("h-3.5 w-3.5 mr-2", loadingIndex && "animate-spin")} />
             Refresh
@@ -196,6 +296,16 @@ export function WorkspacePanel() {
           <DeepCodeEditor />
         </div>
       </div>
+
+      <DiffModal
+        isOpen={diffOpen}
+        oldValue={diffOld}
+        newValue={diffNew}
+        filename={diffFile}
+        onClose={() => setDiffOpen(false)}
+        onReject={() => setDiffOpen(false)}
+        onApply={revertToBaseline}
+      />
     </div>
   )
 }

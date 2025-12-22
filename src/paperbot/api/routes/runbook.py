@@ -17,6 +17,7 @@ import os
 import tempfile
 import threading
 import time
+import hashlib
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
@@ -27,7 +28,7 @@ from pydantic import BaseModel, Field
 from paperbot.application.collaboration.message_schema import new_run_id
 from paperbot.infrastructure.logging.execution_logger import get_execution_logger
 from paperbot.infrastructure.monitoring.resource_monitor import get_resource_monitor
-from paperbot.infrastructure.stores.models import AgentRunModel, Base, RunbookStepModel
+from paperbot.infrastructure.stores.models import AgentRunModel, ArtifactModel, Base, RunbookStepModel
 from paperbot.infrastructure.stores.sqlalchemy_db import SessionProvider
 from paperbot.repro.e2b_executor import E2BExecutor
 from paperbot.repro.execution_result import ExecutionResult
@@ -151,6 +152,240 @@ async def start_smoke(body: SmokeRequest) -> SmokeStartResponse:
 
     asyncio.create_task(_run_smoke_async(run_id, workdir, body))
     return SmokeStartResponse(run_id=run_id, status="running")
+
+
+def _snapshot_root() -> Path:
+    root = Path(os.getenv("PAPERBOT_RUNBOOK_SNAPSHOT_DIR", "data/runbook_snapshots"))
+    root.mkdir(parents=True, exist_ok=True)
+    return root.resolve()
+
+
+def _sha256_text(content: str) -> str:
+    return hashlib.sha256(content.encode("utf-8", errors="ignore")).hexdigest()
+
+
+class CreateSnapshotRequest(BaseModel):
+    project_dir: str
+    label: str = ""
+    max_total_bytes: int = Field(5_000_000, ge=100_000, le=50_000_000)
+    max_file_bytes: int = Field(200_000, ge=1_000, le=10_000_000)
+
+
+@router.post("/runbook/snapshots")
+async def create_snapshot(body: CreateSnapshotRequest):
+    """
+    Create a text snapshot of a project directory for diff/revert.
+
+    Snapshot is stored on disk (data/runbook_snapshots) and indexed as an ArtifactModel (type=snapshot).
+    """
+    root = Path(body.project_dir)
+    if not root.exists() or not root.is_dir():
+        raise HTTPException(status_code=400, detail="project_dir must be an existing directory")
+    if not _allowed_workdir(root):
+        raise HTTPException(status_code=403, detail="project_dir is not allowed")
+
+    ignore_dirs = {".git", ".next", "node_modules", ".venv", "__pycache__", ".pytest_cache", ".mypy_cache"}
+    allowed_ext = {".py", ".md", ".txt", ".json", ".yaml", ".yml", ".toml", ".sh", ".ini", ".cfg"}
+
+    files: Dict[str, Dict[str, Any]] = {}
+    skipped_large: List[str] = []
+    skipped_binary: List[str] = []
+    total_bytes = 0
+
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in ignore_dirs]
+        for name in filenames:
+            p = Path(dirpath) / name
+            rel = os.path.relpath(str(p), str(root))
+            ext = p.suffix.lower()
+            if ext and ext not in allowed_ext:
+                continue
+            try:
+                size = p.stat().st_size
+            except Exception:
+                continue
+            if size > body.max_file_bytes:
+                skipped_large.append(rel)
+                continue
+            if total_bytes + size > body.max_total_bytes:
+                break
+            try:
+                content = p.read_text(encoding="utf-8")
+            except Exception:
+                try:
+                    content = p.read_text(errors="ignore")
+                except Exception:
+                    skipped_binary.append(rel)
+                    continue
+            total_bytes += len(content.encode("utf-8", errors="ignore"))
+            files[rel] = {"sha256": _sha256_text(content), "size_bytes": size, "content": content}
+        if total_bytes >= body.max_total_bytes:
+            break
+
+    created_at = datetime.now(timezone.utc)
+    snapshot_payload = {
+        "version": 1,
+        "project_dir": str(root.resolve()),
+        "label": body.label,
+        "created_at": created_at.isoformat(),
+        "files": files,
+        "skipped": {
+            "too_large": sorted(skipped_large),
+            "binary_or_unreadable": sorted(skipped_binary),
+        },
+        "limits": {
+            "max_total_bytes": body.max_total_bytes,
+            "max_file_bytes": body.max_file_bytes,
+        },
+    }
+
+    run_id = new_run_id()
+    with _provider.session() as session:
+        run = AgentRunModel(
+            run_id=run_id,
+            workflow="runbook",
+            started_at=created_at,
+            ended_at=created_at,
+            status="completed",
+            executor_type=None,
+            timeout_seconds=None,
+            paper_url=None,
+            paper_id=None,
+            metadata_json=json.dumps({"kind": "snapshot", "project_dir": str(root), "label": body.label}, ensure_ascii=False),
+        )
+        session.merge(run)
+        session.commit()
+
+        snapshot_path = _snapshot_root() / f"{run_id}.json"
+        snapshot_path.write_text(json.dumps(snapshot_payload, ensure_ascii=False), encoding="utf-8")
+
+        artifact = ArtifactModel(
+            run_id=run_id,
+            step_id=None,
+            type="snapshot",
+            path_or_uri=str(snapshot_path),
+            mime="application/json",
+            size_bytes=snapshot_path.stat().st_size if snapshot_path.exists() else None,
+            sha256=None,
+            created_at=created_at,
+            metadata_json=json.dumps(
+                {"project_dir": str(root.resolve()), "label": body.label, "file_count": len(files), "total_bytes": total_bytes},
+                ensure_ascii=False,
+            ),
+        )
+        session.add(artifact)
+        session.commit()
+
+        return {
+            "snapshot_id": artifact.id,
+            "run_id": run_id,
+            "file_count": len(files),
+            "total_bytes": total_bytes,
+            "skipped": snapshot_payload["skipped"],
+        }
+
+
+def _load_snapshot(snapshot_id: int) -> Dict[str, Any]:
+    with _provider.session() as session:
+        artifact = session.get(ArtifactModel, snapshot_id)
+        if artifact is None or artifact.type != "snapshot":
+            raise HTTPException(status_code=404, detail="snapshot not found")
+        path = Path(artifact.path_or_uri)
+        snap_root = _snapshot_root()
+        try:
+            resolved = path.resolve()
+        except Exception:
+            raise HTTPException(status_code=400, detail="invalid snapshot path")
+        if not (resolved == snap_root or str(resolved).startswith(str(snap_root) + os.sep)):
+            raise HTTPException(status_code=400, detail="snapshot path not allowed")
+        if not resolved.exists():
+            raise HTTPException(status_code=404, detail="snapshot file missing")
+        try:
+            return json.loads(resolved.read_text(encoding="utf-8"))
+        except Exception:
+            raise HTTPException(status_code=500, detail="failed to read snapshot")
+
+
+@router.get("/runbook/snapshots/{snapshot_id}")
+async def get_snapshot(snapshot_id: int):
+    payload = _load_snapshot(snapshot_id)
+    return {
+        "snapshot_id": snapshot_id,
+        "project_dir": payload.get("project_dir"),
+        "label": payload.get("label"),
+        "created_at": payload.get("created_at"),
+        "file_count": len((payload.get("files") or {}).keys()),
+        "files": sorted((payload.get("files") or {}).keys()),
+        "skipped": payload.get("skipped") or {},
+    }
+
+
+@router.get("/runbook/diff")
+async def diff_file(
+    snapshot_id: int = Query(...),
+    project_dir: str = Query(...),
+    path: str = Query(..., description="Relative file path within project_dir"),
+):
+    root = Path(project_dir)
+    if not root.exists() or not root.is_dir():
+        raise HTTPException(status_code=400, detail="project_dir must be an existing directory")
+    if not _allowed_workdir(root):
+        raise HTTPException(status_code=403, detail="project_dir is not allowed")
+
+    snapshot = _load_snapshot(snapshot_id)
+    files = snapshot.get("files") or {}
+    if path not in files:
+        raise HTTPException(status_code=404, detail="file not found in snapshot")
+    old_content = files[path].get("content", "")
+
+    target = (root / path).resolve()
+    root_resolved = root.resolve()
+    if not (target == root_resolved or str(target).startswith(str(root_resolved) + os.sep)):
+        raise HTTPException(status_code=400, detail="invalid path")
+    if not target.exists() or not target.is_file():
+        raise HTTPException(status_code=404, detail="file not found on disk")
+
+    try:
+        new_content = target.read_text(encoding="utf-8")
+    except Exception:
+        new_content = target.read_text(errors="ignore")
+
+    return {
+        "snapshot_id": snapshot_id,
+        "path": path,
+        "old": old_content,
+        "new": new_content,
+    }
+
+
+class RevertFileRequest(BaseModel):
+    snapshot_id: int
+    project_dir: str
+    path: str
+
+
+@router.post("/runbook/revert")
+async def revert_file(body: RevertFileRequest):
+    root = Path(body.project_dir)
+    if not root.exists() or not root.is_dir():
+        raise HTTPException(status_code=400, detail="project_dir must be an existing directory")
+    if not _allowed_workdir(root):
+        raise HTTPException(status_code=403, detail="project_dir is not allowed")
+
+    snapshot = _load_snapshot(body.snapshot_id)
+    files = snapshot.get("files") or {}
+    if body.path not in files:
+        raise HTTPException(status_code=404, detail="file not found in snapshot")
+    old_content = files[body.path].get("content", "")
+
+    target = (root / body.path).resolve()
+    root_resolved = root.resolve()
+    if not (target == root_resolved or str(target).startswith(str(root_resolved) + os.sep)):
+        raise HTTPException(status_code=400, detail="invalid path")
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(old_content, encoding="utf-8")
+    return {"ok": True, "path": body.path}
 
 
 @router.get("/runbook/files")

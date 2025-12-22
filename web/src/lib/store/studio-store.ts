@@ -55,6 +55,7 @@ interface StudioState {
     selectedFileForDiff: string | null
     paperDraft: PaperDraft
     lastGenCodeResult: GenCodeResult | null
+    workspaceSnapshotId: number | null
 
     // Actions
     addTask: (name: string) => string
@@ -64,6 +65,7 @@ interface StudioState {
     setSelectedFileForDiff: (filename: string | null) => void
     setPaperDraft: (partial: Partial<PaperDraft>) => void
     setLastGenCodeResult: (result: GenCodeResult | null) => void
+    setWorkspaceSnapshotId: (snapshotId: number | null) => void
 }
 
 export const useStudioStore = create<StudioState>((set, _get) => ({
@@ -72,6 +74,7 @@ export const useStudioStore = create<StudioState>((set, _get) => ({
     selectedFileForDiff: null,
     paperDraft: { title: "", abstract: "", methodSection: "" },
     lastGenCodeResult: null,
+    workspaceSnapshotId: null,
 
     addTask: (name) => {
         const id = `task-${Date.now()}`
@@ -119,4 +122,5 @@ export const useStudioStore = create<StudioState>((set, _get) => ({
     })),
 
     setLastGenCodeResult: (result) => set({ lastGenCodeResult: result }),
+    setWorkspaceSnapshotId: (snapshotId) => set({ workspaceSnapshotId: snapshotId }),
 }))
