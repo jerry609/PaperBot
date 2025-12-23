@@ -300,6 +300,7 @@ class ResearchTrackModel(Base):
     tasks = relationship("ResearchTaskModel", back_populates="track", cascade="all, delete-orphan")
     milestones = relationship("ResearchMilestoneModel", back_populates="track", cascade="all, delete-orphan")
     paper_feedback = relationship("PaperFeedbackModel", back_populates="track", cascade="all, delete-orphan")
+    embeddings = relationship("ResearchTrackEmbeddingModel", back_populates="track", cascade="all, delete-orphan")
 
 
 class ResearchTaskModel(Base):
@@ -363,3 +364,22 @@ class PaperFeedbackModel(Base):
     metadata_json: Mapped[str] = mapped_column(Text, default="{}")
 
     track = relationship("ResearchTrackModel", back_populates="paper_feedback")
+
+
+class ResearchTrackEmbeddingModel(Base):
+    """Cached embedding for a track profile (to improve routing)."""
+
+    __tablename__ = "research_track_embeddings"
+    __table_args__ = (UniqueConstraint("track_id", "model", name="uq_track_embedding_track_model"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    track_id: Mapped[int] = mapped_column(Integer, ForeignKey("research_tracks.id"), index=True)
+
+    model: Mapped[str] = mapped_column(String(64), default="text-embedding-3-small", index=True)
+    text_hash: Mapped[str] = mapped_column(String(64), default="", index=True)
+    embedding_json: Mapped[str] = mapped_column(Text, default="[]")
+    dim: Mapped[int] = mapped_column(Integer, default=0)
+
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+    track = relationship("ResearchTrackModel", back_populates="embeddings")

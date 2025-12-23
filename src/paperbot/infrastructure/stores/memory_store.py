@@ -321,6 +321,7 @@ class SqlAlchemyMemoryStore:
                     score += 2
                 if tl in tags:
                     score += 1
+            d["score"] = score
             scored.append((score, d))
 
         scored.sort(key=lambda x: x[0], reverse=True)
@@ -448,6 +449,126 @@ class SqlAlchemyMemoryStore:
             )
             session.commit()
             return True
+
+    def soft_delete_by_scope(
+        self,
+        *,
+        user_id: str,
+        scope_type: str,
+        scope_id: Optional[str],
+        actor_id: str = "system",
+        reason: str = "",
+    ) -> int:
+        """
+        Soft-delete all memory items in a scope.
+
+        Returns number of rows affected (best-effort; 0 if none found).
+        """
+        now = datetime.now(timezone.utc)
+        scope_type = (scope_type or "global").strip() or "global"
+        with self._provider.session() as session:
+            stmt = select(MemoryItemModel).where(
+                MemoryItemModel.user_id == user_id,
+                MemoryItemModel.deleted_at.is_(None),
+                MemoryItemModel.scope_type == scope_type,
+            )
+            if scope_id is not None:
+                stmt = stmt.where(MemoryItemModel.scope_id == scope_id)
+            rows = session.execute(stmt).scalars().all()
+            if not rows:
+                return 0
+            for row in rows:
+                row.deleted_at = now
+                row.deleted_reason = reason or ""
+                row.updated_at = now
+                session.add(row)
+            session.add(
+                MemoryAuditLogModel(
+                    ts=now,
+                    actor_id=actor_id,
+                    user_id=user_id,
+                    workspace_id=None,
+                    action="delete_scope",
+                    item_id=None,
+                    source_id=None,
+                    detail_json=json.dumps(
+                        {"scope_type": scope_type, "scope_id": scope_id, "reason": reason or ""}, ensure_ascii=False
+                    ),
+                )
+            )
+            session.commit()
+            return len(rows)
+
+    def bulk_update_items(
+        self,
+        *,
+        user_id: str,
+        item_ids: List[int],
+        actor_id: str = "system",
+        status: Optional[str] = None,
+        scope_type: Optional[str] = None,
+        scope_id: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Bulk update status/scope for multiple items.
+
+        Notes:
+        - Recomputes content_hash when scope changes (to preserve scope-aware dedup semantics).
+        - Returns updated items (best-effort; empty list if none).
+        """
+        if not item_ids:
+            return []
+        now = datetime.now(timezone.utc)
+        with self._provider.session() as session:
+            rows = session.execute(
+                select(MemoryItemModel).where(
+                    MemoryItemModel.user_id == user_id,
+                    MemoryItemModel.id.in_(item_ids),
+                )
+            ).scalars().all()
+            if not rows:
+                return []
+
+            updated_ids: List[int] = []
+            for row in rows:
+                if status is not None:
+                    row.status = status
+                if scope_type is not None:
+                    row.scope_type = scope_type.strip() or "global"
+                if scope_id is not None:
+                    row.scope_id = scope_id
+                if scope_type is not None or scope_id is not None:
+                    row.content_hash = _sha256_text(
+                        f"{(getattr(row, 'scope_type', None) or 'global')}:{(getattr(row, 'scope_id', None) or '')}:{row.kind}:{row.content}"
+                    )
+                row.updated_at = now
+                updated_ids.append(int(row.id))
+                session.add(row)
+                session.add(
+                    MemoryAuditLogModel(
+                        ts=now,
+                        actor_id=actor_id,
+                        user_id=user_id,
+                        workspace_id=row.workspace_id,
+                        action="bulk_update",
+                        item_id=row.id,
+                        source_id=row.source_id,
+                        detail_json=json.dumps(
+                            {"status": status, "scope_type": scope_type, "scope_id": scope_id}, ensure_ascii=False
+                        ),
+                    )
+                )
+
+            try:
+                session.commit()
+            except IntegrityError:
+                session.rollback()
+                return []
+
+            refreshed = session.execute(
+                select(MemoryItemModel).where(MemoryItemModel.user_id == user_id, MemoryItemModel.id.in_(updated_ids))
+            ).scalars().all()
+            return [self._row_to_dict(r) for r in refreshed]
 
     def hard_delete_item(self, *, user_id: str, item_id: int, actor_id: str = "system") -> bool:
         now = datetime.now(timezone.utc)

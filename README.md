@@ -203,6 +203,11 @@ cp env.example .env
 
 至少配置一个 LLM Key（如 `OPENAI_API_KEY`），否则涉及 LLM 的能力将不可用/自动降级。
 
+可选（用于 Research Track Router 的 embedding 路由与缓存；未配置会自动降级为多特征 keyword/memory/task 路由）：
+
+- `OPENAI_API_KEY`
+- `OPENAI_BASE_URL`（可选：OpenAI 兼容代理地址）
+
 ### 3) 启动 API 服务器（CLI/Web 都依赖它）
 
 ```bash
@@ -221,6 +226,24 @@ python -m uvicorn src.paperbot.api.main:app --reload --port 8000
 | `/api/chat` | POST | AI 对话（SSE） |
 | `/api/sandbox/*` | GET/POST | 沙箱/队列/日志/资源指标（DeepCode Studio） |
 | `/api/runbook/*` | GET/POST | Runbook 执行与 Workspace 文件操作（DeepCode Studio） |
+| `/api/research/*` | GET/POST | 个性化研究：方向（Track）/进度/记忆 Inbox/推荐与反馈 |
+
+#### 个性化研究（Research）关键端点
+
+| 端点 | 方法 | 描述 |
+|------|------|------|
+| `/api/research/tracks` | GET/POST | 列表/创建研究方向（Track） |
+| `/api/research/tracks/active` | GET | 获取当前激活方向 |
+| `/api/research/tracks/{track_id}/activate` | POST | 激活方向（切换研究方向） |
+| `/api/research/tracks/{track_id}/tasks` | GET/POST | 方向内任务（科研进度） |
+| `/api/research/memory/suggest` | POST | 从文本抽取“候选记忆”，写入 Inbox（pending） |
+| `/api/research/memory/inbox` | GET | 记忆 Inbox（pending，默认 active track） |
+| `/api/research/memory/items/{item_id}/moderate` | POST | 审核/编辑记忆（approve/reject/迁移 scope） |
+| `/api/research/memory/bulk_moderate` | POST | 批量审核 Inbox（approve/reject） |
+| `/api/research/memory/bulk_move` | POST | 批量迁移记忆到其它方向（防污染） |
+| `/api/research/tracks/{track_id}/memory/clear?confirm=true` | POST | 一键清空某方向记忆（软删除，需确认） |
+| `/api/research/papers/feedback` | POST | 论文反馈（like/dislike/save…） |
+| `/api/research/context` | POST | 构建 ContextPack（含 Track Router 建议与推荐理由） |
 
 ### 4) 运行 Terminal UI（Node CLI）
 
@@ -311,6 +334,7 @@ python main.py render-report --template academic_report.md.j2
 
 - **总体计划（Plan）**：`docs/PLAN.md`
 - **DeepCode 迭代清单（TODO）**：`docs/DEEPCODE_TODO.md`
+- **Research 个性化 TODO**：`docs/TODO_PERSONALIZED_MEMORY_CONTEXT.md`
 - **数据集说明**：`datasets/README.md`
 - **Web Dashboard**：`web/README.md`
 
@@ -335,13 +359,14 @@ PaperBot/
 │       ├── api/                           # FastAPI（SSE）后端
 │       │   ├── main.py
 │       │   ├── streaming.py
-│       │   └── routes/                    # track/analyze/gen_code/review/chat + sandbox/runbook/jobs/runs/memory
+│       │   └── routes/                    # track/analyze/gen_code/review/chat + sandbox/runbook/jobs/runs/memory/research
 │       ├── application/                   # 应用层（ports/workflows/registries/collaboration）
 │       ├── compat/                        # 兼容层
 │       ├── core/                          # 核心抽象（pipeline/errors/di/report_engine 等）
 │       ├── domain/                        # 领域模型（paper/scholar/influence 等）
 │       ├── infrastructure/                # 基础设施（llm/logging/monitoring/queue/stores/connectors 等）
 │       ├── memory/                        # 记忆系统（parsers 等）
+│       ├── context_engine/                # Context Engine（Research：路由/上下文包/推荐）
 │       ├── presentation/                  # CLI/报告渲染（Python 侧）
 │       ├── repro/                         # Paper2Code / Repro（executors/orchestrator/memory/rag/nodes）
 │       ├── utils/                         # 工具函数

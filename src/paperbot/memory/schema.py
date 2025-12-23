@@ -27,6 +27,11 @@ MemoryKind = Literal[
     "constraint",
     "todo",
     "fact",
+    # Research/product extensions
+    "note",
+    "decision",
+    "hypothesis",
+    "keyword_set",
 ]
 
 
@@ -37,4 +42,7 @@ class MemoryCandidate:
     confidence: float = 0.6
     tags: List[str] = field(default_factory=list)
     evidence: Dict[str, Any] = field(default_factory=dict)
-
+    # Optional scoping; used by stores/context engine to avoid cross-track pollution.
+    scope_type: Optional[str] = None  # global/track/project/paper
+    scope_id: Optional[str] = None
+    status: Optional[str] = None  # pending/approved/rejected/superseded
