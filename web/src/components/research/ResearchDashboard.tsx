@@ -10,6 +10,15 @@ import { Label } from "@/components/ui/label"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog"
 
 type Track = {
   id: number
@@ -77,6 +86,11 @@ export default function ResearchDashboard() {
   const [inbox, setInbox] = useState<MemoryItem[]>([])
   const [suggestText, setSuggestText] = useState("")
   const [selectedInboxIds, setSelectedInboxIds] = useState<Set<number>>(new Set())
+  const [moveTargetTrackId, setMoveTargetTrackId] = useState<number | "">("")
+  const [createOpen, setCreateOpen] = useState(false)
+  const [newTrackName, setNewTrackName] = useState("")
+  const [newTrackDescription, setNewTrackDescription] = useState("")
+  const [newTrackKeywords, setNewTrackKeywords] = useState("")
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -84,11 +98,14 @@ export default function ResearchDashboard() {
 
   const activeTrack = useMemo(() => tracks.find((t) => t.id === activeTrackId) || null, [tracks, activeTrackId])
 
-  async function refreshTracks() {
+  async function refreshTracks(): Promise<number | null> {
     const data = await fetchJson<{ tracks: Track[] }>(`/api/research/tracks?user_id=${encodeURIComponent(userId)}`)
     setTracks(data.tracks || [])
     const active = data.tracks.find((t) => t.is_active)
-    setActiveTrackId(active?.id ?? null)
+    const activeId = active?.id ?? null
+    setActiveTrackId(activeId)
+    setMoveTargetTrackId("")
+    return activeId
   }
 
   async function refreshInbox(trackId?: number | null) {
@@ -119,8 +136,8 @@ export default function ResearchDashboard() {
       body: "{}",
       headers: { "Content-Type": "application/json" },
     })
-    await refreshTracks()
-    await refreshInbox(trackId)
+    const activeId = await refreshTracks()
+    await refreshInbox(activeId ?? trackId)
   }
 
   async function buildContext(activateSuggestion?: boolean) {
@@ -201,6 +218,64 @@ export default function ResearchDashboard() {
     }
   }
 
+  async function bulkMoveToTrack() {
+    if (selectedInboxIds.size === 0) return
+    if (moveTargetTrackId === "" || !moveTargetTrackId) return
+    setLoading(true)
+    setError(null)
+    try {
+      await fetchJson(`/api/research/memory/bulk_move`, {
+        method: "POST",
+        body: JSON.stringify({
+          user_id: userId,
+          item_ids: Array.from(selectedInboxIds),
+          scope_type: "track",
+          scope_id: String(moveTargetTrackId),
+        }),
+        headers: { "Content-Type": "application/json" },
+      })
+      await refreshInbox(activeTrackId)
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function createTrack() {
+    const name = newTrackName.trim()
+    if (!name) return
+    setLoading(true)
+    setError(null)
+    try {
+      const keywords = newTrackKeywords
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean)
+      await fetchJson(`/api/research/tracks`, {
+        method: "POST",
+        body: JSON.stringify({
+          user_id: userId,
+          name,
+          description: newTrackDescription.trim(),
+          keywords,
+          activate: true,
+        }),
+        headers: { "Content-Type": "application/json" },
+      })
+      setCreateOpen(false)
+      setNewTrackName("")
+      setNewTrackDescription("")
+      setNewTrackKeywords("")
+      const activeId = await refreshTracks()
+      await refreshInbox(activeId)
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setLoading(false)
+    }
+  }
+
   async function sendFeedback(paperId: string, action: string) {
     setLoading(true)
     setError(null)
@@ -274,7 +349,50 @@ export default function ResearchDashboard() {
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <Card className="lg:col-span-1">
           <CardHeader>
-            <CardTitle>Tracks</CardTitle>
+            <div className="flex items-center justify-between">
+              <CardTitle>Tracks</CardTitle>
+              <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+                <DialogTrigger asChild>
+                  <Button size="sm" variant="outline">
+                    New
+                  </Button>
+                </DialogTrigger>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>Create Track</DialogTitle>
+                    <DialogDescription>
+                      Track is the isolation boundary for memories, progress, and recommendations.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="space-y-3">
+                    <div className="space-y-1">
+                      <Label>Name</Label>
+                      <Input value={newTrackName} onChange={(e) => setNewTrackName(e.target.value)} />
+                    </div>
+                    <div className="space-y-1">
+                      <Label>Description</Label>
+                      <Textarea
+                        value={newTrackDescription}
+                        onChange={(e) => setNewTrackDescription(e.target.value)}
+                        rows={3}
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label>Keywords (comma separated)</Label>
+                      <Input value={newTrackKeywords} onChange={(e) => setNewTrackKeywords(e.target.value)} />
+                    </div>
+                  </div>
+                  <DialogFooter>
+                    <Button variant="secondary" onClick={() => setCreateOpen(false)} disabled={loading}>
+                      Cancel
+                    </Button>
+                    <Button onClick={() => createTrack()} disabled={loading || !newTrackName.trim()}>
+                      Create & Activate
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+            </div>
           </CardHeader>
           <CardContent className="space-y-3">
             {tracks.length === 0 ? (
@@ -459,6 +577,34 @@ export default function ResearchDashboard() {
                     </div>
                   </div>
 
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="text-sm text-muted-foreground">Move selected to another track:</div>
+                    <div className="flex items-center gap-2">
+                      <select
+                        className="h-9 rounded-md border bg-background px-3 text-sm"
+                        value={moveTargetTrackId}
+                        onChange={(e) => setMoveTargetTrackId(e.target.value ? Number(e.target.value) : "")}
+                        disabled={loading}
+                      >
+                        <option value="">Select track…</option>
+                        {tracks
+                          .filter((t) => t.id !== activeTrackId)
+                          .map((t) => (
+                            <option key={t.id} value={t.id}>
+                              {t.name}
+                            </option>
+                          ))}
+                      </select>
+                      <Button
+                        variant="outline"
+                        onClick={() => bulkMoveToTrack()}
+                        disabled={loading || selectedCount === 0 || moveTargetTrackId === ""}
+                      >
+                        Move
+                      </Button>
+                    </div>
+                  </div>
+
                   {!inbox.length ? (
                     <p className="text-sm text-muted-foreground">No pending items.</p>
                   ) : (
@@ -523,4 +669,3 @@ export default function ResearchDashboard() {
     </div>
   )
 }
-
