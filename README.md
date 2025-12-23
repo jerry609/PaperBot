@@ -219,6 +219,8 @@ python -m uvicorn src.paperbot.api.main:app --reload --port 8000
 | `/api/gen-code` | POST | Paper2Code（SSE） |
 | `/api/review` | POST | 深度评审（SSE） |
 | `/api/chat` | POST | AI 对话（SSE） |
+| `/api/sandbox/*` | GET/POST | 沙箱/队列/日志/资源指标（DeepCode Studio） |
+| `/api/runbook/*` | GET/POST | Runbook 执行与 Workspace 文件操作（DeepCode Studio） |
 
 ### 4) 运行 Terminal UI（Node CLI）
 
@@ -240,6 +242,21 @@ cd web
 npm install
 npm run dev
 ```
+
+如后端不在默认地址（`http://127.0.0.1:8000`），启动前设置：
+
+- `PAPERBOT_API_BASE_URL=http://<host>:8000`（Next.js 代理到 FastAPI）
+
+#### DeepCode Studio（Web）已实现能力
+
+- Runbook：Paper2Code、Smoke（可选 `docker`/`e2b`）并将日志流写入 Timeline
+- Workspace：基于 `outputDir` 的真实文件树（搜索/打开/保存）
+- Diff Staging：Baseline 快照、文件级 diff/revert、hunk 级批量回滚
+
+安全说明（默认行为）：
+
+- Workspace/Runbook 文件操作默认仅允许 `tmp` 下的项目目录；如需放开其它根目录，设置 `PAPERBOT_RUNBOOK_ALLOW_DIR_PREFIXES=/path1,/path2`
+- Snapshot 默认落盘到 `data/runbook_snapshots`；DB 默认 `sqlite:///data/paperbot.db`
 
 ## 常用命令（Python 入口：`main.py`）
 
@@ -293,6 +310,7 @@ python main.py render-report --template academic_report.md.j2
 ## 文档索引（Docs）
 
 - **总体计划（Plan）**：`docs/PLAN.md`
+- **DeepCode 迭代清单（TODO）**：`docs/DEEPCODE_TODO.md`
 - **数据集说明**：`datasets/README.md`
 - **Web Dashboard**：`web/README.md`
 
@@ -471,5 +489,4 @@ pytest -q
 ## License
 
 MIT，见 `LICENSE`。
-
 
