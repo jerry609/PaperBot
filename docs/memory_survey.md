@@ -230,3 +230,6 @@ PaperBot 当前已经具备：
 4) 加“项目维度/工作区维度”命名空间（user_id + workspace_id）
 5) 给记忆条目提供可视化编辑（Web/CLI）
 
+## 8. 各产品 UI 控制项对照
+
+见 `docs/memory_ui_controls_matrix.md`（重点覆盖：ChatGPT/GPT、Anthropic/Claude、Augment Code，并包含 Gemini/Grok/Copilot/Perplexity）。
