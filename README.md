@@ -319,160 +319,53 @@ python main.py render-report --template academic_report.md.j2
 ```text
 PaperBot/
 │
-├── src/                               # 源代码目录
-│   └── paperbot/                      # 主包
-│       ├── __init__.py                # 统一导出
-│       │
-│       ├── core/                      # 核心抽象层
-│       │   ├── abstractions/          # Executable, ExecutionResult
-│       │   ├── pipeline/              # Pipeline 抽象
-│       │   ├── di/                    # 依赖注入
-│       │   ├── errors/                # 统一错误
-│       │   ├── collaboration/         # 协作总线
-│       │   ├── report_engine/         # 报告引擎
-│       │   ├── llm_client.py          # LLM 客户端
-│       │   ├── state.py               # 状态管理
-│       │   └── workflow_coordinator.py # 工作流协调器
-│       │
-│       ├── agents/                    # Agent 层
-│       │   ├── base.py                # BaseAgent
-│       │   ├── mixins/                # 共享 Mixin
-│       │   │   ├── semantic_scholar.py
-│       │   │   ├── text_parsing.py
-│       │   │   └── json_parser.py
-│       │   ├── prompts/               # Prompt 模板
-│       │   ├── state/                 # Agent 状态
-│       │   ├── research/              # ResearchAgent
-│       │   ├── code_analysis/         # CodeAnalysisAgent
-│       │   ├── quality/               # QualityAgent
-│       │   ├── review/                # ReviewerAgent
-│       │   ├── verification/          # VerificationAgent
-│       │   ├── documentation/         # DocumentationAgent
-│       │   ├── conference/            # ConferenceResearchAgent
-│       │   └── scholar_tracking/      # 学者追踪相关 Agents
-│       │
-│       ├── infrastructure/            # 基础设施层
-│       │   ├── llm/                   # LLM 客户端
-│       │   │   ├── base.py            # LLMClient 兼容层
-│       │   │   ├── router.py          # ModelRouter (成本路由)
-│       │   │   └── providers/         # 多后端适配器 (OpenAI, Anthropic, Ollama)
-│       │   │       ├── base.py        # LLMProvider ABC
-│       │   │       ├── openai_provider.py
-│       │   │       ├── anthropic_provider.py
-│       │   │       └── ollama_provider.py
-│       │   ├── api_clients/           # 外部 API
-│       │   ├── storage/               # 存储
-│       │   └── services/              # 业务服务
-│       │
-│       ├── api/                       # FastAPI 后端
-│       │   ├── main.py                # FastAPI 应用
-│       │   ├── streaming.py           # SSE 流式工具
-│       │   └── routes/                # API 路由
-│       │       ├── track.py           # 学者追踪
-│       │       ├── analyze.py         # 论文分析
-│       │       ├── gen_code.py        # Paper2Code
-│       │       ├── review.py          # 深度评审
-│       │       └── chat.py            # AI 对话
-│       │
-│       ├── domain/                    # 领域模型层
-│       │   ├── paper.py               # PaperMeta, CodeMeta
-│       │   ├── scholar.py             # Scholar
-│       │   └── influence/             # 影响力计算
-│       │       ├── result.py
-│       │       ├── calculator.py
-│       │       ├── metrics/
-│       │       ├── analyzers/         # 动态分析器 (Citation Context, PIS)
-│       │       │   ├── citation_context.py
-│       │       │   ├── dynamic_pis.py
-│       │       │   └── code_health.py
-│       │       └── weights.py
-│       │
-│       ├── workflows/                 # 工作流层
-│       │   ├── feed.py                # 信息流
-│       │   ├── filters.py             # 筛选器
-│       │   ├── scheduler.py           # 调度器
-│       │   ├── scholar_tracking.py    # 学者追踪工作流
-│       │   └── nodes/                 # 工作流节点
-│       │
-│       ├── presentation/              # 展示层
-│       │   ├── cards.py               # 信息卡片
-│       │   ├── cli/                   # CLI
-│       │   └── reports/               # 报告生成
-│       │
-│       ├── repro/                     # 复现模块 (DeepCode 增强)
-│       │   ├── repro_agent.py         # 主 Agent（支持 Legacy/Orchestrator 模式）
-│       │   ├── orchestrator.py        # 多 Agent 协调器
-│       │   ├── docker_executor.py     # Docker 执行器
-│       │   ├── e2b_executor.py        # E2B 云沙箱执行器
-│       │   ├── models.py              # 数据模型（Blueprint, PaperContext 等）
-│       │   ├── nodes/                 # 处理节点
-│       │   │   ├── blueprint_node.py  # Blueprint 蒸馏节点
-│       │   │   ├── planning_node.py   # 规划节点
-│       │   │   ├── generation_node.py # 代码生成节点（集成 Memory+RAG）
-│       │   │   └── verification_node.py # 验证节点
-│       │   ├── agents/                # 专用 Agent
-│       │   │   ├── planning_agent.py  # 规划 Agent
-│       │   │   ├── coding_agent.py    # 编码 Agent
-│       │   │   ├── debugging_agent.py # 调试 Agent
-│       │   │   └── verification_agent.py # 验证 Agent
-│       │   ├── memory/                # 状态化代码记忆
-│       │   │   ├── code_memory.py     # 跨文件上下文
-│       │   │   └── symbol_index.py    # AST 符号索引
-│       │   └── rag/                   # 代码知识检索
-│       │       ├── knowledge_base.py  # 关键词匹配知识库
-│       │       └── patterns/          # 内置代码模式
-│       │
-│       └── utils/                     # 工具函数
-│           ├── logger.py
-│           ├── downloader.py
-│           ├── retry_helper.py
-│           ├── json_parser.py
-│           └── text_processing.py
-│
-├── cli/                               # Node.js 终端 UI
-│   ├── src/
-│   │   ├── index.tsx                  # 入口点
-│   │   ├── components/                # React/Ink 组件
-│   │   │   ├── App.tsx
-│   │   │   ├── ChatView.tsx
-│   │   │   ├── TrackView.tsx
-│   │   │   ├── AnalyzeView.tsx
-│   │   │   └── GenCodeView.tsx
-│   │   ├── hooks/                     # React Hooks
-│   │   └── utils/                     # 工具函数
-│   │       ├── api.ts                 # API 客户端
-│   │       └── banner.ts              # oh-my-logo 横幅
-│   ├── package.json
-│   └── tsconfig.json
-│
-├── config/                            # 配置文件
-│   ├── config.yaml
-│   ├── settings.py
-│   ├── models.py
-│   ├── scholar_subscriptions.yaml
-│   └── top_venues.yaml
-│
-├── tests/                             # 测试目录
-│   ├── unit/                          # 单元测试
-│   ├── integration/                   # 集成测试
-│   └── e2e/                           # 端到端测试
-│
-├── output/                            # 输出目录
-│   ├── reports/
-│   └── experiments/
-│
-├── cache/                             # 缓存目录
-│
-├── datasets/                          # 数据集
-│   ├── metadata/
-│   └── processed/
-│
-├── public/                            # 静态资源
-│   └── asset/
-│
-├── main.py                            # Python 入口点
-├── requirements.txt                   # 依赖
-└── README.md
+├── AGENTS.md                              # 贡献者指南（给 agent/协作使用）
+├── README.md                              # 项目说明
+├── LICENSE
+├── env.example                            # 环境变量示例
+├── pyproject.toml                         # Python 配置（black/isort/pyright 等）
+├── requirements.txt
+├── requirements-ci.txt
+├── pyrightconfig.json
+├── alembic.ini
+├── alembic/                               # Alembic 迁移框架（env.py 等）
+├── src/                                   # Python 源码（主包在 src/paperbot）
+│   └── paperbot/
+│       ├── agents/                        # Agents（研究/代码/评审/验证/追踪等）
+│       ├── api/                           # FastAPI（SSE）后端
+│       │   ├── main.py
+│       │   ├── streaming.py
+│       │   └── routes/                    # track/analyze/gen_code/review/chat + sandbox/runbook/jobs/runs/memory
+│       ├── application/                   # 应用层（ports/workflows/registries/collaboration）
+│       ├── compat/                        # 兼容层
+│       ├── core/                          # 核心抽象（pipeline/errors/di/report_engine 等）
+│       ├── domain/                        # 领域模型（paper/scholar/influence 等）
+│       ├── infrastructure/                # 基础设施（llm/logging/monitoring/queue/stores/connectors 等）
+│       ├── memory/                        # 记忆系统（parsers 等）
+│       ├── presentation/                  # CLI/报告渲染（Python 侧）
+│       ├── repro/                         # Paper2Code / Repro（executors/orchestrator/memory/rag/nodes）
+│       ├── utils/                         # 工具函数
+│       └── workflows/                     # 工作流与节点
+├── web/                                   # Web Dashboard（Next.js，DeepCode Studio 在 /studio）
+├── cli/                                   # Node.js Terminal UI（Ink/React）
+├── docs/                                  # 文档（PLAN + DeepCode TODO）
+├── config/                                # 配置（models/venues/subscriptions 等）
+├── datasets/                              # 数据集与元数据
+├── tests/                                 # Python 测试
+├── scripts/                               # 脚本工具
+├── evals/                                 # 评测相关
+├── output/                                # 生成输出（报告/实验）
+├── cache/                                 # 缓存
+├── logs/                                  # 运行日志（本地）
+├── reports/                               # 生成报告（汇总）
+├── papers/                                # 论文缓存/样例
+├── public/                                # 静态资源（Web）
+├── asset/                                 # 文档/截图资源
+├── AI4S/                                  # AI4S 论文与代码集合
+├── utils/                                 # 顶层辅助脚本/工具
+├── main.py                                # Python 入口
+├── validate_datasets.py
+└── verify_claude.py
 ```
 
 ## 测试
@@ -489,4 +382,3 @@ pytest -q
 ## License
 
 MIT，见 `LICENSE`。
-
