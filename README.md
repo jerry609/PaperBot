@@ -210,6 +210,13 @@ cp env.example .env
 
 ### 3) 启动 API 服务器（CLI/Web 都依赖它）
 
+首次运行/更新版本后，建议先跑一次 DB migrations（默认 DB：`sqlite:///data/paperbot.db`）：
+
+```bash
+export PAPERBOT_DB_URL="sqlite:///data/paperbot.db"
+alembic upgrade head
+```
+
 ```bash
 python -m uvicorn src.paperbot.api.main:app --reload --port 8000
 ```
