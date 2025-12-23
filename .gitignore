@@ -23,6 +23,7 @@ Thumbs.db
 
 # Project Specific
 logs/
+/data/
 /papers/
 debug_*.txt
 debug_*.json
@@ -30,6 +31,7 @@ response.html
 *.bak
 *.old
 *.log
+*.db
 
 # Scholar Tracking
 cache/scholar_papers/*.json
@@ -43,4 +45,3 @@ BettaFish/
 node_modules/
 cli/dist/
 npm-debug.log
-

@@ -20,7 +20,7 @@ def _ensure_sqlite_parent_dir(db_url: str) -> None:
     # sqlite:///relative/path.db or sqlite:////abs/path.db
     if not db_url.startswith("sqlite:"):
         return
-    if db_url.startswith("sqlite:///:"):
+    if db_url.startswith("sqlite:///"):
         path = db_url.replace("sqlite:///", "", 1)
     elif db_url.startswith("sqlite:////"):
         path = db_url.replace("sqlite:////", "/", 1)
@@ -54,5 +54,4 @@ class SessionProvider:
 
     def session(self) -> Session:
         return self._factory()
-
 

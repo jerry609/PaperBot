@@ -4,7 +4,7 @@ import json
 from datetime import datetime
 from typing import Any, Dict, Optional
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -181,4 +181,56 @@ class ArtifactModel(Base):
 
     run = relationship("AgentRunModel", back_populates="artifacts")
     step = relationship("RunbookStepModel")
+
+
+class MemorySourceModel(Base):
+    """
+    Imported chat-log sources (e.g., ChatGPT export, Gemini transcript).
+
+    Stores provenance so memory items can be traced back to an import batch.
+    """
+
+    __tablename__ = "memory_sources"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+
+    user_id: Mapped[str] = mapped_column(String(64), index=True)
+    platform: Mapped[str] = mapped_column(String(32), default="unknown", index=True)
+    filename: Mapped[str] = mapped_column(String(256), default="")
+    sha256: Mapped[str] = mapped_column(String(64), index=True)
+
+    ingested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    message_count: Mapped[int] = mapped_column(Integer, default=0)
+    conversation_count: Mapped[int] = mapped_column(Integer, default=0)
+    metadata_json: Mapped[str] = mapped_column(Text, default="{}")
+
+    memories = relationship("MemoryItemModel", back_populates="source", cascade="all, delete-orphan")
+
+
+class MemoryItemModel(Base):
+    """
+    Long-term memory items extracted from chats.
+
+    Content is stored as plain text; retrieval can be keyword-based.
+    """
+
+    __tablename__ = "memory_items"
+    __table_args__ = (UniqueConstraint("user_id", "content_hash", name="uq_memory_user_hash"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+
+    user_id: Mapped[str] = mapped_column(String(64), index=True)
+    kind: Mapped[str] = mapped_column(String(32), default="fact", index=True)
+    content: Mapped[str] = mapped_column(Text, default="")
+    content_hash: Mapped[str] = mapped_column(String(64), index=True)
+    confidence: Mapped[float] = mapped_column(Float, default=0.6)
+
+    tags_json: Mapped[str] = mapped_column(Text, default="[]")
+    evidence_json: Mapped[str] = mapped_column(Text, default="{}")
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+    source_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("memory_sources.id"), nullable=True, index=True)
+    source = relationship("MemorySourceModel", back_populates="memories")
 

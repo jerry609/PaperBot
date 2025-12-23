@@ -1,0 +1,95 @@
+from __future__ import annotations
+
+import json
+
+from paperbot.infrastructure.stores.memory_store import SqlAlchemyMemoryStore
+from paperbot.memory.extractor import extract_memories
+from paperbot.memory.parsers.common import parse_chat_log
+
+
+def test_parse_chatgpt_conversations_export_minimal():
+    export = [
+        {
+            "id": "c1",
+            "mapping": {
+                "n1": {
+                    "id": "n1",
+                    "message": {
+                        "id": "m1",
+                        "author": {"role": "user"},
+                        "content": {"parts": ["我叫 Jerry"]},
+                        "create_time": 1700000000,
+                    },
+                },
+                "n2": {
+                    "id": "n2",
+                    "message": {
+                        "id": "m2",
+                        "author": {"role": "assistant"},
+                        "content": {"parts": ["你好！"]},
+                        "create_time": 1700000001,
+                    },
+                },
+            },
+        }
+    ]
+    parsed = parse_chat_log(json.dumps(export, ensure_ascii=False).encode("utf-8"), filename="conversations.json")
+    assert parsed.platform == "chatgpt"
+    assert len(parsed.messages) == 2
+    assert parsed.messages[0].role == "user"
+    assert "Jerry" in parsed.messages[0].content
+
+
+def test_plaintext_parser_and_heuristic_extraction():
+    raw = "User: 我计划做一个中间件\nAssistant: 好的\nUser: 我不喜欢太长的回答\n".encode("utf-8")
+    parsed = parse_chat_log(raw, filename="chat.txt")
+    assert len(parsed.messages) >= 2
+
+    mems = extract_memories(parsed.messages, use_llm=False, redact=True)
+    kinds = {m.kind for m in mems}
+    assert "goal" in kinds
+    assert "preference" in kinds
+
+
+def test_loose_json_gemini_api_style():
+    obj = {
+        "request": {
+            "contents": [
+                {"role": "user", "parts": [{"text": "我想做一个中间件"}]},
+            ]
+        },
+        "response": {
+            "candidates": [
+                {"content": {"role": "model", "parts": [{"text": "可以，先定义数据模型"}]}},
+            ]
+        },
+    }
+    parsed = parse_chat_log(json.dumps(obj, ensure_ascii=False).encode("utf-8"), filename="gemini.json", platform_hint="gemini")
+    assert len(parsed.messages) >= 2
+    assert parsed.messages[0].role in {"user", "unknown"}
+    assert any("中间件" in m.content for m in parsed.messages)
+
+
+def test_memory_store_dedup_by_user_and_hash(tmp_path):
+    db_url = f"sqlite:///{tmp_path / 'mem.db'}"
+    store = SqlAlchemyMemoryStore(db_url=db_url, auto_create_schema=True)
+
+    raw = "User: 我叫 Jerry".encode("utf-8")
+    parsed = parse_chat_log(raw, filename="a.txt")
+    src = store.upsert_source(
+        user_id="u1",
+        platform="test",
+        filename="a.txt",
+        raw_bytes=raw,
+        message_count=len(parsed.messages),
+        conversation_count=0,
+        metadata={},
+    )
+
+    mems = extract_memories(parsed.messages, use_llm=False)
+    created1, skipped1, _ = store.add_memories(user_id="u1", memories=mems, source_id=src.id)
+    created2, skipped2, _ = store.add_memories(user_id="u1", memories=mems, source_id=src.id)
+
+    assert created1 >= 1
+    assert created2 == 0
+    assert skipped2 >= 1

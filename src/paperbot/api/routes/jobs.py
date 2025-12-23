@@ -11,12 +11,28 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
-from arq.connections import create_pool
-from arq.jobs import Job
+try:
+    from arq.connections import create_pool, RedisSettings
+    from arq.jobs import Job
+except Exception:  # pragma: no cover
+    create_pool = None  # type: ignore[assignment]
+    RedisSettings = None  # type: ignore[assignment]
+    Job = None  # type: ignore[assignment]
 
-from paperbot.infrastructure.queue.arq_worker import _redis_settings
+import os
 
 router = APIRouter()
+
+
+def _redis_settings():
+    if RedisSettings is None:  # pragma: no cover
+        return None
+    return RedisSettings(
+        host=os.getenv("PAPERBOT_REDIS_HOST", "127.0.0.1"),
+        port=int(os.getenv("PAPERBOT_REDIS_PORT", "6379")),
+        database=int(os.getenv("PAPERBOT_REDIS_DB", "0")),
+        password=os.getenv("PAPERBOT_REDIS_PASSWORD") or None,
+    )
 
 
 class TrackScholarJobRequest(BaseModel):
@@ -33,7 +49,12 @@ class AnalyzePaperJobRequest(BaseModel):
 @router.post("/jobs/track-scholar")
 async def enqueue_track_scholar(req: TrackScholarJobRequest):
     try:
-        redis = await create_pool(_redis_settings())
+        if create_pool is None:
+            return {"error": "arq is not installed; install dependencies to enable jobs endpoints"}
+        settings = _redis_settings()
+        if settings is None:
+            return {"error": "arq is not installed; install dependencies to enable jobs endpoints"}
+        redis = await create_pool(settings)
         job = await redis.enqueue_job(
             "track_scholar_job",
             req.scholar_id,
@@ -48,7 +69,12 @@ async def enqueue_track_scholar(req: TrackScholarJobRequest):
 @router.post("/jobs/analyze-paper")
 async def enqueue_analyze_paper(req: AnalyzePaperJobRequest):
     try:
-        redis = await create_pool(_redis_settings())
+        if create_pool is None:
+            return {"error": "arq is not installed; install dependencies to enable jobs endpoints"}
+        settings = _redis_settings()
+        if settings is None:
+            return {"error": "arq is not installed; install dependencies to enable jobs endpoints"}
+        redis = await create_pool(settings)
         job = await redis.enqueue_job(
             "analyze_paper_job",
             req.paper,
@@ -62,7 +88,12 @@ async def enqueue_analyze_paper(req: AnalyzePaperJobRequest):
 @router.get("/jobs/{job_id}")
 async def get_job_status(job_id: str):
     try:
-        redis = await create_pool(_redis_settings())
+        if create_pool is None or Job is None:
+            return {"error": "arq is not installed; install dependencies to enable jobs endpoints"}
+        settings = _redis_settings()
+        if settings is None:
+            return {"error": "arq is not installed; install dependencies to enable jobs endpoints"}
+        redis = await create_pool(settings)
         job = Job(job_id, redis)
         info = await job.info()
         # When finished, result will be in job.result()
@@ -75,5 +106,3 @@ async def get_job_status(job_id: str):
         return {"job_id": job_id, "info": info.model_dump() if info else None, "result": result}
     except Exception as e:
         return {"error": str(e)}
-
-
