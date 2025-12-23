@@ -8,6 +8,7 @@ import {
   LayoutDashboard,
   Users,
   FileText,
+  FlaskConical,
   Code2,
   Settings,
   BookOpen
@@ -36,6 +37,12 @@ export function Sidebar({ className }: SidebarProps) {
       icon: FileText,
       href: "/papers",
       active: pathname.startsWith("/papers"),
+    },
+    {
+      label: "Research",
+      icon: FlaskConical,
+      href: "/research",
+      active: pathname.startsWith("/research"),
     },
     {
       label: "DeepCode Studio",
