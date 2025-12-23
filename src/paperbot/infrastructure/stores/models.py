@@ -220,10 +220,20 @@ class MemoryItemModel(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
 
     user_id: Mapped[str] = mapped_column(String(64), index=True)
+    workspace_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
+    scope_type: Mapped[str] = mapped_column(String(16), default="global", index=True)  # global/track/project/paper
+    scope_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
     kind: Mapped[str] = mapped_column(String(32), default="fact", index=True)
     content: Mapped[str] = mapped_column(Text, default="")
     content_hash: Mapped[str] = mapped_column(String(64), index=True)
     confidence: Mapped[float] = mapped_column(Float, default=0.6)
+
+    status: Mapped[str] = mapped_column(String(16), default="approved", index=True)  # pending/approved/rejected/superseded
+    supersedes_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("memory_items.id"), nullable=True, index=True)
+    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    last_used_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    use_count: Mapped[int] = mapped_column(Integer, default=0)
+    pii_risk: Mapped[int] = mapped_column(Integer, default=0)  # 0=unknown/low,1=maybe,2=high
 
     tags_json: Mapped[str] = mapped_column(Text, default="[]")
     evidence_json: Mapped[str] = mapped_column(Text, default="{}")
@@ -231,6 +241,125 @@ class MemoryItemModel(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
 
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    deleted_reason: Mapped[str] = mapped_column(Text, default="")
+
     source_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("memory_sources.id"), nullable=True, index=True)
     source = relationship("MemorySourceModel", back_populates="memories")
 
+    supersedes = relationship("MemoryItemModel", remote_side="MemoryItemModel.id")
+
+
+class MemoryAuditLogModel(Base):
+    """
+    Audit log for memory governance (create/edit/approve/delete).
+    """
+
+    __tablename__ = "memory_audit_log"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+    actor_id: Mapped[str] = mapped_column(String(64), default="", index=True)  # user/admin/service
+    user_id: Mapped[str] = mapped_column(String(64), index=True)
+    workspace_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
+
+    action: Mapped[str] = mapped_column(String(32), index=True)  # create/update/approve/reject/delete/hard_delete/use
+    item_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("memory_items.id"), nullable=True, index=True)
+    source_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("memory_sources.id"), nullable=True, index=True)
+
+    detail_json: Mapped[str] = mapped_column(Text, default="{}")
+
+
+class ResearchTrackModel(Base):
+    """
+    User research direction / track.
+
+    Scope boundary for domain memories and paper recommendations.
+    """
+
+    __tablename__ = "research_tracks"
+    __table_args__ = (UniqueConstraint("user_id", "name", name="uq_research_tracks_user_name"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[str] = mapped_column(String(64), index=True)
+
+    name: Mapped[str] = mapped_column(String(128), default="")
+    description: Mapped[str] = mapped_column(Text, default="")
+
+    keywords_json: Mapped[str] = mapped_column(Text, default="[]")
+    venues_json: Mapped[str] = mapped_column(Text, default="[]")
+    methods_json: Mapped[str] = mapped_column(Text, default="[]")
+
+    is_active: Mapped[int] = mapped_column(Integer, default=0, index=True)
+    archived_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+
+    created_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+
+    tasks = relationship("ResearchTaskModel", back_populates="track", cascade="all, delete-orphan")
+    milestones = relationship("ResearchMilestoneModel", back_populates="track", cascade="all, delete-orphan")
+    paper_feedback = relationship("PaperFeedbackModel", back_populates="track", cascade="all, delete-orphan")
+
+
+class ResearchTaskModel(Base):
+    """Track-scoped TODO / progress item."""
+
+    __tablename__ = "research_tasks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    track_id: Mapped[int] = mapped_column(Integer, ForeignKey("research_tracks.id"), index=True)
+
+    title: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(16), default="todo", index=True)  # todo/in_progress/done/blocked
+    priority: Mapped[int] = mapped_column(Integer, default=0, index=True)
+
+    paper_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
+    paper_url: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+
+    metadata_json: Mapped[str] = mapped_column(Text, default="{}")
+
+    created_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    done_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+
+    track = relationship("ResearchTrackModel", back_populates="tasks")
+
+
+class ResearchMilestoneModel(Base):
+    """Track-scoped milestone (proposal/survey/experiments/writing/...)."""
+
+    __tablename__ = "research_milestones"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    track_id: Mapped[int] = mapped_column(Integer, ForeignKey("research_tracks.id"), index=True)
+
+    name: Mapped[str] = mapped_column(String(128), default="")
+    status: Mapped[str] = mapped_column(String(16), default="todo", index=True)  # todo/in_progress/done
+    notes: Mapped[str] = mapped_column(Text, default="")
+
+    due_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    created_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+
+    track = relationship("ResearchTrackModel", back_populates="milestones")
+
+
+class PaperFeedbackModel(Base):
+    """User feedback on recommended/seen papers (track-scoped)."""
+
+    __tablename__ = "paper_feedback"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+
+    user_id: Mapped[str] = mapped_column(String(64), index=True)
+    track_id: Mapped[int] = mapped_column(Integer, ForeignKey("research_tracks.id"), index=True)
+
+    paper_id: Mapped[str] = mapped_column(String(64), index=True)
+    action: Mapped[str] = mapped_column(String(16), index=True)  # like/dislike/skip/save/cite
+
+    weight: Mapped[float] = mapped_column(Float, default=0.0)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    metadata_json: Mapped[str] = mapped_column(Text, default="{}")
+
+    track = relationship("ResearchTrackModel", back_populates="paper_feedback")

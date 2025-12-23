@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, File, UploadFile, Query
+from fastapi import APIRouter, File, UploadFile, Query, HTTPException
 from pydantic import BaseModel, Field
 
 from paperbot.infrastructure.stores.memory_store import SqlAlchemyMemoryStore
@@ -21,9 +21,14 @@ def _sha256_bytes(data: bytes) -> str:
 
 class MemoryItemOut(BaseModel):
     id: Optional[int] = None
+    workspace_id: Optional[str] = None
     kind: str
     content: str
     confidence: float = 0.6
+    status: Optional[str] = None
+    pii_risk: Optional[int] = None
+    use_count: Optional[int] = None
+    last_used_at: Optional[str] = None
     tags: List[str] = []
     evidence: Dict[str, Any] = {}
 
@@ -44,10 +49,12 @@ class IngestResponse(BaseModel):
 async def ingest_memory(
     file: UploadFile = File(...),
     user_id: str = Query("default", description="Memory namespace; use one id per person/team."),
+    workspace_id: Optional[str] = Query(None, description="Optional workspace/project namespace."),
     platform: Optional[str] = Query(None, description="Hint: chatgpt/gemini/claude/..."),
     use_llm: bool = Query(False, description="Use configured LLM to extract memories (falls back on heuristics)."),
     redact: bool = Query(True, description="Redact basic PII (email/phone) before extraction."),
     language_hint: Optional[str] = Query(None, description="Optional hint: zh/en/..."),
+    actor_id: str = Query("system", description="Audit actor id (user/admin/service)."),
 ):
     raw = await file.read()
     filename = file.filename or ""
@@ -66,7 +73,13 @@ async def ingest_memory(
         metadata={**parsed.metadata, "parsed_platform": parsed.platform},
     )
 
-    created, skipped, _ = _store.add_memories(user_id=user_id, memories=candidates, source_id=src.id)
+    created, skipped, _ = _store.add_memories(
+        user_id=user_id,
+        workspace_id=workspace_id,
+        memories=candidates,
+        source_id=src.id,
+        actor_id=actor_id,
+    )
 
     extracted_out: List[MemoryItemOut] = []
     for cand in candidates[:50]:
@@ -100,16 +113,35 @@ class MemoryListResponse(BaseModel):
 
 
 @router.get("/memory/list", response_model=MemoryListResponse)
-def list_memories(user_id: str = "default", limit: int = 100, kind: Optional[str] = None):
-    items = _store.list_memories(user_id=user_id, limit=limit, kind=kind)
+def list_memories(
+    user_id: str = "default",
+    limit: int = 100,
+    kind: Optional[str] = None,
+    workspace_id: Optional[str] = None,
+    include_pending: bool = False,
+    include_deleted: bool = False,
+):
+    items = _store.list_memories(
+        user_id=user_id,
+        limit=limit,
+        kind=kind,
+        workspace_id=workspace_id,
+        include_pending=include_pending,
+        include_deleted=include_deleted,
+    )
     return MemoryListResponse(
         user_id=user_id,
         items=[
             MemoryItemOut(
                 id=i.get("id"),
+                workspace_id=i.get("workspace_id"),
                 kind=i.get("kind") or "fact",
                 content=i.get("content") or "",
                 confidence=float(i.get("confidence") or 0.6),
+                status=i.get("status"),
+                pii_risk=i.get("pii_risk"),
+                use_count=i.get("use_count"),
+                last_used_at=i.get("last_used_at"),
                 tags=i.get("tags") or [],
                 evidence=i.get("evidence") or {},
             )
@@ -120,8 +152,10 @@ def list_memories(user_id: str = "default", limit: int = 100, kind: Optional[str
 
 class ContextRequest(BaseModel):
     user_id: str = "default"
+    workspace_id: Optional[str] = None
     query: str = Field(..., min_length=1)
     limit: int = 8
+    actor_id: str = "system"
 
 
 class ContextResponse(BaseModel):
@@ -133,7 +167,13 @@ class ContextResponse(BaseModel):
 
 @router.post("/memory/context", response_model=ContextResponse)
 def memory_context(req: ContextRequest):
-    items = _store.search_memories(user_id=req.user_id, query=req.query, limit=req.limit)
+    items = _store.search_memories(
+        user_id=req.user_id,
+        workspace_id=req.workspace_id,
+        query=req.query,
+        limit=req.limit,
+    )
+    _store.touch_usage(item_ids=[int(i["id"]) for i in items if i.get("id")], actor_id=req.actor_id)
     cands = [
         MemoryCandidate(
             kind=i.get("kind") or "fact",  # type: ignore[arg-type]
@@ -153,12 +193,72 @@ def memory_context(req: ContextRequest):
         items=[
             MemoryItemOut(
                 id=i.get("id"),
+                workspace_id=i.get("workspace_id"),
                 kind=i.get("kind") or "fact",
                 content=i.get("content") or "",
                 confidence=float(i.get("confidence") or 0.6),
+                status=i.get("status"),
+                pii_risk=i.get("pii_risk"),
+                use_count=i.get("use_count"),
+                last_used_at=i.get("last_used_at"),
                 tags=i.get("tags") or [],
                 evidence=i.get("evidence") or {},
             )
             for i in items
         ],
     )
+
+
+class MemoryItemUpdateRequest(BaseModel):
+    kind: Optional[str] = None
+    content: Optional[str] = None
+    tags: Optional[List[str]] = None
+    status: Optional[str] = None
+    workspace_id: Optional[str] = None
+    actor_id: str = "system"
+
+
+@router.patch("/memory/items/{item_id}", response_model=MemoryItemOut)
+def update_memory_item(user_id: str, item_id: int, body: MemoryItemUpdateRequest):
+    updated = _store.update_item(
+        user_id=user_id,
+        item_id=item_id,
+        actor_id=body.actor_id,
+        content=body.content,
+        kind=body.kind,
+        tags=body.tags,
+        status=body.status,
+        workspace_id=body.workspace_id,
+    )
+    if not updated:
+        raise HTTPException(status_code=404, detail="memory item not found or update failed")
+    return MemoryItemOut(
+        id=updated.get("id"),
+        workspace_id=updated.get("workspace_id"),
+        kind=updated.get("kind") or "fact",
+        content=updated.get("content") or "",
+        confidence=float(updated.get("confidence") or 0.6),
+        status=updated.get("status"),
+        pii_risk=updated.get("pii_risk"),
+        use_count=updated.get("use_count"),
+        last_used_at=updated.get("last_used_at"),
+        tags=updated.get("tags") or [],
+        evidence=updated.get("evidence") or {},
+    )
+
+
+@router.delete("/memory/items/{item_id}")
+def delete_memory_item(
+    user_id: str,
+    item_id: int,
+    actor_id: str = "system",
+    reason: str = "",
+    hard: bool = False,
+):
+    if hard:
+        ok = _store.hard_delete_item(user_id=user_id, item_id=item_id, actor_id=actor_id)
+    else:
+        ok = _store.soft_delete_item(user_id=user_id, item_id=item_id, actor_id=actor_id, reason=reason)
+    if not ok:
+        raise HTTPException(status_code=404, detail="memory item not found")
+    return {"status": "ok"}

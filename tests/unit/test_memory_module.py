@@ -93,3 +93,35 @@ def test_memory_store_dedup_by_user_and_hash(tmp_path):
     assert created1 >= 1
     assert created2 == 0
     assert skipped2 >= 1
+
+
+def test_memory_store_soft_delete_and_status_filter(tmp_path):
+    db_url = f"sqlite:///{tmp_path / 'mem2.db'}"
+    store = SqlAlchemyMemoryStore(db_url=db_url, auto_create_schema=True)
+
+    raw = "User: 我不喜欢太长的回答".encode("utf-8")
+    parsed = parse_chat_log(raw, filename="a.txt")
+    src = store.upsert_source(
+        user_id="u1",
+        platform="test",
+        filename="a.txt",
+        raw_bytes=raw,
+        message_count=len(parsed.messages),
+        conversation_count=0,
+        metadata={},
+    )
+    mems = extract_memories(parsed.messages, use_llm=False)
+    created, _, rows = store.add_memories(user_id="u1", memories=mems, source_id=src.id)
+    assert created >= 1
+
+    # Find the preference item and mark it pending; it should no longer be returned by search_memories.
+    pref = next((r for r in rows if r.kind == "preference"), None)
+    assert pref is not None
+    store.update_item(user_id="u1", item_id=int(pref.id), status="pending")
+    assert not any("太长" in i["content"] for i in store.search_memories(user_id="u1", query="太长", limit=10))
+
+    # Approve then soft-delete; it should stay out of results.
+    store.update_item(user_id="u1", item_id=int(pref.id), status="approved")
+    assert any("太长" in i["content"] for i in store.search_memories(user_id="u1", query="太长", limit=10))
+    store.soft_delete_item(user_id="u1", item_id=int(pref.id), reason="user request")
+    assert not any("太长" in i["content"] for i in store.search_memories(user_id="u1", query="太长", limit=10))

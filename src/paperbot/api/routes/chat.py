@@ -60,6 +60,7 @@ Be concise and helpful. When discussing papers, cite specific details when avail
 
                 store = SqlAlchemyMemoryStore()
                 items = store.search_memories(user_id=request.user_id, query=request.message, limit=8)
+                store.touch_usage(item_ids=[int(i["id"]) for i in items if i.get("id")], actor_id=request.user_id)
                 cands = [
                     MemoryCandidate(
                         kind=i.get("kind") or "fact",  # type: ignore[arg-type]
