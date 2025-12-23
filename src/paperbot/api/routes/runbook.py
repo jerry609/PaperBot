@@ -655,6 +655,102 @@ async def revert_project(body: RevertProjectRequest):
     return {"ok": True, "restored": restored, "deleted": deleted}
 
 
+class HunkPayload(BaseModel):
+    before: str = ""
+    after: str = ""
+    old: str
+    new: str
+
+
+class RevertHunksRequest(BaseModel):
+    snapshot_id: int
+    project_dir: str
+    path: str
+    hunks: List[HunkPayload]
+
+
+@router.post("/runbook/revert-hunks")
+async def revert_hunks(body: RevertHunksRequest):
+    """
+    Revert selected hunks of a file back to the snapshot content.
+
+    This operates purely on text lines. Each hunk includes:
+    - before/after context (unchanged lines)
+    - old/new core (changed region)
+    """
+    root = Path(body.project_dir)
+    if not root.exists() or not root.is_dir():
+        raise HTTPException(status_code=400, detail="project_dir must be an existing directory")
+    if not _allowed_workdir(root):
+        raise HTTPException(status_code=403, detail="project_dir is not allowed")
+
+    snapshot = _load_snapshot(body.snapshot_id)
+    snap_files = snapshot.get("files") or {}
+    if body.path not in snap_files:
+        raise HTTPException(status_code=404, detail="file not found in snapshot")
+
+    target = _resolve_under_root(root, body.path)
+    if not target.exists() or not target.is_file():
+        raise HTTPException(status_code=404, detail="file not found on disk")
+
+    try:
+        current_text = target.read_text(encoding="utf-8")
+    except Exception:
+        current_text = target.read_text(errors="ignore")
+
+    current_lines = current_text.split("\n")
+
+    def split_lines(s: str) -> List[str]:
+        return [] if s == "" else s.split("\n")
+
+    applied = 0
+    failed: List[Dict[str, Any]] = []
+
+    for i, hunk in enumerate(body.hunks):
+        before = split_lines(hunk.before)
+        after = split_lines(hunk.after)
+        old = split_lines(hunk.old)
+        new = split_lines(hunk.new)
+
+        pattern = before + new + after
+        replacement = before + old + after
+
+        def find_once(pat: List[str]) -> Optional[int]:
+            if not pat:
+                return None
+            hits: List[int] = []
+            for start in range(0, len(current_lines) - len(pat) + 1):
+                if current_lines[start : start + len(pat)] == pat:
+                    hits.append(start)
+                    if len(hits) > 1:
+                        break
+            if len(hits) == 1:
+                return hits[0]
+            return None
+
+        start_idx = find_once(pattern)
+        used_pattern = "context"
+        if start_idx is None:
+            # Fall back to matching core only if unique.
+            start_idx = find_once(new)
+            used_pattern = "core"
+
+        if start_idx is None:
+            failed.append({"index": i, "reason": "pattern_not_found_or_not_unique", "used": used_pattern})
+            continue
+
+        if used_pattern == "core":
+            current_lines[start_idx : start_idx + len(new)] = old
+        else:
+            current_lines[start_idx : start_idx + len(pattern)] = replacement
+        applied += 1
+
+    new_text = "\n".join(current_lines)
+    target.write_text(new_text, encoding="utf-8")
+
+    return {"ok": True, "applied": applied, "failed": failed}
+
+
 @router.get("/runbook/runs/{run_id}", response_model=RunStatusResponse)
 async def get_run_status(run_id: str) -> RunStatusResponse:
     with _provider.session() as session:

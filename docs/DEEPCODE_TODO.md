@@ -62,7 +62,7 @@
 - [ ] Diff Staging（必须）
   - [x] 生成 diff（基于“原始快照 vs 当前”）— baseline snapshot + file diff
   - [x] Apply/Reject（按文件）— changed/added/removed 列表 + Revert file / Delete added / Revert all
-  - [ ] Apply/Reject（按 hunk）
+  - [x] Apply/Reject（按 hunk）— hunk 列表 + 预览 + 批量回滚
   - [x] 一键回滚到 baseline（后续扩展到 step 快照）
 
 ### 4) Evidence Timeline：按 Run/Step 组织 + 过滤
@@ -131,3 +131,4 @@
 - 2025-12-22: Add ArtifactModel + Runbook file APIs + Workspace real file explorer (open/save) + panel collapse controls.
 - 2025-12-22: Add baseline snapshot + file diff + revert (Diff Staging v0).
 - 2025-12-22: Add change list + revert-project + delete-added (Diff Staging file-level).
+- 2025-12-22: Add hunk-level revert (compute hunks + batch revert-hunks API).

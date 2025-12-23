@@ -11,6 +11,8 @@ import { cn } from "@/lib/utils"
 import { FileText, Folder, RefreshCw, Save, Search, Camera, GitCompare, Undo2 } from "lucide-react"
 import { DiffModal } from "@/components/studio/DiffViewer"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Checkbox } from "@/components/ui/checkbox"
+import { computeHunks, DiffHunk } from "@/lib/diff"
 
 type FileIndexResponse = {
   project_dir: string
@@ -57,6 +59,11 @@ export function WorkspacePanel() {
   const [changesOpen, setChangesOpen] = useState(false)
   const [changes, setChanges] = useState<ChangesResponse | null>(null)
   const [loadingChanges, setLoadingChanges] = useState(false)
+  const [hunksOpen, setHunksOpen] = useState(false)
+  const [hunksFile, setHunksFile] = useState<string | null>(null)
+  const [hunks, setHunks] = useState<DiffHunk[]>([])
+  const [selectedHunks, setSelectedHunks] = useState<Record<string, boolean>>({})
+  const [loadingHunks, setLoadingHunks] = useState(false)
 
   const filteredFiles = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -129,6 +136,76 @@ export function WorkspacePanel() {
     } catch (e) {
       setLastError(e instanceof Error ? e.message : String(e))
     }
+  }
+
+  const openHunksFor = async (path: string) => {
+    if (!projectDir || !workspaceSnapshotId) return
+    setLastError(null)
+    setLoadingHunks(true)
+    setHunksOpen(true)
+    setHunksFile(path)
+    setHunks([])
+    setSelectedHunks({})
+
+    try {
+      const res = await fetch(
+        `/api/runbook/diff?snapshot_id=${encodeURIComponent(String(workspaceSnapshotId))}&project_dir=${encodeURIComponent(projectDir)}&path=${encodeURIComponent(path)}`
+      )
+      if (!res.ok) {
+        const text = await res.text()
+        throw new Error(`Failed to load diff (${res.status}): ${text}`)
+      }
+      const data = (await res.json()) as { old: string; new: string; path: string }
+      const computed = computeHunks(data.old || "", data.new || "", 2)
+      setHunks(computed)
+      setSelectedHunks(Object.fromEntries(computed.map((h) => [h.id, true])))
+    } catch (e) {
+      setLastError(e instanceof Error ? e.message : String(e))
+      setHunks([])
+      setSelectedHunks({})
+    } finally {
+      setLoadingHunks(false)
+    }
+  }
+
+  const revertSelectedHunks = async () => {
+    if (!projectDir || !workspaceSnapshotId || !hunksFile) return
+    const chosen = hunks.filter((h) => selectedHunks[h.id])
+    if (chosen.length === 0) return
+
+    setLastError(null)
+    try {
+      const res = await fetch(`/api/runbook/revert-hunks`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          snapshot_id: workspaceSnapshotId,
+          project_dir: projectDir,
+          path: hunksFile,
+          hunks: chosen.map((h) => ({ before: h.before, after: h.after, old: h.old, new: h.new })),
+        }),
+      })
+      if (!res.ok) {
+        const text = await res.text()
+        throw new Error(`Failed to revert hunks (${res.status}): ${text}`)
+      }
+      // Reload file if it's opened
+      if (activeFile === hunksFile) {
+        await openFile(hunksFile)
+      }
+      await refreshIndex()
+      await loadChanges()
+      setHunksOpen(false)
+    } catch (e) {
+      setLastError(e instanceof Error ? e.message : String(e))
+    }
+  }
+
+  const previewHunk = async (hunk: DiffHunk) => {
+    setDiffOld(hunk.old)
+    setDiffNew(hunk.new)
+    setDiffFile(hunksFile ? `${hunksFile} • ${hunk.id}` : hunk.id)
+    setDiffOpen(true)
   }
 
   const saveActive = async () => {
@@ -435,19 +512,22 @@ export function WorkspacePanel() {
                       <div className="px-2 py-1 text-xs font-semibold text-muted-foreground">Changed</div>
                       <div className="space-y-1">
                         {changes.changed.map((p) => (
-                          <div key={p} className="flex items-center justify-between gap-2 px-2 py-1 rounded hover:bg-muted/50">
-                            <button className="text-xs font-mono truncate text-left" onClick={() => openFile(p)} title={p}>
-                              {p}
-                            </button>
-                            <div className="flex items-center gap-2 shrink-0">
-                              <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => diffFor(p)}>
-                                Diff
-                              </Button>
-                              <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => revertFileToBaseline(p)}>
-                                Revert
-                              </Button>
+                            <div key={p} className="flex items-center justify-between gap-2 px-2 py-1 rounded hover:bg-muted/50">
+                              <button className="text-xs font-mono truncate text-left" onClick={() => openFile(p)} title={p}>
+                                {p}
+                              </button>
+                              <div className="flex items-center gap-2 shrink-0">
+                                <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => diffFor(p)}>
+                                  Diff
+                                </Button>
+                                <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => openHunksFor(p)}>
+                                  Hunks
+                                </Button>
+                                <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => revertFileToBaseline(p)}>
+                                  Revert
+                                </Button>
+                              </div>
                             </div>
-                          </div>
                         ))}
                       </div>
                     </div>
@@ -499,6 +579,83 @@ export function WorkspacePanel() {
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setChangesOpen(false)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={hunksOpen} onOpenChange={setHunksOpen}>
+        <DialogContent className="sm:max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Revert Hunks</DialogTitle>
+            <DialogDescription>
+              {hunksFile ? <span className="font-mono">{hunksFile}</span> : "—"} • baseline {workspaceSnapshotId ?? "—"}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-xs text-muted-foreground">
+                {loadingHunks ? "Computing hunks…" : `${hunks.length} hunks`}
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 text-xs"
+                  onClick={() => hunksFile ? openHunksFor(hunksFile) : undefined}
+                  disabled={loadingHunks || !hunksFile}
+                >
+                  <RefreshCw className={cn("h-3.5 w-3.5 mr-2", loadingHunks && "animate-spin")} />
+                  Refresh
+                </Button>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  className="h-8 text-xs"
+                  onClick={revertSelectedHunks}
+                  disabled={loadingHunks || hunks.length === 0}
+                >
+                  <Undo2 className="h-3.5 w-3.5 mr-2" />
+                  Revert Selected
+                </Button>
+              </div>
+            </div>
+
+            <ScrollArea className="h-[420px] border rounded-md">
+              <div className="p-2 space-y-1">
+                {hunks.length === 0 ? (
+                  <div className="p-3 text-xs text-muted-foreground">No hunks.</div>
+                ) : (
+                  hunks.map((h) => (
+                    <div key={h.id} className="flex items-center justify-between gap-2 px-2 py-2 rounded hover:bg-muted/50">
+                      <div className="flex items-start gap-2 min-w-0">
+                        <Checkbox
+                          checked={!!selectedHunks[h.id]}
+                          onCheckedChange={(v) => setSelectedHunks((prev) => ({ ...prev, [h.id]: Boolean(v) }))}
+                        />
+                        <div className="min-w-0">
+                          <div className="text-xs font-mono">{h.id}</div>
+                          <div className="text-[11px] text-muted-foreground truncate">
+                            <span className="text-green-600">+{h.stats.added}</span> / <span className="text-red-600">-{h.stats.removed}</span>
+                            {" • "}
+                            {(h.new.split("\n")[0] || "").slice(0, 80)}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => previewHunk(h)}>
+                          Preview
+                        </Button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </ScrollArea>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setHunksOpen(false)}>Close</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
