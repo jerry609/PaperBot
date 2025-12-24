@@ -14,12 +14,11 @@
 - [x] Memory Inbox：`/research/memory/suggest` 写入 `pending`，`/research/memory/inbox` 查看
 - [x] 批量治理：`bulk_moderate / bulk_move / clear_track_memory`
 - [x] Track Router（多特征）：keyword + memory hits + task overlap + (optional) embedding
-- [ ] UI：Inbox 批量审核/迁移/清空确认
-- [ ] 推荐多样性/探索：作者/主题多样性更强、探索比例可配置
+- [x] UI：Inbox 批量审核/迁移/清空确认
+- [x] 推荐多样性/探索：作者/主题多样性更强、探索比例可配置
 
 ## P2（护城河）
 
-- [ ] Track/Profile embedding 预计算与后台更新
-- [ ] 基于阅读进度阶段的推荐策略（survey / writing / rebuttal）
-- [ ] 评测回放：离线 eval + 在线反馈闭环
-
+- [x] Track/Profile embedding 预计算与后台更新
+- [x] 基于阅读进度阶段的推荐策略（survey / writing / rebuttal）
+- [x] 评测回放：离线 eval + 在线反馈闭环

@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -52,8 +53,12 @@ type Paper = {
 }
 
 type ContextPack = {
+  context_run_id?: number | null
   routing: {
     track_id: number | null
+    stage?: string
+    exploration_ratio?: number
+    diversity_strength?: number
     suggestion?: {
       track_id: number
       track_name?: string
@@ -68,6 +73,22 @@ type ContextPack = {
   progress_state?: { tasks?: { title: string; status: string; priority: number }[] }
 }
 
+type EvalSummary = {
+  window_days: number
+  runs: number
+  impressions: number
+  unique_recommended_papers: number
+  repeat_rate: number
+  feedback_on_recommended: Record<string, number>
+  feedback_coverage: number
+  linked_feedback_rows: number
+}
+
+type ConfirmAction =
+  | { type: "bulk_moderate"; status: "approved" | "rejected"; itemIds: number[] }
+  | { type: "bulk_move"; itemIds: number[]; targetTrackId: number }
+  | { type: "clear_track_memory"; trackId: number }
+
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, init)
   if (!res.ok) {
@@ -77,17 +98,29 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>
 }
 
+function clampNumber(value: number, min: number, max: number, fallback: number) {
+  if (!Number.isFinite(value)) return fallback
+  return Math.min(max, Math.max(min, value))
+}
+
 export default function ResearchDashboard() {
   const [userId, setUserId] = useState("default")
   const [tracks, setTracks] = useState<Track[]>([])
   const [activeTrackId, setActiveTrackId] = useState<number | null>(null)
   const [query, setQuery] = useState("")
+  const [stage, setStage] = useState<"auto" | "survey" | "writing" | "rebuttal">("auto")
+  const [explorationRatio, setExplorationRatio] = useState<number | "">("")
+  const [diversityStrength, setDiversityStrength] = useState<number | "">("")
   const [contextPack, setContextPack] = useState<ContextPack | null>(null)
   const [inbox, setInbox] = useState<MemoryItem[]>([])
+  const [evalSummary, setEvalSummary] = useState<EvalSummary | null>(null)
+  const [evalDays, setEvalDays] = useState(30)
   const [suggestText, setSuggestText] = useState("")
   const [selectedInboxIds, setSelectedInboxIds] = useState<Set<number>>(new Set())
   const [moveTargetTrackId, setMoveTargetTrackId] = useState<number | "">("")
   const [createOpen, setCreateOpen] = useState(false)
+  const [confirmOpen, setConfirmOpen] = useState(false)
+  const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(null)
   const [newTrackName, setNewTrackName] = useState("")
   const [newTrackDescription, setNewTrackDescription] = useState("")
   const [newTrackKeywords, setNewTrackKeywords] = useState("")
@@ -95,8 +128,67 @@ export default function ResearchDashboard() {
   const [error, setError] = useState<string | null>(null)
 
   const selectedCount = selectedInboxIds.size
+  const allSelected = inbox.length > 0 && selectedCount === inbox.length
 
   const activeTrack = useMemo(() => tracks.find((t) => t.id === activeTrackId) || null, [tracks, activeTrackId])
+
+  const confirmUi = useMemo(() => {
+    if (!confirmAction) return null
+
+    if (confirmAction.type === "bulk_moderate") {
+      const verb = confirmAction.status === "approved" ? "Approve" : "Reject"
+      return {
+        title: `${verb} ${confirmAction.itemIds.length} memory item(s)?`,
+        description:
+          confirmAction.status === "approved"
+            ? "Approved items become eligible for context injection and routing signals."
+            : "Rejected items will remain stored but not used for context injection.",
+        confirmLabel: verb,
+        destructive: confirmAction.status === "rejected",
+      }
+    }
+
+    if (confirmAction.type === "bulk_move") {
+      const targetName = tracks.find((t) => t.id === confirmAction.targetTrackId)?.name || "target track"
+      return {
+        title: `Move ${confirmAction.itemIds.length} item(s) to “${targetName}”?`,
+        description: "This changes the memory scope to the selected track.",
+        confirmLabel: "Move",
+        destructive: false,
+      }
+    }
+
+    const trackName = tracks.find((t) => t.id === confirmAction.trackId)?.name || "active track"
+    return {
+      title: `Clear all memories for “${trackName}”?`,
+      description:
+        "This performs a soft delete of all memory items scoped to the active track. You can re-ingest or re-create memories later.",
+      confirmLabel: "Clear",
+      destructive: true,
+    }
+  }, [confirmAction, tracks])
+
+  function openConfirm(action: ConfirmAction) {
+    setConfirmAction(action)
+    setConfirmOpen(true)
+  }
+
+  function toggleSelected(id: number, nextChecked: boolean) {
+    setSelectedInboxIds((prev) => {
+      const next = new Set(prev)
+      if (nextChecked) next.add(id)
+      else next.delete(id)
+      return next
+    })
+  }
+
+  function toggleSelectAll() {
+    if (allSelected) {
+      setSelectedInboxIds(new Set())
+      return
+    }
+    setSelectedInboxIds(new Set(inbox.map((m) => m.id)))
+  }
 
   async function refreshTracks(): Promise<number | null> {
     const data = await fetchJson<{ tracks: Track[] }>(`/api/research/tracks?user_id=${encodeURIComponent(userId)}`)
@@ -115,6 +207,13 @@ export default function ResearchDashboard() {
     const data = await fetchJson<{ items: MemoryItem[] }>(`/api/research/memory/inbox?${qs.toString()}`)
     setInbox(data.items || [])
     setSelectedInboxIds(new Set())
+  }
+
+  async function refreshEval() {
+    const qs = new URLSearchParams({ user_id: userId, days: String(evalDays) })
+    if (activeTrackId) qs.set("track_id", String(activeTrackId))
+    const data = await fetchJson<{ summary: EvalSummary }>(`/api/research/evals/summary?${qs.toString()}`)
+    setEvalSummary(data.summary)
   }
 
   useEffect(() => {
@@ -146,7 +245,7 @@ export default function ResearchDashboard() {
     try {
       const suggestion = contextPack?.routing?.suggestion
       const activateTrackId = activateSuggestion ? suggestion?.track_id : null
-      const body = {
+      const body: Record<string, unknown> = {
         user_id: userId,
         query,
         paper_limit: 8,
@@ -154,6 +253,13 @@ export default function ResearchDashboard() {
         offline: false,
         include_cross_track: false,
         activate_track_id: activateTrackId,
+        stage,
+      }
+      if (explorationRatio !== "") {
+        body.exploration_ratio = clampNumber(explorationRatio, 0, 0.5, 0.15)
+      }
+      if (diversityStrength !== "") {
+        body.diversity_strength = clampNumber(diversityStrength, 0, 2, 0.55)
       }
       const data = await fetchJson<{ context_pack: ContextPack }>(`/api/research/context`, {
         method: "POST",
@@ -196,8 +302,9 @@ export default function ResearchDashboard() {
     }
   }
 
-  async function bulkModerate(status: "approved" | "rejected") {
-    if (selectedInboxIds.size === 0) return
+  async function bulkModerate(status: "approved" | "rejected", itemIds?: number[]) {
+    const ids = itemIds ?? Array.from(selectedInboxIds)
+    if (ids.length === 0) return
     setLoading(true)
     setError(null)
     try {
@@ -205,7 +312,7 @@ export default function ResearchDashboard() {
         method: "POST",
         body: JSON.stringify({
           user_id: userId,
-          item_ids: Array.from(selectedInboxIds),
+          item_ids: ids,
           status,
         }),
         headers: { "Content-Type": "application/json" },
@@ -218,9 +325,9 @@ export default function ResearchDashboard() {
     }
   }
 
-  async function bulkMoveToTrack() {
-    if (selectedInboxIds.size === 0) return
-    if (moveTargetTrackId === "" || !moveTargetTrackId) return
+  async function bulkMoveToTrack(targetTrackId: number, itemIds?: number[]) {
+    const ids = itemIds ?? Array.from(selectedInboxIds)
+    if (ids.length === 0) return
     setLoading(true)
     setError(null)
     try {
@@ -228,9 +335,9 @@ export default function ResearchDashboard() {
         method: "POST",
         body: JSON.stringify({
           user_id: userId,
-          item_ids: Array.from(selectedInboxIds),
+          item_ids: ids,
           scope_type: "track",
-          scope_id: String(moveTargetTrackId),
+          scope_id: String(targetTrackId),
         }),
         headers: { "Content-Type": "application/json" },
       })
@@ -276,10 +383,11 @@ export default function ResearchDashboard() {
     }
   }
 
-  async function sendFeedback(paperId: string, action: string) {
+  async function sendFeedback(paperId: string, action: string, rank?: number) {
     setLoading(true)
     setError(null)
     try {
+      const contextRunId = contextPack?.context_run_id ?? null
       await fetchJson(`/api/research/papers/feedback`, {
         method: "POST",
         body: JSON.stringify({
@@ -288,6 +396,8 @@ export default function ResearchDashboard() {
           paper_id: paperId,
           action,
           weight: 0.0,
+          context_run_id: contextRunId,
+          context_rank: typeof rank === "number" ? rank : undefined,
           metadata: {},
         }),
         headers: { "Content-Type": "application/json" },
@@ -300,18 +410,15 @@ export default function ResearchDashboard() {
     }
   }
 
-  async function clearTrackMemory() {
-    if (!activeTrackId) return
-    const ok = window.confirm("Clear all memories in this track? (soft delete)")
-    if (!ok) return
+  async function clearTrackMemory(trackId: number) {
     setLoading(true)
     setError(null)
     try {
       await fetchJson(
-        `/api/research/tracks/${activeTrackId}/memory/clear?user_id=${encodeURIComponent(userId)}&confirm=true`,
+        `/api/research/tracks/${trackId}/memory/clear?user_id=${encodeURIComponent(userId)}&confirm=true`,
         { method: "POST", body: "{}", headers: { "Content-Type": "application/json" } },
       )
-      await refreshInbox(activeTrackId)
+      await refreshInbox(trackId)
     } catch (e) {
       setError(String(e))
     } finally {
@@ -319,8 +426,66 @@ export default function ResearchDashboard() {
     }
   }
 
+  async function runConfirmAction() {
+    const action = confirmAction
+    if (!action) return
+
+    if (action.type === "bulk_moderate") {
+      await bulkModerate(action.status, action.itemIds)
+      return
+    }
+
+    if (action.type === "bulk_move") {
+      await bulkMoveToTrack(action.targetTrackId, action.itemIds)
+      return
+    }
+
+    await clearTrackMemory(action.trackId)
+  }
+
   return (
     <div className="space-y-6">
+      <Dialog
+        open={confirmOpen}
+        onOpenChange={(open) => {
+          setConfirmOpen(open)
+          if (!open) setConfirmAction(null)
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{confirmUi?.title || "Confirm"}</DialogTitle>
+            <DialogDescription>{confirmUi?.description}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setConfirmOpen(false)
+                setConfirmAction(null)
+              }}
+              disabled={loading}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant={confirmUi?.destructive ? "destructive" : "default"}
+              onClick={async () => {
+                setConfirmOpen(false)
+                try {
+                  await runConfirmAction()
+                } finally {
+                  setConfirmAction(null)
+                }
+              }}
+              disabled={loading}
+            >
+              {confirmUi?.confirmLabel || "Confirm"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-3xl font-bold tracking-tight">Research</h2>
@@ -430,7 +595,11 @@ export default function ResearchDashboard() {
                 </div>
               ))}
             </div>
-            <Button variant="outline" onClick={() => clearTrackMemory()} disabled={loading || !activeTrackId}>
+            <Button
+              variant="outline"
+              onClick={() => activeTrackId && openConfirm({ type: "clear_track_memory", trackId: activeTrackId })}
+              disabled={loading || !activeTrackId}
+            >
               Clear Track Memory
             </Button>
           </CardContent>
@@ -445,6 +614,46 @@ export default function ResearchDashboard() {
               <div className="space-y-2">
                 <Label>Query</Label>
                 <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="e.g. reranking for RAG" />
+              </div>
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                <div className="space-y-1">
+                  <Label>Stage</Label>
+                  <select
+                    className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+                    value={stage}
+                    onChange={(e) => setStage(e.target.value as typeof stage)}
+                    disabled={loading}
+                  >
+                    <option value="auto">Auto (infer from progress)</option>
+                    <option value="survey">Survey</option>
+                    <option value="writing">Writing</option>
+                    <option value="rebuttal">Rebuttal</option>
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <Label>Exploration ratio (optional, 0–0.5)</Label>
+                  <Input
+                    type="number"
+                    value={explorationRatio}
+                    min={0}
+                    max={0.5}
+                    step={0.05}
+                    placeholder="(auto)"
+                    onChange={(e) => setExplorationRatio(e.target.value === "" ? "" : Number(e.target.value))}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label>Diversity strength (optional, 0–2)</Label>
+                  <Input
+                    type="number"
+                    value={diversityStrength}
+                    min={0}
+                    max={2}
+                    step={0.05}
+                    placeholder="(auto)"
+                    onChange={(e) => setDiversityStrength(e.target.value === "" ? "" : Number(e.target.value))}
+                  />
+                </div>
               </div>
               <div className="flex gap-2">
                 <Button onClick={() => buildContext(false)} disabled={loading || !query.trim()}>
@@ -483,10 +692,11 @@ export default function ResearchDashboard() {
           </Card>
 
           <Tabs defaultValue="papers">
-            <TabsList>
-              <TabsTrigger value="papers">Recommendations</TabsTrigger>
-              <TabsTrigger value="inbox">Memory Inbox</TabsTrigger>
-            </TabsList>
+              <TabsList>
+                <TabsTrigger value="papers">Recommendations</TabsTrigger>
+                <TabsTrigger value="inbox">Memory Inbox</TabsTrigger>
+                <TabsTrigger value="evals">Evals</TabsTrigger>
+              </TabsList>
 
             <TabsContent value="papers">
               <Card>
@@ -501,7 +711,7 @@ export default function ResearchDashboard() {
                   ) : (
                     <ScrollArea className="h-[420px] pr-4">
                       <div className="space-y-3">
-                        {contextPack.paper_recommendations.map((p) => (
+                        {contextPack.paper_recommendations.map((p, idx) => (
                           <div key={p.paper_id} className="rounded-md border p-3 space-y-2">
                             <div className="flex items-start justify-between gap-3">
                               <div className="space-y-1">
@@ -522,13 +732,23 @@ export default function ResearchDashboard() {
                                 ) : null}
                               </div>
                               <div className="flex gap-2">
-                                <Button size="sm" variant="secondary" onClick={() => sendFeedback(p.paper_id, "like")} disabled={loading}>
+                                <Button
+                                  size="sm"
+                                  variant="secondary"
+                                  onClick={() => sendFeedback(p.paper_id, "like", idx)}
+                                  disabled={loading}
+                                >
                                   Like
                                 </Button>
-                                <Button size="sm" variant="outline" onClick={() => sendFeedback(p.paper_id, "save")} disabled={loading}>
+                                <Button size="sm" variant="outline" onClick={() => sendFeedback(p.paper_id, "save", idx)} disabled={loading}>
                                   Save
                                 </Button>
-                                <Button size="sm" variant="destructive" onClick={() => sendFeedback(p.paper_id, "dislike")} disabled={loading}>
+                                <Button
+                                  size="sm"
+                                  variant="destructive"
+                                  onClick={() => sendFeedback(p.paper_id, "dislike", idx)}
+                                  disabled={loading}
+                                >
                                   Dislike
                                 </Button>
                               </div>
@@ -565,11 +785,22 @@ export default function ResearchDashboard() {
                       Selected: {selectedCount}
                     </div>
                     <div className="flex gap-2">
-                      <Button variant="secondary" onClick={() => bulkModerate("approved")} disabled={loading || selectedCount === 0}>
+                      <Button
+                        variant="secondary"
+                        onClick={() => openConfirm({ type: "bulk_moderate", status: "approved", itemIds: Array.from(selectedInboxIds) })}
+                        disabled={loading || selectedCount === 0}
+                      >
                         Approve Selected
                       </Button>
-                      <Button variant="destructive" onClick={() => bulkModerate("rejected")} disabled={loading || selectedCount === 0}>
+                      <Button
+                        variant="destructive"
+                        onClick={() => openConfirm({ type: "bulk_moderate", status: "rejected", itemIds: Array.from(selectedInboxIds) })}
+                        disabled={loading || selectedCount === 0}
+                      >
                         Reject Selected
+                      </Button>
+                      <Button variant="outline" onClick={() => toggleSelectAll()} disabled={loading || inbox.length === 0}>
+                        {allSelected ? "Clear Selection" : "Select All"}
                       </Button>
                       <Button variant="outline" onClick={() => refreshInbox(activeTrackId)} disabled={loading || !activeTrackId}>
                         Refresh Inbox
@@ -597,7 +828,13 @@ export default function ResearchDashboard() {
                       </select>
                       <Button
                         variant="outline"
-                        onClick={() => bulkMoveToTrack()}
+                        onClick={() =>
+                          openConfirm({
+                            type: "bulk_move",
+                            itemIds: Array.from(selectedInboxIds),
+                            targetTrackId: Number(moveTargetTrackId),
+                          })
+                        }
                         disabled={loading || selectedCount === 0 || moveTargetTrackId === ""}
                       >
                         Move
@@ -614,29 +851,31 @@ export default function ResearchDashboard() {
                           const checked = selectedInboxIds.has(m.id)
                           return (
                             <div key={m.id} className="flex items-start justify-between gap-3 rounded-md border p-3">
-                              <div className="space-y-1">
-                                <button
-                                  type="button"
-                                  className="text-left font-medium underline-offset-4 hover:underline"
-                                  onClick={() => {
-                                    const next = new Set(selectedInboxIds)
-                                    if (next.has(m.id)) next.delete(m.id)
-                                    else next.add(m.id)
-                                    setSelectedInboxIds(next)
-                                  }}
-                                >
-                                  {checked ? "✓ " : ""}
-                                  {m.kind}
-                                </button>
-                                <div className="text-sm">{m.content}</div>
+                              <div className="flex items-start gap-3">
+                                <Checkbox
+                                  checked={checked}
+                                  onCheckedChange={(next) => toggleSelected(m.id, next === true)}
+                                  disabled={loading}
+                                  aria-label={`Select memory item ${m.id}`}
+                                />
+                                <div className="space-y-1">
+                                  <button
+                                    type="button"
+                                    className="text-left font-medium underline-offset-4 hover:underline"
+                                    onClick={() => toggleSelected(m.id, !checked)}
+                                    disabled={loading}
+                                  >
+                                    {m.kind}
+                                  </button>
+                                  <div className="text-sm">{m.content}</div>
+                                </div>
                               </div>
                               <div className="flex gap-2">
                                 <Button
                                   size="sm"
                                   variant="secondary"
                                   onClick={() => {
-                                    setSelectedInboxIds(new Set([m.id]))
-                                    bulkModerate("approved")
+                                    bulkModerate("approved", [m.id])
                                   }}
                                   disabled={loading}
                                 >
@@ -646,8 +885,7 @@ export default function ResearchDashboard() {
                                   size="sm"
                                   variant="destructive"
                                   onClick={() => {
-                                    setSelectedInboxIds(new Set([m.id]))
-                                    bulkModerate("rejected")
+                                    bulkModerate("rejected", [m.id])
                                   }}
                                   disabled={loading}
                                 >
@@ -659,6 +897,74 @@ export default function ResearchDashboard() {
                         })}
                       </div>
                     </ScrollArea>
+                  )}
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            <TabsContent value="evals">
+              <Card>
+                <CardHeader>
+                  <div className="flex items-center justify-between gap-3">
+                    <CardTitle>Eval Summary</CardTitle>
+                    <div className="flex items-center gap-2">
+                      <Input
+                        type="number"
+                        className="w-[120px]"
+                        min={1}
+                        max={365}
+                        value={evalDays}
+                        onChange={(e) => setEvalDays(Number(e.target.value))}
+                        disabled={loading}
+                      />
+                      <Button
+                        variant="outline"
+                        onClick={() => refreshEval().catch((e) => setError(String(e)))}
+                        disabled={loading}
+                      >
+                        Refresh
+                      </Button>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className="text-sm text-muted-foreground">
+                    Track: <span className="font-medium">{activeTrack?.name || "None"}</span>
+                    {" · "}
+                    Window: {evalDays} days
+                  </div>
+
+                  {!evalSummary ? (
+                    <Button variant="secondary" onClick={() => refreshEval().catch((e) => setError(String(e)))} disabled={loading}>
+                      Load Summary
+                    </Button>
+                  ) : (
+                    <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                      <div className="rounded-md border p-3 space-y-1">
+                        <div className="text-sm font-medium">Volume</div>
+                        <div className="text-sm text-muted-foreground">
+                          Runs: {evalSummary.runs} · Impressions: {evalSummary.impressions}
+                        </div>
+                        <div className="text-sm text-muted-foreground">
+                          Unique papers: {evalSummary.unique_recommended_papers} · Repeat rate:{" "}
+                          {(evalSummary.repeat_rate * 100).toFixed(1)}%
+                        </div>
+                      </div>
+                      <div className="rounded-md border p-3 space-y-1">
+                        <div className="text-sm font-medium">Feedback</div>
+                        <div className="text-sm text-muted-foreground">
+                          Coverage: {(evalSummary.feedback_coverage * 100).toFixed(1)}% · Linked rows:{" "}
+                          {evalSummary.linked_feedback_rows}
+                        </div>
+                        <div className="flex flex-wrap gap-1 pt-1">
+                          {Object.entries(evalSummary.feedback_on_recommended || {}).map(([k, v]) => (
+                            <Badge key={k} variant="outline" className="text-[10px]">
+                              {k}:{v}
+                            </Badge>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
                   )}
                 </CardContent>
               </Card>

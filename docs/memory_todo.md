@@ -27,21 +27,21 @@
 ## P1：数据模型与存储增强（2–5 天）
 
 ### 1.1 表结构补齐（在现有 `memory_sources` / `memory_items` 上扩展）
-- [ ] `memory_items` 增加字段
-  - [ ] `workspace_id`（可空，默认 user 全局）
-  - [ ] `status`：`pending/approved/rejected/superseded`
-  - [ ] `supersedes_id`（修订链）
-  - [ ] `expires_at`（可选）
-  - [ ] `last_used_at` / `use_count`（用于排序与衰减）
-  - [ ] `pii_risk`（0/1/2 或枚举）
-- [ ] 新增 `memory_audit_log`（审计轨迹）
+- [x] `memory_items` 增加字段
+  - [x] `workspace_id`（可空，默认 user 全局）
+  - [x] `status`：`pending/approved/rejected/superseded`
+  - [x] `supersedes_id`（修订链）
+  - [x] `expires_at`（可选）
+  - [x] `last_used_at` / `use_count`（用于排序与衰减）
+  - [x] `pii_risk`（0/1/2 或枚举）
+- [x] 新增 `memory_audit_log`（审计轨迹）
   - [ ] who/when/what（创建、编辑、删除、审批、回滚）
 - [ ] 新增（可选）`memory_embeddings`
   - [ ] `content_hash` → `embedding`（BLOB/JSON）、`model`, `dim`, `created_at`
 
 ### 1.2 数据生命周期/合规
 - [ ] 明确保留期（sources 与 items 分开）
-- [ ] 支持“硬删除”与“软删除”（软删用于审计，硬删用于合规）
+- [x] 支持“硬删除”与“软删除”（软删用于审计，硬删用于合规）
 - [ ] 可选：静态加密（SQLite 文件级或字段级）
 
 ---
@@ -88,11 +88,11 @@
 
 ## P4：治理（Governance）与数据控制（3–8 天）
 
-- [ ] 记忆条目 CRUD API
-  - [ ] 列表/搜索
-  - [ ] 创建/编辑（人工修正）
-  - [ ] 审批/驳回（pending → approved/rejected）
-  - [ ] 删除（软删/硬删）
+- [x] 记忆条目 CRUD API
+  - [x] 列表/搜索
+  - [x] 创建/编辑（人工修正）
+  - [x] 审批/驳回（pending → approved/rejected）
+  - [x] 删除（软删/硬删）
 - [ ] “训练使用/共享”元数据字段（不是替代厂商开关，但用于你自己的系统）
   - [ ] `allow_training`（默认 false）
   - [ ] `allow_team_share`（默认 false）
@@ -106,7 +106,7 @@
 ## P5：检索与注入（Retrieval/Injection）（4–10 天）
 
 ### 5.1 检索：从 keyword → hybrid
-- [ ] 基线：SQLite `LIKE` + tags（已做）
+- [x] 基线：SQLite `LIKE` + tags（已做）
 - [ ] 升级 1：SQLite FTS5（BM25）
   - [ ] `content`、`tags`、`project` 字段入索引
 - [ ] 升级 2：Embeddings（可选）
@@ -150,4 +150,3 @@
 - [ ] 观测与告警
   - [ ] 注入的 memory ids 日志化（便于追责/回放）
   - [ ] 删除后仍被检索到：硬告警
-

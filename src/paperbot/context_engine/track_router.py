@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import hashlib
 import math
 import re
-import hashlib
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
-from paperbot.context_engine.embeddings import EmbeddingConfig, EmbeddingProvider, try_build_default_embedding_provider
+from paperbot.context_engine.embeddings import (
+    EmbeddingConfig,
+    EmbeddingProvider,
+    try_build_default_embedding_provider,
+)
 from paperbot.infrastructure.stores.memory_store import SqlAlchemyMemoryStore
 from paperbot.infrastructure.stores.research_store import SqlAlchemyResearchStore
 
@@ -42,7 +46,7 @@ def _track_keyword_score(query: str, track: Dict[str, Any]) -> int:
         ("methods", 2),
         ("venues", 1),
     ]:
-        for term in (track.get(bucket) or []):
+        for term in track.get(bucket) or []:
             tt = str(term or "").strip().lower()
             if not tt:
                 continue
@@ -54,7 +58,9 @@ def _track_keyword_score(query: str, track: Dict[str, Any]) -> int:
     return score
 
 
-def _track_profile_text(track: Dict[str, Any], *, memories: List[Dict[str, Any]], tasks: List[Dict[str, Any]]) -> str:
+def _track_profile_text(
+    track: Dict[str, Any], *, memories: List[Dict[str, Any]], tasks: List[Dict[str, Any]]
+) -> str:
     parts: List[str] = []
     parts.append(f"Track: {track.get('name') or ''}".strip())
     if track.get("description"):
@@ -64,14 +70,21 @@ def _track_profile_text(track: Dict[str, Any], *, memories: List[Dict[str, Any]]
         if vals:
             parts.append(f"{label}: {', '.join(vals[:32])}")
     if tasks:
-        titles = [str(t.get('title') or '').strip() for t in tasks if str(t.get('title') or '').strip()]
+        titles = [
+            str(t.get("title") or "").strip() for t in tasks if str(t.get("title") or "").strip()
+        ]
         if titles:
             parts.append("Tasks: " + " | ".join(titles[:10]))
     if memories:
-        mem_texts = [str(m.get("content") or "").strip() for m in memories if str(m.get("content") or "").strip()]
+        mem_texts = [
+            str(m.get("content") or "").strip()
+            for m in memories
+            if str(m.get("content") or "").strip()
+        ]
         if mem_texts:
             parts.append("Notes: " + " | ".join(mem_texts[:12]))
     return "\n".join(parts).strip()
+
 
 def _sha256_text(text: str) -> str:
     return hashlib.sha256((text or "").encode("utf-8")).hexdigest()
@@ -82,9 +95,11 @@ class TrackRouterConfig:
     use_embeddings: bool = True
     embedding_model: str = "text-embedding-3-small"
     min_switch_score: float = 0.10  # combined score threshold to suggest switching
-    min_margin: float = 0.03        # how much better than active to suggest
+    min_margin: float = 0.03  # how much better than active to suggest
     per_track_memory_hits: int = 3
     per_track_task_titles: int = 5
+    embedding_profile_memory_limit: int = 12
+    embedding_profile_task_limit: int = 8
 
 
 class TrackRouter:
@@ -103,6 +118,127 @@ class TrackRouter:
             config=EmbeddingConfig(model=self.config.embedding_model)
         )
 
+    def _profile_context(
+        self, *, user_id: str, track_id: int
+    ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        """
+        Stable per-track context used for profile embeddings.
+
+        Intentionally does NOT depend on the query; query-dependent signals are separate features
+        (keyword overlap, memory hits, task overlap).
+        """
+        tasks = self.research_store.list_tasks(
+            user_id=user_id, track_id=track_id, limit=self.config.embedding_profile_task_limit
+        )
+        memories = self.memory_store.list_memories(
+            user_id=user_id,
+            limit=self.config.embedding_profile_memory_limit,
+            scope_type="track",
+            scope_id=str(track_id),
+            include_pending=False,
+            include_deleted=False,
+        )
+        return memories, tasks
+
+    def ensure_track_embedding(
+        self, *, user_id: str, track: Dict[str, Any]
+    ) -> Optional[List[float]]:
+        if not self.config.use_embeddings or self.embedding_provider is None:
+            return None
+        track_id = int(track.get("id") or track.get("track_id") or 0)
+        if track_id <= 0:
+            return None
+
+        memories, tasks = self._profile_context(user_id=user_id, track_id=track_id)
+        profile_text = _track_profile_text(track, memories=memories, tasks=tasks)
+        profile_hash = _sha256_text(profile_text)
+
+        cached = self.research_store.get_track_embedding(
+            track_id=track_id, model=self.config.embedding_model
+        )
+        if (
+            cached
+            and profile_hash
+            and cached.get("text_hash") == profile_hash
+            and cached.get("embedding")
+        ):
+            return cached.get("embedding")
+
+        try:
+            vec = self.embedding_provider.embed(profile_text)
+        except Exception:
+            vec = None
+        if not vec:
+            return None
+
+        self.research_store.upsert_track_embedding(
+            track_id=track_id,
+            model=self.config.embedding_model,
+            profile_text=profile_text,
+            embedding=vec,
+        )
+        return vec
+
+    def precompute_track_embeddings(
+        self, *, user_id: str, track_ids: Optional[List[int]] = None, limit: int = 200
+    ) -> Dict[str, int]:
+        """
+        Best-effort embedding precompute, intended for background refresh.
+
+        Returns counts: {"considered": n, "updated": n, "skipped": n, "failed": n}
+        """
+        if not self.config.use_embeddings or self.embedding_provider is None:
+            return {"considered": 0, "updated": 0, "skipped": 0, "failed": 0}
+
+        tracks = self.research_store.list_tracks(
+            user_id=user_id, include_archived=False, limit=limit
+        )
+        if track_ids:
+            allow = {int(x) for x in track_ids if int(x) > 0}
+            tracks = [t for t in tracks if int(t.get("id") or 0) in allow]
+
+        considered = 0
+        updated = 0
+        skipped = 0
+        failed = 0
+
+        for t in tracks:
+            track_id = int(t.get("id") or 0)
+            if track_id <= 0:
+                continue
+            considered += 1
+            try:
+                memories, tasks = self._profile_context(user_id=user_id, track_id=track_id)
+                profile_text = _track_profile_text(t, memories=memories, tasks=tasks)
+                profile_hash = _sha256_text(profile_text)
+                cached = self.research_store.get_track_embedding(
+                    track_id=track_id, model=self.config.embedding_model
+                )
+                if (
+                    cached
+                    and profile_hash
+                    and cached.get("text_hash") == profile_hash
+                    and cached.get("embedding")
+                ):
+                    skipped += 1
+                    continue
+
+                vec = self.embedding_provider.embed(profile_text)
+                if not vec:
+                    failed += 1
+                    continue
+                self.research_store.upsert_track_embedding(
+                    track_id=track_id,
+                    model=self.config.embedding_model,
+                    profile_text=profile_text,
+                    embedding=vec,
+                )
+                updated += 1
+            except Exception:
+                failed += 1
+
+        return {"considered": considered, "updated": updated, "skipped": skipped, "failed": failed}
+
     def suggest_track(
         self,
         *,
@@ -111,7 +247,9 @@ class TrackRouter:
         active_track_id: Optional[int],
         limit: int = 50,
     ) -> Optional[Dict[str, Any]]:
-        tracks = self.research_store.list_tracks(user_id=user_id, include_archived=False, limit=limit)
+        tracks = self.research_store.list_tracks(
+            user_id=user_id, include_archived=False, limit=limit
+        )
         if not tracks:
             return None
 
@@ -155,27 +293,10 @@ class TrackRouter:
             task_text = " ".join(str(x.get("title") or "") for x in tasks)
             task_score = float(len(_tokenize(task_text) & _tokenize(query)))
 
-            # Feature 4: embedding similarity between query and track profile
+            # Feature 4: embedding similarity between query and stable track profile
             emb_sim = 0.0
             if query_embedding is not None:
-                profile_text = _track_profile_text(t, memories=mem_hits, tasks=tasks)
-                profile_hash = _sha256_text(profile_text)
-                cached = self.research_store.get_track_embedding(track_id=track_id, model=self.config.embedding_model)
-                vec: Optional[List[float]] = None
-                if cached and profile_hash and cached.get("text_hash") == profile_hash and cached.get("embedding"):
-                    vec = cached.get("embedding")
-                else:
-                    try:
-                        vec = self.embedding_provider.embed(profile_text)
-                    except Exception:
-                        vec = None
-                    if vec:
-                        self.research_store.upsert_track_embedding(
-                            track_id=track_id,
-                            model=self.config.embedding_model,
-                            profile_text=profile_text,
-                            embedding=vec,
-                        )
+                vec = self.ensure_track_embedding(user_id=user_id, track=t)
                 if vec:
                     emb_sim = float(_cosine(query_embedding, vec))
 

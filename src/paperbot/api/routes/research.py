@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from paperbot.context_engine import ContextEngine, ContextEngineConfig
@@ -16,6 +16,29 @@ router = APIRouter()
 
 _research_store = SqlAlchemyResearchStore()
 _memory_store = SqlAlchemyMemoryStore()
+_track_router = TrackRouter(research_store=_research_store, memory_store=_memory_store)
+
+
+def _schedule_embedding_precompute(
+    background_tasks: Optional[BackgroundTasks],
+    *,
+    user_id: str,
+    track_ids: List[int],
+) -> None:
+    if background_tasks is None:
+        return
+
+    ids = sorted({int(x) for x in track_ids if int(x) > 0})
+    if not ids:
+        return
+
+    def _run() -> None:
+        try:
+            _track_router.precompute_track_embeddings(user_id=user_id, track_ids=ids)
+        except Exception:
+            return
+
+    background_tasks.add_task(_run)
 
 
 class TrackCreateRequest(BaseModel):
@@ -33,7 +56,7 @@ class TrackResponse(BaseModel):
 
 
 @router.post("/research/tracks", response_model=TrackResponse)
-def create_track(req: TrackCreateRequest):
+def create_track(req: TrackCreateRequest, background_tasks: BackgroundTasks):
     track = _research_store.create_track(
         user_id=req.user_id,
         name=req.name,
@@ -42,6 +65,9 @@ def create_track(req: TrackCreateRequest):
         venues=req.venues,
         methods=req.methods,
         activate=req.activate,
+    )
+    _schedule_embedding_precompute(
+        background_tasks, user_id=req.user_id, track_ids=[int(track.get("id") or 0)]
     )
     return TrackResponse(track=track)
 
@@ -57,7 +83,9 @@ def list_tracks(
     include_archived: bool = Query(False),
     limit: int = Query(100, ge=1, le=500),
 ):
-    tracks = _research_store.list_tracks(user_id=user_id, include_archived=include_archived, limit=limit)
+    tracks = _research_store.list_tracks(
+        user_id=user_id, include_archived=include_archived, limit=limit
+    )
     return TrackListResponse(user_id=user_id, tracks=tracks)
 
 
@@ -70,10 +98,11 @@ def get_active_track(user_id: str = "default"):
 
 
 @router.post("/research/tracks/{track_id}/activate", response_model=TrackResponse)
-def activate_track(track_id: int, user_id: str = "default"):
+def activate_track(track_id: int, background_tasks: BackgroundTasks, user_id: str = "default"):
     track = _research_store.activate_track(user_id=user_id, track_id=track_id)
     if not track:
         raise HTTPException(status_code=404, detail="Track not found")
+    _schedule_embedding_precompute(background_tasks, user_id=user_id, track_ids=[track_id])
     return TrackResponse(track=track)
 
 
@@ -92,7 +121,7 @@ class TaskResponse(BaseModel):
 
 
 @router.post("/research/tracks/{track_id}/tasks", response_model=TaskResponse)
-def add_task(track_id: int, req: TaskCreateRequest):
+def add_task(track_id: int, req: TaskCreateRequest, background_tasks: BackgroundTasks):
     task = _research_store.add_task(
         user_id=req.user_id,
         track_id=track_id,
@@ -105,6 +134,7 @@ def add_task(track_id: int, req: TaskCreateRequest):
     )
     if not task:
         raise HTTPException(status_code=404, detail="Track not found")
+    _schedule_embedding_precompute(background_tasks, user_id=req.user_id, track_ids=[track_id])
     return TaskResponse(task=task)
 
 
@@ -121,7 +151,9 @@ def list_tasks(
     status: Optional[str] = None,
     limit: int = Query(100, ge=1, le=500),
 ):
-    tasks = _research_store.list_tasks(user_id=user_id, track_id=track_id, status=status, limit=limit)
+    tasks = _research_store.list_tasks(
+        user_id=user_id, track_id=track_id, status=status, limit=limit
+    )
     return TaskListResponse(user_id=user_id, track_id=track_id, tasks=tasks)
 
 
@@ -141,7 +173,9 @@ class MemoryItemResponse(BaseModel):
     item: Dict[str, Any]
 
 
-def _resolve_track_scope_id(user_id: str, scope_type: str, scope_id: Optional[str]) -> Optional[str]:
+def _resolve_track_scope_id(
+    user_id: str, scope_type: str, scope_id: Optional[str]
+) -> Optional[str]:
     if scope_type != "track":
         return scope_id
     if scope_id:
@@ -153,7 +187,7 @@ def _resolve_track_scope_id(user_id: str, scope_type: str, scope_id: Optional[st
 
 
 @router.post("/research/memory/items", response_model=MemoryItemResponse)
-def create_memory_item(req: MemoryItemCreateRequest):
+def create_memory_item(req: MemoryItemCreateRequest, background_tasks: BackgroundTasks):
     scope_type = (req.scope_type or "global").strip() or "global"
     scope_id = _resolve_track_scope_id(req.user_id, scope_type, req.scope_id)
     if scope_type == "track" and not scope_id:
@@ -171,7 +205,13 @@ def create_memory_item(req: MemoryItemCreateRequest):
     )
     created, _, rows = _memory_store.add_memories(user_id=req.user_id, memories=[cand])
     if created <= 0 or not rows:
-        raise HTTPException(status_code=409, detail="Duplicate memory item (same scope/kind/content)")
+        raise HTTPException(
+            status_code=409, detail="Duplicate memory item (same scope/kind/content)"
+        )
+    if scope_type == "track":
+        _schedule_embedding_precompute(
+            background_tasks, user_id=req.user_id, track_ids=[int(scope_id or 0)]
+        )
     return MemoryItemResponse(item=SqlAlchemyMemoryStore._row_to_dict(rows[0]))
 
 
@@ -244,14 +284,16 @@ class MemorySuggestResponse(BaseModel):
 
 
 @router.post("/research/memory/suggest", response_model=MemorySuggestResponse)
-def suggest_memories(req: MemorySuggestRequest):
+def suggest_memories(req: MemorySuggestRequest, background_tasks: BackgroundTasks):
     scope_type = (req.scope_type or "global").strip() or "global"
     scope_id = _resolve_track_scope_id(req.user_id, scope_type, req.scope_id)
     if scope_type == "track" and not scope_id:
         raise HTTPException(status_code=400, detail="scope_id missing and no active track")
 
     msgs = [NormalizedMessage(role="user", content=req.text)]
-    extracted = extract_memories(msgs, use_llm=req.use_llm, redact=req.redact, language_hint=req.language_hint)
+    extracted = extract_memories(
+        msgs, use_llm=req.use_llm, redact=req.redact, language_hint=req.language_hint
+    )
     pending = [
         MemoryCandidate(
             kind=m.kind,
@@ -266,6 +308,10 @@ def suggest_memories(req: MemorySuggestRequest):
         for m in extracted
     ]
     created, skipped, rows = _memory_store.add_memories(user_id=req.user_id, memories=pending)
+    if scope_type == "track":
+        _schedule_embedding_precompute(
+            background_tasks, user_id=req.user_id, track_ids=[int(scope_id or 0)]
+        )
     return MemorySuggestResponse(
         user_id=req.user_id,
         created=created,
@@ -314,13 +360,19 @@ class BulkModerateResponse(BaseModel):
 
 
 @router.post("/research/memory/bulk_moderate", response_model=BulkModerateResponse)
-def bulk_moderate(req: BulkModerateRequest):
+def bulk_moderate(req: BulkModerateRequest, background_tasks: BackgroundTasks):
     updated = _memory_store.bulk_update_items(
         user_id=req.user_id,
         item_ids=req.item_ids,
         status=req.status,
         actor_id="user",
     )
+    affected_tracks = [
+        int(i.get("scope_id") or 0)
+        for i in updated
+        if i.get("scope_type") == "track" and i.get("scope_id")
+    ]
+    _schedule_embedding_precompute(background_tasks, user_id=req.user_id, track_ids=affected_tracks)
     return BulkModerateResponse(user_id=req.user_id, updated=updated)
 
 
@@ -337,7 +389,7 @@ class BulkMoveResponse(BaseModel):
 
 
 @router.post("/research/memory/bulk_move", response_model=BulkMoveResponse)
-def bulk_move(req: BulkMoveRequest):
+def bulk_move(req: BulkMoveRequest, background_tasks: BackgroundTasks):
     scope_type = (req.scope_type or "global").strip() or "global"
     scope_id = _resolve_track_scope_id(req.user_id, scope_type, req.scope_id)
     if scope_type == "track" and not scope_id:
@@ -349,6 +401,12 @@ def bulk_move(req: BulkMoveRequest):
         scope_id=scope_id,
         actor_id="user",
     )
+    affected_tracks = [
+        int(i.get("scope_id") or 0)
+        for i in updated
+        if i.get("scope_type") == "track" and i.get("scope_id")
+    ]
+    _schedule_embedding_precompute(background_tasks, user_id=req.user_id, track_ids=affected_tracks)
     return BulkMoveResponse(user_id=req.user_id, updated=updated)
 
 
@@ -359,7 +417,12 @@ class ClearTrackMemoryResponse(BaseModel):
 
 
 @router.post("/research/tracks/{track_id}/memory/clear", response_model=ClearTrackMemoryResponse)
-def clear_track_memory(track_id: int, user_id: str = "default", confirm: bool = Query(False)):
+def clear_track_memory(
+    track_id: int,
+    background_tasks: BackgroundTasks,
+    user_id: str = "default",
+    confirm: bool = Query(False),
+):
     if not confirm:
         raise HTTPException(status_code=400, detail="confirm=true required")
     deleted = _memory_store.soft_delete_by_scope(
@@ -369,7 +432,42 @@ def clear_track_memory(track_id: int, user_id: str = "default", confirm: bool = 
         actor_id="user",
         reason="clear_track_memory",
     )
+    _schedule_embedding_precompute(background_tasks, user_id=user_id, track_ids=[track_id])
     return ClearTrackMemoryResponse(user_id=user_id, track_id=track_id, deleted_count=deleted)
+
+
+class PrecomputeEmbeddingsRequest(BaseModel):
+    user_id: str = "default"
+    track_ids: Optional[List[int]] = None
+
+
+class PrecomputeEmbeddingsResponse(BaseModel):
+    user_id: str
+    result: Dict[str, int]
+
+
+@router.post("/research/embeddings/precompute", response_model=PrecomputeEmbeddingsResponse)
+def precompute_embeddings(req: PrecomputeEmbeddingsRequest):
+    result = _track_router.precompute_track_embeddings(
+        user_id=req.user_id, track_ids=req.track_ids or None
+    )
+    return PrecomputeEmbeddingsResponse(user_id=req.user_id, result=result)
+
+
+class EvalSummaryResponse(BaseModel):
+    user_id: str
+    track_id: Optional[int] = None
+    summary: Dict[str, Any]
+
+
+@router.get("/research/evals/summary", response_model=EvalSummaryResponse)
+def eval_summary(
+    user_id: str = "default",
+    track_id: Optional[int] = None,
+    days: int = Query(30, ge=1, le=365),
+):
+    summary = _research_store.summarize_eval(user_id=user_id, track_id=track_id, days=days)
+    return EvalSummaryResponse(user_id=user_id, track_id=track_id, summary=summary)
 
 
 class PaperFeedbackRequest(BaseModel):
@@ -379,6 +477,8 @@ class PaperFeedbackRequest(BaseModel):
     action: str = Field(..., min_length=1)  # like/dislike/skip/save/cite
     weight: float = 0.0
     metadata: Dict[str, Any] = {}
+    context_run_id: Optional[int] = None
+    context_rank: Optional[int] = None
 
 
 class PaperFeedbackResponse(BaseModel):
@@ -394,13 +494,19 @@ def add_paper_feedback(req: PaperFeedbackRequest):
             raise HTTPException(status_code=400, detail="track_id missing and no active track")
         track_id = int(active["id"])
 
+    meta: Dict[str, Any] = dict(req.metadata or {})
+    if req.context_run_id is not None:
+        meta["context_run_id"] = int(req.context_run_id)
+    if req.context_rank is not None:
+        meta["context_rank"] = int(req.context_rank)
+
     fb = _research_store.add_paper_feedback(
         user_id=req.user_id,
         track_id=track_id,
         paper_id=req.paper_id,
         action=req.action,
         weight=req.weight,
-        metadata=req.metadata,
+        metadata=meta,
     )
     if not fb:
         raise HTTPException(status_code=404, detail="Track not found")
@@ -420,7 +526,9 @@ def list_paper_feedback(
     action: Optional[str] = None,
     limit: int = Query(200, ge=1, le=1000),
 ):
-    items = _research_store.list_paper_feedback(user_id=user_id, track_id=track_id, action=action, limit=limit)
+    items = _research_store.list_paper_feedback(
+        user_id=user_id, track_id=track_id, action=action, limit=limit
+    )
     return PaperFeedbackListResponse(user_id=user_id, track_id=track_id, items=items)
 
 
@@ -438,8 +546,9 @@ def suggest_track(req: RouterSuggestRequest):
     active = _research_store.get_active_track(user_id=req.user_id)
     if not active:
         return RouterSuggestResponse(suggestion=None)
-    router = TrackRouter(research_store=_research_store, memory_store=_memory_store)
-    suggestion = router.suggest_track(user_id=req.user_id, query=req.query, active_track_id=int(active["id"]))
+    suggestion = _track_router.suggest_track(
+        user_id=req.user_id, query=req.query, active_track_id=int(active["id"])
+    )
     return RouterSuggestResponse(suggestion=suggestion)
 
 
@@ -452,6 +561,9 @@ class ContextRequest(BaseModel):
     paper_limit: int = Field(8, ge=0, le=50)
     offline: bool = False
     include_cross_track: bool = False
+    stage: str = "auto"  # auto/survey/writing/rebuttal
+    exploration_ratio: Optional[float] = Field(default=None, ge=0.0, le=0.5)
+    diversity_strength: Optional[float] = Field(default=None, ge=0.0, le=2.0)
 
 
 class ContextResponse(BaseModel):
@@ -461,17 +573,27 @@ class ContextResponse(BaseModel):
 @router.post("/research/context", response_model=ContextResponse)
 async def build_context(req: ContextRequest):
     if req.activate_track_id is not None:
-        activated = _research_store.activate_track(user_id=req.user_id, track_id=req.activate_track_id)
+        activated = _research_store.activate_track(
+            user_id=req.user_id, track_id=req.activate_track_id
+        )
         if not activated:
             raise HTTPException(status_code=404, detail="Track not found")
 
     engine = ContextEngine(
         research_store=_research_store,
         memory_store=_memory_store,
+        track_router=_track_router,
         config=ContextEngineConfig(
             memory_limit=req.memory_limit,
             paper_limit=req.paper_limit,
             offline=req.offline,
+            stage=req.stage,
+            exploration_ratio=(
+                float(req.exploration_ratio) if req.exploration_ratio is not None else None
+            ),
+            diversity_strength=(
+                float(req.diversity_strength) if req.diversity_strength is not None else None
+            ),
         ),
     )
     try:

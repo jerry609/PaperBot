@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import desc, select
@@ -11,6 +11,8 @@ from sqlalchemy.exc import IntegrityError
 from paperbot.infrastructure.stores.models import (
     Base,
     PaperFeedbackModel,
+    PaperImpressionModel,
+    ResearchContextRunModel,
     ResearchMilestoneModel,
     ResearchTaskModel,
     ResearchTrackEmbeddingModel,
@@ -28,7 +30,9 @@ def _sha256_text(text: str) -> str:
 
 
 def _dump_list(values: Optional[List[str]]) -> str:
-    return json.dumps([str(v).strip() for v in (values or []) if str(v).strip()], ensure_ascii=False)
+    return json.dumps(
+        [str(v).strip() for v in (values or []) if str(v).strip()], ensure_ascii=False
+    )
 
 
 def _load_list(raw: str) -> List[str]:
@@ -49,6 +53,7 @@ class SqlAlchemyResearchStore:
     - research_tracks, research_tasks, research_milestones
     - paper_feedback (like/dislike/save/...)
     - research_track_embeddings (optional embedding cache)
+    - research_context_runs, paper_impressions (eval/replay)
     """
 
     def __init__(self, db_url: Optional[str] = None, *, auto_create_schema: bool = True):
@@ -92,7 +97,9 @@ class SqlAlchemyResearchStore:
                     )
                 ).scalar_one()
                 if activate:
-                    return self.activate_track(user_id=user_id, track_id=existing.id) or self._track_to_dict(existing)
+                    return self.activate_track(
+                        user_id=user_id, track_id=existing.id
+                    ) or self._track_to_dict(existing)
                 return self._track_to_dict(existing)
 
             if activate:
@@ -106,19 +113,25 @@ class SqlAlchemyResearchStore:
             session.refresh(track)
             return self._track_to_dict(track)
 
-    def list_tracks(self, *, user_id: str, include_archived: bool = False, limit: int = 100) -> List[Dict[str, Any]]:
+    def list_tracks(
+        self, *, user_id: str, include_archived: bool = False, limit: int = 100
+    ) -> List[Dict[str, Any]]:
         with self._provider.session() as session:
             stmt = select(ResearchTrackModel).where(ResearchTrackModel.user_id == user_id)
             if not include_archived:
                 stmt = stmt.where(ResearchTrackModel.archived_at.is_(None))
-            stmt = stmt.order_by(desc(ResearchTrackModel.is_active), desc(ResearchTrackModel.updated_at)).limit(limit)
+            stmt = stmt.order_by(
+                desc(ResearchTrackModel.is_active), desc(ResearchTrackModel.updated_at)
+            ).limit(limit)
             tracks = session.execute(stmt).scalars().all()
             return [self._track_to_dict(t) for t in tracks]
 
     def get_track(self, *, user_id: str, track_id: int) -> Optional[Dict[str, Any]]:
         with self._provider.session() as session:
             row = session.execute(
-                select(ResearchTrackModel).where(ResearchTrackModel.user_id == user_id, ResearchTrackModel.id == track_id)
+                select(ResearchTrackModel).where(
+                    ResearchTrackModel.user_id == user_id, ResearchTrackModel.id == track_id
+                )
             ).scalar_one_or_none()
             return self._track_to_dict(row) if row else None
 
@@ -236,7 +249,9 @@ class SqlAlchemyResearchStore:
             stmt = select(ResearchTaskModel).where(ResearchTaskModel.track_id == track_id)
             if status:
                 stmt = stmt.where(ResearchTaskModel.status == status)
-            stmt = stmt.order_by(desc(ResearchTaskModel.priority), desc(ResearchTaskModel.updated_at)).limit(limit)
+            stmt = stmt.order_by(
+                desc(ResearchTaskModel.priority), desc(ResearchTaskModel.updated_at)
+            ).limit(limit)
             rows = session.execute(stmt).scalars().all()
             return [self._task_to_dict(r) for r in rows]
 
@@ -371,11 +386,170 @@ class SqlAlchemyResearchStore:
         limit: int = 500,
     ) -> set[str]:
         ids: set[str] = set()
-        for row in self.list_paper_feedback(user_id=user_id, track_id=track_id, action=action, limit=limit):
+        for row in self.list_paper_feedback(
+            user_id=user_id, track_id=track_id, action=action, limit=limit
+        ):
             pid = str(row.get("paper_id") or "").strip()
             if pid:
                 ids.add(pid)
         return ids
+
+    def create_context_run(
+        self,
+        *,
+        user_id: str,
+        track_id: Optional[int],
+        query: str,
+        merged_query: str,
+        stage: str,
+        exploration_ratio: float,
+        diversity_strength: float,
+        routing: Dict[str, Any],
+        papers: List[Dict[str, Any]],
+        paper_scores: Dict[str, float],
+        paper_reasons: Dict[str, List[str]],
+    ) -> Optional[Dict[str, Any]]:
+        now = _utcnow()
+        with self._provider.session() as session:
+            run = ResearchContextRunModel(
+                user_id=user_id,
+                track_id=int(track_id) if track_id is not None else None,
+                query=(query or "").strip(),
+                merged_query=(merged_query or "").strip(),
+                stage=(stage or "auto").strip() or "auto",
+                exploration_ratio=float(exploration_ratio or 0.0),
+                diversity_strength=float(diversity_strength or 0.0),
+                routing_json=json.dumps(routing or {}, ensure_ascii=False),
+                created_at=now,
+            )
+            session.add(run)
+            session.flush()
+
+            for idx, p in enumerate(papers or []):
+                pid = str(p.get("paper_id") or "").strip()
+                if not pid:
+                    continue
+                reasons = paper_reasons.get(pid) or []
+                session.add(
+                    PaperImpressionModel(
+                        run_id=int(run.id),
+                        user_id=user_id,
+                        track_id=int(track_id) if track_id is not None else None,
+                        paper_id=pid,
+                        rank=int(idx),
+                        score=float(paper_scores.get(pid) or 0.0),
+                        reasons_json=json.dumps(reasons, ensure_ascii=False),
+                        created_at=now,
+                    )
+                )
+
+            session.commit()
+            session.refresh(run)
+            return {
+                "id": int(run.id),
+                "user_id": run.user_id,
+                "track_id": run.track_id,
+                "stage": run.stage,
+                "created_at": run.created_at.isoformat() if run.created_at else None,
+            }
+
+    def summarize_eval(
+        self,
+        *,
+        user_id: str,
+        track_id: Optional[int] = None,
+        days: int = 30,
+        limit: int = 2000,
+    ) -> Dict[str, Any]:
+        now = _utcnow()
+        since = now.replace(microsecond=0) - timedelta(days=int(days or 30))
+
+        with self._provider.session() as session:
+            runs_stmt = select(ResearchContextRunModel).where(
+                ResearchContextRunModel.user_id == user_id,
+                ResearchContextRunModel.created_at >= since,
+            )
+            if track_id is not None:
+                runs_stmt = runs_stmt.where(ResearchContextRunModel.track_id == int(track_id))
+            runs = (
+                session.execute(
+                    runs_stmt.order_by(desc(ResearchContextRunModel.created_at)).limit(int(limit))
+                )
+                .scalars()
+                .all()
+            )
+            run_ids = [int(r.id) for r in runs]
+
+            impressions: List[PaperImpressionModel] = []
+            if run_ids:
+                imp_stmt = select(PaperImpressionModel).where(
+                    PaperImpressionModel.run_id.in_(run_ids)
+                )
+                impressions = session.execute(imp_stmt).scalars().all()
+
+            fb_stmt = select(PaperFeedbackModel).where(
+                PaperFeedbackModel.user_id == user_id,
+                PaperFeedbackModel.ts >= since,
+            )
+            if track_id is not None:
+                fb_stmt = fb_stmt.where(PaperFeedbackModel.track_id == int(track_id))
+            feedback = session.execute(fb_stmt).scalars().all()
+
+        total_runs = len(runs)
+        total_impressions = len(impressions)
+        unique_papers = len({(int(i.track_id or 0), i.paper_id) for i in impressions})
+        repeat_rate = 0.0
+        if total_impressions > 0:
+            repeat_rate = max(0.0, 1.0 - (unique_papers / float(total_impressions)))
+
+        # Map most recent feedback per (track, paper) within the window.
+        fb_by_paper: Dict[tuple[int, str], str] = {}
+        linked_feedback = 0
+        for f in feedback:
+            key = (int(f.track_id or 0), str(f.paper_id or "").strip())
+            if not key[1]:
+                continue
+            fb_by_paper[key] = str(f.action or "").strip()
+            try:
+                meta = json.loads(f.metadata_json or "{}")
+                if isinstance(meta, dict) and meta.get("context_run_id"):
+                    linked_feedback += 1
+            except Exception:
+                pass
+
+        recommended_keys = {
+            (int(i.track_id or 0), str(i.paper_id or "").strip())
+            for i in impressions
+            if str(i.paper_id or "").strip()
+        }
+        feedback_on_recommended: Dict[str, int] = {
+            "like": 0,
+            "save": 0,
+            "dislike": 0,
+            "skip": 0,
+            "cite": 0,
+            "other": 0,
+        }
+        for key in recommended_keys:
+            action = fb_by_paper.get(key)
+            if not action:
+                continue
+            if action in feedback_on_recommended:
+                feedback_on_recommended[action] += 1
+            else:
+                feedback_on_recommended["other"] += 1
+
+        denom = max(1, len(recommended_keys))
+        return {
+            "window_days": int(days or 30),
+            "runs": total_runs,
+            "impressions": total_impressions,
+            "unique_recommended_papers": len(recommended_keys),
+            "repeat_rate": float(repeat_rate),
+            "feedback_on_recommended": feedback_on_recommended,
+            "feedback_coverage": float(sum(feedback_on_recommended.values())) / float(denom),
+            "linked_feedback_rows": int(linked_feedback),
+        }
 
     def get_track_embedding(self, *, track_id: int, model: str) -> Optional[Dict[str, Any]]:
         with self._provider.session() as session:
@@ -522,4 +696,3 @@ class SqlAlchemyResearchStore:
             "ts": f.ts.isoformat() if f.ts else None,
             "metadata": metadata,
         }
-

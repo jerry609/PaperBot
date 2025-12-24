@@ -18,12 +18,16 @@ class AgentRunModel(Base):
     run_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     workflow: Mapped[str] = mapped_column(String(64), default="", index=True)
 
-    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    started_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
     ended_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     status: Mapped[str] = mapped_column(String(32), default="running")
 
     # Sandbox-specific fields
-    executor_type: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)  # e2b/docker/local
+    executor_type: Mapped[Optional[str]] = mapped_column(
+        String(32), nullable=True
+    )  # e2b/docker/local
     timeout_seconds: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     paper_url: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
     paper_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
@@ -32,8 +36,12 @@ class AgentRunModel(Base):
 
     events = relationship("AgentEventModel", back_populates="run", cascade="all, delete-orphan")
     logs = relationship("ExecutionLogModel", back_populates="run", cascade="all, delete-orphan")
-    metrics = relationship("ResourceMetricModel", back_populates="run", cascade="all, delete-orphan")
-    runbook_steps = relationship("RunbookStepModel", back_populates="run", cascade="all, delete-orphan")
+    metrics = relationship(
+        "ResourceMetricModel", back_populates="run", cascade="all, delete-orphan"
+    )
+    runbook_steps = relationship(
+        "RunbookStepModel", back_populates="run", cascade="all, delete-orphan"
+    )
     artifacts = relationship("ArtifactModel", back_populates="run", cascade="all, delete-orphan")
 
     def set_metadata(self, data: Dict[str, Any]) -> None:
@@ -103,6 +111,7 @@ class AgentEventModel(Base):
 
 class ExecutionLogModel(Base):
     """Execution log entries for sandbox runs"""
+
     __tablename__ = "execution_logs"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -111,13 +120,16 @@ class ExecutionLogModel(Base):
     ts: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     level: Mapped[str] = mapped_column(String(16), default="info")  # debug/info/warning/error
     message: Mapped[str] = mapped_column(Text, default="")
-    source: Mapped[str] = mapped_column(String(32), default="system")  # stdout/stderr/executor/system
+    source: Mapped[str] = mapped_column(
+        String(32), default="system"
+    )  # stdout/stderr/executor/system
 
     run = relationship("AgentRunModel", back_populates="logs")
 
 
 class ResourceMetricModel(Base):
     """Resource usage metrics for sandbox runs"""
+
     __tablename__ = "resource_metrics"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -138,16 +150,25 @@ class RunbookStepModel(Base):
     Logs and metrics are stored separately (execution_logs/resource_metrics) keyed by run_id.
     This table provides step-level lifecycle and configuration for long-term evidence tracking.
     """
+
     __tablename__ = "runbook_steps"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     run_id: Mapped[str] = mapped_column(String(64), ForeignKey("agent_runs.run_id"), index=True)
 
-    step_name: Mapped[str] = mapped_column(String(64), index=True)  # smoke/install/data/train/eval/report/...
-    status: Mapped[str] = mapped_column(String(32), default="running")  # running/success/failed/error
-    executor_type: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)  # docker/e2b/ssh_docker/...
+    step_name: Mapped[str] = mapped_column(
+        String(64), index=True
+    )  # smoke/install/data/train/eval/report/...
+    status: Mapped[str] = mapped_column(
+        String(32), default="running"
+    )  # running/success/failed/error
+    executor_type: Mapped[Optional[str]] = mapped_column(
+        String(32), nullable=True
+    )  # docker/e2b/ssh_docker/...
 
-    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    started_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
     ended_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
     command: Mapped[str] = mapped_column(Text, default="")
@@ -165,18 +186,23 @@ class ArtifactModel(Base):
     This table stores references (paths/URIs) to outputs produced during a run/step:
     - logs (raw/filtered), metrics snapshots, reports, figures, exported evidence packs, etc.
     """
+
     __tablename__ = "artifacts"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     run_id: Mapped[str] = mapped_column(String(64), ForeignKey("agent_runs.run_id"), index=True)
-    step_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("runbook_steps.id"), nullable=True, index=True)
+    step_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("runbook_steps.id"), nullable=True, index=True
+    )
 
     type: Mapped[str] = mapped_column(String(32), index=True)  # log/metric/report/file/zip/...
     path_or_uri: Mapped[str] = mapped_column(Text, default="")
     mime: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     size_bytes: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     sha256: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    created_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    created_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
     metadata_json: Mapped[str] = mapped_column(Text, default="{}")
 
     run = relationship("AgentRunModel", back_populates="artifacts")
@@ -204,7 +230,9 @@ class MemorySourceModel(Base):
     conversation_count: Mapped[int] = mapped_column(Integer, default=0)
     metadata_json: Mapped[str] = mapped_column(Text, default="{}")
 
-    memories = relationship("MemoryItemModel", back_populates="source", cascade="all, delete-orphan")
+    memories = relationship(
+        "MemoryItemModel", back_populates="source", cascade="all, delete-orphan"
+    )
 
 
 class MemoryItemModel(Base):
@@ -221,17 +249,27 @@ class MemoryItemModel(Base):
 
     user_id: Mapped[str] = mapped_column(String(64), index=True)
     workspace_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
-    scope_type: Mapped[str] = mapped_column(String(16), default="global", index=True)  # global/track/project/paper
+    scope_type: Mapped[str] = mapped_column(
+        String(16), default="global", index=True
+    )  # global/track/project/paper
     scope_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
     kind: Mapped[str] = mapped_column(String(32), default="fact", index=True)
     content: Mapped[str] = mapped_column(Text, default="")
     content_hash: Mapped[str] = mapped_column(String(64), index=True)
     confidence: Mapped[float] = mapped_column(Float, default=0.6)
 
-    status: Mapped[str] = mapped_column(String(16), default="approved", index=True)  # pending/approved/rejected/superseded
-    supersedes_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("memory_items.id"), nullable=True, index=True)
-    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
-    last_used_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    status: Mapped[str] = mapped_column(
+        String(16), default="approved", index=True
+    )  # pending/approved/rejected/superseded
+    supersedes_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("memory_items.id"), nullable=True, index=True
+    )
+    expires_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    last_used_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
     use_count: Mapped[int] = mapped_column(Integer, default=0)
     pii_risk: Mapped[int] = mapped_column(Integer, default=0)  # 0=unknown/low,1=maybe,2=high
 
@@ -241,10 +279,14 @@ class MemoryItemModel(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
 
-    deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
     deleted_reason: Mapped[str] = mapped_column(Text, default="")
 
-    source_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("memory_sources.id"), nullable=True, index=True)
+    source_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("memory_sources.id"), nullable=True, index=True
+    )
     source = relationship("MemorySourceModel", back_populates="memories")
 
     supersedes = relationship("MemoryItemModel", remote_side="MemoryItemModel.id")
@@ -264,9 +306,15 @@ class MemoryAuditLogModel(Base):
     user_id: Mapped[str] = mapped_column(String(64), index=True)
     workspace_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
 
-    action: Mapped[str] = mapped_column(String(32), index=True)  # create/update/approve/reject/delete/hard_delete/use
-    item_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("memory_items.id"), nullable=True, index=True)
-    source_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("memory_sources.id"), nullable=True, index=True)
+    action: Mapped[str] = mapped_column(
+        String(32), index=True
+    )  # create/update/approve/reject/delete/hard_delete/use
+    item_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("memory_items.id"), nullable=True, index=True
+    )
+    source_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("memory_sources.id"), nullable=True, index=True
+    )
 
     detail_json: Mapped[str] = mapped_column(Text, default="{}")
 
@@ -292,15 +340,27 @@ class ResearchTrackModel(Base):
     methods_json: Mapped[str] = mapped_column(Text, default="[]")
 
     is_active: Mapped[int] = mapped_column(Integer, default=0, index=True)
-    archived_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    archived_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
 
-    created_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
-    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    created_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    updated_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
 
     tasks = relationship("ResearchTaskModel", back_populates="track", cascade="all, delete-orphan")
-    milestones = relationship("ResearchMilestoneModel", back_populates="track", cascade="all, delete-orphan")
-    paper_feedback = relationship("PaperFeedbackModel", back_populates="track", cascade="all, delete-orphan")
-    embeddings = relationship("ResearchTrackEmbeddingModel", back_populates="track", cascade="all, delete-orphan")
+    milestones = relationship(
+        "ResearchMilestoneModel", back_populates="track", cascade="all, delete-orphan"
+    )
+    paper_feedback = relationship(
+        "PaperFeedbackModel", back_populates="track", cascade="all, delete-orphan"
+    )
+    embeddings = relationship(
+        "ResearchTrackEmbeddingModel", back_populates="track", cascade="all, delete-orphan"
+    )
 
 
 class ResearchTaskModel(Base):
@@ -312,7 +372,9 @@ class ResearchTaskModel(Base):
     track_id: Mapped[int] = mapped_column(Integer, ForeignKey("research_tracks.id"), index=True)
 
     title: Mapped[str] = mapped_column(Text, default="")
-    status: Mapped[str] = mapped_column(String(16), default="todo", index=True)  # todo/in_progress/done/blocked
+    status: Mapped[str] = mapped_column(
+        String(16), default="todo", index=True
+    )  # todo/in_progress/done/blocked
     priority: Mapped[int] = mapped_column(Integer, default=0, index=True)
 
     paper_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
@@ -320,9 +382,15 @@ class ResearchTaskModel(Base):
 
     metadata_json: Mapped[str] = mapped_column(Text, default="{}")
 
-    created_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
-    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
-    done_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    created_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    updated_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    done_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
 
     track = relationship("ResearchTrackModel", back_populates="tasks")
 
@@ -336,12 +404,20 @@ class ResearchMilestoneModel(Base):
     track_id: Mapped[int] = mapped_column(Integer, ForeignKey("research_tracks.id"), index=True)
 
     name: Mapped[str] = mapped_column(String(128), default="")
-    status: Mapped[str] = mapped_column(String(16), default="todo", index=True)  # todo/in_progress/done
+    status: Mapped[str] = mapped_column(
+        String(16), default="todo", index=True
+    )  # todo/in_progress/done
     notes: Mapped[str] = mapped_column(Text, default="")
 
-    due_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
-    created_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
-    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    due_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    created_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    updated_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
 
     track = relationship("ResearchTrackModel", back_populates="milestones")
 
@@ -383,3 +459,61 @@ class ResearchTrackEmbeddingModel(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
 
     track = relationship("ResearchTrackModel", back_populates="embeddings")
+
+
+class ResearchContextRunModel(Base):
+    """
+    One context build event (routing + recommendations), used for replay/eval.
+    """
+
+    __tablename__ = "research_context_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+
+    user_id: Mapped[str] = mapped_column(String(64), index=True)
+    track_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("research_tracks.id"), nullable=True, index=True
+    )
+
+    query: Mapped[str] = mapped_column(Text, default="")
+    merged_query: Mapped[str] = mapped_column(Text, default="")
+    stage: Mapped[str] = mapped_column(String(16), default="auto", index=True)
+
+    exploration_ratio: Mapped[float] = mapped_column(Float, default=0.0)
+    diversity_strength: Mapped[float] = mapped_column(Float, default=0.0)
+
+    routing_json: Mapped[str] = mapped_column(Text, default="{}")
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+    impressions = relationship(
+        "PaperImpressionModel", back_populates="run", cascade="all, delete-orphan"
+    )
+    track = relationship("ResearchTrackModel")
+
+
+class PaperImpressionModel(Base):
+    """
+    A paper shown to the user as part of a recommendation list.
+    """
+
+    __tablename__ = "paper_impressions"
+    __table_args__ = (UniqueConstraint("run_id", "paper_id", name="uq_paper_impression_run_paper"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[int] = mapped_column(Integer, ForeignKey("research_context_runs.id"), index=True)
+
+    user_id: Mapped[str] = mapped_column(String(64), index=True)
+    track_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("research_tracks.id"), nullable=True, index=True
+    )
+
+    paper_id: Mapped[str] = mapped_column(String(64), index=True)
+    rank: Mapped[int] = mapped_column(Integer, default=0, index=True)
+    score: Mapped[float] = mapped_column(Float, default=0.0)
+    reasons_json: Mapped[str] = mapped_column(Text, default="[]")
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+    run = relationship("ResearchContextRunModel", back_populates="impressions")
+    track = relationship("ResearchTrackModel")
