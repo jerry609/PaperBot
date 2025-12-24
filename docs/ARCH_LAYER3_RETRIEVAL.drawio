@@ -1,0 +1,91 @@
+<mxfile host="app.diagrams.net" modified="2025-12-24T00:00:00.000Z" agent="Codex" version="24.7.8" editor="draw.io">
+  <diagram id="layer3-retrieval" name="Layer 3 - Retrieval (Online)">
+    <mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1400" pageHeight="900" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="t" value="Layer 3 · 检索层（Online Retrieval）" style="rounded=0;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;fontStyle=1;fontSize=16;fillColor=#ffffff;strokeColor=#ffffff;" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="1320" height="40" as="geometry" />
+        </mxCell>
+
+        <mxCell id="lane" value="Query → Track Router → Retrieve (paper/memory) → Filter/Dedupe → Rerank/Diversity → ContextPack" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8fafc;strokeColor=#94a3b8;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="80" width="1320" height="740" as="geometry" />
+        </mxCell>
+
+        <mxCell id="q" value="用户 Query" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ecfeff;strokeColor=#06b6d4;" vertex="1" parent="1">
+          <mxGeometry x="90" y="140" width="160" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="qu" value="Query Understanding（可选）&#10;- rewrite / intent&#10;- 记录事件/回放" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eef2ff;strokeColor=#6366f1;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="280" y="140" width="230" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="tr" value="Track Router&#10;`context_engine/track_router.py`&#10;keyword + mem hits + tasks + embedding" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eef2ff;strokeColor=#6366f1;" vertex="1" parent="1">
+          <mxGeometry x="540" y="140" width="280" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="mem" value="Memory Search&#10;SqlAlchemyMemoryStore.search/list&#10;only approved" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eef2ff;strokeColor=#6366f1;" vertex="1" parent="1">
+          <mxGeometry x="850" y="120" width="230" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="paper" value="Paper Retrieval&#10;Online: SemanticScholarSearch&#10;Offline: paper library (future)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eef2ff;strokeColor=#6366f1;" vertex="1" parent="1">
+          <mxGeometry x="850" y="200" width="230" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="fusion" value="Hybrid Fusion + 去重&#10;(RRF / rules)&#10;title/doi/arxiv dedup" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eef2ff;strokeColor=#6366f1;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="1110" y="160" width="240" height="70" as="geometry" />
+        </mxCell>
+
+        <mxCell id="rerank" value="Rerank + 多样性/探索&#10;- dislike filter&#10;- stage policy&#10;- diversity penalty + exploration ratio" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eef2ff;strokeColor=#6366f1;" vertex="1" parent="1">
+          <mxGeometry x="540" y="260" width="320" height="90" as="geometry" />
+        </mxCell>
+
+        <mxCell id="ctx" value="Context Window Manager&#10;- token budget&#10;- filter pending/PII&#10;- compress/summarize (optional)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eef2ff;strokeColor=#6366f1;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="890" y="280" width="280" height="90" as="geometry" />
+        </mxCell>
+
+        <mxCell id="ce" value="ContextPack 输出&#10;`context_engine/engine.py`&#10;routing + progress + memories + papers + reasons&#10;+ context_run_id" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fdf2f8;strokeColor=#ec4899;" vertex="1" parent="1">
+          <mxGeometry x="90" y="300" width="410" height="90" as="geometry" />
+        </mxCell>
+
+        <mxCell id="persist" value="Replay 持久化（同步写）&#10;research_context_runs + paper_impressions" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f0fdf4;strokeColor=#22c55e;" vertex="1" parent="1">
+          <mxGeometry x="90" y="420" width="410" height="70" as="geometry" />
+        </mxCell>
+
+        <!-- Edges -->
+        <mxCell id="e1" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#4f46e5;" edge="1" parent="1" source="q" target="qu">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e2" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#4f46e5;" edge="1" parent="1" source="qu" target="tr">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e3" value="retrieve" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#4f46e5;" edge="1" parent="1" source="tr" target="mem">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e4" value="retrieve" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#4f46e5;" edge="1" parent="1" source="tr" target="paper">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e5" value="merge" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#4f46e5;dashed=1;" edge="1" parent="1" source="mem" target="fusion">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e6" value="merge" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#4f46e5;dashed=1;" edge="1" parent="1" source="paper" target="fusion">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e7" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#4f46e5;" edge="1" parent="1" source="fusion" target="rerank">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e8" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#4f46e5;dashed=1;" edge="1" parent="1" source="rerank" target="ctx">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e9" value="pack" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#db2777;" edge="1" parent="1" source="ctx" target="ce">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e10" value="persist" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#16a34a;" edge="1" parent="1" source="ce" target="persist">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
+

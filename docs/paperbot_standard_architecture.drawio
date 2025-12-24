@@ -1,0 +1,210 @@
+<mxfile host="app.diagrams.net" modified="2025-12-24T00:00:00.000Z" agent="Codex" version="24.7.8" editor="draw.io">
+  <diagram id="paperbot-standard-arch" name="PaperBot Standard Architecture">
+    <mxGraphModel dx="1420" dy="880" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1000" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- Title -->
+        <mxCell id="t1" value="PaperBot 标准化架构（Offline Ingestion → Storage → Online Retrieval → Generation → Feedback / Replay）" style="rounded=0;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;fontStyle=1;fontSize=16;fillColor=#ffffff;strokeColor=#ffffff;" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="1520" height="40" as="geometry" />
+        </mxCell>
+
+        <!-- Layer containers -->
+        <mxCell id="l1" value="Layer 1 · 数据摄入层（Offline / Async）&#10;Sources → Parse/Normalize → Chunk → Embed → Index" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8fafc;strokeColor=#94a3b8;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="80" width="1520" height="160" as="geometry" />
+        </mxCell>
+        <mxCell id="l2" value="Layer 2 · 存储层（Storage）&#10;SQL 主库 + 可插拔 Vector Index + 原文/产物存储" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8fafc;strokeColor=#94a3b8;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="260" width="1520" height="180" as="geometry" />
+        </mxCell>
+        <mxCell id="l3" value="Layer 3 · 检索层（Online Retrieval）&#10;Query → Track Router → Retrieve → Filter/Dedupe → Rerank/Diversity → ContextPack" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8fafc;strokeColor=#94a3b8;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="460" width="1520" height="200" as="geometry" />
+        </mxCell>
+        <mxCell id="l4" value="Layer 4 · 生成层（Generation）&#10;PromptComposer → LLM → Output Parser / Tools" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8fafc;strokeColor=#94a3b8;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="680" width="1520" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="l5" value="Layer 5 · 反馈与记忆更新（Feedback / Governance / Replay）&#10;Inbox 审批 → Memory 可检索；Paper feedback → 评测回放" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8fafc;strokeColor=#94a3b8;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="820" width="1520" height="150" as="geometry" />
+        </mxCell>
+
+        <!-- Entry points (UI/API) -->
+        <mxCell id="ui" value="Web UI&#10;`/research`&#10;(Next.js)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ecfeff;strokeColor=#06b6d4;" vertex="1" parent="1">
+          <mxGeometry x="70" y="500" width="140" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="nx" value="Next.js API Proxy&#10;`web/src/app/api/research/*`" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ecfeff;strokeColor=#06b6d4;" vertex="1" parent="1">
+          <mxGeometry x="240" y="500" width="210" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="api" value="FastAPI&#10;`src/paperbot/api/routes/research.py`" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ecfeff;strokeColor=#06b6d4;" vertex="1" parent="1">
+          <mxGeometry x="480" y="500" width="250" height="70" as="geometry" />
+        </mxCell>
+
+        <!-- Layer 1: ingestion -->
+        <mxCell id="src1" value="Sources&#10;- arXiv Atom (connector)&#10;- Reddit RSS (connector)&#10;- 用户上传 PDF/URL (future)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff7ed;strokeColor=#fb923c;" vertex="1" parent="1">
+          <mxGeometry x="80" y="120" width="240" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="job" value="Scheduler / Jobs&#10;ARQ cron / worker&#10;`infrastructure/queue/arq_worker.py`" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff7ed;strokeColor=#fb923c;" vertex="1" parent="1">
+          <mxGeometry x="350" y="120" width="240" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="parse" value="Parse / Normalize&#10;Connectors → events&#10;`infrastructure/connectors/*`" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff7ed;strokeColor=#fb923c;" vertex="1" parent="1">
+          <mxGeometry x="620" y="120" width="230" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="chunk" value="Chunk / Embed / Index&#10;(optional)&#10;Paper chunks + embeddings" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff7ed;strokeColor=#fb923c;" vertex="1" parent="1">
+          <mxGeometry x="880" y="120" width="240" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="elog" value="EventLog (evidence)&#10;`SqlAlchemyEventLog`" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff7ed;strokeColor=#fb923c;" vertex="1" parent="1">
+          <mxGeometry x="1150" y="120" width="180" height="90" as="geometry" />
+        </mxCell>
+
+        <!-- Layer 2: storage -->
+        <mxCell id="sql" value="SQL 主库（SQLite/Postgres）&#10;SQLAlchemy models + Alembic&#10;✅ memory_* / research_* / eval runs" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f0fdf4;strokeColor=#22c55e;" vertex="1" parent="1">
+          <mxGeometry x="80" y="310" width="360" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="tables" value="Core tables (current)&#10;- memory_items / memory_audit_log&#10;- research_tracks / tasks / milestones&#10;- paper_feedback&#10;- research_context_runs / paper_impressions" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f0fdf4;strokeColor=#22c55e;" vertex="1" parent="1">
+          <mxGeometry x="470" y="310" width="420" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="paperlib" value="Paper Library (next)&#10;- paper_items / paper_sources&#10;- paper_chunks / paper_embeddings&#10;- mentions/trends" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f0fdf4;strokeColor=#22c55e;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="920" y="310" width="300" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="vec" value="Vector Index (optional)&#10;Qdrant / Milvus / Weaviate&#10;Adapter via port" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f0fdf4;strokeColor=#22c55e;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="1250" y="310" width="250" height="110" as="geometry" />
+        </mxCell>
+
+        <!-- Layer 3: retrieval -->
+        <mxCell id="ce" value="ContextEngine&#10;`context_engine/engine.py`&#10;build ContextPack + stage/diversity/explore" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eef2ff;strokeColor=#6366f1;" vertex="1" parent="1">
+          <mxGeometry x="780" y="500" width="260" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="tr" value="TrackRouter&#10;`context_engine/track_router.py`&#10;keyword+mem+task+embedding" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eef2ff;strokeColor=#6366f1;" vertex="1" parent="1">
+          <mxGeometry x="1080" y="500" width="230" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="ms" value="MemoryStore&#10;`SqlAlchemyMemoryStore`&#10;approved only + audit" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eef2ff;strokeColor=#6366f1;" vertex="1" parent="1">
+          <mxGeometry x="1340" y="500" width="200" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="ps" value="Paper Searcher&#10;Online: SemanticScholarSearch&#10;Offline: paper library (next)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eef2ff;strokeColor=#6366f1;" vertex="1" parent="1">
+          <mxGeometry x="780" y="590" width="260" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="rank" value="Rank / Filter / Dedupe&#10;Dislike filter + title dedup&#10;Diversity + Exploration" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eef2ff;strokeColor=#6366f1;" vertex="1" parent="1">
+          <mxGeometry x="1080" y="590" width="230" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="replay" value="Replay write&#10;context_run + impressions&#10;(evidence for eval)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eef2ff;strokeColor=#6366f1;" vertex="1" parent="1">
+          <mxGeometry x="1340" y="590" width="200" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- Layer 4: generation -->
+        <mxCell id="pc" value="PromptComposer (recommended)&#10;budget + clean + format" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fdf2f8;strokeColor=#ec4899;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="520" y="710" width="240" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="llm" value="LLM + Tools&#10;GPT/Claude/Gemini&#10;tool calling" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fdf2f8;strokeColor=#ec4899;" vertex="1" parent="1">
+          <mxGeometry x="800" y="710" width="220" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="op" value="Output Parser&#10;structured output + citations" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fdf2f8;strokeColor=#ec4899;" vertex="1" parent="1">
+          <mxGeometry x="1050" y="710" width="240" height="70" as="geometry" />
+        </mxCell>
+
+        <!-- Layer 5: feedback -->
+        <mxCell id="inbox" value="Memory Inbox (governance)&#10;/research/memory/suggest → pending&#10;/inbox approve/reject/move/clear" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fffbeb;strokeColor=#f59e0b;" vertex="1" parent="1">
+          <mxGeometry x="80" y="850" width="420" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="fb" value="Paper Feedback&#10;like/save/dislike + context_run_id/rank&#10;`paper_feedback`" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fffbeb;strokeColor=#f59e0b;" vertex="1" parent="1">
+          <mxGeometry x="530" y="850" width="340" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="eval" value="Evals / Replay Summary&#10;`/research/evals/summary`&#10;repeat-rate + coverage + distribution" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fffbeb;strokeColor=#f59e0b;" vertex="1" parent="1">
+          <mxGeometry x="900" y="850" width="370" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="update" value="Preference / Policy Update (future)&#10;stage defaults, exploration ratio, diversity strength" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fffbeb;strokeColor=#f59e0b;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="1290" y="850" width="250" height="90" as="geometry" />
+        </mxCell>
+
+        <!-- Edges (sync online) -->
+        <mxCell id="e_ui_nx" value="sync" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#0891b2;" edge="1" parent="1" source="ui" target="nx">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_nx_api" value="sync" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#0891b2;" edge="1" parent="1" source="nx" target="api">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_api_ce" value="sync" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#4f46e5;" edge="1" parent="1" source="api" target="ce">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_ce_tr" value="sync" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#4f46e5;" edge="1" parent="1" source="ce" target="tr">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_ce_ms" value="sync" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#4f46e5;" edge="1" parent="1" source="ce" target="ms">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_ce_ps" value="sync/online (optional)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#4f46e5;" edge="1" parent="1" source="ce" target="ps">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_ps_rank" value="sync" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#4f46e5;" edge="1" parent="1" source="ps" target="rank">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_rank_replay" value="sync" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#4f46e5;" edge="1" parent="1" source="rank" target="replay">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Storage links -->
+        <mxCell id="e_ms_sql" value="SQL" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#16a34a;" edge="1" parent="1" source="ms" target="sql">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_tr_sql" value="SQL" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#16a34a;" edge="1" parent="1" source="tr" target="sql">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_replay_sql" value="SQL (runs + impressions)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#16a34a;" edge="1" parent="1" source="replay" target="sql">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Generation (optional in current /research UI) -->
+        <mxCell id="e_ce_pc" value="context → prompt" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#db2777;dashed=1;" edge="1" parent="1" source="ce" target="pc">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_pc_llm" value="sync" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#db2777;dashed=1;" edge="1" parent="1" source="pc" target="llm">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_llm_op" value="sync" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#db2777;dashed=1;" edge="1" parent="1" source="llm" target="op">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Feedback edges -->
+        <mxCell id="e_ui_fb" value="sync feedback" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#d97706;" edge="1" parent="1" source="ui" target="fb">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_fb_sql" value="SQL" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#16a34a;" edge="1" parent="1" source="fb" target="sql">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_eval_sql" value="read runs+feedback" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#16a34a;" edge="1" parent="1" source="eval" target="sql">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Memory governance edges -->
+        <mxCell id="e_ui_inbox" value="sync" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#d97706;" edge="1" parent="1" source="ui" target="inbox">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_inbox_sql" value="memory_items + audit" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#16a34a;" edge="1" parent="1" source="inbox" target="sql">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Ingestion edges (async) -->
+        <mxCell id="e_src_job" value="async/cron" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#ea580c;dashed=1;" edge="1" parent="1" source="src1" target="job">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_job_parse" value="async" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#ea580c;dashed=1;" edge="1" parent="1" source="job" target="parse">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_parse_elog" value="events" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#ea580c;dashed=1;" edge="1" parent="1" source="parse" target="elog">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_parse_chunk" value="optional" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#ea580c;dashed=1;" edge="1" parent="1" source="parse" target="chunk">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_chunk_sql" value="paper library (next)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#16a34a;dashed=1;" edge="1" parent="1" source="chunk" target="paperlib">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_chunk_vec" value="vector index (optional)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#16a34a;dashed=1;" edge="1" parent="1" source="chunk" target="vec">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_elog_sql" value="SQL evidence" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#16a34a;dashed=1;" edge="1" parent="1" source="elog" target="sql">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
+

@@ -1,0 +1,63 @@
+<mxfile host="app.diagrams.net" modified="2025-12-24T00:00:00.000Z" agent="Codex" version="24.7.8" editor="draw.io">
+  <diagram id="layer5-feedback" name="Layer 5 - Feedback / Memory / Replay">
+    <mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1400" pageHeight="900" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="t" value="Layer 5 · 记忆更新与反馈闭环（Governance / Replay / Eval）" style="rounded=0;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;fontStyle=1;fontSize=16;fillColor=#ffffff;strokeColor=#ffffff;" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="1320" height="40" as="geometry" />
+        </mxCell>
+
+        <mxCell id="lane" value="Memory: suggest → pending inbox → approve/reject → searchable&#10;Papers: impressions → feedback (with context_run_id) → eval summary" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8fafc;strokeColor=#94a3b8;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="80" width="1320" height="740" as="geometry" />
+        </mxCell>
+
+        <mxCell id="memsug" value="Memory Suggest&#10;`POST /research/memory/suggest`&#10;extract → pending" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fffbeb;strokeColor=#f59e0b;" vertex="1" parent="1">
+          <mxGeometry x="90" y="150" width="300" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="inbox" value="Inbox (pending)&#10;`GET /research/memory/inbox`&#10;UI 批量治理" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fffbeb;strokeColor=#f59e0b;" vertex="1" parent="1">
+          <mxGeometry x="420" y="150" width="280" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="moderate" value="Moderate / Move / Clear&#10;`bulk_moderate / bulk_move / clear`&#10;→ audit log" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fffbeb;strokeColor=#f59e0b;" vertex="1" parent="1">
+          <mxGeometry x="730" y="150" width="320" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="memstore" value="Memory Store&#10;approved 可检索注入&#10;`memory_items + audit_log`" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f0fdf4;strokeColor=#22c55e;" vertex="1" parent="1">
+          <mxGeometry x="1080" y="150" width="250" height="90" as="geometry" />
+        </mxCell>
+
+        <mxCell id="impr" value="Impressions（展示记录）&#10;Context build →&#10;`research_context_runs + paper_impressions`" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f0fdf4;strokeColor=#22c55e;" vertex="1" parent="1">
+          <mxGeometry x="90" y="290" width="420" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="fb" value="Paper Feedback&#10;Like/Save/Dislike&#10;携带 context_run_id + rank" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fffbeb;strokeColor=#f59e0b;" vertex="1" parent="1">
+          <mxGeometry x="540" y="290" width="320" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="eval" value="Eval Summary / Replay&#10;`GET /research/evals/summary`&#10;repeat-rate / coverage / distribution" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eef2ff;strokeColor=#6366f1;" vertex="1" parent="1">
+          <mxGeometry x="890" y="290" width="440" height="90" as="geometry" />
+        </mxCell>
+
+        <mxCell id="policy" value="Preference / Policy Update（future）&#10;- stage defaults&#10;- exploration/diversity tuning&#10;- forgetting/decay" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eef2ff;strokeColor=#6366f1;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="90" y="430" width="1240" height="100" as="geometry" />
+        </mxCell>
+
+        <!-- Edges -->
+        <mxCell id="e1" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#d97706;" edge="1" parent="1" source="memsug" target="inbox">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e2" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#d97706;" edge="1" parent="1" source="inbox" target="moderate">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e3" value="approved/rejected" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#16a34a;" edge="1" parent="1" source="moderate" target="memstore">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e4" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#16a34a;" edge="1" parent="1" source="impr" target="fb">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e5" value="summarize" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#4f46e5;" edge="1" parent="1" source="fb" target="eval">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
+

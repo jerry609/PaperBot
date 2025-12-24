@@ -1,0 +1,60 @@
+<mxfile host="app.diagrams.net" modified="2025-12-24T00:00:00.000Z" agent="Codex" version="24.7.8" editor="draw.io">
+  <diagram id="layer4-generation" name="Layer 4 - Generation">
+    <mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1400" pageHeight="900" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="t" value="Layer 4 · 生成层（Generation）" style="rounded=0;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;fontStyle=1;fontSize=16;fillColor=#ffffff;strokeColor=#ffffff;" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="1320" height="40" as="geometry" />
+        </mxCell>
+
+        <mxCell id="lane" value="Prompt → LLM → Tools → Output Parser（结构化输出/引用）" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8fafc;strokeColor=#94a3b8;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="80" width="1320" height="740" as="geometry" />
+        </mxCell>
+
+        <mxCell id="cp" value="PromptComposer&#10;- system template&#10;- ContextPack 注入&#10;- token budget/clean" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fdf2f8;strokeColor=#ec4899;" vertex="1" parent="1">
+          <mxGeometry x="90" y="170" width="300" height="110" as="geometry" />
+        </mxCell>
+
+        <mxCell id="llm" value="LLM Provider&#10;Claude / GPT / Gemini&#10;+ tool calling" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fdf2f8;strokeColor=#ec4899;" vertex="1" parent="1">
+          <mxGeometry x="430" y="170" width="250" height="110" as="geometry" />
+        </mxCell>
+
+        <mxCell id="tools" value="Tools / Actions&#10;- paper fetch / browse (future)&#10;- code exec (repro)&#10;- store ops" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fdf2f8;strokeColor=#ec4899;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="720" y="170" width="260" height="110" as="geometry" />
+        </mxCell>
+
+        <mxCell id="op" value="Output Parser&#10;- JSON schema validation&#10;- citations extraction&#10;- guardrails" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fdf2f8;strokeColor=#ec4899;" vertex="1" parent="1">
+          <mxGeometry x="1020" y="170" width="290" height="110" as="geometry" />
+        </mxCell>
+
+        <mxCell id="out" value="最终输出&#10;- answer/report&#10;- structured artifacts (optional)&#10;- tool results" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ecfeff;strokeColor=#06b6d4;" vertex="1" parent="1">
+          <mxGeometry x="90" y="340" width="1220" height="100" as="geometry" />
+        </mxCell>
+
+        <mxCell id="obs" value="Observability（建议）&#10;- trace_id/run_id&#10;- prompt/context budget events&#10;- tool call logs" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eef2ff;strokeColor=#6366f1;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="90" y="470" width="1220" height="100" as="geometry" />
+        </mxCell>
+
+        <!-- Edges -->
+        <mxCell id="e1" value="prompt" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#db2777;" edge="1" parent="1" source="cp" target="llm">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e2" value="tools" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#db2777;dashed=1;" edge="1" parent="1" source="llm" target="tools">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e3" value="completion" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#db2777;" edge="1" parent="1" source="llm" target="op">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e4" value="result" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#0891b2;" edge="1" parent="1" source="op" target="out">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e5" value="events" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#4f46e5;dashed=1;" edge="1" parent="1" source="llm" target="obs">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
+
