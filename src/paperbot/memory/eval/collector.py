@@ -17,8 +17,8 @@ from typing import Any, Dict, List, Optional
 
 from sqlalchemy import select, func
 
-from paperbot.infrastructure.stores.models import MemoryEvalMetricModel, MemoryItemModel
-from paperbot.infrastructure.stores.db_provider import DbProvider
+from paperbot.infrastructure.stores.models import Base, MemoryEvalMetricModel
+from paperbot.infrastructure.stores.sqlalchemy_db import SessionProvider, get_db_url
 
 
 class MemoryMetricCollector:
@@ -48,8 +48,10 @@ class MemoryMetricCollector:
         "deletion_compliance": 1.00,
     }
 
-    def __init__(self, db_provider: DbProvider):
-        self._provider = db_provider
+    def __init__(self, db_url: Optional[str] = None):
+        self._provider = SessionProvider(db_url or get_db_url())
+        # Ensure table exists
+        Base.metadata.create_all(self._provider.engine)
 
     def record_extraction_precision(
         self,
