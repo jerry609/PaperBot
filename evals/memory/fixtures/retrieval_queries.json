@@ -1,0 +1,35 @@
+{
+  "description": "Synthetic test queries for retrieval hit rate evaluation",
+  "test_cases": [
+    {
+      "id": "pref_output_style",
+      "query": "output format preference",
+      "expected_kinds": ["preference"],
+      "expected_keywords": ["concise", "brief", "format"]
+    },
+    {
+      "id": "project_context",
+      "query": "current project",
+      "expected_kinds": ["project"],
+      "expected_keywords": ["project", "working on", "building"]
+    },
+    {
+      "id": "user_identity",
+      "query": "user name role",
+      "expected_kinds": ["profile"],
+      "expected_keywords": ["name", "role", "position"]
+    },
+    {
+      "id": "constraints",
+      "query": "rules restrictions",
+      "expected_kinds": ["constraint"],
+      "expected_keywords": ["never", "always", "must", "don't"]
+    },
+    {
+      "id": "goals",
+      "query": "goals objectives",
+      "expected_kinds": ["goal"],
+      "expected_keywords": ["goal", "want", "trying to", "working towards"]
+    }
+  ]
+}

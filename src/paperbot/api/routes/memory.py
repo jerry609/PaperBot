@@ -10,6 +10,7 @@ from paperbot.infrastructure.stores.memory_store import SqlAlchemyMemoryStore
 from paperbot.memory import build_memory_context, extract_memories, parse_chat_log
 from paperbot.memory.schema import MemoryCandidate
 
+from paperbot.memory.eval.collector import MemoryMetricCollector
 router = APIRouter()
 
 _store = SqlAlchemyMemoryStore()
@@ -262,3 +263,46 @@ def delete_memory_item(
     if not ok:
         raise HTTPException(status_code=404, detail="memory item not found")
     return {"status": "ok"}
+
+
+# --- Metrics Endpoints (Scope and Acceptance Criteria) ---
+
+_metric_collector = MemoryMetricCollector(_store._provider)
+
+
+class MetricsSummaryResponse(BaseModel):
+    status: str  # "pass" or "fail"
+    metrics: Dict[str, Any]
+    targets: Dict[str, float]
+
+
+@router.get("/memory/metrics", response_model=MetricsSummaryResponse)
+def get_memory_metrics():
+    """
+    Get summary of memory system evaluation metrics.
+
+    Returns the latest value for each P0 acceptance metric:
+    - extraction_precision (target: >= 85%)
+    - false_positive_rate (target: <= 5%)
+    - retrieval_hit_rate (target: >= 80%)
+    - injection_pollution_rate (target: <= 2%)
+    - deletion_compliance (target: 100%)
+    """
+    return _metric_collector.get_metrics_summary()
+
+
+class MetricHistoryResponse(BaseModel):
+    metric_name: str
+    history: List[Dict[str, Any]]
+
+
+@router.get("/memory/metrics/{metric_name}", response_model=MetricHistoryResponse)
+def get_metric_history(metric_name: str, limit: int = Query(30, ge=1, le=100)):
+    """Get historical values for a specific metric."""
+    if metric_name not in MemoryMetricCollector.TARGETS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown metric: {metric_name}. Valid: {list(MemoryMetricCollector.TARGETS.keys())}",
+        )
+    history = _metric_collector.get_metric_history(metric_name, limit=limit)
+    return MetricHistoryResponse(metric_name=metric_name, history=history)
