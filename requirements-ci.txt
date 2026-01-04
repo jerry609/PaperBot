@@ -31,5 +31,6 @@ anthropic>=0.3.0
 
 # 代码分析（可选）
 gitpython>=3.1.0
+requests>=2.28.0
 
 
