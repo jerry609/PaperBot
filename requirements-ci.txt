@@ -2,6 +2,7 @@
 # Keep this smaller than requirements.txt to avoid heavy system deps (e.g. weasyprint).
 
 fastapi==0.115.0
+python-multipart>=0.0.6
 starlette>=0.37.2,<0.39.0
 sse-starlette>=2.1.0
 httpx[http2]>=0.27.0,<0.28.0
