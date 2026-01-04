@@ -267,7 +267,7 @@ def delete_memory_item(
 
 # --- Metrics Endpoints (Scope and Acceptance Criteria) ---
 
-_metric_collector = MemoryMetricCollector(_store._provider)
+_metric_collector = MemoryMetricCollector()
 
 
 class MetricsSummaryResponse(BaseModel):

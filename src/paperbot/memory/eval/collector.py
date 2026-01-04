@@ -26,7 +26,8 @@ class MemoryMetricCollector:
     Collects and stores memory system evaluation metrics.
 
     Usage:
-        collector = MemoryMetricCollector(db_provider)
+        collector = MemoryMetricCollector()  # Uses default db_url
+        # Or: collector = MemoryMetricCollector(db_url="sqlite:///custom.db")
 
         # Record extraction results
         collector.record_extraction_precision(
