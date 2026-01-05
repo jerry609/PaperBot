@@ -48,3 +48,10 @@ jobs:
           python evals/runners/run_track_pipeline_smoke.py
           python evals/runners/run_eventlog_replay_smoke.py
 
+      - name: Run memory range and acceptance testing
+        env:
+          PYTHONPATH: src
+        run: |
+          python evals/memory/test_deletion_compliance.py
+          python evals/memory/test_retrieval_hit_rate.py
+

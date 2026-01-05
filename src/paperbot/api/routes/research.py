@@ -9,6 +9,7 @@ from paperbot.context_engine import ContextEngine, ContextEngineConfig
 from paperbot.context_engine.track_router import TrackRouter
 from paperbot.infrastructure.stores.memory_store import SqlAlchemyMemoryStore
 from paperbot.infrastructure.stores.research_store import SqlAlchemyResearchStore
+from paperbot.memory.eval.collector import MemoryMetricCollector
 from paperbot.memory.extractor import extract_memories
 from paperbot.memory.schema import MemoryCandidate, NormalizedMessage
 
@@ -17,6 +18,15 @@ router = APIRouter()
 _research_store = SqlAlchemyResearchStore()
 _memory_store = SqlAlchemyMemoryStore()
 _track_router = TrackRouter(research_store=_research_store, memory_store=_memory_store)
+_metric_collector: Optional[MemoryMetricCollector] = None
+
+
+def _get_metric_collector() -> MemoryMetricCollector:
+    """Lazy initialization of metric collector."""
+    global _metric_collector
+    if _metric_collector is None:
+        _metric_collector = MemoryMetricCollector()
+    return _metric_collector
 
 
 def _schedule_embedding_precompute(
@@ -361,6 +371,9 @@ class BulkModerateResponse(BaseModel):
 
 @router.post("/research/memory/bulk_moderate", response_model=BulkModerateResponse)
 def bulk_moderate(req: BulkModerateRequest, background_tasks: BackgroundTasks):
+    # Get items before update to check their confidence for P0 metrics
+    items_before = _memory_store.get_items_by_ids(user_id=req.user_id, item_ids=req.item_ids)
+
     updated = _memory_store.bulk_update_items(
         user_id=req.user_id,
         item_ids=req.item_ids,
@@ -373,6 +386,26 @@ def bulk_moderate(req: BulkModerateRequest, background_tasks: BackgroundTasks):
         if i.get("scope_type") == "track" and i.get("scope_id")
     ]
     _schedule_embedding_precompute(background_tasks, user_id=req.user_id, track_ids=affected_tracks)
+
+    # P0 Hook: Record false positive rate when user rejects high-confidence items
+    # A rejection of an auto-approved (confidence >= 0.60) item is a false positive
+    if req.status == "rejected" and items_before:
+        high_confidence_rejected = sum(
+            1 for item in items_before
+            if item.get("confidence", 0) >= 0.60 and item.get("status") == "approved"
+        )
+        if high_confidence_rejected > 0:
+            collector = _get_metric_collector()
+            collector.record_false_positive_rate(
+                false_positive_count=high_confidence_rejected,
+                total_approved_count=len(items_before),
+                evaluator_id=f"user:{req.user_id}",
+                detail={
+                    "item_ids": req.item_ids,
+                    "action": "bulk_moderate_reject",
+                },
+            )
+
     return BulkModerateResponse(user_id=req.user_id, updated=updated)
 
 
@@ -410,6 +443,72 @@ def bulk_move(req: BulkMoveRequest, background_tasks: BackgroundTasks):
     return BulkMoveResponse(user_id=req.user_id, updated=updated)
 
 
+class MemoryFeedbackRequest(BaseModel):
+    """Request to record feedback on retrieved memories."""
+    user_id: str = "default"
+    memory_ids: List[int] = Field(..., min_length=1, description="IDs of memories being rated")
+    helpful_ids: List[int] = Field(default_factory=list, description="IDs of memories that were helpful")
+    not_helpful_ids: List[int] = Field(default_factory=list, description="IDs of memories that were not helpful")
+    context_run_id: Optional[int] = None
+    query: Optional[str] = None
+
+
+class MemoryFeedbackResponse(BaseModel):
+    user_id: str
+    total_rated: int
+    helpful_count: int
+    not_helpful_count: int
+    hit_rate: float
+
+
+@router.post("/research/memory/feedback", response_model=MemoryFeedbackResponse)
+def record_memory_feedback(req: MemoryFeedbackRequest):
+    """
+    Record user feedback on retrieved memories.
+
+    This endpoint allows users to indicate which memories were helpful vs not helpful
+    when they were retrieved for a query. This data feeds into the P0 retrieval_hit_rate metric.
+
+    Usage:
+    - After building context, frontend shows retrieved memories
+    - User marks which memories were helpful
+    - Frontend calls this endpoint with the feedback
+    """
+    helpful_set = set(req.helpful_ids)
+    not_helpful_set = set(req.not_helpful_ids)
+
+    # Count hits (helpful) and misses (not helpful)
+    hits = len(helpful_set)
+    total = len(req.memory_ids)
+
+    if total > 0:
+        hit_rate = hits / total
+        collector = _get_metric_collector()
+        collector.record_retrieval_hit_rate(
+            hits=hits,
+            expected=total,
+            evaluator_id=f"user:{req.user_id}",
+            detail={
+                "memory_ids": req.memory_ids,
+                "helpful_ids": list(helpful_set),
+                "not_helpful_ids": list(not_helpful_set),
+                "context_run_id": req.context_run_id,
+                "query": req.query,
+                "action": "memory_feedback",
+            },
+        )
+    else:
+        hit_rate = 0.0
+
+    return MemoryFeedbackResponse(
+        user_id=req.user_id,
+        total_rated=total,
+        helpful_count=hits,
+        not_helpful_count=len(not_helpful_set),
+        hit_rate=hit_rate,
+    )
+
+
 class ClearTrackMemoryResponse(BaseModel):
     user_id: str
     track_id: int
@@ -433,6 +532,41 @@ def clear_track_memory(
         reason="clear_track_memory",
     )
     _schedule_embedding_precompute(background_tasks, user_id=user_id, track_ids=[track_id])
+
+    # P0 Hook: Verify deletion compliance - deleted items should not be retrievable
+    if deleted > 0:
+        # Try to retrieve items from the cleared scope (should return empty)
+        retrieved_after_delete = _memory_store.list_memories(
+            user_id=user_id,
+            scope_type="track",
+            scope_id=str(track_id),
+            include_deleted=False,
+            include_pending=True,
+            limit=100,
+        )
+        # Also try searching
+        search_results = _memory_store.search_memories(
+            user_id=user_id,
+            query="*",  # broad query
+            scope_type="track",
+            scope_id=str(track_id),
+            limit=100,
+        )
+        retrieved_count = len(retrieved_after_delete) + len(search_results)
+
+        collector = _get_metric_collector()
+        collector.record_deletion_compliance(
+            deleted_retrieved_count=retrieved_count,
+            deleted_total_count=deleted,
+            evaluator_id=f"user:{user_id}",
+            detail={
+                "track_id": track_id,
+                "deleted_count": deleted,
+                "retrieved_after_delete": retrieved_count,
+                "action": "clear_track_memory",
+            },
+        )
+
     return ClearTrackMemoryResponse(user_id=user_id, track_id=track_id, deleted_count=deleted)
 
 

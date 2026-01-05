@@ -1,0 +1,42 @@
+{
+  "description": "Sample memories for testing extraction and retrieval",
+  "user_id": "test_user",
+  "memories": [
+    {
+      "kind": "profile",
+      "content": "User's name is Jerry, a PhD student at MIT",
+      "confidence": 0.85,
+      "tags": ["identity", "name", "role"]
+    },
+    {
+      "kind": "preference",
+      "content": "User prefers concise, brief responses without excessive explanation",
+      "confidence": 0.75,
+      "tags": ["style", "output", "format"]
+    },
+    {
+      "kind": "project",
+      "content": "Currently working on PaperBot, a research workflow tool",
+      "confidence": 0.80,
+      "tags": ["project", "paperbot"]
+    },
+    {
+      "kind": "constraint",
+      "content": "Never include code examples unless explicitly requested",
+      "confidence": 0.70,
+      "tags": ["rules", "code"]
+    },
+    {
+      "kind": "goal",
+      "content": "Working towards building a memory middleware for LLM applications",
+      "confidence": 0.72,
+      "tags": ["goal", "memory", "llm"]
+    },
+    {
+      "kind": "fact",
+      "content": "Project deadline is end of Q1 2025",
+      "confidence": 0.65,
+      "tags": ["deadline", "timeline"]
+    }
+  ]
+}

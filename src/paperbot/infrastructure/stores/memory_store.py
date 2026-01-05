@@ -268,6 +268,24 @@ class SqlAlchemyMemoryStore:
             rows = session.execute(stmt).scalars().all()
             return [self._row_to_dict(r) for r in rows]
 
+    def get_items_by_ids(
+        self,
+        *,
+        user_id: str,
+        item_ids: List[int],
+    ) -> List[Dict[str, Any]]:
+        """Get memory items by their IDs for a specific user."""
+        if not item_ids:
+            return []
+        with self._provider.session() as session:
+            stmt = (
+                select(MemoryItemModel)
+                .where(MemoryItemModel.user_id == user_id)
+                .where(MemoryItemModel.id.in_(item_ids))
+            )
+            rows = session.execute(stmt).scalars().all()
+            return [self._row_to_dict(r) for r in rows]
+
     def search_memories(
         self,
         *,

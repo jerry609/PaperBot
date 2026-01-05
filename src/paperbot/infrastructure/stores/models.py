@@ -319,6 +319,34 @@ class MemoryAuditLogModel(Base):
     detail_json: Mapped[str] = mapped_column(Text, default="{}")
 
 
+class MemoryEvalMetricModel(Base):
+    """
+    Evaluation metrics for memory system quality (acceptance criteria).
+
+    Stores periodic measurements of:
+    - extraction_precision: % of extracted items that are correct
+    - false_positive_rate: % of approved items that are incorrect
+    - retrieval_hit_rate: % of relevant memories retrieved when needed
+    - injection_pollution_rate: % of responses negatively affected by wrong memory
+    - deletion_compliance: deleted items never retrieved (should be 1.0)
+
+    See docs/memory_types.md for metric definitions.
+    """
+
+    __tablename__ = "memory_eval_metrics"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+
+    metric_name: Mapped[str] = mapped_column(String(64), index=True)
+    metric_value: Mapped[float] = mapped_column(Float)
+    sample_size: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+    evaluated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    evaluator_id: Mapped[str] = mapped_column(String(64), default="system")
+
+    detail_json: Mapped[str] = mapped_column(Text, default="{}")
+
+
 class ResearchTrackModel(Base):
     """
     User research direction / track.

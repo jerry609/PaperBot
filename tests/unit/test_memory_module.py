@@ -125,3 +125,37 @@ def test_memory_store_soft_delete_and_status_filter(tmp_path):
     assert any("太长" in i["content"] for i in store.search_memories(user_id="u1", query="太长", limit=10))
     store.soft_delete_item(user_id="u1", item_id=int(pref.id), reason="user request")
     assert not any("太长" in i["content"] for i in store.search_memories(user_id="u1", query="太长", limit=10))
+
+
+def test_memory_store_get_items_by_ids(tmp_path):
+    """Test get_items_by_ids method retrieves correct items."""
+    from paperbot.memory.schema import MemoryCandidate
+
+    db_url = f"sqlite:///{tmp_path / 'mem_ids.db'}"
+    store = SqlAlchemyMemoryStore(db_url=db_url, auto_create_schema=True)
+
+    # Create test memories
+    candidates = [
+        MemoryCandidate(kind="preference", content="Prefers Python", confidence=0.8),
+        MemoryCandidate(kind="goal", content="Learn Rust", confidence=0.7),
+        MemoryCandidate(kind="fact", content="Uses VSCode", confidence=0.6),
+    ]
+    created, _, rows = store.add_memories(user_id="u1", memories=candidates)
+    assert created == 3
+
+    # Get IDs from list_memories since rows are detached
+    all_items = store.list_memories(user_id="u1", limit=10)
+    item_ids = [item["id"] for item in all_items]
+    assert len(item_ids) == 3
+
+    # Test get_items_by_ids
+    retrieved = store.get_items_by_ids(user_id="u1", item_ids=item_ids[:2])
+    assert len(retrieved) == 2
+
+    # Test with empty list
+    empty = store.get_items_by_ids(user_id="u1", item_ids=[])
+    assert len(empty) == 0
+
+    # Test user isolation - u2 can't see u1's items
+    other_user = store.get_items_by_ids(user_id="u2", item_ids=item_ids)
+    assert len(other_user) == 0
