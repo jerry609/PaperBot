@@ -283,10 +283,10 @@ def _run_daily_paper(parsed: argparse.Namespace) -> int:
         print(json.dumps(payload, ensure_ascii=False, indent=2))
         return 0
 
-    print(f"daily title: {report[title]}")
-    print(f"date: {report[date]}")
-    print(f"unique_items: {report[stats][unique_items]}")
-    print(f"query_count: {report[stats][query_count]}")
+    print(f"daily title: {report['title']}")
+    print(f"date: {report['date']}")
+    print(f"unique_items: {report['stats']['unique_items']}")
+    print(f"query_count: {report['stats']['query_count']}")
     if markdown_path or json_path:
         print(f"saved markdown: {markdown_path}")
         print(f"saved json: {json_path}")
