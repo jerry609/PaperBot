@@ -166,13 +166,13 @@ def _run_topic_search(parsed: argparse.Namespace) -> int:
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
 
-    print(f"source: {result[source]}")
-    print(f"fetched_at: {result[fetched_at]}")
-    print(f"unique_items: {result[summary][unique_items]}")
+    print(f"source: {result['source']}")
+    print(f"fetched_at: {result['fetched_at']}")
+    print(f"unique_items: {result['summary']['unique_items']}")
     for row in result.get("summary", {}).get("query_highlights", []):
         print(
-            f"- {row[normalized_query]}: {row[hit_count]} hits"
-            + (f" | top: {row[top_title]}" if row.get("top_title") else "")
+            f"- {row['normalized_query']}: {row['hit_count']} hits"
+            + (f" | top: {row['top_title']}" if row.get("top_title") else "")
         )
     return 0
 
