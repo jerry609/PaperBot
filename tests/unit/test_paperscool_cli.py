@@ -113,7 +113,10 @@ def test_cli_daily_paper_json_output_with_llm(monkeypatch, capsys):
     monkeypatch.setattr(
         cli_main,
         "enrich_daily_paper_report",
-        lambda report, llm_features: {**report, "llm_analysis": {"enabled": True, "features": llm_features}},
+        lambda report, llm_features: {
+            **report,
+            "llm_analysis": {"enabled": True, "features": llm_features},
+        },
     )
 
     exit_code = cli_main.run_cli(
@@ -138,24 +141,28 @@ def test_cli_daily_paper_parser_with_judge_flags():
             "2",
             "--judge-max-items",
             "6",
+            "--judge-token-budget",
+            "12000",
         ]
     )
 
     assert args.with_judge is True
     assert args.judge_runs == 2
     assert args.judge_max_items == 6
+    assert args.judge_token_budget == 12000
 
 
 def test_cli_daily_paper_json_output_with_judge(monkeypatch, capsys):
     monkeypatch.setattr(cli_main, "_create_topic_search_workflow", lambda: _FakeWorkflow())
 
-    def _fake_judge(report, max_items_per_query, n_runs):
+    def _fake_judge(report, max_items_per_query, n_runs, judge_token_budget=0):
         report = dict(report)
         report["judge"] = {
             "enabled": True,
             "max_items_per_query": max_items_per_query,
             "n_runs": n_runs,
             "recommendation_count": {"must_read": 1, "worth_reading": 0, "skim": 0, "skip": 0},
+            "budget": {"token_budget": judge_token_budget},
         }
         return report
 
@@ -172,6 +179,8 @@ def test_cli_daily_paper_json_output_with_judge(monkeypatch, capsys):
             "2",
             "--judge-max-items",
             "4",
+            "--judge-token-budget",
+            "9000",
         ]
     )
     captured = capsys.readouterr()
@@ -179,3 +188,4 @@ def test_cli_daily_paper_json_output_with_judge(monkeypatch, capsys):
     assert exit_code == 0
     payload = json.loads(captured.out)
     assert payload["report"]["judge"]["enabled"] is True
+    assert payload["report"]["judge"]["budget"]["token_budget"] == 9000

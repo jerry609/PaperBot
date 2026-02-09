@@ -80,7 +80,9 @@ def test_build_and_render_daily_report(tmp_path):
 
 
 def test_enrich_daily_report_with_llm_features():
-    report = build_daily_paper_report(search_result=_sample_search_result(), title="My Daily", top_n=5)
+    report = build_daily_paper_report(
+        search_result=_sample_search_result(), title="My Daily", top_n=5
+    )
     enriched = enrich_daily_paper_report(
         report,
         llm_service=_FakeLLMService(),
@@ -104,7 +106,9 @@ def test_normalize_llm_features_filters_unknown_items():
 
 
 def test_apply_judge_scores_to_report(monkeypatch):
-    report = build_daily_paper_report(search_result=_sample_search_result(), title="Judge Daily", top_n=5)
+    report = build_daily_paper_report(
+        search_result=_sample_search_result(), title="Judge Daily", top_n=5
+    )
 
     class _FakeJudgment:
         def __init__(self, overall: float, recommendation: str):
@@ -141,4 +145,37 @@ def test_apply_judge_scores_to_report(monkeypatch):
 
     assert item["judge"]["overall"] == 4.2
     assert judged["judge"]["recommendation_count"]["must_read"] == 1
+    assert judged["judge"]["budget"]["judged_items"] == 1
     assert "Judge Summary" in render_daily_paper_markdown(judged)
+
+
+def test_apply_judge_scores_respects_token_budget(monkeypatch):
+    report = build_daily_paper_report(
+        search_result=_sample_search_result(), title="Budget Daily", top_n=5
+    )
+
+    class _FakeJudge:
+        def __init__(self, llm_service=None):
+            pass
+
+        def judge_batch(self, *, papers, query, n_runs=1):
+            raise AssertionError(
+                "judge_batch should not be called when budget blocks all candidates"
+            )
+
+    import paperbot.application.workflows.dailypaper as daily_mod
+
+    monkeypatch.setattr(daily_mod, "PaperJudge", _FakeJudge)
+
+    judged = apply_judge_scores_to_report(
+        report,
+        max_items_per_query=3,
+        n_runs=1,
+        judge_token_budget=1,
+    )
+
+    item = judged["queries"][0]["top_items"][0]
+    assert "judge" not in item
+    assert judged["judge"]["budget"]["token_budget"] == 1
+    assert judged["judge"]["budget"]["judged_items"] == 0
+    assert judged["judge"]["budget"]["skipped_due_budget"] == 1

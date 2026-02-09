@@ -198,6 +198,7 @@ async def cron_daily_papers(ctx) -> Dict[str, Any]:
     )
     judge_runs = int(os.getenv("PAPERBOT_DAILYPAPER_JUDGE_RUNS", "1"))
     judge_max_items = int(os.getenv("PAPERBOT_DAILYPAPER_JUDGE_MAX_ITEMS", "5"))
+    judge_token_budget = int(os.getenv("PAPERBOT_DAILYPAPER_JUDGE_TOKEN_BUDGET", "0"))
 
     job = await redis.enqueue_job(
         "daily_papers_job",
@@ -214,6 +215,7 @@ async def cron_daily_papers(ctx) -> Dict[str, Any]:
         enable_judge=enable_judge,
         judge_runs=judge_runs,
         judge_max_items_per_query=judge_max_items,
+        judge_token_budget=judge_token_budget,
         save=True,
     )
     payload = {
@@ -328,6 +330,7 @@ async def daily_papers_job(
     enable_judge: bool = False,
     judge_runs: int = 1,
     judge_max_items_per_query: int = 5,
+    judge_token_budget: int = 0,
     save: bool = True,
 ) -> Dict[str, Any]:
     """ARQ job: generate DailyPaper report and bridge highlights into feed events."""
@@ -361,6 +364,7 @@ async def daily_papers_job(
                 "enable_judge": enable_judge,
                 "judge_runs": judge_runs,
                 "judge_max_items_per_query": judge_max_items_per_query,
+                "judge_token_budget": judge_token_budget,
             },
         )
     )
@@ -398,6 +402,7 @@ async def daily_papers_job(
             report,
             max_items_per_query=max(1, int(judge_max_items_per_query)),
             n_runs=max(1, int(judge_runs)),
+            judge_token_budget=max(0, int(judge_token_budget)),
         )
     markdown = render_daily_paper_markdown(report)
 

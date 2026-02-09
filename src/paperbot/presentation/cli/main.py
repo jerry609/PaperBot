@@ -127,12 +127,20 @@ def create_parser() -> argparse.ArgumentParser:
         help="LLM 功能：summary/trends/insight/relevance（可重复指定）",
     )
     daily_parser.add_argument("--with-judge", action="store_true", help="启用 LLM-as-Judge 评分")
-    daily_parser.add_argument("--judge-runs", type=int, default=1, help="Judge 重复评分次数（取中位）")
+    daily_parser.add_argument(
+        "--judge-runs", type=int, default=1, help="Judge 重复评分次数（取中位）"
+    )
     daily_parser.add_argument(
         "--judge-max-items",
         type=int,
         default=5,
         help="每个 query 最多执行 Judge 的论文数",
+    )
+    daily_parser.add_argument(
+        "--judge-token-budget",
+        type=int,
+        default=0,
+        help="Judge 的 token 预算上限（0 表示不限制）",
     )
 
     # version
@@ -291,6 +299,7 @@ def _run_daily_paper(parsed: argparse.Namespace) -> int:
             report,
             max_items_per_query=max(1, int(parsed.judge_max_items)),
             n_runs=max(1, int(parsed.judge_runs)),
+            judge_token_budget=max(0, int(parsed.judge_token_budget)),
         )
     markdown = render_daily_paper_markdown(report)
 
@@ -326,7 +335,8 @@ def _run_daily_paper(parsed: argparse.Namespace) -> int:
     if judge_enabled:
         print(
             f"judge: enabled (runs={max(1, int(parsed.judge_runs))}, "
-            f"max_items={max(1, int(parsed.judge_max_items))})"
+            f"max_items={max(1, int(parsed.judge_max_items))}, "
+            f"token_budget={max(0, int(parsed.judge_token_budget))})"
         )
     if markdown_path or json_path:
         print(f"saved markdown: {markdown_path}")

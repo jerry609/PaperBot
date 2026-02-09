@@ -102,12 +102,95 @@ def enrich_daily_paper_report(
     return enriched
 
 
+def estimate_judge_tokens_for_item(item: Dict[str, Any], *, n_runs: int = 1) -> int:
+    """Estimate judge token usage to support lightweight budget controls."""
+
+    title = item.get("title") or ""
+    abstract = item.get("snippet") or item.get("abstract") or ""
+    keywords = ", ".join(item.get("keywords") or [])
+
+    content_chars = len(f"{title}\n{abstract}\n{keywords}")
+    content_tokens = max(120, content_chars // 4)
+
+    # Prompt/rubric text is relatively long; keep a conservative fixed overhead.
+    base_prompt_tokens = 650
+    expected_output_tokens = 280
+    per_run = base_prompt_tokens + content_tokens + expected_output_tokens
+    return per_run * max(1, int(n_runs))
+
+
+def select_judge_candidates(
+    report: Dict[str, Any],
+    *,
+    max_items_per_query: int = 5,
+    n_runs: int = 1,
+    token_budget: int = 0,
+) -> Dict[str, Any]:
+    """Pick candidate papers for judge scoring under per-query and token-budget limits."""
+
+    capped_per_query = max(1, int(max_items_per_query))
+    runs = max(1, int(n_runs))
+    budget = max(0, int(token_budget))
+
+    candidates: List[Dict[str, Any]] = []
+    for query_index, query in enumerate(report.get("queries") or []):
+        top_items = list(query.get("top_items") or [])
+        capped = top_items[:capped_per_query]
+        for item_index, item in enumerate(capped):
+            try:
+                base_score = float(item.get("score") or 0)
+            except Exception:
+                base_score = 0.0
+            candidates.append(
+                {
+                    "query_index": query_index,
+                    "item_index": item_index,
+                    "estimated_tokens": estimate_judge_tokens_for_item(item, n_runs=runs),
+                    "base_score": base_score,
+                }
+            )
+
+    ranked = sorted(candidates, key=lambda row: row["base_score"], reverse=True)
+
+    selected: List[Dict[str, Any]] = []
+    consumed = 0
+    for row in ranked:
+        if budget > 0 and consumed + int(row["estimated_tokens"]) > budget:
+            continue
+        consumed += int(row["estimated_tokens"])
+        selected.append(row)
+
+    if budget <= 0:
+        selected = ranked
+        consumed = sum(int(row["estimated_tokens"]) for row in selected)
+
+    selected_by_query: Dict[int, List[int]] = {}
+    for row in selected:
+        selected_by_query.setdefault(int(row["query_index"]), []).append(int(row["item_index"]))
+
+    for key in list(selected_by_query.keys()):
+        selected_by_query[key] = sorted(set(selected_by_query[key]))
+
+    return {
+        "selected": selected,
+        "selected_by_query": selected_by_query,
+        "budget": {
+            "token_budget": budget,
+            "estimated_tokens": int(consumed),
+            "candidate_items": len(candidates),
+            "judged_items": len(selected),
+            "skipped_due_budget": max(0, len(candidates) - len(selected)),
+        },
+    }
+
+
 def apply_judge_scores_to_report(
     report: Dict[str, Any],
     *,
     llm_service: Optional[LLMService] = None,
     max_items_per_query: int = 5,
     n_runs: int = 1,
+    judge_token_budget: int = 0,
 ) -> Dict[str, Any]:
     """Evaluate papers with LLM-as-Judge and attach per-paper judgment metadata."""
 
@@ -122,30 +205,49 @@ def apply_judge_scores_to_report(
         "skip": 0,
     }
 
-    for query in judged.get("queries") or []:
+    selection = select_judge_candidates(
+        judged,
+        max_items_per_query=max_items_per_query,
+        n_runs=n_runs,
+        token_budget=judge_token_budget,
+    )
+    selected_by_query = selection["selected_by_query"]
+
+    for query_index, query in enumerate(judged.get("queries") or []):
         query_name = query.get("normalized_query") or query.get("raw_query") or ""
         top_items = list(query.get("top_items") or [])
-        capped = top_items[: max(1, int(max_items_per_query))]
-        if not capped:
+        if not top_items:
             continue
 
-        judgments = judge.judge_batch(papers=capped, query=query_name, n_runs=max(1, int(n_runs)))
+        chosen_indices = selected_by_query.get(query_index, [])
+        chosen_items = [top_items[idx] for idx in chosen_indices if 0 <= idx < len(top_items)]
+        if not chosen_items:
+            continue
 
-        for item, judgment in zip(capped, judgments):
+        judgments = judge.judge_batch(
+            papers=chosen_items, query=query_name, n_runs=max(1, int(n_runs))
+        )
+        for item_index, judgment in zip(chosen_indices, judgments):
+            item = top_items[item_index]
             j_payload = judgment.to_dict()
             item["judge"] = j_payload
             rec = j_payload.get("recommendation")
             if rec in recommendation_count:
                 recommendation_count[rec] += 1
 
-        capped.sort(key=lambda it: float((it.get("judge") or {}).get("overall") or 0), reverse=True)
-        query["top_items"] = capped + top_items[len(capped) :]
+        capped_count = min(len(top_items), max(1, int(max_items_per_query)))
+        capped = top_items[:capped_count]
+        capped.sort(
+            key=lambda it: float((it.get("judge") or {}).get("overall") or -1), reverse=True
+        )
+        query["top_items"] = capped + top_items[capped_count:]
 
     judged["judge"] = {
         "enabled": True,
         "max_items_per_query": int(max_items_per_query),
         "n_runs": int(max(1, int(n_runs))),
         "recommendation_count": recommendation_count,
+        "budget": selection["budget"],
     }
     return judged
 
