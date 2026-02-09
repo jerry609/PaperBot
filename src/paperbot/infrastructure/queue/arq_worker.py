@@ -41,7 +41,9 @@ def _load_subscription_scholar_ids() -> List[str]:
     ids: List[str] = []
     for s in scholars:
         # Scholar dataclass (preferred) or raw dict fallback
-        sid = getattr(s, "semantic_scholar_id", None) or (s.get("semantic_scholar_id") if isinstance(s, dict) else None)
+        sid = getattr(s, "semantic_scholar_id", None) or (
+            s.get("semantic_scholar_id") if isinstance(s, dict) else None
+        )
         if sid:
             ids.append(str(sid))
     return ids
@@ -54,6 +56,11 @@ def _load_subscription_settings() -> Dict[str, Any]:
     except Exception:
         # If config missing/invalid, keep worker running with no cron jobs.
         return {"check_interval": None}
+
+
+def _parse_csv_env(name: str, default: str) -> List[str]:
+    raw = os.getenv(name, default)
+    return [item.strip() for item in raw.split(",") if item.strip()]
 
 
 async def cron_track_subscriptions(ctx) -> Dict[str, Any]:
@@ -98,7 +105,12 @@ async def cron_track_subscriptions(ctx) -> Dict[str, Any]:
                 payload={"status": "error", "error": "redis not available in ctx"},
             )
         )
-        return {"run_id": run_id, "trace_id": trace_id, "status": "error", "error": "redis not available"}
+        return {
+            "run_id": run_id,
+            "trace_id": trace_id,
+            "status": "error",
+            "error": "redis not available",
+        }
 
     for sid in scholar_ids:
         job = await redis.enqueue_job(
@@ -139,6 +151,73 @@ async def cron_track_subscriptions(ctx) -> Dict[str, Any]:
     return {"run_id": run_id, "trace_id": trace_id, "status": "ok", "enqueued": enqueued}
 
 
+async def cron_daily_papers(ctx) -> Dict[str, Any]:
+    """Cron entrypoint: enqueue one DailyPaper topic search job."""
+    run_id = new_run_id()
+    trace_id = new_trace_id()
+    elog = _event_log()
+
+    queries = _parse_csv_env("PAPERBOT_DAILYPAPER_QUERIES", "ICL压缩,ICL隐式偏置,KV Cache加速")
+    sources = _parse_csv_env("PAPERBOT_DAILYPAPER_SOURCES", "papers_cool")
+    branches = _parse_csv_env("PAPERBOT_DAILYPAPER_BRANCHES", "arxiv,venue")
+
+    redis = ctx.get("redis")
+    if redis is None:
+        elog.append(
+            make_event(
+                run_id=run_id,
+                trace_id=trace_id,
+                workflow="jobs",
+                stage="cron_daily_papers",
+                attempt=0,
+                agent_name="ARQ",
+                role="orchestrator",
+                type="job_result",
+                payload={"status": "error", "error": "redis not available in ctx"},
+            )
+        )
+        return {
+            "run_id": run_id,
+            "trace_id": trace_id,
+            "status": "error",
+            "error": "redis not available",
+        }
+
+    job = await redis.enqueue_job(
+        "daily_papers_job",
+        queries=queries,
+        sources=sources,
+        branches=branches,
+        top_k_per_query=int(os.getenv("PAPERBOT_DAILYPAPER_TOP_K", "5")),
+        show_per_branch=int(os.getenv("PAPERBOT_DAILYPAPER_SHOW", "25")),
+        top_n=int(os.getenv("PAPERBOT_DAILYPAPER_TOP_N", "10")),
+        title=os.getenv("PAPERBOT_DAILYPAPER_TITLE", "DailyPaper Digest"),
+        output_dir=os.getenv("PAPERBOT_DAILYPAPER_OUTPUT_DIR", "./reports/dailypaper"),
+        save=True,
+    )
+    payload = {
+        "status": "ok",
+        "job_id": job.job_id,
+        "queries": queries,
+        "sources": sources,
+        "branches": branches,
+    }
+    elog.append(
+        make_event(
+            run_id=run_id,
+            trace_id=trace_id,
+            workflow="jobs",
+            stage="cron_daily_papers",
+            attempt=0,
+            agent_name="ARQ",
+            role="orchestrator",
+            type="job_enqueue",
+            payload=payload,
+        )
+    )
+    return {"run_id": run_id, "trace_id": trace_id, **payload}
+
+
 def _build_cron_jobs_from_subscriptions():
     """
     Build ARQ cron_jobs based on subscriptions.settings.check_interval.
@@ -150,7 +229,12 @@ def _build_cron_jobs_from_subscriptions():
     hour = int(os.getenv("PAPERBOT_TRACK_CRON_HOUR", "2"))
     weekday_raw = os.getenv("PAPERBOT_TRACK_CRON_WEEKDAY", "mon")  # arq supports 0-6 or mon-sun
     day = int(os.getenv("PAPERBOT_TRACK_CRON_DAY", "1"))
-    run_at_startup = os.getenv("PAPERBOT_TRACK_RUN_AT_STARTUP", "false").lower() in ("1", "true", "yes", "y")
+    run_at_startup = os.getenv("PAPERBOT_TRACK_RUN_AT_STARTUP", "false").lower() in (
+        "1",
+        "true",
+        "yes",
+        "y",
+    )
 
     weekday: Any = weekday_raw
     try:
@@ -159,16 +243,170 @@ def _build_cron_jobs_from_subscriptions():
         weekday = weekday_raw
 
     if interval == "daily":
-        return [cron(cron_track_subscriptions, minute=minute, hour=hour, run_at_startup=run_at_startup)]
+        return [
+            cron(cron_track_subscriptions, minute=minute, hour=hour, run_at_startup=run_at_startup)
+        ]
     if interval == "weekly":
-        return [cron(cron_track_subscriptions, minute=minute, hour=hour, weekday=weekday, run_at_startup=run_at_startup)]
+        return [
+            cron(
+                cron_track_subscriptions,
+                minute=minute,
+                hour=hour,
+                weekday=weekday,
+                run_at_startup=run_at_startup,
+            )
+        ]
     if interval == "monthly":
-        return [cron(cron_track_subscriptions, minute=minute, hour=hour, day=day, run_at_startup=run_at_startup)]
+        return [
+            cron(
+                cron_track_subscriptions,
+                minute=minute,
+                hour=hour,
+                day=day,
+                run_at_startup=run_at_startup,
+            )
+        ]
     # Disabled / unknown interval -> no cron jobs
     return []
 
 
-async def track_scholar_job(ctx, scholar_id: str, *, dry_run: bool = True, offline: bool = False) -> Dict[str, Any]:
+def _build_daily_paper_cron_jobs():
+    enabled = os.getenv("PAPERBOT_DAILYPAPER_ENABLED", "false").lower() in (
+        "1",
+        "true",
+        "yes",
+        "y",
+    )
+    if not enabled:
+        return []
+
+    minute = int(os.getenv("PAPERBOT_DAILYPAPER_CRON_MINUTE", "30"))
+    hour = int(os.getenv("PAPERBOT_DAILYPAPER_CRON_HOUR", "8"))
+    run_at_startup = os.getenv("PAPERBOT_DAILYPAPER_RUN_AT_STARTUP", "false").lower() in (
+        "1",
+        "true",
+        "yes",
+        "y",
+    )
+    return [cron(cron_daily_papers, minute=minute, hour=hour, run_at_startup=run_at_startup)]
+
+
+async def daily_papers_job(
+    ctx,
+    *,
+    queries: Optional[List[str]] = None,
+    sources: Optional[List[str]] = None,
+    branches: Optional[List[str]] = None,
+    top_k_per_query: int = 5,
+    show_per_branch: int = 25,
+    top_n: int = 10,
+    title: str = "DailyPaper Digest",
+    output_dir: str = "./reports/dailypaper",
+    save: bool = True,
+) -> Dict[str, Any]:
+    """ARQ job: generate DailyPaper report and bridge highlights into feed events."""
+    run_id = new_run_id()
+    trace_id = new_trace_id()
+    elog = _event_log()
+
+    job_queries = queries or ["ICL压缩", "ICL隐式偏置", "KV Cache加速"]
+    job_sources = sources or ["papers_cool"]
+    job_branches = branches or ["arxiv", "venue"]
+
+    elog.append(
+        make_event(
+            run_id=run_id,
+            trace_id=trace_id,
+            workflow="jobs",
+            stage="daily_papers",
+            attempt=0,
+            agent_name="ARQ",
+            role="orchestrator",
+            type="job_start",
+            payload={
+                "queries": job_queries,
+                "sources": job_sources,
+                "branches": job_branches,
+                "top_k_per_query": top_k_per_query,
+                "show_per_branch": show_per_branch,
+                "top_n": top_n,
+            },
+        )
+    )
+
+    from paperbot.application.workflows.dailypaper import (
+        DailyPaperReporter,
+        build_daily_paper_report,
+        normalize_output_formats,
+        render_daily_paper_markdown,
+    )
+    from paperbot.application.workflows.paperscool_topic_search import PapersCoolTopicSearchWorkflow
+    from paperbot.workflows.feed import ScholarFeedService
+
+    search_workflow = PapersCoolTopicSearchWorkflow()
+    search_result = search_workflow.run(
+        queries=job_queries,
+        sources=job_sources,
+        branches=job_branches,
+        top_k_per_query=max(1, int(top_k_per_query)),
+        show_per_branch=max(1, int(show_per_branch)),
+    )
+    report = build_daily_paper_report(
+        search_result=search_result, title=title, top_n=max(1, int(top_n))
+    )
+    markdown = render_daily_paper_markdown(report)
+
+    markdown_path = None
+    json_path = None
+    if save:
+        reporter = DailyPaperReporter(output_dir=output_dir)
+        artifacts = reporter.write(
+            report=report,
+            markdown=markdown,
+            formats=normalize_output_formats(["both"]),
+            slug=title,
+        )
+        markdown_path = artifacts.markdown_path
+        json_path = artifacts.json_path
+
+    feed_service = ScholarFeedService()
+    feed_service.process_daily_paper_report(report)
+    feed_events = [event.to_dict() for event in feed_service.get_feed(limit=30)]
+
+    payload = {
+        "report_date": report.get("date"),
+        "unique_items": report.get("stats", {}).get("unique_items", 0),
+        "markdown_path": markdown_path,
+        "json_path": json_path,
+        "feed_events": len(feed_events),
+    }
+    elog.append(
+        make_event(
+            run_id=run_id,
+            trace_id=trace_id,
+            workflow="jobs",
+            stage="daily_papers",
+            attempt=0,
+            agent_name="ARQ",
+            role="orchestrator",
+            type="job_result",
+            payload=payload,
+        )
+    )
+    return {
+        "run_id": run_id,
+        "trace_id": trace_id,
+        "status": "ok",
+        "report": report,
+        "markdown_path": markdown_path,
+        "json_path": json_path,
+        "feed_events": feed_events,
+    }
+
+
+async def track_scholar_job(
+    ctx, scholar_id: str, *, dry_run: bool = True, offline: bool = False
+) -> Dict[str, Any]:
     """
     ARQ job: track a scholar and detect new papers.
 
@@ -240,7 +478,9 @@ async def track_scholar_job(ctx, scholar_id: str, *, dry_run: bool = True, offli
             pass
 
 
-async def analyze_paper_job(ctx, paper: Dict[str, Any], *, scholar_name: str = "") -> Dict[str, Any]:
+async def analyze_paper_job(
+    ctx, paper: Dict[str, Any], *, scholar_name: str = ""
+) -> Dict[str, Any]:
     """
     ARQ job: analyze a single paper via ScholarPipeline.
 
@@ -300,9 +540,13 @@ async def analyze_paper_job(ctx, paper: Dict[str, Any], *, scholar_name: str = "
 
 
 class WorkerSettings:
-    functions = [track_scholar_job, analyze_paper_job, cron_track_subscriptions]
+    functions = [
+        track_scholar_job,
+        analyze_paper_job,
+        cron_track_subscriptions,
+        cron_daily_papers,
+        daily_papers_job,
+    ]
     redis_settings = _redis_settings()
 
-    cron_jobs = _build_cron_jobs_from_subscriptions()
-
-
+    cron_jobs = _build_cron_jobs_from_subscriptions() + _build_daily_paper_cron_jobs()
