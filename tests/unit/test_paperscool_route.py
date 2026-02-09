@@ -144,7 +144,14 @@ def test_paperscool_daily_route_with_judge(monkeypatch):
 
     called = {"value": False}
 
-    def _fake_judge(report, *, llm_service=None, max_items_per_query=5, n_runs=1):
+    def _fake_judge(
+        report,
+        *,
+        llm_service=None,
+        max_items_per_query=5,
+        n_runs=1,
+        judge_token_budget=0,
+    ):
         called["value"] = True
         report = dict(report)
         report["judge"] = {
@@ -152,6 +159,7 @@ def test_paperscool_daily_route_with_judge(monkeypatch):
             "max_items_per_query": max_items_per_query,
             "n_runs": n_runs,
             "recommendation_count": {"must_read": 1, "worth_reading": 0, "skim": 0, "skip": 0},
+            "budget": {"token_budget": judge_token_budget, "judged_items": 1},
         }
         return report
 
@@ -172,3 +180,79 @@ def test_paperscool_daily_route_with_judge(monkeypatch):
     payload = resp.json()
     assert called["value"] is True
     assert payload["report"]["judge"]["enabled"] is True
+
+
+def test_paperscool_analyze_route_stream(monkeypatch):
+    class _FakeLLM:
+        def analyze_trends(self, *, topic, papers):
+            return f"trend:{topic}:{len(papers)}"
+
+    class _FakeJudgment:
+        def to_dict(self):
+            return {
+                "relevance": {"score": 5, "rationale": ""},
+                "novelty": {"score": 4, "rationale": ""},
+                "rigor": {"score": 4, "rationale": ""},
+                "impact": {"score": 4, "rationale": ""},
+                "clarity": {"score": 4, "rationale": ""},
+                "overall": 4.2,
+                "one_line_summary": "good",
+                "recommendation": "must_read",
+                "judge_model": "fake",
+                "judge_cost_tier": 1,
+            }
+
+    class _FakeJudge:
+        def __init__(self, llm_service=None):
+            pass
+
+        def judge_single(self, *, paper, query):
+            return _FakeJudgment()
+
+        def judge_with_calibration(self, *, paper, query, n_runs=1):
+            return _FakeJudgment()
+
+    monkeypatch.setattr(paperscool_route, "get_llm_service", lambda: _FakeLLM())
+    monkeypatch.setattr(paperscool_route, "PaperJudge", _FakeJudge)
+
+    report = {
+        "title": "Daily",
+        "date": "2026-02-09",
+        "generated_at": "2026-02-09T00:00:00+00:00",
+        "source": "papers.cool",
+        "sources": ["papers_cool"],
+        "stats": {"unique_items": 1, "total_query_hits": 1, "query_count": 1},
+        "queries": [
+            {
+                "raw_query": "ICL压缩",
+                "normalized_query": "icl compression",
+                "total_hits": 1,
+                "top_items": [
+                    {
+                        "title": "UniICL",
+                        "score": 10.0,
+                        "snippet": "compress context",
+                        "keywords": ["icl", "compression"],
+                    }
+                ],
+            }
+        ],
+        "global_top": [],
+    }
+
+    with TestClient(api_main.app) as client:
+        resp = client.post(
+            "/api/research/paperscool/analyze",
+            json={
+                "report": report,
+                "run_judge": True,
+                "run_trends": True,
+                "judge_token_budget": 5000,
+            },
+        )
+
+    assert resp.status_code == 200
+    text = resp.text
+    assert '"type": "trend"' in text
+    assert '"type": "judge"' in text
+    assert "[DONE]" in text
