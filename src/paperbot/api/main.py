@@ -6,7 +6,20 @@ Supports Server-Sent Events (SSE) for streaming responses
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .routes import track, analyze, gen_code, review, chat, runs, jobs, sandbox, runbook, memory, research
+from .routes import (
+    track,
+    analyze,
+    gen_code,
+    review,
+    chat,
+    runs,
+    jobs,
+    sandbox,
+    runbook,
+    memory,
+    research,
+    paperscool,
+)
 from paperbot.infrastructure.event_log.logging_event_log import LoggingEventLog
 from paperbot.infrastructure.event_log.composite_event_log import CompositeEventLog
 from paperbot.infrastructure.event_log.sqlalchemy_event_log import SqlAlchemyEventLog
@@ -45,6 +58,8 @@ app.include_router(sandbox.router, prefix="/api", tags=["Sandbox"])
 app.include_router(runbook.router, prefix="/api", tags=["Runbook"])
 app.include_router(memory.router, prefix="/api", tags=["Memory"])
 app.include_router(research.router, prefix="/api", tags=["Research"])
+app.include_router(paperscool.router, prefix="/api", tags=["PapersCool"])
+
 
 @app.on_event("startup")
 async def _startup_eventlog():
@@ -59,4 +74,5 @@ async def _startup_eventlog():
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app, host="0.0.0.0", port=8000)

@@ -1,6 +1,19 @@
 """API Routes"""
 
-from . import track, analyze, gen_code, review, chat, runs, jobs, sandbox, runbook, memory, research
+from . import (
+    track,
+    analyze,
+    gen_code,
+    review,
+    chat,
+    runs,
+    jobs,
+    sandbox,
+    runbook,
+    memory,
+    research,
+    paperscool,
+)
 
 __all__ = [
     "track",
@@ -14,4 +27,5 @@ __all__ = [
     "runbook",
     "memory",
     "research",
+    "paperscool",
 ]
