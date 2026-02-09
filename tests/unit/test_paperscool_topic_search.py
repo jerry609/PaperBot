@@ -92,3 +92,9 @@ def test_topic_search_normalizes_and_deduplicates_results():
     assert query_items["icl compression"][0]["matched_keywords"] == ["compression", "icl"]
     assert len(query_items["kv cache acceleration"]) == 1
     assert query_items["kv cache acceleration"][0]["score"] > 0
+
+    assert result["summary"]["unique_items"] == 2
+    assert result["summary"]["total_query_hits"] == 2
+    assert len(result["summary"]["top_titles"]) == 2
+    highlight = {h["normalized_query"]: h for h in result["summary"]["query_highlights"]}
+    assert highlight["icl compression"]["top_title"].startswith("UniICL")

@@ -68,6 +68,12 @@ class PapersCoolTopicSearchWorkflow:
                 "fetched_at": datetime.now(timezone.utc).isoformat(),
                 "queries": [],
                 "items": [],
+                "summary": {
+                    "unique_items": 0,
+                    "total_query_hits": 0,
+                    "top_titles": [],
+                    "query_highlights": [],
+                },
             }
 
         aggregated_items: List[Dict[str, Any]] = []
@@ -110,11 +116,14 @@ class PapersCoolTopicSearchWorkflow:
                 }
             )
 
+        summary = self._build_summary(query_views=query_views, aggregated_items=aggregated_items)
+
         return {
             "source": "papers.cool",
             "fetched_at": datetime.now(timezone.utc).isoformat(),
             "queries": query_views,
             "items": [self._serialize_item(item) for item in aggregated_items],
+            "summary": summary,
         }
 
     def _build_item(self, *, record: PapersCoolRecord, query_spec: QuerySpec) -> Dict[str, Any]:
@@ -213,6 +222,38 @@ class PapersCoolTopicSearchWorkflow:
             "pdf_stars": item["pdf_stars"],
             "kimi_stars": item["kimi_stars"],
             "alternative_urls": item["alternative_urls"],
+        }
+
+    def _build_summary(
+        self,
+        *,
+        query_views: Sequence[Dict[str, Any]],
+        aggregated_items: Sequence[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        query_highlights: List[Dict[str, Any]] = []
+        total_query_hits = 0
+        for query in query_views:
+            items = query.get("items") or []
+            total_query_hits += int(query.get("total_hits") or 0)
+            top_item = items[0] if items else None
+            query_highlights.append(
+                {
+                    "raw_query": query["raw_query"],
+                    "normalized_query": query["normalized_query"],
+                    "hit_count": query.get("total_hits") or 0,
+                    "top_title": top_item.get("title") if top_item else "",
+                    "top_keywords": (
+                        (top_item.get("matched_keywords") or [])[:5] if top_item else []
+                    ),
+                }
+            )
+
+        top_titles = [item["title"] for item in list(aggregated_items)[:5]]
+        return {
+            "unique_items": len(aggregated_items),
+            "total_query_hits": total_query_hits,
+            "top_titles": top_titles,
+            "query_highlights": query_highlights,
         }
 
 
