@@ -375,6 +375,7 @@ python -m paperbot.presentation.cli.main daily-paper \
 - **Research 个性化 TODO**：`docs/TODO_PERSONALIZED_MEMORY_CONTEXT.md`
 - **Papers.cool Workflow 说明**：`docs/PAPERSCOOL_WORKFLOW.md`
 - **Papers.cool Workflow V2 TODO**：`docs/paperscool_workflow_v2_todo.md`
+- **Topic Source 开发模板**：`docs/TOPIC_SOURCE_TEMPLATE.md`
 - **数据集说明**：`datasets/README.md`
 - **Web Dashboard**：`web/README.md`
 
