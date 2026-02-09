@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react"
 
+import JudgeRadarChart from "@/components/research/JudgeRadarChart"
 import WorkflowDagView from "@/components/research/WorkflowDagView"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -12,11 +13,24 @@ import { Label } from "@/components/ui/label"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
+import { readSSE } from "@/lib/sse"
+
+type DimensionScore = {
+  score?: number
+  rationale?: string
+}
 
 type JudgeResult = {
+  relevance?: DimensionScore
+  novelty?: DimensionScore
+  rigor?: DimensionScore
+  impact?: DimensionScore
+  clarity?: DimensionScore
   overall?: number
   recommendation?: string
   one_line_summary?: string
+  judge_model?: string
+  judge_cost_tier?: number
 }
 
 type SearchItem = {
@@ -58,6 +72,13 @@ type JudgeSummary = {
   max_items_per_query?: number
   n_runs?: number
   recommendation_count?: Record<string, number>
+  budget?: {
+    token_budget?: number
+    estimated_tokens?: number
+    candidate_items?: number
+    judged_items?: number
+    skipped_due_budget?: number
+  }
 }
 
 type DailyResult = {
@@ -197,12 +218,15 @@ export default function TopicWorkflowDashboard() {
   const [enableJudge, setEnableJudge] = useState(false)
   const [judgeRuns, setJudgeRuns] = useState(1)
   const [judgeMaxItems, setJudgeMaxItems] = useState(5)
+  const [judgeTokenBudget, setJudgeTokenBudget] = useState(0)
 
   const [phase, setPhase] = useState<WorkflowPhase>("idle")
   const [searchResult, setSearchResult] = useState<SearchResult | null>(null)
   const [dailyResult, setDailyResult] = useState<DailyResult | null>(null)
   const [loadingSearch, setLoadingSearch] = useState(false)
   const [loadingDaily, setLoadingDaily] = useState(false)
+  const [loadingAnalyze, setLoadingAnalyze] = useState(false)
+  const [analyzeLog, setAnalyzeLog] = useState<string[]>([])
   const [error, setError] = useState<string | null>(null)
 
   const queries = useMemo(() => parseLines(queriesText), [queriesText])
@@ -287,6 +311,7 @@ export default function TopicWorkflowDashboard() {
           enable_judge: enableJudge,
           judge_runs: judgeRuns,
           judge_max_items_per_query: judgeMaxItems,
+          judge_token_budget: judgeTokenBudget,
         }),
       })
       if (!res.ok) {
@@ -300,6 +325,84 @@ export default function TopicWorkflowDashboard() {
       setPhase("error")
     } finally {
       setLoadingDaily(false)
+    }
+  }
+
+
+  async function runAnalyzeStream() {
+    if (!dailyResult?.report) {
+      setError("Please generate DailyPaper first.")
+      return
+    }
+    const runJudge = Boolean(enableJudge)
+    const runTrends = Boolean(enableLLM && useTrends)
+    if (!runJudge && !runTrends) {
+      setError("Enable Judge or LLM trends before starting analyze stream.")
+      return
+    }
+
+    setLoadingAnalyze(true)
+    setError(null)
+    setAnalyzeLog([])
+    setPhase("reporting")
+
+    try {
+      const res = await fetch("/api/research/paperscool/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          report: dailyResult.report,
+          run_judge: runJudge,
+          run_trends: runTrends,
+          judge_runs: judgeRuns,
+          judge_max_items_per_query: judgeMaxItems,
+          judge_token_budget: judgeTokenBudget,
+          trend_max_items_per_query: 3,
+        }),
+      })
+      if (!res.ok || !res.body) {
+        throw new Error(await res.text())
+      }
+
+      for await (const event of readSSE(res.body)) {
+        if (event.type === "progress") {
+          const data = (event.data || {}) as { phase?: string; message?: string }
+          setAnalyzeLog((prev) => [...prev, `[${data.phase || "step"}] ${data.message || "running"}`])
+          continue
+        }
+
+        if (event.type === "trend") {
+          const data = (event.data || {}) as { query?: string; done?: number; total?: number }
+          setAnalyzeLog((prev) => [...prev, `trend ${data.done || 0}/${data.total || 0}: ${data.query || "query"}`])
+          continue
+        }
+
+        if (event.type === "judge") {
+          const data = (event.data || {}) as { title?: string; done?: number; total?: number }
+          setAnalyzeLog((prev) => [...prev, `judge ${data.done || 0}/${data.total || 0}: ${data.title || "paper"}`])
+          continue
+        }
+
+        if (event.type === "result") {
+          const data = (event.data || {}) as { report?: DailyResult["report"]; markdown?: string }
+          if (data.report) {
+            setDailyResult((prev) => {
+              if (!prev) return null
+              return {
+                ...prev,
+                report: data.report || prev.report,
+                markdown: typeof data.markdown === "string" ? data.markdown : prev.markdown,
+              }
+            })
+          }
+        }
+      }
+      setPhase("reported")
+    } catch (err) {
+      setError(String(err))
+      setPhase("error")
+    } finally {
+      setLoadingAnalyze(false)
     }
   }
 
@@ -421,7 +524,7 @@ export default function TopicWorkflowDashboard() {
                 <Checkbox checked={enableJudge} onCheckedChange={(v) => setEnableJudge(Boolean(v))} />
                 Enable LLM Judge
               </label>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-3 gap-3">
                 <div className="space-y-1">
                   <Label>Judge Runs</Label>
                   <Input type="number" min={1} max={5} value={judgeRuns} onChange={(e) => setJudgeRuns(Number(e.target.value || 1))} />
@@ -434,6 +537,15 @@ export default function TopicWorkflowDashboard() {
                     max={20}
                     value={judgeMaxItems}
                     onChange={(e) => setJudgeMaxItems(Number(e.target.value || 5))}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label>Token Budget</Label>
+                  <Input
+                    type="number"
+                    min={0}
+                    value={judgeTokenBudget}
+                    onChange={(e) => setJudgeTokenBudget(Number(e.target.value || 0))}
                   />
                 </div>
               </div>
@@ -449,6 +561,13 @@ export default function TopicWorkflowDashboard() {
                 onClick={runDailyPaper}
               >
                 {loadingDaily ? "Generating DailyPaper..." : "Generate DailyPaper"}
+              </Button>
+              <Button
+                variant="outline"
+                disabled={loadingAnalyze || !dailyResult?.report}
+                onClick={runAnalyzeStream}
+              >
+                {loadingAnalyze ? "Streaming Analyze..." : "Run Analyze Stream"}
               </Button>
             </div>
 
@@ -537,6 +656,13 @@ export default function TopicWorkflowDashboard() {
                 <div>Enabled: {dailyResult?.report?.judge?.enabled ? "Yes" : "No"}</div>
                 <div>Runs: {dailyResult?.report?.judge?.n_runs ?? 0}</div>
                 <div>Max Items / Query: {dailyResult?.report?.judge?.max_items_per_query ?? 0}</div>
+                <div>
+                  Budget: {dailyResult?.report?.judge?.budget?.estimated_tokens ?? 0}/
+                  {(dailyResult?.report?.judge?.budget?.token_budget ?? 0) > 0
+                    ? dailyResult?.report?.judge?.budget?.token_budget
+                    : "unlimited"}{" "}
+                  tokens
+                </div>
                 <div className="flex flex-wrap gap-2">
                   {Object.entries(dailyResult?.report?.judge?.recommendation_count || {}).map(([name, count]) => (
                     <Badge key={name} variant="outline">
@@ -544,21 +670,42 @@ export default function TopicWorkflowDashboard() {
                     </Badge>
                   ))}
                 </div>
-                <ScrollArea className="h-52 rounded border p-3">
-                  <div className="space-y-2">
+                <ScrollArea className="h-72 rounded border p-3">
+                  <div className="space-y-3">
                     {(dailyResult?.report?.queries || []).flatMap((query) =>
-                      (query.top_items || []).slice(0, 2).map((item, idx) => (
-                        <div key={`${query.normalized_query}-${item.title}-${idx}`} className="rounded border p-2">
-                          <div className="font-medium">{item.title}</div>
-                          <div className="text-xs text-muted-foreground">
-                            {query.normalized_query || query.raw_query} | overall={item.judge?.overall} | rec={item.judge?.recommendation}
+                      (query.top_items || [])
+                        .filter((item) => Boolean(item.judge))
+                        .slice(0, 2)
+                        .map((item, idx) => (
+                          <div key={`${query.normalized_query}-${item.title}-${idx}`} className="rounded border p-3">
+                            <div className="font-medium">{item.title}</div>
+                            <div className="text-xs text-muted-foreground">
+                              {query.normalized_query || query.raw_query} | overall={item.judge?.overall} | rec={item.judge?.recommendation}
+                            </div>
+                            <div className="mt-2 grid gap-2 md:grid-cols-[180px_1fr]">
+                              <JudgeRadarChart judge={item.judge} />
+                              <div className="space-y-1 text-xs text-muted-foreground">
+                                <div>Rel: {item.judge?.relevance?.score ?? "-"} / Nov: {item.judge?.novelty?.score ?? "-"}</div>
+                                <div>Rig: {item.judge?.rigor?.score ?? "-"} / Imp: {item.judge?.impact?.score ?? "-"}</div>
+                                <div>Clr: {item.judge?.clarity?.score ?? "-"}</div>
+                                <div>{item.judge?.one_line_summary || "-"}</div>
+                              </div>
+                            </div>
                           </div>
-                          <div className="text-xs text-muted-foreground">{item.judge?.one_line_summary || "-"}</div>
-                        </div>
-                      )),
+                        )),
                     )}
                   </div>
                 </ScrollArea>
+                <div className="rounded border p-3">
+                  <div className="font-medium">Analyze Stream Log</div>
+                  <ScrollArea className="mt-2 h-24">
+                    <div className="space-y-1 text-xs text-muted-foreground">
+                      {(analyzeLog.length ? analyzeLog : ["No streaming events yet."]).map((line, idx) => (
+                        <div key={`${line}-${idx}`}>{line}</div>
+                      ))}
+                    </div>
+                  </ScrollArea>
+                </div>
               </TabsContent>
             </Tabs>
           </CardContent>
