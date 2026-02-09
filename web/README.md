@@ -7,7 +7,7 @@ Modern React-based interface for PaperBot, built with Next.js 15, Shadcn UI, and
 - **Morning Paper Dashboard**: Research activity feed.
 - **DeepCode Studio**: Interactive Cloud IDE for reproduction.
 - **Scholar Profile**: Radar charts and impact metrics.
-- **Topic Workflows** (`/workflows`): Configure topic queries, run papers.cool search, generate DailyPaper preview, and optionally persist report files.
+- **Topic Workflows** (`/workflows`): Configure topic queries, run papers.cool search, inspect XYFlow read-only DAG status, generate DailyPaper preview, and optionally persist report files.
 
 ## Workflows Page
 
@@ -20,6 +20,7 @@ Modern React-based interface for PaperBot, built with Next.js 15, Shadcn UI, and
 - Run topic search and inspect ranked/aggregated results
 - Generate DailyPaper report preview (markdown)
 - Enable optional LLM analysis (`summary/trends/insight/relevance`) for DailyPaper
+- Enable optional LLM-as-Judge scoring (multidimension + recommendation)
 - Optionally save DailyPaper artifacts (markdown/json) through backend API
 
 ### Related API proxy routes

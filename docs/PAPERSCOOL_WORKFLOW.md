@@ -13,6 +13,7 @@ Input Queries
    -> Merge / Dedup / Score
    -> Query Summary + Global Summary
    -> (Optional) LLM Enrichment (summary/trends/insight/relevance)
+   -> (Optional) LLM-as-Judge (5-dim scoring + recommendation)
    -> (Optional) DailyPaper Markdown/JSON
    -> (Optional) Scheduler Cron + Feed Events
 ```
@@ -40,12 +41,17 @@ Input Queries
    - 支持 `summary/trends/insight/relevance` 四类增强。
    - 默认关闭，不影响原有纯检索模式。
 
-5. **日报输出（DailyPaper）**
+5. **LLM-as-Judge（可选）**
+   - 对每个 query 的 top papers 做 5 维评分：relevance/novelty/rigor/impact/clarity。
+   - 产出 `overall` 与 `recommendation`（must_read/worth_reading/skim/skip）。
+   - 可配置重复打分次数（中位数校准）。
+
+6. **日报输出（DailyPaper）**
    - 支持 `markdown/json/both`。
    - 支持直接写盘。
    - Markdown 会自动附加 LLM Insights 区块（若启用）。
 
-6. **调度与信息流**
+7. **调度与信息流**
    - ARQ job 定时生成日报。
    - 将日报高亮项桥接到 feed 的 recommendation 事件。
    - 支持 `PAPERBOT_DAILYPAPER_ENABLE_LLM` 与特性开关。
@@ -95,7 +101,10 @@ Input Queries
   "save": true,
   "output_dir": "./reports/dailypaper",
   "enable_llm_analysis": true,
-  "llm_features": ["summary", "trends", "insight"]
+  "llm_features": ["summary", "trends", "insight"],
+  "enable_judge": true,
+  "judge_runs": 2,
+  "judge_max_items_per_query": 5
 }
 ```
 
@@ -111,7 +120,8 @@ python -m paperbot.presentation.cli.main topic-search \
 python -m paperbot.presentation.cli.main daily-paper \
   -q "ICL压缩" -q "ICL隐式偏置" -q "KV Cache加速" \
   --source papers_cool --format both --save --output-dir ./reports/dailypaper \
-  --with-llm --llm-feature summary --llm-feature trends --llm-feature insight
+  --with-llm --llm-feature summary --llm-feature trends --llm-feature insight \
+  --with-judge --judge-runs 2 --judge-max-items 5
 ```
 
 ## 5. 新源注入（扩展）
@@ -134,7 +144,7 @@ registry.register("my_source", MySource)
 
 - Excalidraw：`docs/diagrams/crawling_pipeline_architecture.excalidraw`
 
-## 7. Scheduler 配置（DailyPaper）
+## 8. Scheduler 配置（DailyPaper）
 
 - `PAPERBOT_DAILYPAPER_ENABLED`：是否启用 daily cron（true/false）
 - `PAPERBOT_DAILYPAPER_CRON_HOUR` / `PAPERBOT_DAILYPAPER_CRON_MINUTE`
@@ -147,10 +157,13 @@ registry.register("my_source", MySource)
 - `PAPERBOT_DAILYPAPER_OUTPUT_DIR`
 - `PAPERBOT_DAILYPAPER_ENABLE_LLM`
 - `PAPERBOT_DAILYPAPER_LLM_FEATURES`（逗号分隔：summary,trends,insight,relevance）
+- `PAPERBOT_DAILYPAPER_ENABLE_JUDGE`
+- `PAPERBOT_DAILYPAPER_JUDGE_RUNS`
+- `PAPERBOT_DAILYPAPER_JUDGE_MAX_ITEMS`
 
-## 8. UI 设计说明
+## 9. UI 设计说明
 
-当前采用 **参数化工作流面板**（`/workflows`）而非 n8n/coze 式自由拖拽，原因：
+当前采用 **参数化面板 + XYFlow 只读 DAG**（`/workflows`）而非 n8n/coze 式自由拖拽，原因：
 
 - MVP 目标是“先可用 + 可验证 + 可运维”。
 - 当前流程节点固定（Source -> Search -> Rank -> DailyPaper -> Schedule），参数面板已经覆盖主要操作。

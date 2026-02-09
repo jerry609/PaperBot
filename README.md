@@ -110,6 +110,7 @@ Orchestrator Pipeline:
 - **聚合与排序**：跨 query/branch 去重（URL + 标题兜底）并输出规则化分数
 - **日报输出**：支持 DailyPaper 风格 `markdown/json` 双格式输出（可写盘）
 - **LLM 增强（可选）**：支持 `summary/trends/insight/relevance`，由统一 `LLMService` 走 ModelRouter 路由
+- **LLM-as-Judge（可选）**：多维评分与推荐分级（must_read/worth_reading/skim/skip）
 - **调度集成**：支持 ARQ cron 定时生成日报并桥接到 feed 推荐事件
 - **Web 工作流页**：新增 `/workflows` 页面用于参数化执行与结果预览（含 LLM 开关）
 
@@ -359,7 +360,8 @@ python -m paperbot.presentation.cli.main topic-search \
 python -m paperbot.presentation.cli.main daily-paper \
   -q "ICL压缩" -q "ICL隐式偏置" -q "KV Cache加速" \
   --source papers_cool --format both --save --output-dir ./reports/dailypaper \
-  --with-llm --llm-feature summary --llm-feature trends --llm-feature insight
+  --with-llm --llm-feature summary --llm-feature trends --llm-feature insight \
+  --with-judge --judge-runs 2 --judge-max-items 5
 ```
 
 ## Roadmap（Plan 摘要）
