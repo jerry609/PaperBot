@@ -5,7 +5,6 @@ import {
   Controls,
   Handle,
   MarkerType,
-  MiniMap,
   Position,
   ReactFlow,
   type Edge,
@@ -192,7 +191,6 @@ export default function WorkflowDagView(props: WorkflowDagViewProps) {
         proOptions={{ hideAttribution: true }}
       >
         <Background gap={16} size={1} />
-        <MiniMap pannable zoomable />
         <Controls showInteractive={false} />
       </ReactFlow>
     </div>

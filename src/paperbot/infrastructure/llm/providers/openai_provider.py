@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import logging
+import re
 from typing import Any, Dict, Generator, List, Optional
 
 from .base import LLMProvider, ProviderInfo
@@ -121,18 +122,26 @@ class OpenAIProvider(LLMProvider):
             k: v for k, v in kwargs.items()
             if k in self.ALLOWED_PARAMS and v is not None
         }
-        
+
         timeout = extra_params.pop("timeout", self.timeout)
-        
+
         response = self.client.chat.completions.create(
             model=self.model_name,
             messages=messages,
             timeout=timeout,
             **extra_params,
         )
-        
+
         if response.choices and response.choices[0].message:
-            content = response.choices[0].message.content
+            msg = response.choices[0].message
+            content = msg.content or ""
+            # Some thinking models (GLM4.7) put the answer in reasoning_content
+            # when content is empty
+            if not content.strip():
+                rc = getattr(msg, "reasoning_content", None)
+                if rc:
+                    content = str(rc)
+            content = self._strip_thinking_tags(content)
             return content.strip() if content else ""
         return ""
     
@@ -147,9 +156,9 @@ class OpenAIProvider(LLMProvider):
             if k in self.ALLOWED_PARAMS and v is not None
         }
         extra_params["stream"] = True
-        
+
         timeout = extra_params.pop("timeout", self.timeout)
-        
+
         try:
             stream = self.client.chat.completions.create(
                 model=self.model_name,
@@ -157,12 +166,30 @@ class OpenAIProvider(LLMProvider):
                 timeout=timeout,
                 **extra_params,
             )
-            
+
+            in_think = False
             for chunk in stream:
                 if chunk.choices and len(chunk.choices) > 0:
                     delta = chunk.choices[0].delta
-                    if delta and delta.content:
-                        yield delta.content
+                    if not delta:
+                        continue
+                    text = delta.content or ""
+                    # Skip reasoning_content chunks from thinking models
+                    if not text:
+                        rc = getattr(delta, "reasoning_content", None)
+                        if rc:
+                            continue
+                    # Filter out <think>...</think> inline tags from MiniMax
+                    if "<think>" in text:
+                        in_think = True
+                    if in_think:
+                        if "</think>" in text:
+                            in_think = False
+                            text = text.split("</think>", 1)[1]
+                        else:
+                            continue
+                    if text:
+                        yield text
         except Exception as e:
             logger.error(f"流式请求失败: {e}")
             raise
@@ -177,3 +204,8 @@ class OpenAIProvider(LLMProvider):
             max_tokens=4096,
             supports_streaming=True,
         )
+
+    @staticmethod
+    def _strip_thinking_tags(text: str) -> str:
+        """Remove <think>...</think> blocks from thinking model output (e.g. MiniMax M2.1)."""
+        return re.sub(r"<think>[\s\S]*?</think>", "", text).strip()

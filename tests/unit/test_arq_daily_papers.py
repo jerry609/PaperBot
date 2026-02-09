@@ -4,6 +4,8 @@ from pathlib import Path
 
 import pytest
 
+pytest.importorskip("arq", reason="arq not installed")
+
 
 def test_build_daily_paper_cron_jobs_disabled(monkeypatch):
     monkeypatch.setenv("PAPERBOT_DAILYPAPER_ENABLED", "false")

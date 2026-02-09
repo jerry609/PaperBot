@@ -110,9 +110,10 @@ Orchestrator Pipeline:
 - **聚合与排序**：跨 query/branch 去重（URL + 标题兜底）并输出规则化分数
 - **日报输出**：支持 DailyPaper 风格 `markdown/json` 双格式输出（可写盘）
 - **LLM 增强（可选）**：支持 `summary/trends/insight/relevance`，由统一 `LLMService` 走 ModelRouter 路由
-- **LLM-as-Judge（可选）**：多维评分与推荐分级（must_read/worth_reading/skim/skip）
+- **LLM-as-Judge（可选）**：5 维多维评分（Relevance / Novelty / Rigor / Impact / Clarity，1–5 分）与推荐分级（must_read / worth_reading / skim / skip），支持 Token Budget 控制与多轮校准（calibration）
+- **Analyze SSE 流式**：Judge + Trend 分析通过 SSE 实时流式推送进度与结果，前端实时更新
 - **调度集成**：支持 ARQ cron 定时生成日报并桥接到 feed 推荐事件
-- **Web 工作流页**：新增 `/workflows` 页面用于参数化执行与结果预览（含 LLM 开关）
+- **Web 工作流页**：`/workflows` 页面支持参数化执行、工作流 DAG 可视化、Judge 雷达图、Insight 面板、结果本地持久化（Zustand + localStorage）、可折叠侧边栏
 
 ## 界面预览
 
@@ -141,6 +142,20 @@ Orchestrator Pipeline:
 4. DeepCode Studio（代码复现）
 
 ![DeepCode Studio](asset/ui/deepcode.jpg)
+
+### Topic Workflow（主题检索 + LLM-as-Judge）
+
+5. 工作流全景：DAG 流程可视化 + 配置面板（LLM Analysis / Judge 开关、Token Budget 等）
+
+![Topic Workflow Dashboard](asset/ui/9-3.png)
+
+6. DailyPaper 报告：Query Highlights 表 + Global Top 表 + Markdown 预览
+
+![DailyPaper Report](asset/ui/9-1.png)
+
+7. 论文卡片：搜索评分、来源标签、排序控制
+
+![Paper Cards](asset/ui/9-2.png)
 
 ## 与 AlphaXiv / DeepCode 的主要区别（参考）
 
@@ -179,7 +194,17 @@ Orchestrator Pipeline:
 
 - **OpenAI / 兼容接口**：如 `gpt-4o`、`gpt-4o-mini` 等
 - **Anthropic**：如 Claude 系列
+- **NVIDIA NIM**：通过 OpenAI-compatible 接口访问 MiniMax M2.1（default）、GLM 4.7（reasoning/judge）等
+- **OpenRouter**：访问 DeepSeek R1 等 thinking model（含 `<think>` 标签自动剥离）
 - **Ollama**：本地模型（可选）
+
+路由策略（`DEFAULT_ROUTING`）：
+
+| 任务类型 | 路由目标 | 典型模型 |
+|---------|---------|---------|
+| default / extraction / summary / chat | default | MiniMax M2.1 / gpt-4o-mini |
+| analysis / reasoning / review | reasoning | GLM 4.7 / DeepSeek R1 |
+| code | code | gpt-4o |
 
 ## 快速开始
 
@@ -214,10 +239,29 @@ cp env.example .env
 
 至少配置一个 LLM Key（如 `OPENAI_API_KEY`），否则涉及 LLM 的能力将不可用/自动降级。
 
-可选（用于 Research Track Router 的 embedding 路由与缓存；未配置会自动降级为多特征 keyword/memory/task 路由）：
+可选 LLM 后端配置（`ModelRouter` 按优先级自动检测）：
 
-- `OPENAI_API_KEY`
-- `OPENAI_BASE_URL`（可选：OpenAI 兼容代理地址）
+```bash
+# --- OpenAI (默认) ---
+OPENAI_API_KEY=sk-...
+OPENAI_BASE_URL=              # 可选：兼容代理地址
+
+# --- NVIDIA NIM (OpenAI-compatible) ---
+NVIDIA_BASE_URL=https://integrate.api.nvidia.com/v1
+NVIDIA_MINIMAX_API_KEY=nvapi-...   # default 路由
+NVIDIA_MINIMAX_MODEL=minimaxai/minimax-m2.1
+NVIDIA_GLM_API_KEY=nvapi-...       # reasoning/judge 路由
+NVIDIA_GLM_MODEL=z-ai/glm4.7
+
+# --- OpenRouter ---
+OPENROUTER_API_KEY=sk-or-v1-...
+OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
+OPENROUTER_DS_R1_MODEL=deepseek/deepseek-r1-0528:free
+
+# --- 显式覆盖（优先级最高） ---
+LLM_DEFAULT_MODEL=             # 覆盖 default 路由模型
+LLM_REASONING_MODEL=           # 覆盖 reasoning 路由模型
+```
 
 ### 3) 启动 API 服务器（CLI/Web 都依赖它）
 
@@ -247,6 +291,7 @@ python -m uvicorn src.paperbot.api.main:app --reload --port 8000
 | `/api/research/*` | GET/POST | 个性化研究：方向（Track）/进度/记忆 Inbox/推荐与反馈 |
 | `/api/research/paperscool/search` | POST | 主题检索工作流（多主题聚合结果） |
 | `/api/research/paperscool/daily` | POST | DailyPaper 日报生成（Markdown/JSON） |
+| `/api/research/paperscool/analyze` | POST | LLM Judge + Trend 流式分析（SSE） |
 
 #### 个性化研究（Research）关键端点
 
@@ -299,8 +344,15 @@ npm run dev
 #### Workflows（Web）
 
 - 路径：`/workflows`
-- 能力：主题配置、source/branch 选择、Topic Search 执行、DailyPaper 预览与写盘
-- 设计：当前采用“参数化工作流面板”MVP，后续可演进为节点拖拽
+- 能力：
+  - 主题配置、source/branch 选择、参数调节（Top K / Show / Daily Top N）
+  - Topic Search → DailyPaper → Analyze 三步执行
+  - **LLM-as-Judge**：5 维评分雷达图、推荐分级、Token Budget 控制
+  - **Trend Analysis**：逐 Query 趋势洞察（SSE 流式推送）
+  - **工作流 DAG**：基于 XYFlow 的可视化流程图（含阶段状态着色）
+  - **状态持久化**：搜索/报告/Judge 结果通过 Zustand + localStorage 持久化，刷新/切换页面后保留
+  - **可折叠侧边栏**：图标模式（56px）与全展模式（224px）切换
+- 设计：当前采用"参数化工作流面板"MVP，后续可演进为节点拖拽
 
 安全说明（默认行为）：
 
@@ -406,7 +458,7 @@ PaperBot/
 │       │   ├── main.py
 │       │   ├── streaming.py
 │       │   └── routes/                    # track/analyze/gen_code/review/chat + sandbox/runbook/jobs/runs/memory/research
-│       ├── application/                   # 应用层（ports/workflows/registries/collaboration）
+│       ├── application/                   # 应用层（ports/workflows/registries/collaboration/judge）
 │       ├── compat/                        # 兼容层
 │       ├── core/                          # 核心抽象（pipeline/errors/di/report_engine 等）
 │       ├── domain/                        # 领域模型（paper/scholar/influence 等）

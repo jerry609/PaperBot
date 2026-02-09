@@ -1,3 +1,7 @@
+import pytest
+
+pytest.importorskip("arq", reason="arq not installed")
+
 from paperbot.infrastructure.queue.arq_worker import WorkerSettings
 
 

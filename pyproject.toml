@@ -72,6 +72,10 @@ typeCheckingMode = "basic"
 enabled = true
 live_mode = true
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "strict"
+
 [tool.black]
 line-length = 100
 target-version = ['py310']

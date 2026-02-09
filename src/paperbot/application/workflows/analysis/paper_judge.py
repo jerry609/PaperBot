@@ -135,6 +135,11 @@ class PaperJudge:
         if not text:
             return {}
 
+        # Strip <think>...</think> blocks from thinking models (MiniMax M2.1)
+        text = re.sub(r"<think>[\s\S]*?</think>", "", text).strip()
+        if not text:
+            return {}
+
         try:
             obj = json.loads(text)
             if isinstance(obj, dict):

@@ -31,7 +31,7 @@ def test_paperscool_connector_parses_arxiv_and_venue_fixtures(tmp_path):
     assert venue_records[0].source_branch == "venue"
     assert "compression" in venue_records[0].keywords
 
-    db_url = f"sqlite:///{tmp_path / paperscool_it.db}"
+    db_url = f"sqlite:///{tmp_path / 'paperscool_it.db'}"
     event_log = SqlAlchemyEventLog(db_url=db_url, auto_create_schema=True)
     run_id = new_run_id()
 

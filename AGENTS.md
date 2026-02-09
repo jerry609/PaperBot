@@ -1,51 +1,112 @@
-# Repository Guidelines
+# AGENTS.md
 
-## Project Structure
+This document is the working contract for contributors and coding agents in this repository.
+Follow it as the default behavior unless a task-specific instruction says otherwise.
 
-- `src/`: Python package source (PaperBot backend: agents, workflows, API).
-- `tests/`: Pytest suite (unit + integration tests).
-- `alembic/` + `alembic.ini`: Database migrations (SQLAlchemy/Alembic).
-- `web/`: Next.js web dashboard (DeepCode Studio + UI).
-- `cli/`: Terminal/CLI tooling.
-- `docs/`: Design notes and plans (see `docs/PLAN.md`).
-- `asset/`, `public/`: Images and static assets used by docs/UI.
+## 1) Repository Overview
 
-## Build, Test, and Development Commands
+PaperBot is a mixed Python + Next.js project.
 
-**Backend (Python)**
-- Install: `python -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt`
-- Run API (dev): `python -m uvicorn src.paperbot.api.main:app --reload --port 8000`
-- Tests: `pytest` (or `pytest -q`; integration tests live under `tests/integration/`)
+- `src/` - Python backend package (agents, workflows, API)
+- `tests/` - pytest suite (unit + integration)
+- `alembic/` + `alembic.ini` - SQLAlchemy/Alembic migrations
+- `web/` - Next.js dashboard (DeepCode Studio + UI)
+- `cli/` - CLI and terminal tooling
+- `docs/` - design notes and plans (`docs/PLAN.md`)
+- `asset/`, `public/` - static assets for docs/UI
 
-**Web (Next.js)**
-- Install: `cd web && npm install`
-- Dev server: `cd web && npm run dev` (open `http://localhost:3000`)
-- Lint: `cd web && npm run lint`
-- Build: `cd web && npm run build`
+## 2) Local Development
 
-## Coding Style & Naming Conventions
+### Backend (Python)
 
-- Python: formatted with Black (`line-length = 100`) and import-sorted with isort (Black profile). Prefer `snake_case` for functions/vars and `PascalCase` for classes.
-  - Format: `python -m black .`
-  - Imports: `python -m isort .`
-  - Types: `pyright` (config in `pyrightconfig.json`)
-- TypeScript/React: follow existing component patterns in `web/src/` and keep Tailwind class usage consistent.
-- Avoid editing generated/vendor outputs (`web/.next/`, `web/node_modules/`).
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+python -m uvicorn src.paperbot.api.main:app --reload --port 8000
+```
 
-## Testing Guidelines
+### Web (Next.js)
 
-- Use pytest for Python. Add tests alongside existing suites and name files `test_*.py`.
-- Prefer small, deterministic tests; mock external APIs where possible.
+```bash
+cd web
+npm install
+npm run dev
+```
 
-## Commit & Pull Request Guidelines
+Open `http://localhost:3000` for the web app.
 
-- Commits follow Conventional Commits (e.g., `feat: ...`, `fix: ...`, `refactor: ...`, `docs: ...`).
-- PRs should include:
-  - Clear description of behavior change and any config/env impacts.
-  - Linked issue (if applicable).
-  - For UI changes in `web/`, include screenshots or short clips.
-  - Evidence of validation (e.g., `pytest`, `npm run build`).
+## 3) Build, Lint, and Test
 
-## Configuration Tips
+### Python
 
-- Copy `env.example` to `.env` for local runs: `cp env.example .env` and set required API keys (e.g., `OPENAI_API_KEY`).
+```bash
+pytest
+# or
+pytest -q
+python -m black .
+python -m isort .
+pyright
+```
+
+### Web
+
+```bash
+cd web
+npm run lint
+npm run build
+```
+
+Notes:
+- Integration tests live under `tests/integration/`.
+- Prefer deterministic tests and mock external APIs when possible.
+
+## 4) Style Conventions
+
+### Python
+- Black formatting, `line-length = 100`
+- isort with Black profile
+- Naming: `snake_case` for functions/variables, `PascalCase` for classes
+
+### TypeScript/React
+- Follow established patterns in `web/src/`
+- Keep Tailwind usage consistent with nearby components
+
+Do not edit generated/vendor directories:
+- `web/.next/`
+- `web/node_modules/`
+
+## 5) Commits and Pull Requests
+
+### Commits
+Use Conventional Commits:
+- `feat: ...`
+- `fix: ...`
+- `refactor: ...`
+- `docs: ...`
+
+### Pull Requests
+Each PR should include:
+- What changed and why
+- Any config/environment impact
+- Linked issue (if available)
+- Validation evidence (for example: `pytest`, `npm run build`)
+- Screenshots or clips for UI changes under `web/`
+
+## 6) Configuration
+
+Bootstrap local env:
+
+```bash
+cp env.example .env
+```
+
+Then fill required keys (for example `OPENAI_API_KEY`).
+
+## 7) Agent Working Rules
+
+- Make the smallest safe change that satisfies the request.
+- Keep edits local and avoid unrelated refactors.
+- Prefer fast, targeted checks before broad test runs.
+- If behavior changes, add or update tests.
+- When uncertain, document assumptions explicitly in the final note.
