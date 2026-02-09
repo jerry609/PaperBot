@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+import copy
 import json
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence
+
+from paperbot.application.services.llm_service import LLMService, get_llm_service
+
+
+SUPPORTED_LLM_FEATURES = ("summary", "trends", "insight", "relevance")
 
 
 def build_daily_paper_report(
@@ -47,6 +53,54 @@ def build_daily_paper_report(
     }
 
 
+def enrich_daily_paper_report(
+    report: Dict[str, Any],
+    *,
+    llm_service: Optional[LLMService] = None,
+    llm_features: Sequence[str] = ("summary",),
+    max_items_per_query: int = 3,
+) -> Dict[str, Any]:
+    """Optionally enrich DailyPaper report with LLM outputs."""
+
+    features = normalize_llm_features(llm_features)
+    if not features:
+        return copy.deepcopy(report)
+
+    svc = llm_service or get_llm_service()
+    enriched = copy.deepcopy(report)
+    llm_block: Dict[str, Any] = {
+        "enabled": True,
+        "features": features,
+        "query_trends": [],
+        "daily_insight": "",
+    }
+
+    for query in enriched.get("queries") or []:
+        query_name = query.get("normalized_query") or query.get("raw_query") or ""
+        top_items = (query.get("top_items") or [])[: max(1, int(max_items_per_query))]
+
+        if "summary" in features:
+            for item in top_items:
+                item["ai_summary"] = svc.summarize_paper(
+                    title=item.get("title") or "",
+                    abstract=item.get("snippet") or item.get("abstract") or "",
+                )
+
+        if "relevance" in features:
+            for item in top_items:
+                item["relevance"] = svc.assess_relevance(paper=item, query=query_name)
+
+        if "trends" in features and top_items:
+            trend_text = svc.analyze_trends(topic=query_name, papers=top_items)
+            llm_block["query_trends"].append({"query": query_name, "analysis": trend_text})
+
+    if "insight" in features:
+        llm_block["daily_insight"] = svc.generate_daily_insight(enriched)
+
+    enriched["llm_analysis"] = llm_block
+    return enriched
+
+
 def render_daily_paper_markdown(report: Dict[str, Any]) -> str:
     lines: List[str] = []
     lines.append(f"# {report.get('title') or 'DailyPaper Digest'}")
@@ -79,6 +133,16 @@ def render_daily_paper_markdown(report: Dict[str, Any]) -> str:
                 lines.append(f"- [{title}]({url}) | score={score}")
             else:
                 lines.append(f"- {title} | score={score}")
+
+            ai_summary = (item.get("ai_summary") or "").strip()
+            if ai_summary:
+                lines.append(f"  - AI Summary: {ai_summary}")
+
+            relevance = item.get("relevance")
+            if isinstance(relevance, dict):
+                rel_score = relevance.get("score")
+                rel_reason = relevance.get("reason") or ""
+                lines.append(f"  - Relevance: score={rel_score} reason={rel_reason}")
         lines.append("")
 
     lines.append("## Global Top")
@@ -95,6 +159,29 @@ def render_daily_paper_markdown(report: Dict[str, Any]) -> str:
 
     if not (report.get("global_top") or []):
         lines.append("- No items")
+
+    llm_analysis = report.get("llm_analysis") or {}
+    if llm_analysis:
+        lines.append("")
+        lines.append("## LLM Insights")
+        lines.append("")
+
+        features = ", ".join(llm_analysis.get("features") or [])
+        if features:
+            lines.append(f"- Enabled Features: {features}")
+
+        daily_insight = (llm_analysis.get("daily_insight") or "").strip()
+        if daily_insight:
+            lines.append(f"- Daily Insight: {daily_insight}")
+
+        trends = llm_analysis.get("query_trends") or []
+        if trends:
+            lines.append("")
+            lines.append("### Query Trends")
+            for trend in trends:
+                topic = trend.get("query") or ""
+                text = trend.get("analysis") or ""
+                lines.append(f"- {topic}: {text}")
 
     lines.append("")
     return "\n".join(lines)
@@ -172,3 +259,14 @@ def normalize_output_formats(formats: Iterable[str]) -> List[str]:
             seen.add(key)
             normalized.append(key)
     return normalized or ["markdown", "json"]
+
+
+def normalize_llm_features(features: Iterable[str]) -> List[str]:
+    normalized: List[str] = []
+    seen = set()
+    for feature in features:
+        key = (feature or "").strip().lower()
+        if key in SUPPORTED_LLM_FEATURES and key not in seen:
+            seen.add(key)
+            normalized.append(key)
+    return normalized

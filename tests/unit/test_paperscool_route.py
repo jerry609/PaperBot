@@ -108,3 +108,32 @@ def test_paperscool_daily_route_success(monkeypatch, tmp_path):
     assert payload["report"]["stats"]["unique_items"] == 1
     assert payload["markdown_path"] is not None
     assert payload["json_path"] is not None
+
+
+def test_paperscool_daily_route_with_llm_enrichment(monkeypatch):
+    monkeypatch.setattr(paperscool_route, "PapersCoolTopicSearchWorkflow", _FakeWorkflow)
+
+    called = {"value": False}
+
+    def _fake_enrich(report, *, llm_features, llm_service=None, max_items_per_query=3):
+        called["value"] = True
+        report = dict(report)
+        report["llm_analysis"] = {"enabled": True, "features": llm_features}
+        return report
+
+    monkeypatch.setattr(paperscool_route, "enrich_daily_paper_report", _fake_enrich)
+
+    with TestClient(api_main.app) as client:
+        resp = client.post(
+            "/api/research/paperscool/daily",
+            json={
+                "queries": ["ICL压缩"],
+                "enable_llm_analysis": True,
+                "llm_features": ["summary", "trends"],
+            },
+        )
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert called["value"] is True
+    assert payload["report"]["llm_analysis"]["enabled"] is True

@@ -15,6 +15,8 @@ from typing import Optional
 from paperbot.application.workflows.dailypaper import (
     DailyPaperReporter,
     build_daily_paper_report,
+    enrich_daily_paper_report,
+    normalize_llm_features,
     normalize_output_formats,
     render_daily_paper_markdown,
 )
@@ -115,6 +117,14 @@ def create_parser() -> argparse.ArgumentParser:
     daily_parser.add_argument("--output-dir", default="./reports/dailypaper", help="输出目录")
     daily_parser.add_argument("--save", action="store_true", help="将日报写入文件")
     daily_parser.add_argument("--json", action="store_true", help="打印 JSON 报告")
+    daily_parser.add_argument("--with-llm", action="store_true", help="启用 LLM 增强分析")
+    daily_parser.add_argument(
+        "--llm-feature",
+        action="append",
+        dest="llm_features",
+        default=None,
+        help="LLM 功能：summary/trends/insight/relevance（可重复指定）",
+    )
 
     # version
     parser.add_argument("--version", "-v", action="store_true", help="显示版本")
@@ -258,6 +268,13 @@ def _run_daily_paper(parsed: argparse.Namespace) -> int:
         title=parsed.title,
         top_n=max(1, int(parsed.top_n)),
     )
+    llm_enabled = bool(parsed.with_llm)
+    llm_features = normalize_llm_features(parsed.llm_features or ["summary"])
+    if llm_enabled:
+        report = enrich_daily_paper_report(
+            report,
+            llm_features=llm_features or ["summary"],
+        )
     markdown = render_daily_paper_markdown(report)
 
     markdown_path = None
@@ -287,6 +304,8 @@ def _run_daily_paper(parsed: argparse.Namespace) -> int:
     print(f"date: {report['date']}")
     print(f"unique_items: {report['stats']['unique_items']}")
     print(f"query_count: {report['stats']['query_count']}")
+    if llm_enabled:
+        print(f"llm_analysis: enabled ({', '.join(llm_features or ['summary'])})")
     if markdown_path or json_path:
         print(f"saved markdown: {markdown_path}")
         print(f"saved json: {json_path}")

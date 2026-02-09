@@ -183,6 +183,14 @@ async def cron_daily_papers(ctx) -> Dict[str, Any]:
             "error": "redis not available",
         }
 
+    enable_llm_analysis = os.getenv("PAPERBOT_DAILYPAPER_ENABLE_LLM", "false").lower() in (
+        "1",
+        "true",
+        "yes",
+        "y",
+    )
+    llm_features = _parse_csv_env("PAPERBOT_DAILYPAPER_LLM_FEATURES", "summary")
+
     job = await redis.enqueue_job(
         "daily_papers_job",
         queries=queries,
@@ -193,6 +201,8 @@ async def cron_daily_papers(ctx) -> Dict[str, Any]:
         top_n=int(os.getenv("PAPERBOT_DAILYPAPER_TOP_N", "10")),
         title=os.getenv("PAPERBOT_DAILYPAPER_TITLE", "DailyPaper Digest"),
         output_dir=os.getenv("PAPERBOT_DAILYPAPER_OUTPUT_DIR", "./reports/dailypaper"),
+        enable_llm_analysis=enable_llm_analysis,
+        llm_features=llm_features,
         save=True,
     )
     payload = {
@@ -302,6 +312,8 @@ async def daily_papers_job(
     top_n: int = 10,
     title: str = "DailyPaper Digest",
     output_dir: str = "./reports/dailypaper",
+    enable_llm_analysis: bool = False,
+    llm_features: Optional[List[str]] = None,
     save: bool = True,
 ) -> Dict[str, Any]:
     """ARQ job: generate DailyPaper report and bridge highlights into feed events."""
@@ -330,6 +342,8 @@ async def daily_papers_job(
                 "top_k_per_query": top_k_per_query,
                 "show_per_branch": show_per_branch,
                 "top_n": top_n,
+                "enable_llm_analysis": enable_llm_analysis,
+                "llm_features": llm_features or ["summary"],
             },
         )
     )
@@ -337,6 +351,8 @@ async def daily_papers_job(
     from paperbot.application.workflows.dailypaper import (
         DailyPaperReporter,
         build_daily_paper_report,
+        enrich_daily_paper_report,
+        normalize_llm_features,
         normalize_output_formats,
         render_daily_paper_markdown,
     )
@@ -354,6 +370,11 @@ async def daily_papers_job(
     report = build_daily_paper_report(
         search_result=search_result, title=title, top_n=max(1, int(top_n))
     )
+    if enable_llm_analysis:
+        report = enrich_daily_paper_report(
+            report,
+            llm_features=normalize_llm_features(llm_features or ["summary"]),
+        )
     markdown = render_daily_paper_markdown(report)
 
     markdown_path = None

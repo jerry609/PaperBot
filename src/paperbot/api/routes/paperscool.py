@@ -8,6 +8,8 @@ from pydantic import BaseModel, Field
 from paperbot.application.workflows.dailypaper import (
     DailyPaperReporter,
     build_daily_paper_report,
+    enrich_daily_paper_report,
+    normalize_llm_features,
     normalize_output_formats,
     render_daily_paper_markdown,
 )
@@ -44,6 +46,8 @@ class DailyPaperRequest(BaseModel):
     formats: List[str] = Field(default_factory=lambda: ["both"])
     save: bool = False
     output_dir: str = "./reports/dailypaper"
+    enable_llm_analysis: bool = False
+    llm_features: List[str] = Field(default_factory=lambda: ["summary"])
 
 
 class DailyPaperResponse(BaseModel):
@@ -85,6 +89,11 @@ def generate_daily_report(req: DailyPaperRequest):
         show_per_branch=req.show_per_branch,
     )
     report = build_daily_paper_report(search_result=search_result, title=req.title, top_n=req.top_n)
+    if req.enable_llm_analysis:
+        report = enrich_daily_paper_report(
+            report,
+            llm_features=normalize_llm_features(req.llm_features),
+        )
     markdown = render_daily_paper_markdown(report)
 
     markdown_path = None

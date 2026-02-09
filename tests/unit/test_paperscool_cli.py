@@ -87,3 +87,35 @@ def test_cli_daily_paper_json_output(monkeypatch, capsys):
     payload = json.loads(captured.out)
     assert payload["report"]["title"] == "DailyPaper Digest"
     assert "# DailyPaper Digest" in payload["markdown"]
+
+
+def test_cli_daily_paper_parser_with_llm_flags():
+    parser = cli_main.create_parser()
+    args = parser.parse_args(
+        [
+            "daily-paper",
+            "-q",
+            "ICL压缩",
+            "--with-llm",
+            "--llm-feature",
+            "summary",
+            "--llm-feature",
+            "trends",
+        ]
+    )
+
+    assert args.with_llm is True
+    assert args.llm_features == ["summary", "trends"]
+
+
+def test_cli_daily_paper_json_output_with_llm(monkeypatch, capsys):
+    monkeypatch.setattr(cli_main, "_create_topic_search_workflow", lambda: _FakeWorkflow())
+
+    exit_code = cli_main.run_cli(
+        ["daily-paper", "-q", "ICL压缩", "--json", "--with-llm", "--llm-feature", "summary"]
+    )
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    payload = json.loads(captured.out)
+    assert "llm_analysis" in payload["report"]
