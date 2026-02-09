@@ -9,6 +9,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 
 type SearchItem = {
@@ -18,6 +19,11 @@ type SearchItem = {
   matched_queries?: string[]
   branches?: string[]
   sources?: string[]
+  ai_summary?: string
+  relevance?: {
+    score?: number
+    reason?: string
+  }
 }
 
 type SearchResult = {
@@ -32,6 +38,13 @@ type SearchResult = {
   }
 }
 
+type LLMAnalysis = {
+  enabled?: boolean
+  features?: string[]
+  daily_insight?: string
+  query_trends?: Array<{ query: string; analysis: string }>
+}
+
 type DailyResult = {
   report: {
     title: string
@@ -42,6 +55,7 @@ type DailyResult = {
       query_count: number
     }
     global_top: SearchItem[]
+    llm_analysis?: LLMAnalysis
   }
   markdown: string
   markdown_path?: string | null
@@ -69,6 +83,12 @@ export default function TopicWorkflowDashboard() {
   const [useVenue, setUseVenue] = useState(true)
   const [usePapersCool, setUsePapersCool] = useState(true)
 
+  const [enableLLM, setEnableLLM] = useState(false)
+  const [useSummary, setUseSummary] = useState(true)
+  const [useTrends, setUseTrends] = useState(true)
+  const [useInsight, setUseInsight] = useState(true)
+  const [useRelevance, setUseRelevance] = useState(false)
+
   const [searchResult, setSearchResult] = useState<SearchResult | null>(null)
   const [dailyResult, setDailyResult] = useState<DailyResult | null>(null)
   const [loadingSearch, setLoadingSearch] = useState(false)
@@ -81,6 +101,10 @@ export default function TopicWorkflowDashboard() {
     [useArxiv, useVenue],
   )
   const sources = useMemo(() => [usePapersCool ? "papers_cool" : ""].filter(Boolean), [usePapersCool])
+  const llmFeatures = useMemo(
+    () => [useSummary ? "summary" : "", useTrends ? "trends" : "", useInsight ? "insight" : "", useRelevance ? "relevance" : ""].filter(Boolean),
+    [useInsight, useRelevance, useSummary, useTrends],
+  )
 
   async function runTopicSearch() {
     setLoadingSearch(true)
@@ -127,6 +151,8 @@ export default function TopicWorkflowDashboard() {
           formats: ["both"],
           save: saveDaily,
           output_dir: outputDir,
+          enable_llm_analysis: enableLLM,
+          llm_features: llmFeatures,
         }),
       })
       if (!res.ok) {
@@ -145,18 +171,20 @@ export default function TopicWorkflowDashboard() {
     <div className="space-y-4">
       <Card>
         <CardHeader>
-          <CardTitle>Workflow Canvas (MVP)</CardTitle>
+          <CardTitle>Workflow Canvas (MVP+)</CardTitle>
         </CardHeader>
         <CardContent className="space-y-2">
           <div className="flex flex-wrap gap-2">
             <Badge variant="secondary">Source</Badge>
+            <Badge variant="secondary">Normalize</Badge>
             <Badge variant="secondary">Search</Badge>
-            <Badge variant="secondary">Rank</Badge>
+            <Badge variant="secondary">Dedupe/Rank</Badge>
+            <Badge variant={enableLLM ? "default" : "secondary"}>LLM Analysis</Badge>
             <Badge variant="secondary">DailyPaper</Badge>
             <Badge variant="secondary">Scheduler/Feed</Badge>
           </div>
           <p className="text-sm text-muted-foreground">
-            当前先做参数化流程面板（比 n8n/coze 全自由拖拽更轻量，后续可升级为节点拖拽）。
+            参数化工作流先跑通，再逐步升级到 XYFlow 可视化 DAG（不是一上来就做全自由拖拽）。
           </p>
         </CardContent>
       </Card>
@@ -222,6 +250,27 @@ export default function TopicWorkflowDashboard() {
               <Input value={outputDir} onChange={(e) => setOutputDir(e.target.value)} placeholder="./reports/dailypaper" />
             </div>
 
+            <div className="space-y-2 rounded border p-3">
+              <label className="flex items-center gap-2 text-sm">
+                <Checkbox checked={enableLLM} onCheckedChange={(v) => setEnableLLM(Boolean(v))} />
+                Enable LLM Analysis
+              </label>
+              <div className="grid grid-cols-2 gap-2 text-sm">
+                <label className="flex items-center gap-2">
+                  <Checkbox checked={useSummary} onCheckedChange={(v) => setUseSummary(Boolean(v))} /> summary
+                </label>
+                <label className="flex items-center gap-2">
+                  <Checkbox checked={useTrends} onCheckedChange={(v) => setUseTrends(Boolean(v))} /> trends
+                </label>
+                <label className="flex items-center gap-2">
+                  <Checkbox checked={useInsight} onCheckedChange={(v) => setUseInsight(Boolean(v))} /> insight
+                </label>
+                <label className="flex items-center gap-2">
+                  <Checkbox checked={useRelevance} onCheckedChange={(v) => setUseRelevance(Boolean(v))} /> relevance
+                </label>
+              </div>
+            </div>
+
             <div className="flex flex-wrap gap-2">
               <Button disabled={loadingSearch || queries.length === 0 || branches.length === 0 || sources.length === 0} onClick={runTopicSearch}>
                 {loadingSearch ? "Running Search..." : "Run Topic Search"}
@@ -241,60 +290,83 @@ export default function TopicWorkflowDashboard() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Search Summary</CardTitle>
+            <CardTitle>Execution Output</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-2 text-sm">
-            <div>Source: {searchResult?.source ?? "-"}</div>
-            <div>Fetched At: {searchResult?.fetched_at ?? "-"}</div>
-            <div>Unique Items: {searchResult?.summary?.unique_items ?? 0}</div>
-            <div>Total Query Hits: {searchResult?.summary?.total_query_hits ?? 0}</div>
-            <div className="flex flex-wrap gap-2 pt-2">
-              {Object.entries(searchResult?.summary?.source_breakdown || {}).map(([name, count]) => (
-                <Badge key={name} variant="outline">
-                  {name}: {count}
-                </Badge>
-              ))}
-            </div>
-            <ScrollArea className="h-72 rounded border p-3">
-              <div className="space-y-2">
-                {(searchResult?.items || []).slice(0, 15).map((item, idx) => (
-                  <div key={`${item.title}-${idx}`} className="rounded border p-2">
-                    <div className="font-medium">
-                      {item.url ? (
-                        <a className="underline" href={item.url} target="_blank" rel="noreferrer">
-                          {item.title}
-                        </a>
-                      ) : (
-                        item.title
-                      )}
-                    </div>
-                    <div className="text-xs text-muted-foreground">
-                      score={item.score} | branches={(item.branches || []).join(", ")} | sources={(item.sources || []).join(", ")}
-                    </div>
+          <CardContent>
+            <Tabs defaultValue="search" className="w-full">
+              <TabsList>
+                <TabsTrigger value="search">Search Results</TabsTrigger>
+                <TabsTrigger value="daily">DailyPaper</TabsTrigger>
+                <TabsTrigger value="llm">LLM Analysis</TabsTrigger>
+              </TabsList>
+              <TabsContent value="search" className="space-y-2 text-sm pt-3">
+                <div>Source: {searchResult?.source ?? "-"}</div>
+                <div>Fetched At: {searchResult?.fetched_at ?? "-"}</div>
+                <div>Unique Items: {searchResult?.summary?.unique_items ?? 0}</div>
+                <div>Total Query Hits: {searchResult?.summary?.total_query_hits ?? 0}</div>
+                <div className="flex flex-wrap gap-2 pt-2">
+                  {Object.entries(searchResult?.summary?.source_breakdown || {}).map(([name, count]) => (
+                    <Badge key={name} variant="outline">
+                      {name}: {count}
+                    </Badge>
+                  ))}
+                </div>
+                <ScrollArea className="h-72 rounded border p-3">
+                  <div className="space-y-2">
+                    {(searchResult?.items || []).slice(0, 15).map((item, idx) => (
+                      <div key={`${item.title}-${idx}`} className="rounded border p-2">
+                        <div className="font-medium">
+                          {item.url ? (
+                            <a className="underline" href={item.url} target="_blank" rel="noreferrer">
+                              {item.title}
+                            </a>
+                          ) : (
+                            item.title
+                          )}
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          score={item.score} | branches={(item.branches || []).join(", ")} | sources={(item.sources || []).join(", ")}
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
-            </ScrollArea>
+                </ScrollArea>
+              </TabsContent>
+
+              <TabsContent value="daily" className="space-y-2 text-sm pt-3">
+                <div>Title: {dailyResult?.report?.title ?? "-"}</div>
+                <div>Date: {dailyResult?.report?.date ?? "-"}</div>
+                <div>Unique Items: {dailyResult?.report?.stats?.unique_items ?? 0}</div>
+                <div>Query Count: {dailyResult?.report?.stats?.query_count ?? 0}</div>
+                <div>Markdown File: {dailyResult?.markdown_path || "(not saved)"}</div>
+                <div>JSON File: {dailyResult?.json_path || "(not saved)"}</div>
+                <ScrollArea className="h-64 rounded border p-3">
+                  <pre className="whitespace-pre-wrap text-xs">{dailyResult?.markdown || "Run Generate DailyPaper to preview markdown."}</pre>
+                </ScrollArea>
+              </TabsContent>
+
+              <TabsContent value="llm" className="space-y-3 text-sm pt-3">
+                <div>Enabled: {dailyResult?.report?.llm_analysis?.enabled ? "Yes" : "No"}</div>
+                <div>Features: {(dailyResult?.report?.llm_analysis?.features || []).join(", ") || "-"}</div>
+                <div className="rounded border p-3 text-sm">
+                  <div className="font-medium">Daily Insight</div>
+                  <p className="mt-1 text-muted-foreground">{dailyResult?.report?.llm_analysis?.daily_insight || "-"}</p>
+                </div>
+                <ScrollArea className="h-48 rounded border p-3">
+                  <div className="space-y-2">
+                    {(dailyResult?.report?.llm_analysis?.query_trends || []).map((trend, idx) => (
+                      <div key={`${trend.query}-${idx}`} className="rounded border p-2">
+                        <div className="font-medium">{trend.query}</div>
+                        <div className="text-xs text-muted-foreground whitespace-pre-wrap">{trend.analysis}</div>
+                      </div>
+                    ))}
+                  </div>
+                </ScrollArea>
+              </TabsContent>
+            </Tabs>
           </CardContent>
         </Card>
       </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>DailyPaper Preview</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-2 text-sm">
-          <div>Title: {dailyResult?.report?.title ?? "-"}</div>
-          <div>Date: {dailyResult?.report?.date ?? "-"}</div>
-          <div>Unique Items: {dailyResult?.report?.stats?.unique_items ?? 0}</div>
-          <div>Query Count: {dailyResult?.report?.stats?.query_count ?? 0}</div>
-          <div>Markdown File: {dailyResult?.markdown_path || "(not saved)"}</div>
-          <div>JSON File: {dailyResult?.json_path || "(not saved)"}</div>
-          <ScrollArea className="h-64 rounded border p-3">
-            <pre className="whitespace-pre-wrap text-xs">{dailyResult?.markdown || "Run Generate DailyPaper to preview markdown."}</pre>
-          </ScrollArea>
-        </CardContent>
-      </Card>
     </div>
   )
 }
