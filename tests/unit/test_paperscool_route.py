@@ -9,6 +9,7 @@ class _FakeWorkflow:
         return {
             "source": "papers.cool",
             "fetched_at": "2026-02-09T00:00:00+00:00",
+            "sources": ["papers_cool"],
             "queries": [
                 {
                     "raw_query": queries[0],
@@ -64,6 +65,7 @@ def test_paperscool_search_route_success(monkeypatch):
             "/api/research/paperscool/search",
             json={
                 "queries": ["ICL压缩"],
+                "sources": ["papers_cool"],
                 "branches": ["arxiv", "venue"],
                 "top_k_per_query": 5,
                 "show_per_branch": 25,

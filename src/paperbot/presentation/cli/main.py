@@ -56,6 +56,13 @@ def create_parser() -> argparse.ArgumentParser:
         choices=["arxiv", "venue"],
         help="检索分支，可重复指定；默认 arxiv+venue",
     )
+    topic_search_parser.add_argument(
+        "--source",
+        action="append",
+        dest="sources",
+        default=None,
+        help="数据源名称，可重复指定；默认 papers_cool",
+    )
     topic_search_parser.add_argument("--top-k", type=int, default=5, help="每个主题保留的结果数")
     topic_search_parser.add_argument(
         "--show", type=int, default=25, help="每个分支请求的候选结果数量"
@@ -153,10 +160,12 @@ def _run_topic_search(parsed: argparse.Namespace) -> int:
         queries = ["ICL压缩", "ICL隐式偏置", "KV Cache加速"]
 
     branches = parsed.branches or ["arxiv", "venue"]
+    sources = parsed.sources or ["papers_cool"]
 
     workflow = _create_topic_search_workflow()
     result = workflow.run(
         queries=queries,
+        sources=sources,
         branches=branches,
         top_k_per_query=max(1, int(parsed.top_k)),
         show_per_branch=max(1, int(parsed.show)),

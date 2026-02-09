@@ -8,6 +8,7 @@ class _FakeWorkflow:
         return {
             "source": "papers.cool",
             "fetched_at": "2026-02-09T00:00:00+00:00",
+            "sources": ["papers_cool"],
             "queries": [
                 {
                     "raw_query": queries[0],
@@ -42,6 +43,8 @@ def test_cli_topic_search_parser_flags():
             "topic-search",
             "-q",
             "ICL压缩",
+            "--source",
+            "papers_cool",
             "--branch",
             "arxiv",
             "--top-k",
@@ -54,6 +57,7 @@ def test_cli_topic_search_parser_flags():
 
     assert args.command == "topic-search"
     assert args.queries == ["ICL压缩"]
+    assert args.sources == ["papers_cool"]
     assert args.branches == ["arxiv"]
     assert args.top_k == 3
     assert args.show == 20

@@ -6,9 +6,11 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
-from paperbot.infrastructure.connectors.paperscool_connector import (
-    PapersCoolConnector,
-    PapersCoolRecord,
+from paperbot.application.workflows.topic_search_sources import (
+    TopicSearchRecord,
+    TopicSearchSourceRegistry,
+    build_default_topic_source_registry,
+    dedupe_sources,
 )
 
 
@@ -30,8 +32,11 @@ class QuerySpec:
 
 
 class PapersCoolTopicSearchWorkflow:
-    def __init__(self, connector: Optional[PapersCoolConnector] = None):
-        self.connector = connector or PapersCoolConnector()
+    def __init__(
+        self,
+        source_registry: Optional[TopicSearchSourceRegistry] = None,
+    ):
+        self.source_registry = source_registry or build_default_topic_source_registry()
 
     def normalize_queries(self, queries: Sequence[str]) -> List[QuerySpec]:
         specs: List[QuerySpec] = []
@@ -58,14 +63,19 @@ class PapersCoolTopicSearchWorkflow:
         *,
         queries: Sequence[str],
         branches: Sequence[str] = ("arxiv", "venue"),
+        sources: Sequence[str] = ("papers_cool",),
         top_k_per_query: int = 5,
         show_per_branch: int = 25,
     ) -> Dict[str, Any]:
         query_specs = self.normalize_queries(queries)
+        source_names = dedupe_sources(sources)
+        if not source_names:
+            source_names = ["papers_cool"]
         if not query_specs:
             return {
                 "source": "papers.cool",
                 "fetched_at": datetime.now(timezone.utc).isoformat(),
+                "sources": source_names,
                 "queries": [],
                 "items": [],
                 "summary": {
@@ -73,6 +83,7 @@ class PapersCoolTopicSearchWorkflow:
                     "total_query_hits": 0,
                     "top_titles": [],
                     "query_highlights": [],
+                    "source_breakdown": {},
                 },
             }
 
@@ -81,12 +92,12 @@ class PapersCoolTopicSearchWorkflow:
         by_title: Dict[str, Dict[str, Any]] = {}
 
         for spec in query_specs:
-            for branch in branches:
-                records = self.connector.search(
-                    branch=branch,
+            for source_name in source_names:
+                source = self.source_registry.create(source_name)
+                records = source.search(
                     query=spec.normalized_query,
-                    highlight=True,
-                    show=show_per_branch,
+                    branches=branches,
+                    show_per_branch=show_per_branch,
                 )
                 for record in records:
                     item = self._build_item(record=record, query_spec=spec)
@@ -121,18 +132,19 @@ class PapersCoolTopicSearchWorkflow:
         return {
             "source": "papers.cool",
             "fetched_at": datetime.now(timezone.utc).isoformat(),
+            "sources": source_names,
             "queries": query_views,
             "items": [self._serialize_item(item) for item in aggregated_items],
             "summary": summary,
         }
 
-    def _build_item(self, *, record: PapersCoolRecord, query_spec: QuerySpec) -> Dict[str, Any]:
+    def _build_item(self, *, record: TopicSearchRecord, query_spec: QuerySpec) -> Dict[str, Any]:
         matched_keywords = _matched_keywords(record=record, tokens=query_spec.tokens)
         score = _score_record(
             record=record, token_count=len(query_spec.tokens), matched=matched_keywords
         )
         return {
-            "paper_id": record.paper_id,
+            "paper_id": record.source_record_id,
             "title": record.title,
             "url": record.url,
             "external_url": record.external_url,
@@ -143,6 +155,7 @@ class PapersCoolTopicSearchWorkflow:
             "snippet": record.snippet,
             "keywords": record.keywords,
             "branches": [record.source_branch],
+            "sources": [record.source],
             "pdf_stars": record.pdf_stars,
             "kimi_stars": record.kimi_stars,
             "matched_keywords": matched_keywords,
@@ -189,6 +202,7 @@ class PapersCoolTopicSearchWorkflow:
             set(target["matched_queries"]).union(incoming["matched_queries"])
         )
         target["branches"] = sorted(set(target["branches"]).union(incoming["branches"]))
+        target["sources"] = sorted(set(target["sources"]).union(incoming["sources"]))
         target["keywords"] = sorted(set(target["keywords"]).union(incoming["keywords"]))
         target["authors"] = sorted(set(target["authors"]).union(incoming["authors"]))
 
@@ -216,6 +230,7 @@ class PapersCoolTopicSearchWorkflow:
             "snippet": item["snippet"],
             "keywords": item["keywords"],
             "branches": item["branches"],
+            "sources": item["sources"],
             "matched_keywords": item["matched_keywords"],
             "matched_queries": item["matched_queries"],
             "score": round(float(item["score"]), 4),
@@ -249,11 +264,16 @@ class PapersCoolTopicSearchWorkflow:
             )
 
         top_titles = [item["title"] for item in list(aggregated_items)[:5]]
+        source_breakdown: Dict[str, int] = {}
+        for item in aggregated_items:
+            for source in item.get("sources") or []:
+                source_breakdown[source] = source_breakdown.get(source, 0) + 1
         return {
             "unique_items": len(aggregated_items),
             "total_query_hits": total_query_hits,
             "top_titles": top_titles,
             "query_highlights": query_highlights,
+            "source_breakdown": source_breakdown,
         }
 
 
@@ -279,7 +299,7 @@ def _normalize_title(title: str) -> str:
     return "".join(re.findall(r"[a-z0-9]+", title.lower()))
 
 
-def _matched_keywords(*, record: PapersCoolRecord, tokens: Iterable[str]) -> List[str]:
+def _matched_keywords(*, record: TopicSearchRecord, tokens: Iterable[str]) -> List[str]:
     haystack = " ".join([record.title, record.snippet, " ".join(record.keywords)]).lower()
     matched = []
     for token in tokens:
@@ -288,8 +308,8 @@ def _matched_keywords(*, record: PapersCoolRecord, tokens: Iterable[str]) -> Lis
     return sorted(set(matched))
 
 
-def _extract_year(record: PapersCoolRecord) -> Optional[int]:
-    text = " ".join([record.published_at, record.subject_or_venue, record.paper_id])
+def _extract_year(record: TopicSearchRecord) -> Optional[int]:
+    text = " ".join([record.published_at, record.subject_or_venue, record.source_record_id])
     year_match = re.search(r"(20\d{2})", text)
     if not year_match:
         return None
@@ -299,7 +319,7 @@ def _extract_year(record: PapersCoolRecord) -> Optional[int]:
     return year
 
 
-def _score_record(*, record: PapersCoolRecord, token_count: int, matched: Sequence[str]) -> float:
+def _score_record(*, record: TopicSearchRecord, token_count: int, matched: Sequence[str]) -> float:
     hit_count = len(matched)
     coverage = hit_count / max(token_count, 1)
     popularity = math.log1p(max(record.pdf_stars, 0) + max(record.kimi_stars, 0))
