@@ -11,7 +11,8 @@ import {
   FlaskConical,
   Code2,
   Settings,
-  BookOpen
+  BookOpen,
+  Workflow,
 } from "lucide-react"
 
 type SidebarProps = React.HTMLAttributes<HTMLDivElement>
@@ -43,6 +44,12 @@ export function Sidebar({ className }: SidebarProps) {
       icon: FlaskConical,
       href: "/research",
       active: pathname.startsWith("/research"),
+    },
+    {
+      label: "Workflows",
+      icon: Workflow,
+      href: "/workflows",
+      active: pathname.startsWith("/workflows"),
     },
     {
       label: "DeepCode Studio",
