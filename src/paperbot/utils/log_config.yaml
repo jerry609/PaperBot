@@ -1,0 +1,14 @@
+# Log file paths configuration
+# Add new log files here, then import them in Python:
+#   from paperbot.utils.logging_config import Logger, LogFiles
+#   Logger.info("message", file=LogFiles.HARVEST)
+
+# Base directory for all logs (relative to project root)
+base_dir: "logs"
+
+# Log file paths (relative to base_dir)
+files:
+  HARVEST: "harvest/harvest.log"
+  api: "api/api.log"
+  error: "errors/error.log"
+  database: "db/database.log"
