@@ -103,6 +103,15 @@ Orchestrator Pipeline:
                                         CodeMemory + RAG    VerificationAgent
 ```
 
+### 10. 主题检索工作流（Papers.cool + DailyPaper）
+
+- **单源多主题检索**：支持在 `papers.cool` 上对多个主题一次性检索（默认 `arxiv + venue` 分支）
+- **可插拔 Source 注入**：抽象 `TopicSearchSource`，支持后续新增来源并通过 `sources=[...]` 切换
+- **聚合与排序**：跨 query/branch 去重（URL + 标题兜底）并输出规则化分数
+- **日报输出**：支持 DailyPaper 风格 `markdown/json` 双格式输出（可写盘）
+- **调度集成**：支持 ARQ cron 定时生成日报并桥接到 feed 推荐事件
+- **Web 工作流页**：新增 `/workflows` 页面用于参数化执行与结果预览
+
 ## 界面预览
 
 ### Terminal UI（Ink）
@@ -234,6 +243,8 @@ python -m uvicorn src.paperbot.api.main:app --reload --port 8000
 | `/api/sandbox/*` | GET/POST | 沙箱/队列/日志/资源指标（DeepCode Studio） |
 | `/api/runbook/*` | GET/POST | Runbook 执行与 Workspace 文件操作（DeepCode Studio） |
 | `/api/research/*` | GET/POST | 个性化研究：方向（Track）/进度/记忆 Inbox/推荐与反馈 |
+| `/api/research/paperscool/search` | POST | 主题检索工作流（多主题聚合结果） |
+| `/api/research/paperscool/daily` | POST | DailyPaper 日报生成（Markdown/JSON） |
 
 #### 个性化研究（Research）关键端点
 
@@ -283,6 +294,12 @@ npm run dev
 - Workspace：基于 `outputDir` 的真实文件树（搜索/打开/保存）
 - Diff Staging：Baseline 快照、文件级 diff/revert、hunk 级批量回滚
 
+#### Workflows（Web）
+
+- 路径：`/workflows`
+- 能力：主题配置、source/branch 选择、Topic Search 执行、DailyPaper 预览与写盘
+- 设计：当前采用“参数化工作流面板”MVP，后续可演进为节点拖拽
+
 安全说明（默认行为）：
 
 - Workspace/Runbook 文件操作默认仅允许 `tmp` 下的项目目录；如需放开其它根目录，设置 `PAPERBOT_RUNBOOK_ALLOW_DIR_PREFIXES=/path1,/path2`
@@ -329,6 +346,20 @@ python main.py run-exp --config config/experiments/exp_sentiment.yaml
 python main.py render-report --template academic_report.md.j2
 ```
 
+### 主题检索与 DailyPaper（CLI 入口）
+
+```bash
+# topic search
+python -m paperbot.presentation.cli.main topic-search \
+  -q "ICL压缩" -q "ICL隐式偏置" -q "KV Cache加速" \
+  --source papers_cool --branch arxiv --branch venue --json
+
+# daily paper
+python -m paperbot.presentation.cli.main daily-paper \
+  -q "ICL压缩" -q "ICL隐式偏置" -q "KV Cache加速" \
+  --source papers_cool --format both --save --output-dir ./reports/dailypaper
+```
+
 ## Roadmap（Plan 摘要）
 
 - **Phase 1（P0）稳定性与一致性**：收敛重复实现、统一网络层与并发模型、补齐解析契约测试
@@ -342,6 +373,8 @@ python main.py render-report --template academic_report.md.j2
 - **总体计划（Plan）**：`docs/PLAN.md`
 - **DeepCode 迭代清单（TODO）**：`docs/DEEPCODE_TODO.md`
 - **Research 个性化 TODO**：`docs/TODO_PERSONALIZED_MEMORY_CONTEXT.md`
+- **Papers.cool Workflow 说明**：`docs/PAPERSCOOL_WORKFLOW.md`
+- **Papers.cool Workflow V2 TODO**：`docs/paperscool_workflow_v2_todo.md`
 - **数据集说明**：`datasets/README.md`
 - **Web Dashboard**：`web/README.md`
 
