@@ -12,6 +12,7 @@ Input Queries
    -> Parse & Normalize Records
    -> Merge / Dedup / Score
    -> Query Summary + Global Summary
+   -> (Optional) LLM Enrichment (summary/trends/insight/relevance)
    -> (Optional) DailyPaper Markdown/JSON
    -> (Optional) Scheduler Cron + Feed Events
 ```
@@ -34,18 +35,27 @@ Input Queries
    - 先按 URL 去重，后按归一化标题兜底去重。
    - 输出 `matched_keywords / matched_queries / score`。
 
-4. **日报输出（DailyPaper）**
+4. **LLM 增强（可选）**
+   - 统一入口 `LLMService`，按 task_type 走 ModelRouter。
+   - 支持 `summary/trends/insight/relevance` 四类增强。
+   - 默认关闭，不影响原有纯检索模式。
+
+5. **日报输出（DailyPaper）**
    - 支持 `markdown/json/both`。
    - 支持直接写盘。
+   - Markdown 会自动附加 LLM Insights 区块（若启用）。
 
-5. **调度与信息流**
+6. **调度与信息流**
    - ARQ job 定时生成日报。
    - 将日报高亮项桥接到 feed 的 recommendation 事件。
+   - 支持 `PAPERBOT_DAILYPAPER_ENABLE_LLM` 与特性开关。
 
 ## 2. 代码位置
 
 - Source 注入层：`src/paperbot/application/workflows/topic_search_sources.py`
 - 工作流编排：`src/paperbot/application/workflows/paperscool_topic_search.py`
+- LLM 统一服务：`src/paperbot/application/services/llm_service.py`
+- Prompt 模板：`src/paperbot/application/prompts/registry.py`
 - DailyPaper 报告：`src/paperbot/application/workflows/dailypaper.py`
 - API 路由：`src/paperbot/api/routes/paperscool.py`
 - CLI 命令：`src/paperbot/presentation/cli/main.py`
@@ -83,7 +93,9 @@ Input Queries
   "top_n": 10,
   "formats": ["both"],
   "save": true,
-  "output_dir": "./reports/dailypaper"
+  "output_dir": "./reports/dailypaper",
+  "enable_llm_analysis": true,
+  "llm_features": ["summary", "trends", "insight"]
 }
 ```
 
@@ -95,10 +107,11 @@ python -m paperbot.presentation.cli.main topic-search \
   -q "ICL压缩" -q "ICL隐式偏置" -q "KV Cache加速" \
   --source papers_cool --branch arxiv --branch venue --json
 
-# 生成日报
+# 生成日报（含 LLM 增强）
 python -m paperbot.presentation.cli.main daily-paper \
   -q "ICL压缩" -q "ICL隐式偏置" -q "KV Cache加速" \
-  --source papers_cool --format both --save --output-dir ./reports/dailypaper
+  --source papers_cool --format both --save --output-dir ./reports/dailypaper \
+  --with-llm --llm-feature summary --llm-feature trends --llm-feature insight
 ```
 
 ## 5. 新源注入（扩展）
@@ -117,7 +130,11 @@ registry.register("my_source", MySource)
 
 然后请求中传入：`"sources": ["my_source"]`。
 
-## 6. Scheduler 配置（DailyPaper）
+## 6. 爬取/收集架构图
+
+- Excalidraw：`docs/diagrams/crawling_pipeline_architecture.excalidraw`
+
+## 7. Scheduler 配置（DailyPaper）
 
 - `PAPERBOT_DAILYPAPER_ENABLED`：是否启用 daily cron（true/false）
 - `PAPERBOT_DAILYPAPER_CRON_HOUR` / `PAPERBOT_DAILYPAPER_CRON_MINUTE`
@@ -128,8 +145,10 @@ registry.register("my_source", MySource)
 - `PAPERBOT_DAILYPAPER_TOP_K` / `PAPERBOT_DAILYPAPER_SHOW` / `PAPERBOT_DAILYPAPER_TOP_N`
 - `PAPERBOT_DAILYPAPER_TITLE`
 - `PAPERBOT_DAILYPAPER_OUTPUT_DIR`
+- `PAPERBOT_DAILYPAPER_ENABLE_LLM`
+- `PAPERBOT_DAILYPAPER_LLM_FEATURES`（逗号分隔：summary,trends,insight,relevance）
 
-## 7. UI 设计说明
+## 8. UI 设计说明
 
 当前采用 **参数化工作流面板**（`/workflows`）而非 n8n/coze 式自由拖拽，原因：
 

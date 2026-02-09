@@ -109,8 +109,9 @@ Orchestrator Pipeline:
 - **可插拔 Source 注入**：抽象 `TopicSearchSource`，支持后续新增来源并通过 `sources=[...]` 切换
 - **聚合与排序**：跨 query/branch 去重（URL + 标题兜底）并输出规则化分数
 - **日报输出**：支持 DailyPaper 风格 `markdown/json` 双格式输出（可写盘）
+- **LLM 增强（可选）**：支持 `summary/trends/insight/relevance`，由统一 `LLMService` 走 ModelRouter 路由
 - **调度集成**：支持 ARQ cron 定时生成日报并桥接到 feed 推荐事件
-- **Web 工作流页**：新增 `/workflows` 页面用于参数化执行与结果预览
+- **Web 工作流页**：新增 `/workflows` 页面用于参数化执行与结果预览（含 LLM 开关）
 
 ## 界面预览
 
@@ -354,10 +355,11 @@ python -m paperbot.presentation.cli.main topic-search \
   -q "ICL压缩" -q "ICL隐式偏置" -q "KV Cache加速" \
   --source papers_cool --branch arxiv --branch venue --json
 
-# daily paper
+# daily paper (+ optional LLM enrichment)
 python -m paperbot.presentation.cli.main daily-paper \
   -q "ICL压缩" -q "ICL隐式偏置" -q "KV Cache加速" \
-  --source papers_cool --format both --save --output-dir ./reports/dailypaper
+  --source papers_cool --format both --save --output-dir ./reports/dailypaper \
+  --with-llm --llm-feature summary --llm-feature trends --llm-feature insight
 ```
 
 ## Roadmap（Plan 摘要）
@@ -374,6 +376,7 @@ python -m paperbot.presentation.cli.main daily-paper \
 - **DeepCode 迭代清单（TODO）**：`docs/DEEPCODE_TODO.md`
 - **Research 个性化 TODO**：`docs/TODO_PERSONALIZED_MEMORY_CONTEXT.md`
 - **Papers.cool Workflow 说明**：`docs/PAPERSCOOL_WORKFLOW.md`
+- **爬取/收集架构图（Excalidraw）**：`docs/diagrams/crawling_pipeline_architecture.excalidraw`
 - **Papers.cool Workflow V2 TODO**：`docs/paperscool_workflow_v2_todo.md`
 - **Topic Source 开发模板**：`docs/TOPIC_SOURCE_TEMPLATE.md`
 - **数据集说明**：`datasets/README.md`

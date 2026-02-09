@@ -19,6 +19,7 @@ Modern React-based interface for PaperBot, built with Next.js 15, Shadcn UI, and
 - Select sources (currently `papers_cool`) and branches (`arxiv`, `venue`)
 - Run topic search and inspect ranked/aggregated results
 - Generate DailyPaper report preview (markdown)
+- Enable optional LLM analysis (`summary/trends/insight/relevance`) for DailyPaper
 - Optionally save DailyPaper artifacts (markdown/json) through backend API
 
 ### Related API proxy routes
