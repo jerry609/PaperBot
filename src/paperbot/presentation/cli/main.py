@@ -12,6 +12,13 @@ import json
 import sys
 from typing import Optional
 
+from paperbot.application.workflows.dailypaper import (
+    DailyPaperReporter,
+    build_daily_paper_report,
+    normalize_output_formats,
+    render_daily_paper_markdown,
+)
+
 
 def create_parser() -> argparse.ArgumentParser:
     """创建 CLI 参数解析器"""
@@ -68,6 +75,46 @@ def create_parser() -> argparse.ArgumentParser:
         "--show", type=int, default=25, help="每个分支请求的候选结果数量"
     )
     topic_search_parser.add_argument("--json", action="store_true", help="输出完整 JSON")
+
+    # daily-paper 命令
+    daily_parser = subparsers.add_parser(
+        "daily-paper", help="生成 DailyPaper 风格日报（markdown/json）"
+    )
+    daily_parser.add_argument(
+        "--query",
+        "-q",
+        action="append",
+        dest="queries",
+        help="检索主题，可重复指定多次",
+    )
+    daily_parser.add_argument(
+        "--source",
+        action="append",
+        dest="sources",
+        default=None,
+        help="数据源名称，可重复指定；默认 papers_cool",
+    )
+    daily_parser.add_argument(
+        "--branch",
+        action="append",
+        dest="branches",
+        choices=["arxiv", "venue"],
+        help="检索分支，可重复指定；默认 arxiv+venue",
+    )
+    daily_parser.add_argument("--top-k", type=int, default=5, help="每个主题保留的结果数")
+    daily_parser.add_argument("--show", type=int, default=25, help="每个分支请求的候选结果数量")
+    daily_parser.add_argument("--top-n", type=int, default=10, help="日报中保留的 top 项数量")
+    daily_parser.add_argument("--title", default="DailyPaper Digest", help="日报标题")
+    daily_parser.add_argument(
+        "--format",
+        action="append",
+        dest="formats",
+        default=None,
+        help="输出格式：markdown/json/both（可重复指定）",
+    )
+    daily_parser.add_argument("--output-dir", default="./reports/dailypaper", help="输出目录")
+    daily_parser.add_argument("--save", action="store_true", help="将日报写入文件")
+    daily_parser.add_argument("--json", action="store_true", help="打印 JSON 报告")
 
     # version
     parser.add_argument("--version", "-v", action="store_true", help="显示版本")
@@ -126,6 +173,9 @@ def run_cli(args: Optional[list] = None) -> int:
         elif parsed.command == "topic-search":
             return _run_topic_search(parsed)
 
+        elif parsed.command == "daily-paper":
+            return _run_daily_paper(parsed)
+
         return 0
 
     except Exception as e:
@@ -183,6 +233,64 @@ def _run_topic_search(parsed: argparse.Namespace) -> int:
             f"- {row['normalized_query']}: {row['hit_count']} hits"
             + (f" | top: {row['top_title']}" if row.get("top_title") else "")
         )
+    return 0
+
+
+def _run_daily_paper(parsed: argparse.Namespace) -> int:
+    queries = list(parsed.queries or [])
+    if not queries:
+        queries = ["ICL压缩", "ICL隐式偏置", "KV Cache加速"]
+
+    branches = parsed.branches or ["arxiv", "venue"]
+    sources = parsed.sources or ["papers_cool"]
+
+    workflow = _create_topic_search_workflow()
+    search_result = workflow.run(
+        queries=queries,
+        sources=sources,
+        branches=branches,
+        top_k_per_query=max(1, int(parsed.top_k)),
+        show_per_branch=max(1, int(parsed.show)),
+    )
+
+    report = build_daily_paper_report(
+        search_result=search_result,
+        title=parsed.title,
+        top_n=max(1, int(parsed.top_n)),
+    )
+    markdown = render_daily_paper_markdown(report)
+
+    markdown_path = None
+    json_path = None
+    if parsed.save:
+        reporter = DailyPaperReporter(output_dir=parsed.output_dir)
+        artifacts = reporter.write(
+            report=report,
+            markdown=markdown,
+            formats=normalize_output_formats(parsed.formats or ["both"]),
+            slug=parsed.title,
+        )
+        markdown_path = artifacts.markdown_path
+        json_path = artifacts.json_path
+
+    if parsed.json:
+        payload = {
+            "report": report,
+            "markdown": markdown,
+            "markdown_path": markdown_path,
+            "json_path": json_path,
+        }
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return 0
+
+    print(f"daily title: {report[title]}")
+    print(f"date: {report[date]}")
+    print(f"unique_items: {report[stats][unique_items]}")
+    print(f"query_count: {report[stats][query_count]}")
+    if markdown_path or json_path:
+        print(f"saved markdown: {markdown_path}")
+        print(f"saved json: {json_path}")
+    print("\n" + markdown)
     return 0
 
 

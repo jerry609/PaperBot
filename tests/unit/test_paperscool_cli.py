@@ -4,11 +4,11 @@ from paperbot.presentation.cli import main as cli_main
 
 
 class _FakeWorkflow:
-    def run(self, *, queries, branches, top_k_per_query, show_per_branch):
+    def run(self, *, queries, sources, branches, top_k_per_query, show_per_branch):
         return {
             "source": "papers.cool",
             "fetched_at": "2026-02-09T00:00:00+00:00",
-            "sources": ["papers_cool"],
+            "sources": sources,
             "queries": [
                 {
                     "raw_query": queries[0],
@@ -23,6 +23,7 @@ class _FakeWorkflow:
                 "unique_items": 1,
                 "total_query_hits": 1,
                 "top_titles": ["UniICL"],
+                "source_breakdown": {sources[0]: 1},
                 "query_highlights": [
                     {
                         "raw_query": queries[0],
@@ -74,3 +75,15 @@ def test_cli_topic_search_json_output(monkeypatch, capsys):
     payload = json.loads(captured.out)
     assert payload["source"] == "papers.cool"
     assert payload["summary"]["unique_items"] == 1
+
+
+def test_cli_daily_paper_json_output(monkeypatch, capsys):
+    monkeypatch.setattr(cli_main, "_create_topic_search_workflow", lambda: _FakeWorkflow())
+
+    exit_code = cli_main.run_cli(["daily-paper", "-q", "ICL压缩", "--json"])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    payload = json.loads(captured.out)
+    assert payload["report"]["title"] == "DailyPaper Digest"
+    assert "# DailyPaper Digest" in payload["markdown"]

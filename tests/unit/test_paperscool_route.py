@@ -5,11 +5,11 @@ from paperbot.api.routes import paperscool as paperscool_route
 
 
 class _FakeWorkflow:
-    def run(self, *, queries, branches, top_k_per_query, show_per_branch):
+    def run(self, *, queries, sources, branches, top_k_per_query, show_per_branch):
         return {
             "source": "papers.cool",
             "fetched_at": "2026-02-09T00:00:00+00:00",
-            "sources": ["papers_cool"],
+            "sources": sources,
             "queries": [
                 {
                     "raw_query": queries[0],
@@ -44,6 +44,7 @@ class _FakeWorkflow:
                 "unique_items": 1,
                 "total_query_hits": 1,
                 "top_titles": ["UniICL"],
+                "source_breakdown": {sources[0]: 1},
                 "query_highlights": [
                     {
                         "raw_query": queries[0],
@@ -84,3 +85,26 @@ def test_paperscool_search_route_requires_queries():
 
     assert resp.status_code == 400
     assert resp.json()["detail"] == "queries is required"
+
+
+def test_paperscool_daily_route_success(monkeypatch, tmp_path):
+    monkeypatch.setattr(paperscool_route, "PapersCoolTopicSearchWorkflow", _FakeWorkflow)
+
+    with TestClient(api_main.app) as client:
+        resp = client.post(
+            "/api/research/paperscool/daily",
+            json={
+                "queries": ["ICL压缩"],
+                "sources": ["papers_cool"],
+                "branches": ["arxiv", "venue"],
+                "save": True,
+                "formats": ["both"],
+                "output_dir": str(tmp_path / "daily"),
+            },
+        )
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["report"]["stats"]["unique_items"] == 1
+    assert payload["markdown_path"] is not None
+    assert payload["json_path"] is not None
