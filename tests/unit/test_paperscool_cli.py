@@ -110,6 +110,11 @@ def test_cli_daily_paper_parser_with_llm_flags():
 
 def test_cli_daily_paper_json_output_with_llm(monkeypatch, capsys):
     monkeypatch.setattr(cli_main, "_create_topic_search_workflow", lambda: _FakeWorkflow())
+    monkeypatch.setattr(
+        cli_main,
+        "enrich_daily_paper_report",
+        lambda report, llm_features: {**report, "llm_analysis": {"enabled": True, "features": llm_features}},
+    )
 
     exit_code = cli_main.run_cli(
         ["daily-paper", "-q", "ICL压缩", "--json", "--with-llm", "--llm-feature", "summary"]
@@ -119,3 +124,58 @@ def test_cli_daily_paper_json_output_with_llm(monkeypatch, capsys):
     assert exit_code == 0
     payload = json.loads(captured.out)
     assert "llm_analysis" in payload["report"]
+
+
+def test_cli_daily_paper_parser_with_judge_flags():
+    parser = cli_main.create_parser()
+    args = parser.parse_args(
+        [
+            "daily-paper",
+            "-q",
+            "ICL压缩",
+            "--with-judge",
+            "--judge-runs",
+            "2",
+            "--judge-max-items",
+            "6",
+        ]
+    )
+
+    assert args.with_judge is True
+    assert args.judge_runs == 2
+    assert args.judge_max_items == 6
+
+
+def test_cli_daily_paper_json_output_with_judge(monkeypatch, capsys):
+    monkeypatch.setattr(cli_main, "_create_topic_search_workflow", lambda: _FakeWorkflow())
+
+    def _fake_judge(report, max_items_per_query, n_runs):
+        report = dict(report)
+        report["judge"] = {
+            "enabled": True,
+            "max_items_per_query": max_items_per_query,
+            "n_runs": n_runs,
+            "recommendation_count": {"must_read": 1, "worth_reading": 0, "skim": 0, "skip": 0},
+        }
+        return report
+
+    monkeypatch.setattr(cli_main, "apply_judge_scores_to_report", _fake_judge)
+
+    exit_code = cli_main.run_cli(
+        [
+            "daily-paper",
+            "-q",
+            "ICL压缩",
+            "--json",
+            "--with-judge",
+            "--judge-runs",
+            "2",
+            "--judge-max-items",
+            "4",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    payload = json.loads(captured.out)
+    assert payload["report"]["judge"]["enabled"] is True

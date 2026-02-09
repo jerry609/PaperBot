@@ -151,6 +151,23 @@ class LLMService:
         )
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
+    def describe_task_provider(self, task_type: str = "default") -> Dict[str, Any]:
+        """Expose selected provider metadata for auditing/judge reports."""
+        try:
+            provider = self._router.get_provider(task_type)
+            info = provider.info
+            return {
+                "provider_name": info.provider_name,
+                "model_name": info.model_name,
+                "cost_tier": info.cost_tier,
+            }
+        except Exception:
+            return {
+                "provider_name": "",
+                "model_name": "",
+                "cost_tier": 0,
+            }
+
 
 _default_llm_service: Optional[LLMService] = None
 

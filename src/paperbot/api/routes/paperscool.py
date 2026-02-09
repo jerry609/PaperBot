@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 
 from paperbot.application.workflows.dailypaper import (
     DailyPaperReporter,
+    apply_judge_scores_to_report,
     build_daily_paper_report,
     enrich_daily_paper_report,
     normalize_llm_features,
@@ -48,6 +49,9 @@ class DailyPaperRequest(BaseModel):
     output_dir: str = "./reports/dailypaper"
     enable_llm_analysis: bool = False
     llm_features: List[str] = Field(default_factory=lambda: ["summary"])
+    enable_judge: bool = False
+    judge_runs: int = Field(1, ge=1, le=5)
+    judge_max_items_per_query: int = Field(5, ge=1, le=20)
 
 
 class DailyPaperResponse(BaseModel):
@@ -93,6 +97,12 @@ def generate_daily_report(req: DailyPaperRequest):
         report = enrich_daily_paper_report(
             report,
             llm_features=normalize_llm_features(req.llm_features),
+        )
+    if req.enable_judge:
+        report = apply_judge_scores_to_report(
+            report,
+            max_items_per_query=req.judge_max_items_per_query,
+            n_runs=req.judge_runs,
         )
     markdown = render_daily_paper_markdown(report)
 

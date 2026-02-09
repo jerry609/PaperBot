@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 from paperbot.application.services.llm_service import LLMService, get_llm_service
+from paperbot.application.workflows.analysis.paper_judge import PaperJudge
 
 
 SUPPORTED_LLM_FEATURES = ("summary", "trends", "insight", "relevance")
@@ -101,6 +102,54 @@ def enrich_daily_paper_report(
     return enriched
 
 
+def apply_judge_scores_to_report(
+    report: Dict[str, Any],
+    *,
+    llm_service: Optional[LLMService] = None,
+    max_items_per_query: int = 5,
+    n_runs: int = 1,
+) -> Dict[str, Any]:
+    """Evaluate papers with LLM-as-Judge and attach per-paper judgment metadata."""
+
+    judged = copy.deepcopy(report)
+    svc = llm_service or get_llm_service()
+    judge = PaperJudge(llm_service=svc)
+
+    recommendation_count = {
+        "must_read": 0,
+        "worth_reading": 0,
+        "skim": 0,
+        "skip": 0,
+    }
+
+    for query in judged.get("queries") or []:
+        query_name = query.get("normalized_query") or query.get("raw_query") or ""
+        top_items = list(query.get("top_items") or [])
+        capped = top_items[: max(1, int(max_items_per_query))]
+        if not capped:
+            continue
+
+        judgments = judge.judge_batch(papers=capped, query=query_name, n_runs=max(1, int(n_runs)))
+
+        for item, judgment in zip(capped, judgments):
+            j_payload = judgment.to_dict()
+            item["judge"] = j_payload
+            rec = j_payload.get("recommendation")
+            if rec in recommendation_count:
+                recommendation_count[rec] += 1
+
+        capped.sort(key=lambda it: float((it.get("judge") or {}).get("overall") or 0), reverse=True)
+        query["top_items"] = capped + top_items[len(capped) :]
+
+    judged["judge"] = {
+        "enabled": True,
+        "max_items_per_query": int(max_items_per_query),
+        "n_runs": int(max(1, int(n_runs))),
+        "recommendation_count": recommendation_count,
+    }
+    return judged
+
+
 def render_daily_paper_markdown(report: Dict[str, Any]) -> str:
     lines: List[str] = []
     lines.append(f"# {report.get('title') or 'DailyPaper Digest'}")
@@ -143,6 +192,15 @@ def render_daily_paper_markdown(report: Dict[str, Any]) -> str:
                 rel_score = relevance.get("score")
                 rel_reason = relevance.get("reason") or ""
                 lines.append(f"  - Relevance: score={rel_score} reason={rel_reason}")
+
+            judge = item.get("judge")
+            if isinstance(judge, dict):
+                overall = judge.get("overall")
+                rec = judge.get("recommendation")
+                lines.append(f"  - Judge: overall={overall} recommendation={rec}")
+                one_line = judge.get("one_line_summary") or ""
+                if one_line:
+                    lines.append(f"  - Judge Summary: {one_line}")
         lines.append("")
 
     lines.append("## Global Top")
@@ -182,6 +240,15 @@ def render_daily_paper_markdown(report: Dict[str, Any]) -> str:
                 topic = trend.get("query") or ""
                 text = trend.get("analysis") or ""
                 lines.append(f"- {topic}: {text}")
+
+    judge_block = report.get("judge") or {}
+    if judge_block:
+        lines.append("")
+        lines.append("## Judge Summary")
+        lines.append("")
+        recommendation_count = judge_block.get("recommendation_count") or {}
+        for key in ("must_read", "worth_reading", "skim", "skip"):
+            lines.append(f"- {key}: {recommendation_count.get(key, 0)}")
 
     lines.append("")
     return "\n".join(lines)

@@ -16,6 +16,15 @@ class _FakeProvider:
         yield "A"
         yield "B"
 
+    @property
+    def info(self):
+        class _Info:
+            provider_name = "fake"
+            model_name = "fake-model"
+            cost_tier = 1
+
+        return _Info()
+
 
 class _FakeRouter:
     def __init__(self, provider: _FakeProvider):
@@ -66,3 +75,13 @@ def test_assess_relevance_fallback_when_non_json_response():
 
     assert isinstance(relevance["score"], int)
     assert "Fallback" in relevance["reason"]
+
+
+def test_describe_task_provider_returns_model_metadata():
+    provider = _FakeProvider(response="cached")
+    service = LLMService(router=_FakeRouter(provider))
+
+    info = service.describe_task_provider("analysis")
+
+    assert info["provider_name"] == "fake"
+    assert info["model_name"] == "fake-model"

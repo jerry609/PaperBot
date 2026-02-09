@@ -137,3 +137,38 @@ def test_paperscool_daily_route_with_llm_enrichment(monkeypatch):
     payload = resp.json()
     assert called["value"] is True
     assert payload["report"]["llm_analysis"]["enabled"] is True
+
+
+def test_paperscool_daily_route_with_judge(monkeypatch):
+    monkeypatch.setattr(paperscool_route, "PapersCoolTopicSearchWorkflow", _FakeWorkflow)
+
+    called = {"value": False}
+
+    def _fake_judge(report, *, llm_service=None, max_items_per_query=5, n_runs=1):
+        called["value"] = True
+        report = dict(report)
+        report["judge"] = {
+            "enabled": True,
+            "max_items_per_query": max_items_per_query,
+            "n_runs": n_runs,
+            "recommendation_count": {"must_read": 1, "worth_reading": 0, "skim": 0, "skip": 0},
+        }
+        return report
+
+    monkeypatch.setattr(paperscool_route, "apply_judge_scores_to_report", _fake_judge)
+
+    with TestClient(api_main.app) as client:
+        resp = client.post(
+            "/api/research/paperscool/daily",
+            json={
+                "queries": ["ICL压缩"],
+                "enable_judge": True,
+                "judge_runs": 2,
+                "judge_max_items_per_query": 4,
+            },
+        )
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert called["value"] is True
+    assert payload["report"]["judge"]["enabled"] is True

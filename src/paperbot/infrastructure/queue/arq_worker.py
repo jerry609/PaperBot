@@ -190,6 +190,14 @@ async def cron_daily_papers(ctx) -> Dict[str, Any]:
         "y",
     )
     llm_features = _parse_csv_env("PAPERBOT_DAILYPAPER_LLM_FEATURES", "summary")
+    enable_judge = os.getenv("PAPERBOT_DAILYPAPER_ENABLE_JUDGE", "false").lower() in (
+        "1",
+        "true",
+        "yes",
+        "y",
+    )
+    judge_runs = int(os.getenv("PAPERBOT_DAILYPAPER_JUDGE_RUNS", "1"))
+    judge_max_items = int(os.getenv("PAPERBOT_DAILYPAPER_JUDGE_MAX_ITEMS", "5"))
 
     job = await redis.enqueue_job(
         "daily_papers_job",
@@ -203,6 +211,9 @@ async def cron_daily_papers(ctx) -> Dict[str, Any]:
         output_dir=os.getenv("PAPERBOT_DAILYPAPER_OUTPUT_DIR", "./reports/dailypaper"),
         enable_llm_analysis=enable_llm_analysis,
         llm_features=llm_features,
+        enable_judge=enable_judge,
+        judge_runs=judge_runs,
+        judge_max_items_per_query=judge_max_items,
         save=True,
     )
     payload = {
@@ -314,6 +325,9 @@ async def daily_papers_job(
     output_dir: str = "./reports/dailypaper",
     enable_llm_analysis: bool = False,
     llm_features: Optional[List[str]] = None,
+    enable_judge: bool = False,
+    judge_runs: int = 1,
+    judge_max_items_per_query: int = 5,
     save: bool = True,
 ) -> Dict[str, Any]:
     """ARQ job: generate DailyPaper report and bridge highlights into feed events."""
@@ -344,12 +358,16 @@ async def daily_papers_job(
                 "top_n": top_n,
                 "enable_llm_analysis": enable_llm_analysis,
                 "llm_features": llm_features or ["summary"],
+                "enable_judge": enable_judge,
+                "judge_runs": judge_runs,
+                "judge_max_items_per_query": judge_max_items_per_query,
             },
         )
     )
 
     from paperbot.application.workflows.dailypaper import (
         DailyPaperReporter,
+        apply_judge_scores_to_report,
         build_daily_paper_report,
         enrich_daily_paper_report,
         normalize_llm_features,
@@ -374,6 +392,12 @@ async def daily_papers_job(
         report = enrich_daily_paper_report(
             report,
             llm_features=normalize_llm_features(llm_features or ["summary"]),
+        )
+    if enable_judge:
+        report = apply_judge_scores_to_report(
+            report,
+            max_items_per_query=max(1, int(judge_max_items_per_query)),
+            n_runs=max(1, int(judge_runs)),
         )
     markdown = render_daily_paper_markdown(report)
 

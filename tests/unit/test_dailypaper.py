@@ -1,5 +1,6 @@
 from paperbot.application.workflows.dailypaper import (
     DailyPaperReporter,
+    apply_judge_scores_to_report,
     build_daily_paper_report,
     enrich_daily_paper_report,
     normalize_llm_features,
@@ -100,3 +101,44 @@ def test_normalize_output_formats_supports_both_alias():
 
 def test_normalize_llm_features_filters_unknown_items():
     assert normalize_llm_features(["summary", "foo", "trends", "summary"]) == ["summary", "trends"]
+
+
+def test_apply_judge_scores_to_report(monkeypatch):
+    report = build_daily_paper_report(search_result=_sample_search_result(), title="Judge Daily", top_n=5)
+
+    class _FakeJudgment:
+        def __init__(self, overall: float, recommendation: str):
+            self._overall = overall
+            self._recommendation = recommendation
+
+        def to_dict(self):
+            return {
+                "relevance": {"score": 5, "rationale": ""},
+                "novelty": {"score": 4, "rationale": ""},
+                "rigor": {"score": 4, "rationale": ""},
+                "impact": {"score": 4, "rationale": ""},
+                "clarity": {"score": 5, "rationale": ""},
+                "overall": self._overall,
+                "one_line_summary": "good paper",
+                "recommendation": self._recommendation,
+                "judge_model": "fake-model",
+                "judge_cost_tier": 1,
+            }
+
+    class _FakeJudge:
+        def __init__(self, llm_service=None):
+            pass
+
+        def judge_batch(self, *, papers, query, n_runs=1):
+            return [_FakeJudgment(4.2, "must_read") for _ in papers]
+
+    import paperbot.application.workflows.dailypaper as daily_mod
+
+    monkeypatch.setattr(daily_mod, "PaperJudge", _FakeJudge)
+
+    judged = apply_judge_scores_to_report(report, max_items_per_query=3, n_runs=1)
+    item = judged["queries"][0]["top_items"][0]
+
+    assert item["judge"]["overall"] == 4.2
+    assert judged["judge"]["recommendation_count"]["must_read"] == 1
+    assert "Judge Summary" in render_daily_paper_markdown(judged)

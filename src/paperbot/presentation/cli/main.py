@@ -14,6 +14,7 @@ from typing import Optional
 
 from paperbot.application.workflows.dailypaper import (
     DailyPaperReporter,
+    apply_judge_scores_to_report,
     build_daily_paper_report,
     enrich_daily_paper_report,
     normalize_llm_features,
@@ -124,6 +125,14 @@ def create_parser() -> argparse.ArgumentParser:
         dest="llm_features",
         default=None,
         help="LLM 功能：summary/trends/insight/relevance（可重复指定）",
+    )
+    daily_parser.add_argument("--with-judge", action="store_true", help="启用 LLM-as-Judge 评分")
+    daily_parser.add_argument("--judge-runs", type=int, default=1, help="Judge 重复评分次数（取中位）")
+    daily_parser.add_argument(
+        "--judge-max-items",
+        type=int,
+        default=5,
+        help="每个 query 最多执行 Judge 的论文数",
     )
 
     # version
@@ -275,6 +284,14 @@ def _run_daily_paper(parsed: argparse.Namespace) -> int:
             report,
             llm_features=llm_features or ["summary"],
         )
+
+    judge_enabled = bool(parsed.with_judge)
+    if judge_enabled:
+        report = apply_judge_scores_to_report(
+            report,
+            max_items_per_query=max(1, int(parsed.judge_max_items)),
+            n_runs=max(1, int(parsed.judge_runs)),
+        )
     markdown = render_daily_paper_markdown(report)
 
     markdown_path = None
@@ -306,6 +323,11 @@ def _run_daily_paper(parsed: argparse.Namespace) -> int:
     print(f"query_count: {report['stats']['query_count']}")
     if llm_enabled:
         print(f"llm_analysis: enabled ({', '.join(llm_features or ['summary'])})")
+    if judge_enabled:
+        print(
+            f"judge: enabled (runs={max(1, int(parsed.judge_runs))}, "
+            f"max_items={max(1, int(parsed.judge_max_items))})"
+        )
     if markdown_path or json_path:
         print(f"saved markdown: {markdown_path}")
         print(f"saved json: {json_path}")
