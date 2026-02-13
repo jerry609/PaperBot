@@ -1580,6 +1580,55 @@ def _parse_iso_datetime(value: Any) -> Optional[datetime]:
     return parsed
 
 
+class ScholarSearchResponse(BaseModel):
+    query: str
+    items: List[Dict[str, Any]]
+    total: int
+
+
+@router.get("/research/scholars/search", response_model=ScholarSearchResponse)
+async def search_scholar_candidates(
+    query: str = Query(..., min_length=1),
+    limit: int = Query(10, ge=1, le=50),
+):
+    api_key = os.getenv("SEMANTIC_SCHOLAR_API_KEY") or os.getenv("S2_API_KEY")
+    client = SemanticScholarClient(api_key=api_key)
+    try:
+        rows = await client.search_authors(
+            query=query,
+            limit=max(1, int(limit)),
+            fields=["name", "affiliations", "paperCount", "citationCount", "hIndex"],
+        )
+    finally:
+        await client.close()
+
+    items: List[Dict[str, Any]] = []
+    for row in rows:
+        name = str(row.get("name") or "").strip()
+        author_id = str(row.get("authorId") or row.get("author_id") or "").strip()
+        if not name or not author_id:
+            continue
+
+        affiliations_raw = row.get("affiliations") or []
+        affiliations = []
+        if isinstance(affiliations_raw, list):
+            affiliations = [str(v).strip() for v in affiliations_raw if str(v).strip()]
+
+        items.append(
+            {
+                "author_id": author_id,
+                "name": name,
+                "affiliations": affiliations,
+                "affiliation": affiliations[0] if affiliations else "Unknown affiliation",
+                "paper_count": _safe_int(row.get("paperCount"), 0),
+                "citation_count": _safe_int(row.get("citationCount"), 0),
+                "h_index": _safe_int(row.get("hIndex"), 0),
+            }
+        )
+
+    return ScholarSearchResponse(query=query, items=items, total=len(items))
+
+
 @router.get("/research/scholars", response_model=ScholarListResponse)
 def list_tracked_scholars(limit: int = Query(100, ge=1, le=500)):
     from paperbot.agents.scholar_tracking.scholar_profile_agent import ScholarProfileAgent

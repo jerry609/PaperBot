@@ -1,7 +1,15 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { Loader2, Pencil, Plus, RefreshCw, Trash2, UserRound } from "lucide-react"
+import {
+  Loader2,
+  Pencil,
+  Plus,
+  RefreshCw,
+  Search,
+  Trash2,
+  UserRound,
+} from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -25,6 +33,16 @@ type ScholarRow = {
   status: "active" | "idle"
   recent_activity: string
   cached_papers?: number
+}
+
+type ScholarCandidate = {
+  author_id: string
+  name: string
+  affiliation?: string
+  affiliations?: string[]
+  paper_count?: number
+  citation_count?: number
+  h_index?: number
 }
 
 type ScholarFormState = {
@@ -59,7 +77,16 @@ export function ScholarSubscriptionsPanel() {
   const [error, setError] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
 
+  const [searchQuery, setSearchQuery] = useState("")
+  const [searching, setSearching] = useState(false)
+  const [searchResults, setSearchResults] = useState<ScholarCandidate[]>([])
+  const [searchError, setSearchError] = useState<string | null>(null)
+
   const editing = useMemo(() => !!form.id, [form.id])
+  const knownSemanticIds = useMemo(
+    () => new Set(items.map((item) => String(item.semantic_scholar_id || item.id || "").toLowerCase())),
+    [items],
+  )
 
   async function load() {
     setLoading(true)
@@ -81,8 +108,8 @@ export function ScholarSubscriptionsPanel() {
     load().catch(() => {})
   }, [])
 
-  function openAdd() {
-    setForm({ ...EMPTY_FORM })
+  function openAdd(prefill?: Partial<ScholarFormState>) {
+    setForm({ ...EMPTY_FORM, ...prefill })
     setDialogOpen(true)
     setError(null)
     setMessage(null)
@@ -101,6 +128,29 @@ export function ScholarSubscriptionsPanel() {
     setMessage(null)
   }
 
+  async function searchCandidates() {
+    const q = searchQuery.trim()
+    if (!q) return
+
+    setSearching(true)
+    setSearchError(null)
+    try {
+      const qs = new URLSearchParams({ query: q, limit: "8" })
+      const res = await fetch(`/api/research/scholars/search?${qs.toString()}`, { cache: "no-store" })
+      if (!res.ok) {
+        const text = await res.text().catch(() => "")
+        throw new Error(text || `${res.status} ${res.statusText}`)
+      }
+      const payload = (await res.json()) as { items?: ScholarCandidate[] }
+      setSearchResults(payload.items || [])
+    } catch (e) {
+      setSearchError(e instanceof Error ? e.message : String(e))
+      setSearchResults([])
+    } finally {
+      setSearching(false)
+    }
+  }
+
   async function saveScholar() {
     setSaving(true)
     setError(null)
@@ -117,7 +167,9 @@ export function ScholarSubscriptionsPanel() {
         research_fields: [],
       }
 
-      const url = editing ? `/api/research/scholars/${encodeURIComponent(String(form.id))}` : "/api/research/scholars"
+      const url = editing
+        ? `/api/research/scholars/${encodeURIComponent(String(form.id))}`
+        : "/api/research/scholars"
       const method = editing ? "PATCH" : "POST"
 
       const res = await fetch(url, {
@@ -169,14 +221,16 @@ export function ScholarSubscriptionsPanel() {
       <div className="flex items-center justify-between">
         <div>
           <h3 className="text-base font-semibold">Scholar Subscriptions</h3>
-          <p className="text-sm text-muted-foreground">Manage watchlist used by scholar tracking workflows</p>
+          <p className="text-sm text-muted-foreground">
+            Manage watchlist used by scholar tracking workflows
+          </p>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={() => load().catch(() => {})}>
             <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
             Refresh
           </Button>
-          <Button size="sm" onClick={openAdd}>
+          <Button size="sm" onClick={() => openAdd()}>
             <Plus className="mr-1.5 h-3.5 w-3.5" />
             Add Scholar
           </Button>
@@ -185,6 +239,60 @@ export function ScholarSubscriptionsPanel() {
 
       {error && <p className="text-sm text-destructive">{error}</p>}
       {message && <p className="text-sm text-green-600">{message}</p>}
+
+      <Card>
+        <CardContent className="space-y-3 p-4">
+          <p className="text-sm font-medium">Import from Semantic Scholar</p>
+          <div className="flex flex-wrap gap-2">
+            <Input
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search author name"
+              className="min-w-[220px] flex-1"
+            />
+            <Button size="sm" onClick={searchCandidates} disabled={searching || !searchQuery.trim()}>
+              {searching ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Search className="mr-1.5 h-3.5 w-3.5" />}
+              Search
+            </Button>
+          </div>
+          {searchError ? <p className="text-xs text-destructive">{searchError}</p> : null}
+
+          {!!searchResults.length && (
+            <div className="space-y-2">
+              {searchResults.map((candidate) => {
+                const alreadyAdded = knownSemanticIds.has(String(candidate.author_id || "").toLowerCase())
+                return (
+                  <div key={candidate.author_id} className="flex items-center justify-between gap-3 rounded-lg border p-2.5">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium">{candidate.name}</p>
+                      <p className="truncate text-xs text-muted-foreground">
+                        {candidate.affiliation || "Unknown affiliation"} · {candidate.author_id}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        papers {candidate.paper_count || 0} · citations {candidate.citation_count || 0} · h-index {candidate.h_index || 0}
+                      </p>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant={alreadyAdded ? "secondary" : "outline"}
+                      disabled={alreadyAdded}
+                      onClick={() =>
+                        openAdd({
+                          name: candidate.name,
+                          semantic_scholar_id: candidate.author_id,
+                          affiliation: candidate.affiliation || "",
+                        })
+                      }
+                    >
+                      {alreadyAdded ? "Added" : "Use"}
+                    </Button>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {loading ? (
         <p className="text-sm text-muted-foreground">Loading scholars...</p>
@@ -204,7 +312,7 @@ export function ScholarSubscriptionsPanel() {
                         {item.status}
                       </Badge>
                     </div>
-                    <p className="mt-1 text-xs text-muted-foreground truncate">
+                    <p className="mt-1 truncate text-xs text-muted-foreground">
                       {item.affiliation || "Unknown affiliation"} · {item.semantic_scholar_id || item.id}
                     </p>
                     <div className="mt-1 flex flex-wrap gap-1.5">

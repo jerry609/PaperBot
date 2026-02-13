@@ -8,6 +8,26 @@ class _FakeSemanticScholarClient:
     def __init__(self, api_key=None):
         self.api_key = api_key
 
+    async def search_authors(self, query, limit=10, fields=None):
+        return [
+            {
+                "authorId": "1001",
+                "name": "Alice",
+                "affiliations": ["Lab"],
+                "paperCount": 10,
+                "citationCount": 100,
+                "hIndex": 12,
+            },
+            {
+                "authorId": "1002",
+                "name": "Alice B",
+                "affiliations": ["Institute"],
+                "paperCount": 8,
+                "citationCount": 50,
+                "hIndex": 8,
+            },
+        ]
+
     async def get_author(self, author_id, fields=None):
         return {
             "authorId": author_id,
@@ -218,3 +238,16 @@ def test_scholar_update_route(monkeypatch):
     assert payload["scholar"]["name"] == "Alice Updated"
     assert payload["scholar"]["keywords"] == ["rag", "safety"]
     assert missing.status_code == 404
+
+
+def test_scholar_search_route(monkeypatch):
+    monkeypatch.setattr(research_route, "SemanticScholarClient", _FakeSemanticScholarClient)
+
+    with TestClient(api_main.app) as client:
+        resp = client.get("/api/research/scholars/search?query=alice&limit=5")
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["query"] == "alice"
+    assert payload["total"] == 2
+    assert payload["items"][0]["author_id"] == "1001"
