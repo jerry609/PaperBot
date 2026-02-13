@@ -1,11 +1,15 @@
 export interface Scholar {
     id: string
+    semantic_scholar_id?: string
     name: string
     affiliation: string
     h_index: number
     papers_tracked: number
     recent_activity: string
     status: "active" | "idle"
+    keywords?: string[]
+    cached_papers?: number
+    last_updated?: string | null
 }
 
 export interface Paper {
@@ -16,6 +20,7 @@ export interface Paper {
     citations: string | number
     status: "pending" | "analyzing" | "Reproduced" | "Saved"
     tags: string[]
+    url?: string
 }
 
 export interface PaperDetails extends Paper {
@@ -75,6 +80,14 @@ export interface ScholarDetails extends Scholar {
         papers_count: number
         h_index: number
     }
+    trend_summary?: {
+        publication_trend: "up" | "down" | "flat" | string
+        citation_trend: "up" | "down" | "flat" | string
+        window?: number
+    }
+    publication_velocity?: Array<{ year: number; papers: number; citations: number }>
+    top_topics?: Array<{ topic: string; count: number }>
+    top_venues?: Array<{ venue: string; count: number }>
 }
 
 export interface WikiConcept {

@@ -40,19 +40,21 @@ async function postJson<T>(path: string, payload: Record<string, unknown>): Prom
 
 export async function fetchStats(): Promise<Stats> {
     try {
-        const [usage, papers] = await Promise.allSettled([
+        const [usage, papers, scholars] = await Promise.allSettled([
             fetchLLMUsage(),
             fetchPapers(),
+            fetchScholars(),
         ])
         const usageData = usage.status === "fulfilled" ? usage.value : null
         const papersData = papers.status === "fulfilled" ? papers.value : []
+        const scholarsData = scholars.status === "fulfilled" ? scholars.value : []
         const tokenCount = usageData?.totals?.total_tokens ?? 0
         const prettyTokens = tokenCount >= 1000 ? `${Math.round(tokenCount / 1000)}k` : `${tokenCount}`
         return {
-            tracked_scholars: 0,
+            tracked_scholars: scholarsData.length,
             new_papers: papersData.length,
             llm_usage: prettyTokens,
-            read_later: papersData.filter(p => p.status === "Saved").length,
+            read_later: papersData.filter((p) => p.status === "Saved").length,
         }
     } catch {
         return { tracked_scholars: 0, new_papers: 0, llm_usage: "0", read_later: 0 }
@@ -216,36 +218,41 @@ export async function fetchDeadlineRadar(userId: string = "default"): Promise<De
 
 
 export async function fetchScholars(): Promise<Scholar[]> {
-    // Mock data for now
-    return [
-        {
-            id: "dawn-song",
-            name: "Dawn Song",
-            affiliation: "UC Berkeley",
-            h_index: 120,
-            papers_tracked: 45,
-            recent_activity: "Published 2 days ago",
-            status: "active"
-        },
-        {
-            id: "kaiming-he",
-            name: "Kaiming He",
-            affiliation: "MIT",
-            h_index: 145,
-            papers_tracked: 28,
-            recent_activity: "Cited 500+ times this week",
-            status: "active"
-        },
-        {
-            id: "yann-lecun",
-            name: "Yann LeCun",
-            affiliation: "Meta AI / NYU",
-            h_index: 180,
-            papers_tracked: 15,
-            recent_activity: "New interview",
-            status: "idle"
+    try {
+        const res = await fetch(`${API_BASE_URL}/research/scholars?limit=200`, { cache: "no-store" })
+        if (!res.ok) return []
+        const data = await res.json() as {
+            items?: Array<{
+                id?: string
+                scholar_id?: string
+                semantic_scholar_id?: string | null
+                name?: string
+                affiliation?: string
+                keywords?: string[]
+                h_index?: number
+                paper_count?: number
+                recent_activity?: string
+                status?: "active" | "idle"
+                cached_papers?: number
+                last_updated?: string | null
+            }>
         }
-    ]
+        return (data.items || []).map((row) => ({
+            id: String(row.id || row.semantic_scholar_id || row.scholar_id || row.name || "unknown"),
+            semantic_scholar_id: row.semantic_scholar_id || undefined,
+            name: String(row.name || "Unknown"),
+            affiliation: String(row.affiliation || "Unknown affiliation"),
+            h_index: Number(row.h_index || 0),
+            papers_tracked: Number(row.paper_count || 0),
+            recent_activity: String(row.recent_activity || "No tracking runs yet"),
+            status: row.status === "active" ? "active" : "idle",
+            keywords: row.keywords || [],
+            cached_papers: Number(row.cached_papers || 0),
+            last_updated: row.last_updated || null,
+        }))
+    } catch {
+        return []
+    }
 }
 
 export async function fetchPaperDetails(id: string): Promise<PaperDetails> {
@@ -300,7 +307,10 @@ export async function fetchPaperDetails(id: string): Promise<PaperDetails> {
 // TODO: add unit tests for fetchScholarDetails — cover successful network+trends,
 //  partial responses, and both-null fallback path.
 export async function fetchScholarDetails(id: string): Promise<ScholarDetails> {
-    const scholarName = slugToName(id)
+    const scholarId = decodeURIComponent(id)
+    const roster = await fetchScholars()
+    const listed = roster.find((item) => item.id === scholarId || item.semantic_scholar_id === scholarId)
+    const scholarName = listed?.name || slugToName(scholarId)
 
     type ScholarNetworkResponse = {
         scholar?: { name?: string; affiliations?: string[]; citation_count?: number; paper_count?: number; h_index?: number }
@@ -310,73 +320,85 @@ export async function fetchScholarDetails(id: string): Promise<ScholarDetails> {
 
     type ScholarTrendsResponse = {
         scholar?: { name?: string; affiliations?: string[]; citation_count?: number; paper_count?: number; h_index?: number }
-        trend_summary?: { publication_trend?: "up" | "down" | "flat"; citation_trend?: "up" | "down" | "flat" }
+        trend_summary?: { publication_trend?: "up" | "down" | "flat"; citation_trend?: "up" | "down" | "flat"; window?: number }
         topic_distribution?: Array<{ topic?: string; count?: number }>
+        venue_distribution?: Array<{ venue?: string; count?: number }>
+        publication_velocity?: Array<{ year?: number; papers?: number; citations?: number }>
         recent_papers?: Array<{ title?: string; year?: number; citation_count?: number; venue?: string; url?: string }>
     }
 
+    const payloadBase = listed?.semantic_scholar_id || /^\d+$/.test(scholarId)
+        ? { scholar_id: listed?.semantic_scholar_id || scholarId }
+        : { scholar_name: scholarName }
+
     const [network, trends] = await Promise.all([
         postJson<ScholarNetworkResponse>("/research/scholar/network", {
-            scholar_name: scholarName,
+            ...payloadBase,
             max_papers: 120,
             recent_years: 5,
             max_nodes: 30,
         }),
         postJson<ScholarTrendsResponse>("/research/scholar/trends", {
-            scholar_name: scholarName,
+            ...payloadBase,
             max_papers: 200,
             year_window: 10,
         }),
     ])
 
-    // TODO: mock fallback is hardcoded to Dawn Song — replace with generic
-    //  placeholder or remove entirely once real scholar data is always available.
-    // Fallback to mock data if the scholar is not configured in subscriptions yet.
+    // Fallback to minimal profile when upstream scholar APIs are unavailable.
     if (!network && !trends) {
-        const papers = await fetchPapers()
         return {
-            id,
+            id: scholarId,
+            semantic_scholar_id: listed?.semantic_scholar_id || scholarId,
             name: scholarName,
-            affiliation: "University of California, Berkeley",
-            h_index: 120,
-            papers_tracked: 45,
-            recent_activity: "Published 2 days ago",
-            status: "active",
-            bio: "Dawn Song is a Professor in the Department of Electrical Engineering and Computer Science at UC Berkeley. Her research interest lies in deep learning, security, and blockchain.",
-            location: "Berkeley, CA",
-            website: "https://dawnsong.io",
+            affiliation: listed?.affiliation || "Unknown affiliation",
+            h_index: listed?.h_index || 0,
+            papers_tracked: listed?.papers_tracked || 0,
+            recent_activity: listed?.recent_activity || "No tracking runs yet",
+            status: listed?.status || "idle",
+            keywords: listed?.keywords || [],
+            cached_papers: listed?.cached_papers || 0,
+            bio: "Live scholar signals are unavailable right now. Check Semantic Scholar API configuration and retry.",
+            location: "N/A",
+            website: "",
             expertise_radar: [
-                { subject: "Security", A: 100, fullMark: 100 },
-                { subject: "Deep Learning", A: 90, fullMark: 100 },
-                { subject: "Blockchain", A: 80, fullMark: 100 },
-                { subject: "Systems", A: 85, fullMark: 100 },
-                { subject: "Privacy", A: 95, fullMark: 100 },
+                { subject: "Coverage", A: 0, fullMark: 100 },
+                { subject: "Recency", A: 0, fullMark: 100 },
+                { subject: "Citation", A: 0, fullMark: 100 },
             ],
-            publications: papers,
-            co_authors: [
-                { name: "Dan Hendrycks", avatar: "https://avatar.vercel.sh/dan.png" },
-                { name: "Kevin Eykholt", avatar: "https://avatar.vercel.sh/kevin.png" },
-            ],
+            publications: [],
+            co_authors: [],
             stats: {
-                total_citations: 54321,
-                papers_count: 230,
-                h_index: 120,
+                total_citations: 0,
+                papers_count: listed?.papers_tracked || 0,
+                h_index: listed?.h_index || 0,
             },
+            trend_summary: {
+                publication_trend: "flat",
+                citation_trend: "flat",
+                window: 10,
+            },
+            publication_velocity: [],
+            top_topics: [],
+            top_venues: [],
         }
     }
 
     const scholar = network?.scholar || trends?.scholar || {}
-    const topicDist = (trends?.topic_distribution || []).slice(0, 5)
+    const topicDist = (trends?.topic_distribution || []).slice(0, 6)
+    const venueDist = (trends?.venue_distribution || []).slice(0, 6)
+    const velocity = (trends?.publication_velocity || []).slice(-10)
     const maxTopicCount = Math.max(1, ...topicDist.map((t) => Number(t.count || 0)))
 
     const publications: Paper[] = (trends?.recent_papers || []).slice(0, 15).map((paper, idx) => ({
-        id: `sch-${id}-paper-${idx}`,
+        id: `sch-${scholarId}-paper-${idx}`,
         title: String(paper.title || "Untitled"),
         venue: String(paper.venue || "Unknown venue"),
         authors: String(scholar.name || scholarName),
         citations: Number(paper.citation_count || 0),
         status: "analyzing",
         tags: topicDist.map((t) => String(t.topic || "")).filter(Boolean).slice(0, 3),
+        url: paper.url || "",
     }))
 
     const coauthors = (network?.nodes || [])
@@ -399,13 +421,16 @@ export async function fetchScholarDetails(id: string): Promise<ScholarDetails> {
             : "Publication trend stable"
 
     return {
-        id,
+        id: scholarId,
+        semantic_scholar_id: listed?.semantic_scholar_id || (payloadBase as { scholar_id?: string }).scholar_id,
         name: String(scholar.name || scholarName),
-        affiliation: String((scholar.affiliations || ["Unknown affiliation"])[0] || "Unknown affiliation"),
-        h_index: Number(scholar.h_index || 0),
-        papers_tracked: Number(scholar.paper_count || 0),
+        affiliation: String((scholar.affiliations || [listed?.affiliation || "Unknown affiliation"])[0] || "Unknown affiliation"),
+        h_index: Number(scholar.h_index || listed?.h_index || 0),
+        papers_tracked: Number(scholar.paper_count || listed?.papers_tracked || 0),
         recent_activity: recentActivity,
         status: publicationTrend === "up" ? "active" : "idle",
+        keywords: listed?.keywords || topicDist.map((t) => String(t.topic || "")).filter(Boolean).slice(0, 6),
+        cached_papers: listed?.cached_papers || 0,
         bio: `Trend snapshot: ${trends?.trend_summary?.citation_trend || "flat"} citation trend over the recent analysis window.`,
         location: "N/A",
         website: "",
@@ -421,6 +446,24 @@ export async function fetchScholarDetails(id: string): Promise<ScholarDetails> {
             papers_count: Number(scholar.paper_count || 0),
             h_index: Number(scholar.h_index || 0),
         },
+        trend_summary: {
+            publication_trend: trends?.trend_summary?.publication_trend || "flat",
+            citation_trend: trends?.trend_summary?.citation_trend || "flat",
+            window: Number(trends?.trend_summary?.window || 10),
+        },
+        publication_velocity: velocity.map((row) => ({
+            year: Number(row.year || 0),
+            papers: Number(row.papers || 0),
+            citations: Number(row.citations || 0),
+        })),
+        top_topics: topicDist.map((row) => ({
+            topic: String(row.topic || "Unknown"),
+            count: Number(row.count || 0),
+        })),
+        top_venues: venueDist.map((row) => ({
+            venue: String(row.venue || "Unknown"),
+            count: Number(row.count || 0),
+        })),
     }
 }
 
