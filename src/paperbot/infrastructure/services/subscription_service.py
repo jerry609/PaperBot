@@ -208,6 +208,90 @@ class SubscriptionService:
         self._scholars = None
         return payload
 
+    def update_scholar(self, scholar_ref: str, updates: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """更新订阅学者配置。"""
+        ref = str(scholar_ref or "").strip()
+        if not ref:
+            return None
+
+        config = self.load_config()
+        subscriptions = config.setdefault("subscriptions", {})
+        scholars = subscriptions.setdefault("scholars", [])
+
+        target_index: Optional[int] = None
+        ref_key = ref.lower()
+        for idx, row in enumerate(scholars):
+            row_semantic = str(row.get("semantic_scholar_id") or "").strip().lower()
+            row_id = str(row.get("scholar_id") or row.get("id") or "").strip().lower()
+            row_name = str(row.get("name") or "").strip().lower()
+            if ref_key in {row_semantic, row_id, row_name}:
+                target_index = idx
+                break
+
+        if target_index is None:
+            return None
+
+        current = dict(scholars[target_index])
+
+        name = str(updates.get("name") or current.get("name") or "").strip()
+        semantic_id = str(
+            updates.get("semantic_scholar_id")
+            if updates.get("semantic_scholar_id") is not None
+            else current.get("semantic_scholar_id") or ""
+        ).strip()
+
+        if not name:
+            raise ValueError("name is required")
+        if not semantic_id:
+            raise ValueError("semantic_scholar_id is required")
+
+        normalized_id = semantic_id.lower()
+        for idx, existing in enumerate(scholars):
+            if idx == target_index:
+                continue
+            existing_id = str(existing.get("semantic_scholar_id") or "").strip().lower()
+            if existing_id and existing_id == normalized_id:
+                raise ValueError("semantic_scholar_id already exists")
+
+        payload: Dict[str, Any] = {
+            "name": name,
+            "semantic_scholar_id": semantic_id,
+        }
+
+        if updates.get("keywords") is not None:
+            keywords = updates.get("keywords")
+            if isinstance(keywords, list):
+                payload["keywords"] = [str(v).strip() for v in keywords if str(v).strip()]
+        elif isinstance(current.get("keywords"), list):
+            payload["keywords"] = [
+                str(v).strip() for v in current.get("keywords", []) if str(v).strip()
+            ]
+
+        if updates.get("affiliations") is not None:
+            affiliations = updates.get("affiliations")
+            if isinstance(affiliations, list):
+                payload["affiliations"] = [str(v).strip() for v in affiliations if str(v).strip()]
+        elif isinstance(current.get("affiliations"), list):
+            payload["affiliations"] = [
+                str(v).strip() for v in current.get("affiliations", []) if str(v).strip()
+            ]
+
+        if updates.get("research_fields") is not None:
+            research_fields = updates.get("research_fields")
+            if isinstance(research_fields, list):
+                payload["research_fields"] = [
+                    str(v).strip() for v in research_fields if str(v).strip()
+                ]
+        elif isinstance(current.get("research_fields"), list):
+            payload["research_fields"] = [
+                str(v).strip() for v in current.get("research_fields", []) if str(v).strip()
+            ]
+
+        scholars[target_index] = payload
+        self.save_config()
+        self._scholars = None
+        return payload
+
     def remove_scholar(self, scholar_ref: str) -> Optional[Dict[str, Any]]:
         """按 semantic_scholar_id / scholar_id / name 删除订阅学者。"""
         ref = str(scholar_ref or "").strip()

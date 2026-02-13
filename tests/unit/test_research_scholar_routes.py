@@ -191,3 +191,30 @@ def test_scholar_delete_route(monkeypatch):
     assert payload["removed"] is True
     assert payload["scholar"]["semantic_scholar_id"] == "1003"
     assert missing.status_code == 404
+
+
+def test_scholar_update_route(monkeypatch):
+    class _FakeSubscriptionService:
+        def update_scholar(self, scholar_ref, updates):
+            if scholar_ref == "missing":
+                return None
+            return {
+                "name": updates.get("name") or "Alice",
+                "semantic_scholar_id": updates.get("semantic_scholar_id") or "1001",
+                "keywords": updates.get("keywords") or [],
+            }
+
+    monkeypatch.setattr(research_route, "_subscription_service", _FakeSubscriptionService())
+
+    with TestClient(api_main.app) as client:
+        resp = client.patch(
+            "/api/research/scholars/1001",
+            json={"name": "Alice Updated", "keywords": ["rag", "safety"]},
+        )
+        missing = client.patch("/api/research/scholars/missing", json={"name": "x"})
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["scholar"]["name"] == "Alice Updated"
+    assert payload["scholar"]["keywords"] == ["rag", "safety"]
+    assert missing.status_code == 404

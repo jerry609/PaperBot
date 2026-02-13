@@ -16,6 +16,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 
+import { ScholarSubscriptionsPanel } from "@/components/settings/ScholarSubscriptionsPanel"
+
 type ModelEndpoint = {
   id: number
   name: string
@@ -370,6 +372,10 @@ export default function SettingsPage() {
             ))}
           </div>
         </div>
+      </div>
+
+      <div className="pt-4 border-t">
+        <ScholarSubscriptionsPanel />
       </div>
 
       {/* Add/Edit Dialog */}

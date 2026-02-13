@@ -1486,6 +1486,14 @@ class ScholarCreateResponse(BaseModel):
     scholar: Dict[str, Any]
 
 
+class ScholarUpdateRequest(BaseModel):
+    name: Optional[str] = Field(None, min_length=1, max_length=200)
+    semantic_scholar_id: Optional[str] = Field(None, min_length=1, max_length=128)
+    affiliations: Optional[List[str]] = None
+    keywords: Optional[List[str]] = None
+    research_fields: Optional[List[str]] = None
+
+
 class ScholarDeleteResponse(BaseModel):
     removed: bool
     scholar: Optional[Dict[str, Any]] = None
@@ -1510,6 +1518,33 @@ def create_tracked_scholar(req: ScholarCreateRequest):
         raise HTTPException(status_code=status_code, detail=detail) from exc
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"failed to persist scholar: {exc}") from exc
+
+    return ScholarCreateResponse(scholar=scholar)
+
+
+@router.patch("/research/scholars/{scholar_ref}", response_model=ScholarCreateResponse)
+def update_tracked_scholar(scholar_ref: str, req: ScholarUpdateRequest):
+    service = _get_subscription_service()
+    payload = {
+        "name": req.name,
+        "semantic_scholar_id": req.semantic_scholar_id,
+        "affiliations": req.affiliations,
+        "keywords": req.keywords,
+        "research_fields": req.research_fields,
+    }
+    try:
+        scholar = service.update_scholar(scholar_ref, payload)
+    except ValueError as exc:
+        detail = str(exc)
+        status_code = 409 if "already exists" in detail else 400
+        raise HTTPException(status_code=status_code, detail=detail) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502, detail=f"failed to persist scholar update: {exc}"
+        ) from exc
+
+    if scholar is None:
+        raise HTTPException(status_code=404, detail="Scholar not found")
 
     return ScholarCreateResponse(scholar=scholar)
 
