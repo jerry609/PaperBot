@@ -10,11 +10,13 @@ import { DeadlineRadar } from "@/components/dashboard/DeadlineRadar"
 import { LLMUsageChart } from "@/components/dashboard/LLMUsageChart"
 import { PipelineStatus } from "@/components/dashboard/PipelineStatus"
 import { ReadingQueue } from "@/components/dashboard/ReadingQueue"
+import { ScholarSignalsPanel } from "@/components/dashboard/ScholarSignalsPanel"
 import { TrackSpotlight } from "@/components/dashboard/TrackSpotlight"
 import {
   fetchDeadlineRadar,
   fetchLLMUsage,
   fetchPipelineTasks,
+  fetchScholars,
 } from "@/lib/api"
 import {
   fetchDashboardActivities,
@@ -33,7 +35,7 @@ function formatCompactNumber(value: number): string {
 }
 
 export default async function DashboardPage() {
-  const [tracksResult, tasksResult, readingQueueResult, llmUsageResult, deadlineResult, activitiesResult] =
+  const [tracksResult, tasksResult, readingQueueResult, llmUsageResult, deadlineResult, activitiesResult, scholarsResult] =
     await Promise.allSettled([
       fetchDashboardTracks("default"),
       fetchPipelineTasks(),
@@ -41,6 +43,7 @@ export default async function DashboardPage() {
       fetchLLMUsage(14),
       fetchDeadlineRadar("default"),
       fetchDashboardActivities("default"),
+      fetchScholars(),
     ])
 
   const tracks = tracksResult.status === "fulfilled" ? tracksResult.value : []
@@ -56,6 +59,7 @@ export default async function DashboardPage() {
       }
   const deadlines = deadlineResult.status === "fulfilled" ? deadlineResult.value : []
   const activities = activitiesResult.status === "fulfilled" ? activitiesResult.value : []
+  const scholars = scholarsResult.status === "fulfilled" ? scholarsResult.value : []
 
   const activeTrack = tracks.find((track) => track.is_active) || tracks[0] || null
 
@@ -115,11 +119,18 @@ export default async function DashboardPage() {
             </div>
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
             <div className="rounded-xl border bg-background/70 p-4">
               <p className="text-xs text-muted-foreground">Active Tracks</p>
               <p className="mt-1 text-2xl font-semibold">{tracks.length}</p>
               <p className="mt-1 text-xs text-muted-foreground truncate">{activeTrack?.name || "No active track"}</p>
+            </div>
+            <div className="rounded-xl border bg-background/70 p-4">
+              <p className="text-xs text-muted-foreground">Tracked Scholars</p>
+              <p className="mt-1 text-2xl font-semibold">{scholars.length}</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {scholars.filter((item) => item.status === "active").length} active now
+              </p>
             </div>
             <div className="rounded-xl border bg-background/70 p-4">
               <p className="text-xs text-muted-foreground">Saved Queue</p>
@@ -177,6 +188,7 @@ export default async function DashboardPage() {
 
         <section className="space-y-6 xl:col-span-4">
           <PipelineStatus tasks={tasks} />
+          <ScholarSignalsPanel scholars={scholars} />
           <ReadingQueue items={readingQueue} />
           <DeadlineRadar items={deadlines} />
           <LLMUsageChart data={usageSummary} />
