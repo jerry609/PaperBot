@@ -33,6 +33,7 @@ _workflow_metric_store: Optional[WorkflowMetricStore] = None
 _paper_store: Optional["PaperStore"] = None
 _paper_search_service: Optional["PaperSearchService"] = None
 _anchor_service: Optional["AnchorService"] = None
+_subscription_service: Optional["SubscriptionService"] = None
 
 ENABLE_ANCHOR_AUTHORS = os.getenv("PAPERBOT_ENABLE_ANCHOR_AUTHORS", "true").lower() == "true"
 
@@ -143,6 +144,17 @@ def _get_anchor_service() -> "AnchorService":
     if _anchor_service is None:
         _anchor_service = AnchorService()
     return _anchor_service
+
+
+def _get_subscription_service() -> "SubscriptionService":
+    from paperbot.infrastructure.services.subscription_service import SubscriptionService
+
+    global _subscription_service
+    if _subscription_service is None:
+        _subscription_service = SubscriptionService(
+            config_path=os.getenv("PAPERBOT_SUBSCRIPTIONS_CONFIG_PATH") or None
+        )
+    return _subscription_service
 
 
 def _ensure_anchor_feature_enabled() -> None:
@@ -1460,6 +1472,62 @@ async def build_context(req: ContextRequest):
 class ScholarListResponse(BaseModel):
     items: List[Dict[str, Any]]
     total: int
+
+
+class ScholarCreateRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=200)
+    semantic_scholar_id: str = Field(..., min_length=1, max_length=128)
+    affiliations: List[str] = []
+    keywords: List[str] = []
+    research_fields: List[str] = []
+
+
+class ScholarCreateResponse(BaseModel):
+    scholar: Dict[str, Any]
+
+
+class ScholarDeleteResponse(BaseModel):
+    removed: bool
+    scholar: Optional[Dict[str, Any]] = None
+
+
+@router.post("/research/scholars", response_model=ScholarCreateResponse)
+def create_tracked_scholar(req: ScholarCreateRequest):
+    service = _get_subscription_service()
+    try:
+        scholar = service.add_scholar(
+            {
+                "name": req.name,
+                "semantic_scholar_id": req.semantic_scholar_id,
+                "affiliations": req.affiliations,
+                "keywords": req.keywords,
+                "research_fields": req.research_fields,
+            }
+        )
+    except ValueError as exc:
+        detail = str(exc)
+        status_code = 409 if "already exists" in detail else 400
+        raise HTTPException(status_code=status_code, detail=detail) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"failed to persist scholar: {exc}") from exc
+
+    return ScholarCreateResponse(scholar=scholar)
+
+
+@router.delete("/research/scholars/{scholar_ref}", response_model=ScholarDeleteResponse)
+def delete_tracked_scholar(scholar_ref: str):
+    service = _get_subscription_service()
+    try:
+        removed = service.remove_scholar(scholar_ref)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502, detail=f"failed to persist scholar removal: {exc}"
+        ) from exc
+
+    if removed is None:
+        raise HTTPException(status_code=404, detail="Scholar not found")
+
+    return ScholarDeleteResponse(removed=True, scholar=removed)
 
 
 def _parse_iso_datetime(value: Any) -> Optional[datetime]:

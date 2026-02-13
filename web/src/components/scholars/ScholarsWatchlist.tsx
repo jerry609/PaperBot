@@ -1,12 +1,20 @@
 "use client"
 
 import Link from "next/link"
-import { useMemo, useState } from "react"
-import { ArrowRight, BookOpen, FlaskConical, Search, Users, Workflow } from "lucide-react"
+import { useCallback, useEffect, useMemo, useState } from "react"
+import { ArrowRight, BookOpen, FlaskConical, Plus, Search, Trash2, Users, Workflow } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import type { Scholar } from "@/lib/types"
 
@@ -21,13 +29,44 @@ function toResearchLink(scholar: Scholar): string {
   return `/research?query=${encodeURIComponent(keyword)}&scholar=${encodeURIComponent(scholar.name)}`
 }
 
+function splitTags(raw: string): string[] {
+  return raw
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
+
 export function ScholarsWatchlist({ scholars }: ScholarsWatchlistProps) {
+  const [items, setItems] = useState<Scholar[]>(scholars)
   const [query, setQuery] = useState("")
   const [status, setStatus] = useState<StatusFilter>("all")
 
+  const [createOpen, setCreateOpen] = useState(false)
+  const [createName, setCreateName] = useState("")
+  const [createSemanticId, setCreateSemanticId] = useState("")
+  const [createAffiliation, setCreateAffiliation] = useState("")
+  const [createKeywords, setCreateKeywords] = useState("")
+  const [createLoading, setCreateLoading] = useState(false)
+  const [createError, setCreateError] = useState<string | null>(null)
+
+  const [rowBusy, setRowBusy] = useState<Record<string, boolean>>({})
+
+  useEffect(() => {
+    setItems(scholars)
+  }, [scholars])
+
+  const refreshScholars = useCallback(async () => {
+    const res = await fetch("/api/research/scholars?limit=200", { cache: "no-store" })
+    if (!res.ok) {
+      throw new Error(`Failed to refresh scholars: ${res.status}`)
+    }
+    const payload = (await res.json()) as { items?: Scholar[] }
+    setItems(payload.items || [])
+  }, [])
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
-    return scholars
+    return items
       .filter((item) => {
         if (status !== "all" && item.status !== status) return false
         if (!q) return true
@@ -38,9 +77,62 @@ export function ScholarsWatchlist({ scholars }: ScholarsWatchlistProps) {
         if (a.status !== b.status) return a.status === "active" ? -1 : 1
         return (b.h_index || 0) - (a.h_index || 0)
       })
-  }, [query, scholars, status])
+  }, [items, query, status])
 
-  const activeCount = scholars.filter((item) => item.status === "active").length
+  const activeCount = items.filter((item) => item.status === "active").length
+
+  async function handleCreateScholar() {
+    setCreateLoading(true)
+    setCreateError(null)
+    try {
+      const res = await fetch("/api/research/scholars", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: createName,
+          semantic_scholar_id: createSemanticId,
+          affiliations: createAffiliation ? [createAffiliation.trim()] : [],
+          keywords: splitTags(createKeywords),
+          research_fields: [],
+        }),
+      })
+      if (!res.ok) {
+        const text = await res.text().catch(() => "")
+        throw new Error(text || `HTTP ${res.status}`)
+      }
+      await refreshScholars()
+      setCreateOpen(false)
+      setCreateName("")
+      setCreateSemanticId("")
+      setCreateAffiliation("")
+      setCreateKeywords("")
+    } catch (error) {
+      setCreateError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setCreateLoading(false)
+    }
+  }
+
+  async function handleDeleteScholar(scholar: Scholar) {
+    const ok = window.confirm(`Remove ${scholar.name} from watchlist?`)
+    if (!ok) return
+
+    setRowBusy((prev) => ({ ...prev, [scholar.id]: true }))
+    try {
+      const res = await fetch(`/api/research/scholars/${encodeURIComponent(scholar.id)}`, {
+        method: "DELETE",
+      })
+      if (!res.ok) {
+        const text = await res.text().catch(() => "")
+        throw new Error(text || `HTTP ${res.status}`)
+      }
+      await refreshScholars()
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : String(error))
+    } finally {
+      setRowBusy((prev) => ({ ...prev, [scholar.id]: false }))
+    }
+  }
 
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 p-4 pb-10 sm:p-6">
@@ -54,6 +146,10 @@ export function ScholarsWatchlist({ scholars }: ScholarsWatchlistProps) {
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
+              <Button onClick={() => setCreateOpen(true)}>
+                <Plus className="mr-1 h-4 w-4" />
+                Add Scholar
+              </Button>
               <Button asChild variant="outline">
                 <Link href="/research">Open Research</Link>
               </Button>
@@ -66,7 +162,7 @@ export function ScholarsWatchlist({ scholars }: ScholarsWatchlistProps) {
           <div className="mt-4 grid gap-3 sm:grid-cols-3">
             <div className="rounded-xl border bg-background/70 p-4">
               <p className="text-xs text-muted-foreground">Tracked Scholars</p>
-              <p className="mt-1 text-2xl font-semibold">{scholars.length}</p>
+              <p className="mt-1 text-2xl font-semibold">{items.length}</p>
             </div>
             <div className="rounded-xl border bg-background/70 p-4">
               <p className="text-xs text-muted-foreground">Active Signals</p>
@@ -75,8 +171,8 @@ export function ScholarsWatchlist({ scholars }: ScholarsWatchlistProps) {
             <div className="rounded-xl border bg-background/70 p-4">
               <p className="text-xs text-muted-foreground">Avg H-Index</p>
               <p className="mt-1 text-2xl font-semibold">
-                {scholars.length
-                  ? Math.round(scholars.reduce((acc, row) => acc + Number(row.h_index || 0), 0) / scholars.length)
+                {items.length
+                  ? Math.round(items.reduce((acc, row) => acc + Number(row.h_index || 0), 0) / items.length)
                   : 0}
               </p>
             </div>
@@ -99,9 +195,27 @@ export function ScholarsWatchlist({ scholars }: ScholarsWatchlistProps) {
                 placeholder="Search scholar, affiliation, keyword"
               />
             </div>
-            <Button variant={status === "all" ? "default" : "outline"} size="sm" onClick={() => setStatus("all")}>All</Button>
-            <Button variant={status === "active" ? "default" : "outline"} size="sm" onClick={() => setStatus("active")}>Active</Button>
-            <Button variant={status === "idle" ? "default" : "outline"} size="sm" onClick={() => setStatus("idle")}>Idle</Button>
+            <Button
+              variant={status === "all" ? "default" : "outline"}
+              size="sm"
+              onClick={() => setStatus("all")}
+            >
+              All
+            </Button>
+            <Button
+              variant={status === "active" ? "default" : "outline"}
+              size="sm"
+              onClick={() => setStatus("active")}
+            >
+              Active
+            </Button>
+            <Button
+              variant={status === "idle" ? "default" : "outline"}
+              size="sm"
+              onClick={() => setStatus("idle")}
+            >
+              Idle
+            </Button>
           </div>
 
           {!filtered.length ? (
@@ -169,6 +283,16 @@ export function ScholarsWatchlist({ scholars }: ScholarsWatchlistProps) {
                           Workflow
                         </Link>
                       </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-8 text-destructive hover:text-destructive"
+                        disabled={!!rowBusy[scholar.id]}
+                        onClick={() => handleDeleteScholar(scholar)}
+                      >
+                        <Trash2 className="mr-1 h-3.5 w-3.5" />
+                        Remove
+                      </Button>
                     </div>
                   </CardContent>
                 </Card>
@@ -178,7 +302,7 @@ export function ScholarsWatchlist({ scholars }: ScholarsWatchlistProps) {
 
           <div className="flex items-center justify-between rounded-xl border bg-muted/20 p-3">
             <p className="text-xs text-muted-foreground">
-              Need new scholars? Edit `config/scholar_subscriptions.yaml` or extend settings UI next.
+              Watchlist is persisted in subscription config and powers scholar tracking workflows.
             </p>
             <Button asChild size="sm" variant="ghost">
               <Link href="/settings">
@@ -221,6 +345,47 @@ export function ScholarsWatchlist({ scholars }: ScholarsWatchlistProps) {
           </CardContent>
         </Card>
       </div>
+
+      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add Scholar</DialogTitle>
+            <DialogDescription>
+              Add a scholar to watchlist. This updates scholar subscriptions used by tracking workflows.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <p className="text-xs text-muted-foreground">Name</p>
+              <Input value={createName} onChange={(event) => setCreateName(event.target.value)} placeholder="Dawn Song" />
+            </div>
+            <div className="space-y-1.5">
+              <p className="text-xs text-muted-foreground">Semantic Scholar ID</p>
+              <Input value={createSemanticId} onChange={(event) => setCreateSemanticId(event.target.value)} placeholder="1741101" />
+            </div>
+            <div className="space-y-1.5">
+              <p className="text-xs text-muted-foreground">Affiliation (optional)</p>
+              <Input value={createAffiliation} onChange={(event) => setCreateAffiliation(event.target.value)} placeholder="UC Berkeley" />
+            </div>
+            <div className="space-y-1.5">
+              <p className="text-xs text-muted-foreground">Keywords (comma separated)</p>
+              <Input value={createKeywords} onChange={(event) => setCreateKeywords(event.target.value)} placeholder="AI Security, LLM Safety" />
+            </div>
+            {createError ? <p className="text-xs text-destructive">{createError}</p> : null}
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCreateOpen(false)} disabled={createLoading}>Cancel</Button>
+            <Button
+              onClick={handleCreateScholar}
+              disabled={createLoading || !createName.trim() || !createSemanticId.trim()}
+            >
+              {createLoading ? "Saving..." : "Save Scholar"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

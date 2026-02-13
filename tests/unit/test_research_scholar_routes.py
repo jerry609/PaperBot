@@ -146,3 +146,48 @@ def test_scholar_list_route(monkeypatch):
     assert payload["items"][0]["name"] == "Alice"
     assert payload["items"][0]["status"] == "active"
     assert payload["items"][1]["name"] == "Bob"
+
+
+def test_scholar_create_route(monkeypatch):
+    class _FakeSubscriptionService:
+        def add_scholar(self, scholar):
+            if scholar.get("semantic_scholar_id") == "dup":
+                raise ValueError("semantic_scholar_id already exists")
+            return scholar
+
+    monkeypatch.setattr(research_route, "_subscription_service", _FakeSubscriptionService())
+
+    with TestClient(api_main.app) as client:
+        resp = client.post(
+            "/api/research/scholars",
+            json={
+                "name": "Carol",
+                "semantic_scholar_id": "1003",
+                "keywords": ["rag", "agents"],
+            },
+        )
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["scholar"]["name"] == "Carol"
+    assert payload["scholar"]["semantic_scholar_id"] == "1003"
+
+
+def test_scholar_delete_route(monkeypatch):
+    class _FakeSubscriptionService:
+        def remove_scholar(self, scholar_ref):
+            if scholar_ref == "missing":
+                return None
+            return {"name": "Carol", "semantic_scholar_id": scholar_ref}
+
+    monkeypatch.setattr(research_route, "_subscription_service", _FakeSubscriptionService())
+
+    with TestClient(api_main.app) as client:
+        resp = client.delete("/api/research/scholars/1003")
+        missing = client.delete("/api/research/scholars/missing")
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["removed"] is True
+    assert payload["scholar"]["semantic_scholar_id"] == "1003"
+    assert missing.status_code == 404
