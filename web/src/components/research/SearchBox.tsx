@@ -1,7 +1,7 @@
 "use client"
 
 import { KeyboardEvent, useRef } from "react"
-import { Brain, Loader2, Search } from "lucide-react"
+import { Brain, CalendarRange, Loader2, Search } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -71,6 +71,8 @@ export function SearchBox({
     }
   }
 
+  const hasYearFilter = !!(yearFrom.trim() || yearTo.trim())
+
   return (
     <div
       className={cn(
@@ -106,36 +108,63 @@ export function SearchBox({
         {/* Bottom Toolbar */}
         <div className="absolute bottom-0 left-0 right-0 flex items-center justify-between px-4 sm:px-5 py-2.5 sm:py-3">
           {/* Left side - mode + year range */}
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1.5 sm:gap-2">
             <Button
               variant="outline"
               size="sm"
               className="h-8 text-xs"
-              onClick={() => onAnchorModeChange?.(anchorMode === "personalized" ? "global" : "personalized")}
+              onClick={() =>
+                onAnchorModeChange?.(anchorMode === "personalized" ? "global" : "personalized")
+              }
               disabled={disabled || isSearching}
             >
               {anchorMode === "personalized" ? "Personalized" : "Global"}
             </Button>
-            <Input
-              type="number"
-              value={yearFrom}
-              onChange={(e) => onYearFromChange?.(e.target.value)}
-              placeholder="From"
-              className="h-8 w-20 px-2 text-xs"
-              min={1900}
-              max={2100}
-              disabled={disabled || isSearching}
-            />
-            <Input
-              type="number"
-              value={yearTo}
-              onChange={(e) => onYearToChange?.(e.target.value)}
-              placeholder="To"
-              className="h-8 w-20 px-2 text-xs"
-              min={1900}
-              max={2100}
-              disabled={disabled || isSearching}
-            />
+
+            <div className="flex h-8 items-center gap-1 rounded-md border bg-muted/30 px-2">
+              <CalendarRange className="h-3.5 w-3.5 text-muted-foreground" />
+              <span className="hidden text-[10px] font-medium uppercase tracking-wide text-muted-foreground md:inline">
+                Year
+              </span>
+              <Input
+                type="number"
+                value={yearFrom}
+                onChange={(e) => onYearFromChange?.(e.target.value)}
+                placeholder="YYYY"
+                aria-label="Year from"
+                className="h-6 w-14 border-0 bg-transparent px-1 text-xs shadow-none [appearance:textfield] focus-visible:ring-0"
+                min={1900}
+                max={2100}
+                disabled={disabled || isSearching}
+              />
+              <span className="text-muted-foreground">-</span>
+              <Input
+                type="number"
+                value={yearTo}
+                onChange={(e) => onYearToChange?.(e.target.value)}
+                placeholder="YYYY"
+                aria-label="Year to"
+                className="h-6 w-14 border-0 bg-transparent px-1 text-xs shadow-none [appearance:textfield] focus-visible:ring-0"
+                min={1900}
+                max={2100}
+                disabled={disabled || isSearching}
+              />
+            </div>
+
+            {hasYearFilter && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 px-2 text-xs text-muted-foreground hover:text-foreground"
+                onClick={() => {
+                  onYearFromChange?.("")
+                  onYearToChange?.("")
+                }}
+                disabled={disabled || isSearching}
+              >
+                All years
+              </Button>
+            )}
           </div>
 
           {/* Right side - Memory, Track selector and Search button */}

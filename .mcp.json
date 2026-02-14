@@ -2,7 +2,17 @@
   "mcpServers": {
     "drawio": {
       "command": "npx",
-      "args": ["-y", "drawio-mcp-server"]
+      "args": [
+        "-y",
+        "drawio-mcp-server"
+      ]
+    },
+    "playwright": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@playwright/mcp@latest"
+      ]
     }
   }
 }
