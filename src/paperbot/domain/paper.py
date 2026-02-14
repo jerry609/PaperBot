@@ -15,6 +15,7 @@ from paperbot.domain.identity import PaperIdentity
 @dataclass
 class PaperMeta:
     """论文元数据模型。"""
+
     paper_id: str
     title: str
     authors: List[str] = field(default_factory=list)
@@ -31,7 +32,7 @@ class PaperMeta:
     publication_date: Optional[str] = None  # 发布日期 (ISO 格式)
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典。"""
         return {
@@ -52,7 +53,7 @@ class PaperMeta:
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
-    
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "PaperMeta":
         """从字典创建实例。"""
@@ -72,7 +73,7 @@ class PaperMeta:
             fields_of_study=data.get("fields_of_study", []),
             publication_date=data.get("publication_date"),
         )
-    
+
     @classmethod
     def from_semantic_scholar(cls, data: Dict[str, Any]) -> "PaperMeta":
         """从 Semantic Scholar API 响应创建实例。"""
@@ -84,7 +85,7 @@ class PaperMeta:
                     authors.append(author.get("name", ""))
                 elif isinstance(author, str):
                     authors.append(author)
-        
+
         # 提取年份
         year = data.get("year")
         if not year and data.get("publicationDate"):
@@ -92,7 +93,7 @@ class PaperMeta:
                 year = int(data["publicationDate"][:4])
             except (ValueError, TypeError):
                 pass
-        
+
         # 提取 GitHub URL
         github_url = None
         has_code = False
@@ -101,7 +102,7 @@ class PaperMeta:
             if "github" in pdf_url.lower():
                 github_url = pdf_url
                 has_code = True
-        
+
         # 检查 externalIds 中的 GitHub
         if data.get("externalIds"):
             for _, value in data["externalIds"].items():
@@ -109,9 +110,9 @@ class PaperMeta:
                     github_url = value
                     has_code = True
                     break
-        
+
         fields_of_study = data.get("fieldsOfStudy", []) or []
-        
+
         return cls(
             paper_id=data.get("paperId", ""),
             title=data.get("title", ""),
@@ -133,6 +134,7 @@ class PaperMeta:
 @dataclass
 class CodeMeta:
     """代码仓库元数据模型。"""
+
     repo_url: str
     stars: int = 0
     forks: int = 0
@@ -144,7 +146,7 @@ class CodeMeta:
     updated_at: Optional[str] = None
     last_commit_date: Optional[str] = None
     reproducibility_score: Optional[float] = None
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典。"""
         return {
@@ -160,7 +162,7 @@ class CodeMeta:
             "last_commit_date": self.last_commit_date,
             "reproducibility_score": self.reproducibility_score,
         }
-    
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "CodeMeta":
         """从字典创建实例。"""
@@ -204,6 +206,8 @@ class PaperCandidate:
     identities: List[PaperIdentity] = field(default_factory=list)
     title_hash: str = ""
     canonical_id: Optional[int] = None
+    retrieval_score: float = 0.0
+    retrieval_sources: List[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         if not self.title_hash and self.title:
@@ -229,9 +233,10 @@ class PaperCandidate:
             "fields_of_study": self.fields_of_study,
             "publication_date": self.publication_date,
             "identities": [
-                {"source": i.source, "external_id": i.external_id}
-                for i in self.identities
+                {"source": i.source, "external_id": i.external_id} for i in self.identities
             ],
             "title_hash": self.title_hash,
             "canonical_id": self.canonical_id,
+            "retrieval_score": float(self.retrieval_score or 0.0),
+            "retrieval_sources": [str(x) for x in (self.retrieval_sources or []) if str(x)],
         }
