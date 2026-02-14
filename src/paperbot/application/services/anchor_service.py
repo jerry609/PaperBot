@@ -387,6 +387,52 @@ class AnchorService:
                 for row in rows
             ]
 
+    def get_followed_paper_anchor_scores(
+        self,
+        *,
+        user_id: str,
+        track_id: int,
+        paper_ids: list[int],
+    ) -> dict[int, float]:
+        """Return max personalized anchor score for followed authors per paper."""
+        clean_ids = sorted({int(pid) for pid in paper_ids if int(pid) > 0})
+        if not clean_ids:
+            return {}
+
+        with self._provider.session() as session:
+            rows = session.execute(
+                select(
+                    PaperAuthorModel.paper_id,
+                    func.max(func.coalesce(UserAnchorScoreModel.personalized_anchor_score, 0.0)),
+                )
+                .join(
+                    UserAnchorActionModel,
+                    and_(
+                        UserAnchorActionModel.author_id == PaperAuthorModel.author_id,
+                        UserAnchorActionModel.user_id == str(user_id),
+                        UserAnchorActionModel.track_id == int(track_id),
+                        UserAnchorActionModel.action == "follow",
+                    ),
+                )
+                .outerjoin(
+                    UserAnchorScoreModel,
+                    and_(
+                        UserAnchorScoreModel.user_id == UserAnchorActionModel.user_id,
+                        UserAnchorScoreModel.track_id == UserAnchorActionModel.track_id,
+                        UserAnchorScoreModel.author_id == UserAnchorActionModel.author_id,
+                    ),
+                )
+                .where(PaperAuthorModel.paper_id.in_(clean_ids))
+                .group_by(PaperAuthorModel.paper_id)
+            ).all()
+
+            out: dict[int, float] = {}
+            for paper_id, score in rows:
+                if paper_id is None:
+                    continue
+                out[int(paper_id)] = max(0.0, float(score or 0.0))
+            return out
+
     @staticmethod
     def list_user_anchor_actions(
         *,

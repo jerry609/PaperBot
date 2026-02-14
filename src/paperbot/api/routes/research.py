@@ -1309,6 +1309,7 @@ class ContextRequest(BaseModel):
     stage: str = "auto"  # auto/survey/writing/rebuttal
     exploration_ratio: Optional[float] = Field(default=None, ge=0.0, le=0.5)
     diversity_strength: Optional[float] = Field(default=None, ge=0.0, le=2.0)
+    personalized: bool = True
 
 
 class ContextResponse(BaseModel):
@@ -1419,6 +1420,7 @@ async def build_context(req: ContextRequest):
             diversity_strength=(
                 float(req.diversity_strength) if req.diversity_strength is not None else None
             ),
+            personalized=bool(req.personalized),
         ),
     )
     try:

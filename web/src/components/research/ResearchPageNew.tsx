@@ -169,6 +169,7 @@ export default function ResearchPageNew() {
         offline: false,
         include_cross_track: false,
         stage: "auto",
+        personalized: anchorPersonalized,
       }
 
       const data = await fetchJson<{ context_pack: ContextPack }>(
@@ -200,7 +201,7 @@ export default function ResearchPageNew() {
     })
   }
 
-  // Auto-refresh search when sources change (after initial search)
+  // Auto-refresh search when sources or personalization mode change (after initial search)
   useEffect(() => {
     if (!hasSearched || !query.trim() || isSearching) return
 
@@ -211,7 +212,7 @@ export default function ResearchPageNew() {
 
     return () => clearTimeout(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchSources])
+  }, [searchSources, anchorPersonalized])
 
   async function handleCreateTrack(data: {
     name: string

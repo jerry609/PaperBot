@@ -19,7 +19,25 @@ try:
 except ImportError:  # pragma: no cover
     PaperSearchService = None  # type: ignore
 
+# Optional: AnchorService for personalized author boosts
+try:
+    from paperbot.application.services.anchor_service import AnchorService
+except ImportError:  # pragma: no cover
+    AnchorService = None  # type: ignore
+
 _TOKEN_RX = re.compile(r"[a-zA-Z0-9_+.-]+")
+
+
+_anchor_service: Optional["AnchorService"] = None
+
+
+def _get_anchor_service() -> Optional["AnchorService"]:
+    global _anchor_service
+    if AnchorService is None:
+        return None
+    if _anchor_service is None:
+        _anchor_service = AnchorService()
+    return _anchor_service
 
 
 def _tokenize(text: str) -> set[str]:
@@ -402,6 +420,7 @@ class ContextEngineConfig:
     search_sources: Optional[List[str]] = None
     exploration_ratio: Optional[float] = None
     diversity_strength: Optional[float] = None
+    personalized: bool = True
     track_router: TrackRouterConfig = field(default_factory=TrackRouterConfig)
 
 
@@ -568,10 +587,11 @@ class ContextEngine:
             )
 
         boosts: Dict[str, float] = {}
-        for pid in saved_ids:
-            boosts[pid] = boosts.get(pid, 0.0) + 0.25
-        for pid in liked_ids:
-            boosts[pid] = boosts.get(pid, 0.0) + 0.15
+        if self.config.personalized:
+            for pid in saved_ids:
+                boosts[pid] = boosts.get(pid, 0.0) + 0.25
+            for pid in liked_ids:
+                boosts[pid] = boosts.get(pid, 0.0) + 0.15
 
         stage = stage_raw
         if stage_raw == "auto":
@@ -685,6 +705,33 @@ class ContextEngine:
                     if tkey:
                         seen_titles.add(tkey)
                     filtered.append(p)
+
+                if self.config.personalized and routed_track:
+                    try:
+                        anchor_service = _get_anchor_service()
+                        if anchor_service is not None:
+                            numeric_ids = [
+                                int(str(p.get("paper_id") or 0))
+                                for p in filtered
+                                if str(p.get("paper_id") or "").isdigit()
+                            ]
+                            if numeric_ids:
+                                anchor_boosts = anchor_service.get_followed_paper_anchor_scores(
+                                    user_id=user_id,
+                                    track_id=int(routed_track["id"]),
+                                    paper_ids=numeric_ids,
+                                )
+                                for paper_id, anchor_score in anchor_boosts.items():
+                                    pid = str(paper_id)
+                                    boosts[pid] = boosts.get(pid, 0.0) + min(
+                                        0.35,
+                                        0.20 * max(0.0, float(anchor_score)),
+                                    )
+                    except Exception as exc:
+                        Logger.warning(
+                            f"Failed to apply anchor boost: {exc}",
+                            file=LogFiles.HARVEST,
+                        )
 
                 try:
                     self._attach_latest_judge(filtered)
