@@ -75,27 +75,51 @@ class PaperSearchService:
         if not selected:
             return SearchResult()
 
-        # 1. Concurrent search across adapters
-        tasks = [
-            adapter.search(
-                query,
-                max_results=max_results,
-                year_from=year_from,
-                year_to=year_to,
-            )
-            for adapter in selected
-        ]
+        # 1. Concurrent search across adapters with per-adapter timeout
+        PER_ADAPTER_TIMEOUT = 25.0  # seconds — don't let one slow source block everything
+
+        async def _guarded_search(adapter):
+            try:
+                return await asyncio.wait_for(
+                    adapter.search(
+                        query,
+                        max_results=max_results,
+                        year_from=year_from,
+                        year_to=year_to,
+                    ),
+                    timeout=PER_ADAPTER_TIMEOUT,
+                )
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "Adapter %s timed out after %.0fs", adapter.source_name, PER_ADAPTER_TIMEOUT
+                )
+                return TimeoutError(f"{adapter.source_name} timed out")
+            except Exception as exc:
+                return exc
+
+        tasks = [_guarded_search(adapter) for adapter in selected]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
         results_by_source: Dict[str, List[PaperCandidate]] = {}
+        failed_sources: List[str] = []
         total_raw = 0
         for adapter, result in zip(selected, results):
-            if isinstance(result, Exception):
+            if isinstance(result, BaseException):
                 logger.warning("Adapter %s failed: %s", adapter.source_name, result)
+                failed_sources.append(adapter.source_name)
                 continue
             papers = list(result)
             results_by_source[adapter.source_name] = papers
             total_raw += len(papers)
+
+        if failed_sources:
+            logger.info(
+                "Search degraded: %d/%d sources failed (%s), continuing with %s",
+                len(failed_sources),
+                len(selected),
+                ", ".join(failed_sources),
+                ", ".join(results_by_source.keys()) or "none",
+            )
 
         if not results_by_source:
             return SearchResult()
@@ -125,10 +149,20 @@ class PaperSearchService:
             for paper in unique:
                 try:
                     source_hint = (paper.retrieval_sources or ["unknown"])[0]
-                    result_dict = self._registry.upsert_paper(
-                        paper=paper.to_dict(),
-                        source_hint=source_hint,
-                    )
+                    upsert_kwargs = {
+                        "paper": paper.to_dict(),
+                        "source_hint": source_hint,
+                        # Interactive search path: avoid blocking user requests on best-effort
+                        # author-link syncing when SQLite is busy.
+                        "sync_authors": False,
+                    }
+                    try:
+                        result_dict = self._registry.upsert_paper(**upsert_kwargs)
+                    except TypeError as exc:
+                        if "sync_authors" not in str(exc):
+                            raise
+                        upsert_kwargs.pop("sync_authors", None)
+                        result_dict = self._registry.upsert_paper(**upsert_kwargs)
                     paper.canonical_id = result_dict.get("id")
                 except Exception as e:
                     logger.warning("Failed to persist paper %s: %s", paper.title[:50], e)

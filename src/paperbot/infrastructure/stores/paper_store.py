@@ -109,6 +109,7 @@ class PaperStore:
         paper: Dict[str, Any],
         source_hint: Optional[str] = None,
         seen_at: Optional[datetime] = None,
+        sync_authors: bool = True,
     ) -> Dict[str, Any]:
         now = _utcnow()
 
@@ -272,7 +273,7 @@ class PaperStore:
             self._sync_identifiers(session, row)
 
             # Extract and link authors to authors/paper_authors tables
-            if authors and row.id:
+            if sync_authors and authors and row.id:
                 try:
                     self._author_store.replace_paper_authors(
                         paper_id=int(row.id),

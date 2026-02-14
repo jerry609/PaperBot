@@ -28,6 +28,15 @@ class _FakeAdapter:
         return None
 
 
+@dataclass
+class _FakeRegistry:
+    sync_flags: list[bool]
+
+    def upsert_paper(self, *, paper: dict, source_hint: str, sync_authors: bool = True) -> dict:
+        self.sync_flags.append(bool(sync_authors))
+        return {"id": 1}
+
+
 @pytest.mark.asyncio
 async def test_rrf_fusion_prefers_cross_source_consensus() -> None:
     shared = PaperCandidate(title="Attention is all you need")
@@ -72,3 +81,17 @@ async def test_rrf_merges_duplicates_and_tracks_retrieval_sources() -> None:
     assert merged.title == "Duplicate Title"
     assert set(merged.retrieval_sources) == {"semantic_scholar", "arxiv"}
     assert merged.retrieval_score > 0
+
+
+@pytest.mark.asyncio
+async def test_persist_search_results_disables_author_sync_for_latency() -> None:
+    registry = _FakeRegistry(sync_flags=[])
+    service = PaperSearchService(
+        adapters={"semantic_scholar": _FakeAdapter("semantic_scholar", [PaperCandidate(title="P1")])},
+        registry=registry,
+    )
+
+    result = await service.search("p1", sources=["semantic_scholar"], persist=True)
+
+    assert len(result.papers) == 1
+    assert registry.sync_flags == [False]
