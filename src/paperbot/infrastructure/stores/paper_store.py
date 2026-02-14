@@ -241,7 +241,7 @@ class PaperStore:
             row.abstract = abstract or row.abstract or ""
             row.url = url or row.url or None
             row.pdf_url = pdf_url or row.pdf_url or None
-            row.venue = venue or row.venue or None
+            row.venue = venue or row.venue or ""
             row.year = year if year is not None else row.year
             row.publication_date = publication_date or row.publication_date
             row.citation_count = max(citation_count, int(row.citation_count or 0))

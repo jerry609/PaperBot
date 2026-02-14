@@ -796,7 +796,7 @@ class ContextEngine:
                             file=LogFiles.HARVEST,
                         )
 
-                # Feedback filtering + dedup + relevance
+                # Feedback filtering + dedup + relevance + year range
                 seen_titles: set[str] = set()
                 filtered: List[Dict[str, Any]] = []
                 for p in raw:
@@ -805,6 +805,13 @@ class ContextEngine:
                         continue
                     if not _is_academic_paper(p):
                         continue
+                    # Year range filter (post-search safety net)
+                    year_val = p.get("year")
+                    if isinstance(year_val, int):
+                        if self.config.year_from is not None and year_val < self.config.year_from:
+                            continue
+                        if self.config.year_to is not None and year_val > self.config.year_to:
+                            continue
                     tkey = _normalize_title(str(p.get("title") or ""))
                     if tkey and tkey in seen_titles:
                         continue
