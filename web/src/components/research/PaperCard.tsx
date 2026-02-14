@@ -24,6 +24,9 @@ export type Paper = {
     evidence_quotes?: Array<{ text: string; source_url?: string; page_hint?: string }>
   }
   is_saved?: boolean
+  retrieval_sources?: string[]
+  retrieval_score?: number
+  source?: string
   structured_card?: {
     method?: string
     dataset?: string

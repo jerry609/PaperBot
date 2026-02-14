@@ -1310,6 +1310,8 @@ class ContextRequest(BaseModel):
     exploration_ratio: Optional[float] = Field(default=None, ge=0.0, le=0.5)
     diversity_strength: Optional[float] = Field(default=None, ge=0.0, le=2.0)
     personalized: bool = True
+    year_from: Optional[int] = Field(default=None, ge=1900, le=2100)
+    year_to: Optional[int] = Field(default=None, ge=1900, le=2100)
 
 
 class ContextResponse(BaseModel):
@@ -1382,6 +1384,9 @@ async def build_context(req: ContextRequest):
     started = time.perf_counter()
     metric_store = _get_workflow_metric_store()
 
+    if req.year_from is not None and req.year_to is not None and req.year_from > req.year_to:
+        raise HTTPException(status_code=400, detail="year_from cannot be greater than year_to")
+
     if req.activate_track_id is not None:
         Logger.info("Activating research track", file=LogFiles.HARVEST)
         activated = _research_store.activate_track(
@@ -1421,6 +1426,8 @@ async def build_context(req: ContextRequest):
                 float(req.diversity_strength) if req.diversity_strength is not None else None
             ),
             personalized=bool(req.personalized),
+            year_from=req.year_from,
+            year_to=req.year_to,
         ),
     )
     try:
@@ -1448,6 +1455,8 @@ async def build_context(req: ContextRequest):
                 "paper_limit": int(req.paper_limit),
                 "memory_limit": int(req.memory_limit),
                 "offline": bool(req.offline),
+                "year_from": req.year_from,
+                "year_to": req.year_to,
                 "sources": list(req.sources or []),
             },
         )
@@ -1464,6 +1473,8 @@ async def build_context(req: ContextRequest):
                 "paper_limit": int(req.paper_limit),
                 "memory_limit": int(req.memory_limit),
                 "offline": bool(req.offline),
+                "year_from": req.year_from,
+                "year_to": req.year_to,
             },
         )
         raise

@@ -79,6 +79,8 @@ export default function ResearchPageNew() {
   const [isSearching, setIsSearching] = useState(false)
   const [contextPack, setContextPack] = useState<ContextPack | null>(null)
   const [searchSources, setSearchSources] = useState<string[]>(ALL_SOURCES)
+  const [yearFrom, setYearFrom] = useState("")
+  const [yearTo, setYearTo] = useState("")
 
   // Memory drawer state
   const [memoryOpen, setMemoryOpen] = useState(false)
@@ -160,6 +162,17 @@ export default function ResearchPageNew() {
     setError(null)
 
     try {
+      const parseYear = (value: string): number | undefined => {
+        const trimmed = value.trim()
+        if (!trimmed) return undefined
+        const n = Number(trimmed)
+        if (!Number.isInteger(n)) return undefined
+        if (n < 1900 || n > 2100) return undefined
+        return n
+      }
+      const parsedYearFrom = parseYear(yearFrom)
+      const parsedYearTo = parseYear(yearTo)
+
       const body = {
         user_id: userId,
         query,
@@ -170,6 +183,8 @@ export default function ResearchPageNew() {
         include_cross_track: false,
         stage: "auto",
         personalized: anchorPersonalized,
+        year_from: parsedYearFrom,
+        year_to: parsedYearTo,
       }
 
       const data = await fetchJson<{ context_pack: ContextPack }>(
@@ -212,7 +227,7 @@ export default function ResearchPageNew() {
 
     return () => clearTimeout(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchSources, anchorPersonalized])
+  }, [searchSources, anchorPersonalized, yearFrom, yearTo])
 
   async function handleCreateTrack(data: {
     name: string
@@ -347,7 +362,14 @@ export default function ResearchPageNew() {
       weight: 0.0,
       context_run_id: contextPack?.context_run_id ?? null,
       context_rank: typeof rank === "number" ? rank : undefined,
-      metadata: {},
+      metadata: {
+        retrieval_sources: Array.isArray(paper?.retrieval_sources)
+          ? paper?.retrieval_sources
+          : [],
+        retrieval_score:
+          typeof paper?.retrieval_score === "number" ? paper.retrieval_score : undefined,
+        anchor_mode: anchorPersonalized ? "personalized" : "global",
+      },
     }
 
     // Include paper metadata for save action
@@ -491,6 +513,10 @@ export default function ResearchPageNew() {
             anchorMode={anchorPersonalized ? "personalized" : "global"}
             onAnchorModeChange={(mode) => setAnchorPersonalized(mode === "personalized")}
             onOpenMemory={() => setMemoryOpen(true)}
+            yearFrom={yearFrom}
+            yearTo={yearTo}
+            onYearFromChange={setYearFrom}
+            onYearToChange={setYearTo}
           />
         </div>
 
@@ -528,9 +554,9 @@ export default function ResearchPageNew() {
             hasSearched={hasSearched}
             selectedSources={searchSources}
             onToggleSource={toggleSearchSource}
-            onLike={(paperId, rank) => handleFeedback(paperId, "like", rank)}
+            onLike={(paperId, rank, paper) => handleFeedback(paperId, "like", rank, paper)}
             onSave={(paperId, rank, paper) => handleFeedback(paperId, "save", rank, paper)}
-            onDislike={(paperId, rank) => handleFeedback(paperId, "dislike", rank)}
+            onDislike={(paperId, rank, paper) => handleFeedback(paperId, "dislike", rank, paper)}
           />
         )}
 

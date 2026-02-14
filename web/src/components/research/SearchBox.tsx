@@ -6,6 +6,7 @@ import { Brain, Loader2, Search } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
+import { Input } from "@/components/ui/input"
 
 import { TrackSelector, type Track } from "./TrackSelector"
 
@@ -25,6 +26,10 @@ interface SearchBoxProps {
   anchorMode?: "personalized" | "global"
   onAnchorModeChange?: (mode: "personalized" | "global") => void
   onOpenMemory?: () => void
+  yearFrom?: string
+  yearTo?: string
+  onYearFromChange?: (value: string) => void
+  onYearToChange?: (value: string) => void
 }
 
 export function SearchBox({
@@ -43,6 +48,10 @@ export function SearchBox({
   anchorMode = "personalized",
   onAnchorModeChange,
   onOpenMemory,
+  yearFrom = "",
+  yearTo = "",
+  onYearFromChange,
+  onYearToChange,
 }: SearchBoxProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
@@ -96,7 +105,7 @@ export function SearchBox({
 
         {/* Bottom Toolbar */}
         <div className="absolute bottom-0 left-0 right-0 flex items-center justify-between px-4 sm:px-5 py-2.5 sm:py-3">
-          {/* Left side - Anchor mode toggle */}
+          {/* Left side - mode + year range */}
           <div className="flex items-center gap-1.5">
             <Button
               variant="outline"
@@ -107,6 +116,26 @@ export function SearchBox({
             >
               {anchorMode === "personalized" ? "Personalized" : "Global"}
             </Button>
+            <Input
+              type="number"
+              value={yearFrom}
+              onChange={(e) => onYearFromChange?.(e.target.value)}
+              placeholder="From"
+              className="h-8 w-20 px-2 text-xs"
+              min={1900}
+              max={2100}
+              disabled={disabled || isSearching}
+            />
+            <Input
+              type="number"
+              value={yearTo}
+              onChange={(e) => onYearToChange?.(e.target.value)}
+              placeholder="To"
+              className="h-8 w-20 px-2 text-xs"
+              min={1900}
+              max={2100}
+              disabled={disabled || isSearching}
+            />
           </div>
 
           {/* Right side - Memory, Track selector and Search button */}

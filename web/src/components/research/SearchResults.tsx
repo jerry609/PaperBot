@@ -15,9 +15,9 @@ interface SearchResultsProps {
   hasSearched: boolean
   selectedSources?: string[]
   onToggleSource?: (source: string) => void
-  onLike?: (paperId: string, rank: number) => Promise<void> | void
+  onLike?: (paperId: string, rank: number, paper: Paper) => Promise<void> | void
   onSave?: (paperId: string, rank: number, paper: Paper) => Promise<void> | void
-  onDislike?: (paperId: string, rank: number) => Promise<void> | void
+  onDislike?: (paperId: string, rank: number, paper: Paper) => Promise<void> | void
 }
 
 const SOURCE_OPTIONS: Array<{ value: string; label: string }> = [
@@ -135,9 +135,9 @@ export function SearchResults({
               paper={paper}
               rank={idx}
               reasons={reasons?.[paper.paper_id]}
-              onLike={onLike ? () => onLike(paper.paper_id, idx) : undefined}
+              onLike={onLike ? () => onLike(paper.paper_id, idx, paper) : undefined}
               onSave={onSave ? () => onSave(paper.paper_id, idx, paper) : undefined}
-              onDislike={onDislike ? () => onDislike(paper.paper_id, idx) : undefined}
+              onDislike={onDislike ? () => onDislike(paper.paper_id, idx, paper) : undefined}
               className={cn(
                 "animate-in fade-in slide-in-from-bottom-2",
                 // Staggered animation delay
