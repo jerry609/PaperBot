@@ -266,6 +266,75 @@ class RecommendationPolicy:
     max_per_field: int = 4
 
 
+def _learn_source_weights_from_feedback(
+    *,
+    feedback_rows: List[Dict[str, Any]],
+    selected_sources: List[str],
+    default_weights: Dict[str, float],
+    min_samples: int = 8,
+) -> Optional[Dict[str, float]]:
+    """Estimate per-source RRF weights from recent explicit feedback metadata."""
+    valid_sources = [str(s).strip() for s in (selected_sources or []) if str(s).strip()]
+    if not valid_sources:
+        return None
+
+    stats: Dict[str, Dict[str, float]] = {
+        source: {"pos": 0.0, "neg": 0.0, "n": 0.0} for source in valid_sources
+    }
+
+    action_signal = {
+        "save": 2.0,
+        "like": 1.5,
+        "cite": 1.5,
+        "dislike": -2.0,
+        "not_relevant": -2.0,
+        "not-relevant": -2.0,
+        "skip": -0.5,
+    }
+
+    sample_count = 0
+    for row in feedback_rows or []:
+        action = str(row.get("action") or "").strip().lower()
+        signal = float(action_signal.get(action, 0.0))
+        if signal == 0.0:
+            continue
+
+        metadata = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
+        retrieval_sources = metadata.get("retrieval_sources")
+        if not isinstance(retrieval_sources, list):
+            retrieval_sources = []
+
+        clean_sources = [
+            str(source).strip() for source in retrieval_sources if str(source).strip() in stats
+        ]
+        if not clean_sources:
+            continue
+
+        sample_count += 1
+        for source in clean_sources:
+            stats[source]["n"] += 1.0
+            if signal > 0:
+                stats[source]["pos"] += signal
+            else:
+                stats[source]["neg"] += abs(signal)
+
+    if sample_count < max(1, int(min_samples)):
+        return None
+
+    learned: Dict[str, float] = {}
+    for source in valid_sources:
+        base = float(default_weights.get(source, 0.5))
+        s = stats[source]
+        # Beta-style smoothing to avoid extreme swings under sparse feedback.
+        pos = float(s["pos"])
+        neg = float(s["neg"])
+        ctr_like = (pos + 1.0) / (pos + neg + 2.0)
+        scale = 0.6 + 0.8 * ctr_like  # [0.6, 1.4]
+        learned[source] = min(1.8, max(0.3, base * scale))
+
+    return learned
+
+
 def _normalize_stage(stage: Optional[str]) -> str:
     s = (stage or "").strip().lower()
     if s in {"survey", "writing", "rebuttal"}:
@@ -421,6 +490,8 @@ class ContextEngineConfig:
     exploration_ratio: Optional[float] = None
     diversity_strength: Optional[float] = None
     personalized: bool = True
+    year_from: Optional[int] = None
+    year_to: Optional[int] = None
     track_router: TrackRouterConfig = field(default_factory=TrackRouterConfig)
 
 
@@ -617,6 +688,8 @@ class ContextEngine:
             "rebuttal": (0.50, 0.40, 0.10),
         }.get(stage, (0.55, 0.30, 0.15))
 
+        learned_source_weights: Optional[Dict[str, float]] = None
+
         Logger.info(
             f"Paper search config: offline={self.config.offline}, "
             f"paper_limit={self.config.paper_limit}",
@@ -634,6 +707,29 @@ class ContextEngine:
                     if not selected_sources:
                         selected_sources = ["semantic_scholar"]
 
+                    if self.config.personalized and routed_track:
+                        try:
+                            feedback_rows = self.research_store.list_paper_feedback(
+                                user_id=user_id,
+                                track_id=int(routed_track["id"]),
+                                limit=500,
+                            )
+                            default_rrf_weights = getattr(
+                                self.search_service,
+                                "DEFAULT_SOURCE_WEIGHTS",
+                                {},
+                            )
+                            learned_source_weights = _learn_source_weights_from_feedback(
+                                feedback_rows=feedback_rows,
+                                selected_sources=selected_sources,
+                                default_weights=dict(default_rrf_weights or {}),
+                            )
+                        except Exception as exc:
+                            Logger.warning(
+                                f"Failed to learn source weights: {exc}",
+                                file=LogFiles.HARVEST,
+                            )
+
                     Logger.info(
                         f"Using PaperSearchService for query='{merged_query}'",
                         file=LogFiles.HARVEST,
@@ -642,7 +738,10 @@ class ContextEngine:
                         merged_query,
                         sources=selected_sources,
                         max_results=fetch_limit,
+                        year_from=self.config.year_from,
+                        year_to=self.config.year_to,
                         persist=True,
+                        source_weights=learned_source_weights,
                     )
                     raw = [p.to_dict() for p in search_result.papers]
                     # Inject paper_id from canonical_id or first identity
@@ -679,6 +778,13 @@ class ContextEngine:
                         for p in local_papers:
                             d = paper_to_dict(p)
                             d["paper_id"] = str(d.get("id") or "")
+                            year_val = d.get("year")
+                            if self.config.year_from is not None and isinstance(year_val, int):
+                                if int(year_val) < int(self.config.year_from):
+                                    continue
+                            if self.config.year_to is not None and isinstance(year_val, int):
+                                if int(year_val) > int(self.config.year_to):
+                                    continue
                             raw.append(d)
                         Logger.info(
                             f"Local DB fallback returned {len(raw)} papers",
@@ -792,6 +898,10 @@ class ContextEngine:
             "exploration_ratio": float(exploration_ratio),
             "diversity_strength": float(diversity_strength),
             "suggestion": routing_suggestion,
+            "personalized": bool(self.config.personalized),
+            "learned_source_weights": dict(learned_source_weights or {}),
+            "year_from": self.config.year_from,
+            "year_to": self.config.year_to,
         }
 
         context_run_id: Optional[int] = None
