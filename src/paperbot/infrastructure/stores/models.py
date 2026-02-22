@@ -24,10 +24,10 @@ class AgentRunModel(Base):
     ended_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     status: Mapped[str] = mapped_column(String(32), default="running")
 
-    # Sandbox-specific fields
+    # Sandbox-specific fields (legacy, no longer used)
     executor_type: Mapped[Optional[str]] = mapped_column(
         String(32), nullable=True
-    )  # e2b/docker/local
+    )
     timeout_seconds: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     paper_url: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
     paper_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
@@ -164,7 +164,7 @@ class RunbookStepModel(Base):
     )  # running/success/failed/error
     executor_type: Mapped[Optional[str]] = mapped_column(
         String(32), nullable=True
-    )  # docker/e2b/ssh_docker/...
+    )  # legacy, no longer used
 
     started_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True, index=True

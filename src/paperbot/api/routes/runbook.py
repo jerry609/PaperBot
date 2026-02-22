@@ -1,35 +1,28 @@
 """
-Runbook API Routes
+Runbook API Routes - File Management
 
-Minimal endpoints to support DeepCode Studio Runbook steps:
-- Start a smoke run (docker/e2b)
-- Query run status
-
-Logs are emitted via ExecutionLogger and can be streamed from:
-  GET /api/sandbox/runs/{run_id}/logs/stream
+Provides file management endpoints for DeepCode Studio:
+- List/read/write files in project directories
+- Snapshot creation and comparison
+- File diff and revert functionality
 """
 
 from __future__ import annotations
 
-import asyncio
+import hashlib
 import json
 import os
 import shlex
 import tempfile
-import threading
-import time
-import hashlib
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from paperbot.application.collaboration.message_schema import new_run_id
-from paperbot.infrastructure.logging.execution_logger import get_execution_logger
-from paperbot.infrastructure.monitoring.resource_monitor import get_resource_monitor
-from paperbot.infrastructure.stores.models import AgentRunModel, ArtifactModel, Base, RunbookStepModel
+from paperbot.infrastructure.stores.models import AgentRunModel, ArtifactModel, Base
 from paperbot.infrastructure.stores.sqlalchemy_db import SessionProvider
 from paperbot.repro.e2b_executor import E2BExecutor
 from paperbot.repro.execution_result import ExecutionResult
@@ -729,6 +722,11 @@ async def revert_file(body: RevertFileRequest):
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(old_content, encoding="utf-8")
     return {"ok": True, "path": body.path}
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# File Operations
+# ──────────────────────────────────────────────────────────────────────────────
 
 
 @router.get("/runbook/files")

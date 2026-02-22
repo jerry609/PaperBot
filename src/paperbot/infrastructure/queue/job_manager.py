@@ -238,7 +238,6 @@ class JobManager:
         self,
         paper_url: Optional[str] = None,
         paper_id: Optional[str] = None,
-        executor: str = "e2b",
         options: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, str]:
         """
@@ -254,7 +253,6 @@ class JobManager:
         job_kwargs = {
             "paper_url": paper_url,
             "paper_id": paper_id,
-            "executor": executor,
             "options": options or {},
             "run_id": run_id,
             "trace_id": trace_id,

@@ -6,6 +6,7 @@ from . import (
     gen_code,
     review,
     chat,
+    studio_chat,
     runs,
     jobs,
     sandbox,
@@ -14,6 +15,7 @@ from . import (
     research,
     paperscool,
     newsletter,
+    harvest,
     model_endpoints,
 )
 
@@ -23,6 +25,7 @@ __all__ = [
     "gen_code",
     "review",
     "chat",
+    "studio_chat",
     "runs",
     "jobs",
     "sandbox",
@@ -31,5 +34,6 @@ __all__ = [
     "research",
     "paperscool",
     "newsletter",
+    "harvest",
     "model_endpoints",
 ]

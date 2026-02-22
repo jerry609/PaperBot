@@ -1,34 +1,29 @@
 # repro/base_executor.py
 """
-Abstract base class for code executors.
+Base class for code executors.
 
-Provides a unified interface for different execution backends:
-- DockerExecutor: Local Docker-based execution
-- E2BExecutor: Cloud-based E2B sandbox execution
+Note: Docker and E2B executors have been removed.
+Code execution now uses Claude CLI integration.
 """
 
-from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import List, Optional
 
 from .execution_result import ExecutionResult
 
 
-class BaseExecutor(ABC):
+class BaseExecutor:
     """
-    Abstract base class for code execution backends.
+    Stub executor class.
 
-    All executors must implement:
-    - available(): Check if the executor is ready
-    - run(): Execute commands in the sandbox
+    Note: Actual code execution is now handled by Claude CLI.
+    This class is kept for interface compatibility.
     """
 
-    @abstractmethod
     def available(self) -> bool:
         """Check if the executor is available and ready to use."""
-        pass
+        return False
 
-    @abstractmethod
     def run(
         self,
         workdir: Path,
@@ -40,19 +35,15 @@ class BaseExecutor(ABC):
         """
         Execute commands in the sandbox environment.
 
-        Args:
-            workdir: Directory containing code to execute
-            commands: List of shell commands to run
-            timeout_sec: Maximum execution time in seconds
-            cache_dir: Optional cache directory for dependencies
-            record_meta: Whether to record runtime metadata
-
-        Returns:
-            ExecutionResult with status, logs, and metadata
+        Note: This is a stub. Actual execution uses Claude CLI.
         """
-        pass
+        return ExecutionResult(
+            success=False,
+            logs="Executor not available. Use Claude CLI for code execution.",
+            exit_code=1,
+        )
 
     @property
     def executor_type(self) -> str:
         """Return the executor type identifier."""
-        return self.__class__.__name__
+        return "stub"

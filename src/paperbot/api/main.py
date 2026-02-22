@@ -13,6 +13,7 @@ from .routes import (
     gen_code,
     review,
     chat,
+    studio_chat,
     runs,
     jobs,
     sandbox,
@@ -59,6 +60,7 @@ app.include_router(analyze.router, prefix="/api", tags=["Paper Analysis"])
 app.include_router(gen_code.router, prefix="/api", tags=["Paper2Code"])
 app.include_router(review.router, prefix="/api", tags=["Review"])
 app.include_router(chat.router, prefix="/api", tags=["Chat"])
+app.include_router(studio_chat.router, prefix="/api", tags=["Studio Chat"])
 app.include_router(runs.router, prefix="/api", tags=["Runs"])
 app.include_router(jobs.router, prefix="/api", tags=["Jobs"])
 app.include_router(sandbox.router, prefix="/api", tags=["Sandbox"])

@@ -56,14 +56,10 @@ class ResourceMetrics:
 @dataclass
 class SystemStatus:
     """Overall system status"""
-    e2b: Dict[str, Any] = field(default_factory=dict)
-    docker: Dict[str, Any] = field(default_factory=dict)
     queue: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
-            "e2b": self.e2b,
-            "docker": self.docker,
             "queue": self.queue,
         }
 
@@ -251,46 +247,13 @@ class ResourceMonitor:
         """
         Get overall system status.
 
-        Checks E2B, Docker, and Redis availability.
+        Checks Redis availability.
         """
-        e2b_status = await self._check_e2b_status()
-        docker_status = await self._check_docker_status()
         queue_status = await self._check_queue_status()
 
         return SystemStatus(
-            e2b=e2b_status,
-            docker=docker_status,
             queue=queue_status,
         )
-
-    async def _check_e2b_status(self) -> Dict[str, Any]:
-        """Check E2B sandbox availability."""
-        has_key = bool(os.getenv("E2B_API_KEY"))
-        return {
-            "status": "available" if has_key else "not_configured",
-            "api_key_set": has_key,
-            "sandboxes_active": len([
-                r for r in self._active_runs.values()
-                if r.get("executor") == "e2b" and r.get("status") == "running"
-            ]),
-        }
-
-    async def _check_docker_status(self) -> Dict[str, Any]:
-        """Check Docker availability."""
-        try:
-            import docker
-            client = docker.from_env()
-            client.ping()
-            containers = len(client.containers.list())
-            return {
-                "status": "healthy",
-                "containers_active": containers,
-            }
-        except Exception:
-            return {
-                "status": "unavailable",
-                "containers_active": 0,
-            }
 
     async def _check_queue_status(self) -> Dict[str, Any]:
         """Check Redis/ARQ queue availability."""

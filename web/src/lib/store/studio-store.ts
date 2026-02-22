@@ -24,6 +24,10 @@ export interface AgentAction {
         mcpServer?: string
         mcpTool?: string
         mcpResult?: unknown
+        // For chat messages
+        role?: 'user' | 'assistant'
+        mode?: 'Code' | 'Plan' | 'Ask'
+        model?: string
     }
 }
 

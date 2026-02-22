@@ -14,10 +14,6 @@ Multi-Agent Mode (new):
 - Blueprint distillation for efficient context
 - CodeMemory for cross-file awareness
 - CodeRAG for pattern injection
-
-Execution Backends:
-- DockerExecutor: Local Docker-based execution
-- E2BExecutor: Cloud-based E2B sandbox execution
 """
 
 import logging
@@ -34,17 +30,12 @@ from .nodes import (
     EnvironmentInferenceNode
 )
 from .base_executor import BaseExecutor
-from .docker_executor import DockerExecutor
-from .e2b_executor import E2BExecutor
 from .orchestrator import Orchestrator, OrchestratorConfig
 
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from paperbot.application.ports.event_log_port import EventLogPort
-
-# Executor type alias
-ExecutorType = Literal["docker", "e2b", "auto"]
 
 # Legacy default commands
 DEFAULT_PLAN = [
@@ -68,7 +59,7 @@ class ReproAgent:
     - Hyperparameter extraction from paper
     - Config.yaml and Dockerfile generation
     - Self-healing verification with error classification
-    - Multiple execution backends (Docker/E2B)
+    - Code execution via Claude CLI integration
     - Blueprint distillation for efficient LLM context
     - CodeMemory for cross-file context awareness
     - CodeRAG for pattern injection
@@ -104,68 +95,13 @@ class ReproAgent:
 
     def _create_executor(self) -> BaseExecutor:
         """
-        Create the appropriate executor based on configuration.
+        Create a stub executor.
 
-        Config options:
-        - executor: "docker" | "e2b" | "auto" (default: "auto")
-        - e2b_api_key: E2B API key (or use E2B_API_KEY env var)
-        - docker_image: Docker image for local execution
-
-        "auto" mode tries E2B first if configured, falls back to Docker.
+        Note: Docker and E2B executors have been removed.
+        Code execution now uses Claude CLI integration.
         """
-        executor_type: ExecutorType = self.config.get("executor", "auto")
-
-        if executor_type == "e2b":
-            return self._create_e2b_executor()
-        elif executor_type == "docker":
-            return self._create_docker_executor()
-        else:  # auto
-            # Try E2B first if API key is available
-            e2b_executor = self._create_e2b_executor()
-            if e2b_executor.available():
-                self.logger.info("Using E2B executor (cloud sandbox)")
-                return e2b_executor
-
-            # Fall back to Docker
-            docker_executor = self._create_docker_executor()
-            if docker_executor.available():
-                self.logger.info("Using Docker executor (local)")
-                return docker_executor
-
-            # Neither available, return Docker with warning
-            self.logger.warning(
-                "Neither E2B nor Docker available. "
-                "Set E2B_API_KEY or install Docker for code execution."
-            )
-            return docker_executor
-
-    def _create_e2b_executor(self) -> E2BExecutor:
-        """Create E2B executor from config."""
-        return E2BExecutor(
-            api_key=self.config.get("e2b_api_key"),
-            template=self.config.get("e2b_template", "Python3"),
-            timeout_sandbox=self.config.get("e2b_timeout", 300),
-        )
-
-    def _create_docker_executor(self) -> DockerExecutor:
-        """Create Docker executor from config."""
-        return DockerExecutor(
-            image=self.config.get("docker_image", "python:3.10-slim"),
-            cpu_shares=self.config.get("cpu_shares", 1),
-            mem_limit=self.config.get("mem_limit", "1g"),
-            network=self.config.get("network", False),
-        )
-
-    def switch_executor(self, executor_type: ExecutorType) -> None:
-        """
-        Switch to a different executor at runtime.
-
-        Args:
-            executor_type: "docker", "e2b", or "auto"
-        """
-        self.config["executor"] = executor_type
-        self.executor = self._create_executor()
-        self.logger.info(f"Switched to {self.executor.executor_type} executor")
+        # Return a base executor stub - actual execution is handled by Claude CLI
+        return BaseExecutor()
 
     def get_orchestrator(
         self,
@@ -314,9 +250,9 @@ class ReproAgent:
                 env_spec: EnvironmentSpec = env_result.data
                 result.phases_completed.append("environment")
             
-            # Update Docker executor with inferred image
+            # Note: Docker executor removed - environment info stored for reference
             if env_spec.base_image:
-                self.executor = DockerExecutor(image=env_spec.base_image)
+                self.logger.info(f"Detected base image: {env_spec.base_image}")
             
             # Phase 2: Analysis (enhanced with environment spec)
             self.logger.info("Phase 2: Analysis with hyperparameter extraction")
