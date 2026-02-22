@@ -30,14 +30,34 @@ _provider = SessionProvider()
 Base.metadata.create_all(_provider.engine)
 
 
-def _allowed_workdir(workdir: Path) -> bool:
-    allowed_prefixes = [Path(tempfile.gettempdir()).resolve()]
+def _allowed_workdir_prefixes() -> List[Path]:
+    prefixes: List[Path] = [Path(tempfile.gettempdir()).resolve()]
+    try:
+        prefixes.append(Path.cwd().resolve())
+    except Exception:
+        pass
+
     extra = os.getenv("PAPERBOT_RUNBOOK_ALLOW_DIR_PREFIXES", "").strip()
     if extra:
         for p in extra.split(","):
             p = p.strip()
             if p:
-                allowed_prefixes.append(Path(p).expanduser().resolve())
+                prefixes.append(Path(p).expanduser().resolve())
+
+    # Preserve order and deduplicate
+    unique: List[Path] = []
+    seen = set()
+    for prefix in prefixes:
+        key = str(prefix)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(prefix)
+    return unique
+
+
+def _allowed_workdir(workdir: Path) -> bool:
+    allowed_prefixes = _allowed_workdir_prefixes()
 
     try:
         resolved = workdir.resolve()
@@ -52,6 +72,47 @@ def _allowed_workdir(workdir: Path) -> bool:
             continue
 
     return False
+
+
+class PrepareProjectDirRequest(BaseModel):
+    project_dir: str
+    create_if_missing: bool = True
+
+
+@router.post("/runbook/project-dir/prepare")
+async def prepare_project_dir(body: PrepareProjectDirRequest):
+    """
+    Validate and normalize a project directory for runbook operations.
+
+    If the path is under allowed prefixes and does not exist yet, this endpoint
+    can create it to make Studio directory selection smoother.
+    """
+    requested = Path(body.project_dir).expanduser()
+    try:
+        resolved = requested.resolve(strict=False)
+    except Exception:
+        raise HTTPException(status_code=400, detail="invalid project_dir")
+
+    if not _allowed_workdir(resolved):
+        raise HTTPException(status_code=403, detail="project_dir is not allowed")
+
+    created = False
+    if resolved.exists() and not resolved.is_dir():
+        raise HTTPException(status_code=400, detail="project_dir must be a directory")
+    if not resolved.exists():
+        if not body.create_if_missing:
+            raise HTTPException(status_code=400, detail="project_dir must be an existing directory")
+        try:
+            resolved.mkdir(parents=True, exist_ok=True)
+            created = True
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"failed to create project_dir: {exc}") from exc
+
+    return {
+        "project_dir": str(resolved),
+        "created": created,
+        "allowed_prefixes": [str(p) for p in _allowed_workdir_prefixes()],
+    }
 
 
 def _resolve_under_root(root: Path, relative_path: str) -> Path:

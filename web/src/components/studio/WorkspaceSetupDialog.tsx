@@ -34,6 +34,7 @@ export function WorkspaceSetupDialog({
     const [choice, setChoice] = useState<"current" | "custom">("current")
     const [customDir, setCustomDir] = useState("")
     const [error, setError] = useState<string | null>(null)
+    const [validating, setValidating] = useState(false)
 
     // Fetch current working directory on mount
     useEffect(() => {
@@ -62,13 +63,40 @@ export function WorkspaceSetupDialog({
         }
     }, [open, paper.title])
 
-    const handleConfirm = () => {
+    const handleConfirm = async () => {
         const directory = choice === "current" ? currentDir : customDir.trim()
         if (!directory) {
             setError("Please enter a valid directory path")
             return
         }
-        onConfirm(directory)
+        setValidating(true)
+        setError(null)
+        try {
+            const res = await fetch("/api/runbook/project-dir/prepare", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    project_dir: directory,
+                    create_if_missing: true,
+                }),
+            })
+            if (!res.ok) {
+                const text = await res.text()
+                try {
+                    const payload = JSON.parse(text) as { detail?: string }
+                    setError(payload.detail || `Directory is not available (${res.status})`)
+                } catch {
+                    setError(text || `Directory is not available (${res.status})`)
+                }
+                return
+            }
+            const data = await res.json() as { project_dir?: string }
+            onConfirm(data.project_dir || directory)
+        } catch {
+            setError("Failed to validate directory path")
+        } finally {
+            setValidating(false)
+        }
     }
 
     const selectedDir = choice === "current" ? currentDir : customDir
@@ -182,8 +210,8 @@ export function WorkspaceSetupDialog({
                     <Button variant="outline" onClick={onCancel}>
                         Cancel
                     </Button>
-                    <Button onClick={handleConfirm} disabled={loading || !selectedDir}>
-                        Start Session
+                    <Button onClick={handleConfirm} disabled={loading || !selectedDir || validating}>
+                        {validating ? "Preparing..." : "Start Session"}
                     </Button>
                 </DialogFooter>
             </DialogContent>
