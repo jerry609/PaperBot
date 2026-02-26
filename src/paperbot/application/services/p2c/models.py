@@ -228,6 +228,7 @@ class NormalizedInput:
     abstract: str = ""
     full_text: str = ""
     sections: Dict[str, str] = field(default_factory=dict)
+    section_offsets: Dict[str, tuple[int, int]] = field(default_factory=dict)
 
     @property
     def method_section(self) -> str:

@@ -11,6 +11,7 @@ from paperbot.application.services.p2c import (
     NormalizedInput,
     PaperIdentity,
     PaperInputRouter,
+    PaperSectionExtractor,
     PaperType,
     PaperTypeClassifier,
     RawPaperData,
@@ -344,3 +345,76 @@ async def test_success_criteria_confidence_is_lower_without_metric_spans():
     without_conf = without_metrics.observations[0].confidence
     assert with_conf > without_conf
     assert without_metrics.warnings
+
+
+@pytest.mark.asyncio
+async def test_section_extractor_handles_numbered_headings_and_offsets():
+    extractor = PaperSectionExtractor()
+    raw = RawPaperData(
+        paper_id="local:sec1",
+        title="Sectioned",
+        full_text=(
+            "1 Introduction\n"
+            "Intro text.\n"
+            "2 Methodology\n"
+            "We use transformer encoder blocks.\n"
+            "3 Experiments\n"
+            "Evaluation on benchmark datasets.\n"
+            "4 Conclusion\n"
+            "Final remarks.\n"
+        ),
+    )
+
+    normalized = await extractor.extract(raw)
+    assert "method" in normalized.sections
+    assert "results" in normalized.sections
+    assert "discussion" in normalized.sections
+    start, end = normalized.section_offsets["method"]
+    assert start < end
+    assert "transformer encoder" in normalized.full_text[start:end].lower()
+
+
+@pytest.mark.asyncio
+async def test_section_extractor_handles_uppercase_and_colon_headings():
+    extractor = PaperSectionExtractor()
+    raw = RawPaperData(
+        paper_id="local:sec2",
+        title="Uppercase headings",
+        full_text=(
+            "I. BACKGROUND\n"
+            "Background details.\n"
+            "II. METHODS:\n"
+            "Method details.\n"
+            "III. EVALUATION\n"
+            "Evaluation details.\n"
+            "IV. FUTURE WORK\n"
+            "Discussion details.\n"
+        ),
+    )
+
+    normalized = await extractor.extract(raw)
+    assert "introduction" in normalized.sections
+    assert "method" in normalized.sections
+    assert "results" in normalized.sections
+    assert "discussion" in normalized.sections
+    assert all(section in normalized.section_offsets for section in normalized.sections)
+
+
+@pytest.mark.asyncio
+async def test_section_extractor_fallback_segments_noisy_plain_text():
+    extractor = PaperSectionExtractor()
+    raw = RawPaperData(
+        paper_id="local:sec3",
+        title="Noisy plain text",
+        full_text=(
+            "This paper introduction explains motivation and setup. "
+            "Our method uses retrieval augmentation with a lightweight transformer. "
+            "Experiments show strong results on two benchmarks. "
+            "Conclusion discusses limitations and future work."
+        ),
+    )
+
+    normalized = await extractor.extract(raw)
+    assert "method" in normalized.sections
+    assert "results" in normalized.sections
+    assert normalized.section_offsets.get("method")

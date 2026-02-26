@@ -246,44 +246,148 @@ class PaperSectionExtractor:
     """Heuristic section extractor for module1 baseline."""
 
     _heading_patterns = {
-        "introduction": ["introduction", "background"],
-        "method": ["method", "approach", "model", "methodology"],
-        "results": ["results", "experiments", "evaluation"],
-        "discussion": ["discussion", "conclusion"],
+        "introduction": ["introduction", "background", "related work"],
+        "method": ["method", "methods", "approach", "model", "methodology"],
+        "results": [
+            "results",
+            "experiments",
+            "experimental setup",
+            "evaluation",
+            "analysis",
+        ],
+        "discussion": ["discussion", "conclusion", "future work", "limitations"],
     }
+    _heading_prefix_re = re.compile(r"^\s*(?:\d+(?:\.\d+)*|[ivxlcdm]+)[\).\s:-]+", re.IGNORECASE)
+
+    def _normalize_heading_text(self, line: str) -> str:
+        normalized = line.strip().lower()
+        normalized = self._heading_prefix_re.sub("", normalized)
+        normalized = re.sub(r"\s+", " ", normalized).strip(" :.-")
+        return normalized
 
     def _is_heading(self, line: str) -> Optional[str]:
-        normalized = line.strip().lower().strip(":")
+        original = line.strip()
+        if not original:
+            return None
+        if len(original) > 120:
+            return None
+        if original.endswith((".", "?", "!")) and ":" not in original:
+            return None
+        if len(original.split()) > 8:
+            return None
+
+        normalized = self._normalize_heading_text(line)
         if not normalized:
             return None
         for section, aliases in self._heading_patterns.items():
-            if normalized in aliases:
-                return section
+            for alias in aliases:
+                if (
+                    normalized == alias
+                    or normalized.startswith(f"{alias} and ")
+                    or normalized.endswith(f" {alias}")
+                ):
+                    return section
         return None
 
-    def _split_sections(self, text: str) -> dict[str, str]:
-        sections: dict[str, List[str]] = {k: [] for k in self._heading_patterns.keys()}
-        current: Optional[str] = None
+    @staticmethod
+    def _merge_offset_range(
+        offsets: dict[str, tuple[int, int]],
+        *,
+        section: str,
+        start: int,
+        end: int,
+    ) -> None:
+        if start >= end:
+            return
+        if section in offsets:
+            old_start, old_end = offsets[section]
+            offsets[section] = (min(old_start, start), max(old_end, end))
+        else:
+            offsets[section] = (start, end)
 
-        for raw_line in text.splitlines():
+    def _split_sections(self, text: str) -> tuple[dict[str, str], dict[str, tuple[int, int]]]:
+        sections: dict[str, List[str]] = {k: [] for k in self._heading_patterns.keys()}
+        offsets: dict[str, tuple[int, int]] = {}
+        current: Optional[str] = None
+        current_start: Optional[int] = None
+        cursor = 0
+
+        for raw_line in text.splitlines(keepends=True):
             line = raw_line.strip()
             heading = self._is_heading(line)
             if heading:
+                if current and current_start is not None:
+                    self._merge_offset_range(
+                        offsets,
+                        section=current,
+                        start=current_start,
+                        end=cursor,
+                    )
                 current = heading
+                current_start = cursor + len(raw_line)
+                cursor += len(raw_line)
                 continue
             if current:
-                sections[current].append(raw_line)
+                sections[current].append(raw_line.rstrip("\n"))
+            cursor += len(raw_line)
+
+        if current and current_start is not None:
+            self._merge_offset_range(
+                offsets,
+                section=current,
+                start=current_start,
+                end=cursor,
+            )
 
         compact = {name: "\n".join(lines).strip() for name, lines in sections.items() if lines}
-        return compact
+        offsets = {name: span for name, span in offsets.items() if name in compact}
+        return compact, offsets
+
+    def _segment_noisy_text(self, text: str) -> tuple[dict[str, str], dict[str, tuple[int, int]]]:
+        lowered = text.lower()
+        anchors: list[tuple[int, int, str]] = []
+
+        for section, aliases in self._heading_patterns.items():
+            best_match: Optional[tuple[int, int, str]] = None
+            for alias in aliases:
+                match = re.search(rf"\b{re.escape(alias)}\b", lowered)
+                if match:
+                    candidate = (match.start(), match.end(), section)
+                    if best_match is None or candidate[0] < best_match[0]:
+                        best_match = candidate
+            if best_match:
+                anchors.append(best_match)
+
+        if len(anchors) < 2:
+            return {}, {}
+
+        anchors.sort(key=lambda item: item[0])
+        sections: dict[str, str] = {}
+        offsets: dict[str, tuple[int, int]] = {}
+        for idx, (_, anchor_end, section) in enumerate(anchors):
+            next_start = anchors[idx + 1][0] if idx + 1 < len(anchors) else len(text)
+            snippet = text[anchor_end:next_start].strip()
+            if not snippet:
+                continue
+            if section in sections:
+                sections[section] = f"{sections[section]}\n{snippet}".strip()
+                old_start, _ = offsets[section]
+                offsets[section] = (old_start, next_start)
+            else:
+                sections[section] = snippet
+                offsets[section] = (anchor_end, next_start)
+        return sections, offsets
 
     async def extract(self, raw: RawPaperData) -> NormalizedInput:
         full_text = (raw.full_text or "").strip()
         abstract = raw.abstract.strip()
 
-        sections = self._split_sections(full_text)
+        sections, section_offsets = self._split_sections(full_text)
         if not sections and full_text:
-            # Fallback: we only know we have text, so keep a best-effort method slice.
+            sections, section_offsets = self._segment_noisy_text(full_text)
+
+        if not sections and full_text:
+            # Last fallback: keep a best-effort method slice.
             method_hint = re.search(
                 r"(method|approach|model|methodology)([\s\S]{0,1200})",
                 full_text,
@@ -291,6 +395,7 @@ class PaperSectionExtractor:
             )
             if method_hint:
                 sections["method"] = method_hint.group(2).strip()
+                section_offsets["method"] = (method_hint.start(2), method_hint.end(2))
 
         identity = PaperIdentity(
             paper_id=raw.paper_id,
@@ -305,6 +410,7 @@ class PaperSectionExtractor:
             abstract=abstract,
             full_text=full_text,
             sections=sections,
+            section_offsets=section_offsets,
         )
 
 
