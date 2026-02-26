@@ -1143,3 +1143,115 @@ class HarvestRunModel(Base):
 
     def set_errors(self, errors: dict) -> None:
         self.error_json = json.dumps(errors or {}, ensure_ascii=False)
+
+
+# ============================================================================
+# P2C (Paper-to-Context) Module 2 Models
+# ============================================================================
+
+
+class ReproContextPackModel(Base):
+    """P2C context pack: stores the full ReproContextPack JSON produced by Core Engine."""
+
+    __tablename__ = "repro_context_pack"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)  # "ctxp_{uuid}"
+    user_id: Mapped[str] = mapped_column(String(64), nullable=False, default="default", index=True)
+    project_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
+    paper_id: Mapped[str] = mapped_column(String(256), nullable=False, index=True)
+    paper_title: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    version: Mapped[str] = mapped_column(String(16), nullable=False, default="v1")
+    depth: Mapped[str] = mapped_column(String(16), nullable=False, default="standard")  # fast/standard/deep
+    status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="pending", index=True
+    )  # pending/running/completed/failed
+    objective: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    pack_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    confidence_overall: Mapped[float] = mapped_column(Float, default=0.0, index=True)
+    warning_count: Mapped[int] = mapped_column(Integer, default=0)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    stage_results = relationship(
+        "ReproContextStageResultModel", back_populates="pack", cascade="all, delete-orphan"
+    )
+    evidence_links = relationship(
+        "ReproContextEvidenceModel", back_populates="pack", cascade="all, delete-orphan"
+    )
+    feedback_rows = relationship(
+        "ReproContextFeedbackModel", back_populates="pack", cascade="all, delete-orphan"
+    )
+
+    def get_pack(self) -> dict:
+        try:
+            return json.loads(self.pack_json or "{}")
+        except Exception:
+            return {}
+
+    def set_pack(self, data: dict) -> None:
+        self.pack_json = json.dumps(data or {}, ensure_ascii=False)
+
+
+class ReproContextStageResultModel(Base):
+    """Per-stage intermediate result for debugging and audit."""
+
+    __tablename__ = "repro_context_stage_result"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    context_pack_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("repro_context_pack.id", ondelete="CASCADE"), index=True
+    )
+    stage_name: Mapped[str] = mapped_column(String(64), index=True)
+    status: Mapped[str] = mapped_column(String(16), default="completed", index=True)  # completed/failed/skipped
+    result_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    confidence: Mapped[float] = mapped_column(Float, default=0.0)
+    duration_ms: Mapped[int] = mapped_column(Integer, default=0)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+    pack = relationship("ReproContextPackModel", back_populates="stage_results")
+
+
+class ReproContextEvidenceModel(Base):
+    """Evidence links for audit trail — maps extracted fields back to paper spans."""
+
+    __tablename__ = "repro_context_evidence"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    context_pack_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("repro_context_pack.id", ondelete="CASCADE"), index=True
+    )
+    evidence_type: Mapped[str] = mapped_column(String(32), index=True)  # paper_span/table/figure/code_snippet/metadata
+    ref: Mapped[str] = mapped_column(Text, default="")
+    supports_json: Mapped[str] = mapped_column(Text, default="[]")  # JSON array of field names
+    confidence: Mapped[float] = mapped_column(Float, default=0.0)
+
+    pack = relationship("ReproContextPackModel", back_populates="evidence_links")
+
+    def get_supports(self) -> list:
+        try:
+            return json.loads(self.supports_json or "[]")
+        except Exception:
+            return []
+
+    def set_supports(self, values: list) -> None:
+        self.supports_json = json.dumps(values or [], ensure_ascii=False)
+
+
+class ReproContextFeedbackModel(Base):
+    """User ratings and comments on a context pack (collected post-launch)."""
+
+    __tablename__ = "repro_context_feedback"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    context_pack_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("repro_context_pack.id", ondelete="CASCADE"), index=True
+    )
+    user_id: Mapped[str] = mapped_column(String(64), index=True)
+    rating: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # 1-5
+    comment: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+    pack = relationship("ReproContextPackModel", back_populates="feedback_rows")
