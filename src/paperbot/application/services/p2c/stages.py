@@ -4,6 +4,7 @@ import re
 from dataclasses import dataclass
 from typing import Dict
 
+from .evidence import EvidenceLinker, calibrate_confidence
 from .models import (
     ExtractionObservation,
     StageName,
@@ -11,6 +12,8 @@ from .models import (
     TaskCheckpoint,
     new_observation_id,
 )
+
+_evidence_linker = EvidenceLinker()
 
 
 @dataclass
@@ -52,6 +55,11 @@ class LiteratureDistillStage:
             data.abstract,
             fallback="No abstract summary detected; review the original manuscript.",
         )
+        evidence = _evidence_linker.section_anchor(
+            data.abstract,
+            section="abstract",
+            supports=["problem_definition"],
+        )
         obs = ExtractionObservation(
             id=new_observation_id(),
             stage=self.name,
@@ -62,7 +70,8 @@ class LiteratureDistillStage:
                 "problem_definition": narrative,
                 "paper_title": data.title,
             },
-            confidence=0.55,
+            evidence=evidence,
+            confidence=calibrate_confidence(0.55, evidence),
             concepts=["core_method"],
         )
         return StageResult(observations=[obs])
@@ -74,6 +83,18 @@ class BlueprintExtractStage:
     async def run(self, data: StageInput) -> StageResult:
         source_text = f"{data.title}\n{data.abstract}\n{data.sections.get('method', '')}"
         architecture = _detect_architecture(source_text)
+        evidence = (
+            _evidence_linker.find_keyword_evidence(
+                source_text,
+                keywords=[architecture],
+                section="method",
+                supports=["architecture_type"],
+                max_links=1,
+            )
+            if architecture != "unknown"
+            else []
+        )
+        confidence = calibrate_confidence(0.6 if architecture != "unknown" else 0.3, evidence)
         obs = ExtractionObservation(
             id=new_observation_id(),
             stage=self.name,
@@ -81,10 +102,14 @@ class BlueprintExtractStage:
             title=f"Architecture: {architecture}",
             narrative=f"Detected main architecture pattern as {architecture}.",
             structured_data={"architecture_type": architecture},
-            confidence=0.6 if architecture != "unknown" else 0.3,
+            evidence=evidence,
+            confidence=confidence,
             concepts=["architecture"],
         )
-        return StageResult(observations=[obs])
+        warnings = []
+        if architecture != "unknown" and not evidence:
+            warnings.append("Blueprint extraction lacks direct evidence span for architecture.")
+        return StageResult(observations=[obs], warnings=warnings)
 
 
 class EnvironmentExtractStage:
@@ -98,6 +123,20 @@ class EnvironmentExtractStage:
             else "tensorflow" if "tensorflow" in text else "unknown"
         )
         python_version = "3.10" if framework != "unknown" else "3.11"
+        evidence = (
+            _evidence_linker.find_keyword_evidence(
+                text,
+                keywords=[framework],
+                section="full_text",
+                supports=["framework"],
+                max_links=1,
+            )
+            if framework != "unknown"
+            else []
+        )
+        confidence = calibrate_confidence(
+            0.5 if framework != "unknown" else 0.35, evidence, required=True
+        )
         obs = ExtractionObservation(
             id=new_observation_id(),
             stage=self.name,
@@ -108,10 +147,14 @@ class EnvironmentExtractStage:
                 "python_version": python_version,
                 "framework": framework,
             },
-            confidence=0.5 if framework != "unknown" else 0.35,
+            evidence=evidence,
+            confidence=confidence,
             concepts=["environment"],
         )
-        return StageResult(observations=[obs])
+        warnings = []
+        if framework == "unknown":
+            warnings.append("Environment extraction could not find explicit framework evidence.")
+        return StageResult(observations=[obs], warnings=warnings)
 
 
 class SpecExtractStage:
@@ -129,10 +172,19 @@ class SpecExtractStage:
     async def run(self, data: StageInput) -> StageResult:
         blob = f"{data.abstract}\n{data.full_text}"
         extracted: Dict[str, str] = {}
+        evidence = []
         for key, pattern in self._regex_map.items():
             match = pattern.search(blob)
             if match:
                 extracted[key] = match.group(1)
+                evidence.append(
+                    _evidence_linker.from_match(
+                        section="full_text",
+                        supports=[key],
+                        start=match.start(1),
+                        end=match.end(1),
+                    )
+                )
 
         if not extracted:
             return StageResult(
@@ -140,6 +192,7 @@ class SpecExtractStage:
             )
 
         narrative = ", ".join(f"{k}={v}" for k, v in extracted.items())
+        confidence = calibrate_confidence(0.62, evidence, required=True)
         obs = ExtractionObservation(
             id=new_observation_id(),
             stage=self.name,
@@ -147,10 +200,14 @@ class SpecExtractStage:
             title="Key hyperparameters",
             narrative=f"Extracted hyperparameters: {narrative}.",
             structured_data=extracted,
-            confidence=0.62,
+            evidence=evidence,
+            confidence=confidence,
             concepts=["hyperparameter", "gotcha"],
         )
-        return StageResult(observations=[obs])
+        warnings = []
+        if not evidence:
+            warnings.append("Spec extraction produced values without evidence spans.")
+        return StageResult(observations=[obs], warnings=warnings)
 
 
 class RoadmapPlanningStage:
@@ -202,10 +259,22 @@ class SuccessCriteriaStage:
 
     async def run(self, data: StageInput) -> StageResult:
         blob = f"{data.abstract}\n{data.full_text}"
-        metrics = sorted({m.group(1).lower() for m in self._metric_re.finditer(blob)})
+        matches = list(self._metric_re.finditer(blob))
+        metrics = sorted({m.group(1).lower() for m in matches})
+        evidence = [
+            _evidence_linker.from_match(
+                section="full_text",
+                supports=["metrics"],
+                start=match.start(1),
+                end=match.end(1),
+                confidence=0.81,
+            )
+            for match in matches[:5]
+        ]
         if not metrics:
             metrics = ["accuracy"]
 
+        confidence = calibrate_confidence(0.52, evidence, required=True)
         obs = ExtractionObservation(
             id=new_observation_id(),
             stage=self.name,
@@ -213,7 +282,13 @@ class SuccessCriteriaStage:
             title="Success criteria",
             narrative=f"Track metrics: {', '.join(metrics)}.",
             structured_data={"metrics": metrics},
-            confidence=0.52,
+            evidence=evidence,
+            confidence=confidence,
             concepts=["baseline"],
         )
-        return StageResult(observations=[obs])
+        warnings = []
+        if not evidence:
+            warnings.append(
+                "Success criteria metrics are inferred without explicit metric span evidence."
+            )
+        return StageResult(observations=[obs], warnings=warnings)

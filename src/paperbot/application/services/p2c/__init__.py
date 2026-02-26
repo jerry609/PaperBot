@@ -1,3 +1,4 @@
+from .evidence import EvidenceLinker, calibrate_confidence
 from .input_pipeline import (
     ArXivAdapter,
     LocalFileAdapter,
@@ -31,6 +32,8 @@ __all__ = [
     "PaperSectionExtractor",
     "PaperTypeClassifier",
     "SemanticScholarAdapter",
+    "EvidenceLinker",
+    "calibrate_confidence",
     "ConfidenceScores",
     "EvidenceLink",
     "ExtractionObservation",

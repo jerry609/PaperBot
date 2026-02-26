@@ -4,6 +4,7 @@ import pytest
 
 from paperbot.application.services.p2c import (
     ArXivAdapter,
+    EvidenceLink,
     ExtractionObservation,
     ExtractionOrchestrator,
     GenerateContextRequest,
@@ -15,6 +16,12 @@ from paperbot.application.services.p2c import (
     RawPaperData,
     ReproContextPack,
     SemanticScholarAdapter,
+    calibrate_confidence,
+)
+from paperbot.application.services.p2c.stages import (
+    SpecExtractStage,
+    StageInput,
+    SuccessCriteriaStage,
 )
 
 
@@ -275,3 +282,65 @@ async def test_deep_mode_uses_stricter_confidence_than_standard():
     )
 
     assert deep.confidence.overall < standard.confidence.overall
+
+
+def test_calibrate_confidence_penalizes_missing_required_evidence():
+    with_evidence = calibrate_confidence(
+        0.6,
+        [
+            EvidenceLink(
+                type="paper_span",
+                ref="method#char:1-10",
+                supports=["learning_rate"],
+                confidence=0.9,
+            )
+        ],
+        required=True,
+    )
+    without_evidence = calibrate_confidence(0.6, [], required=True)
+    assert with_evidence > without_evidence
+
+
+@pytest.mark.asyncio
+async def test_spec_extract_emits_evidence_links_for_hyperparameters():
+    stage = SpecExtractStage()
+    result = await stage.run(
+        StageInput(
+            title="Hyperparam Test",
+            abstract="",
+            full_text="Learning rate 1e-4, batch size 32, epochs 8.",
+            sections={},
+        )
+    )
+
+    assert result.observations
+    obs = result.observations[0]
+    assert obs.type == "hyperparameter"
+    assert obs.evidence
+    assert all(link.supports for link in obs.evidence)
+
+
+@pytest.mark.asyncio
+async def test_success_criteria_confidence_is_lower_without_metric_spans():
+    stage = SuccessCriteriaStage()
+    with_metrics = await stage.run(
+        StageInput(
+            title="Metric Rich",
+            abstract="",
+            full_text="Results show accuracy improves and F1 reaches 0.80.",
+            sections={},
+        )
+    )
+    without_metrics = await stage.run(
+        StageInput(
+            title="Metric Sparse",
+            abstract="",
+            full_text="Results are promising according to qualitative feedback.",
+            sections={},
+        )
+    )
+
+    with_conf = with_metrics.observations[0].confidence
+    without_conf = without_metrics.observations[0].confidence
+    assert with_conf > without_conf
+    assert without_metrics.warnings
