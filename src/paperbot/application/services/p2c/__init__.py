@@ -1,0 +1,48 @@
+from .input_pipeline import (
+    ArXivAdapter,
+    LocalFileAdapter,
+    PaperInputAdapter,
+    PaperInputRouter,
+    PaperSectionExtractor,
+    PaperTypeClassifier,
+    SemanticScholarAdapter,
+)
+from .models import (
+    ConfidenceScores,
+    EvidenceLink,
+    ExtractionObservation,
+    GenerateContextRequest,
+    NormalizedInput,
+    PaperIdentity,
+    PaperType,
+    RawPaperData,
+    ReproContextPack,
+    StageName,
+    StageResult,
+    TaskCheckpoint,
+)
+from .orchestrator import ExtractionOrchestrator, OrchestratorConfig
+
+__all__ = [
+    "ArXivAdapter",
+    "LocalFileAdapter",
+    "PaperInputAdapter",
+    "PaperInputRouter",
+    "PaperSectionExtractor",
+    "PaperTypeClassifier",
+    "SemanticScholarAdapter",
+    "ConfidenceScores",
+    "EvidenceLink",
+    "ExtractionObservation",
+    "GenerateContextRequest",
+    "NormalizedInput",
+    "PaperIdentity",
+    "PaperType",
+    "RawPaperData",
+    "ReproContextPack",
+    "StageName",
+    "StageResult",
+    "TaskCheckpoint",
+    "ExtractionOrchestrator",
+    "OrchestratorConfig",
+]
