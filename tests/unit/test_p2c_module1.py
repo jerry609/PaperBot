@@ -214,3 +214,64 @@ async def test_input_router_dispatches_to_arxiv_and_semantic_scholar_adapters():
     assert arxiv_raw.title == "ArXiv Sample"
     assert s2_raw.source_adapter == "semantic_scholar"
     assert s2_raw.title == "S2 Sample"
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_stage_callback_emits_stage_payload():
+    orchestrator = ExtractionOrchestrator()
+    request = GenerateContextRequest(paper_id="local:cb", depth="standard")
+    events: list[tuple[str, int, int]] = []
+
+    async def _on_stage_complete(stage_name, observations, warnings):
+        events.append((stage_name, len(observations), len(warnings)))
+
+    raw_paper = RawPaperData(
+        paper_id="local:cb",
+        title="Experimental Transformer Study",
+        abstract="We present a transformer model with improved accuracy.",
+        year=2026,
+        full_text=(
+            "Method\n"
+            "Transformer blocks with learning rate 1e-4 and batch size 16 for 5 epochs.\n"
+            "Results\n"
+            "Accuracy improves to 90.2.\n"
+        ),
+        source_adapter="local_file",
+    )
+
+    await orchestrator.run(request, raw_paper=raw_paper, on_stage_complete=_on_stage_complete)
+
+    expected_order = ExtractionOrchestrator.resolve_stage_sequence(
+        "standard", PaperType.EXPERIMENTAL
+    )
+    assert [item[0] for item in events] == expected_order
+    assert all(obs_count >= 0 for _, obs_count, _ in events)
+
+
+@pytest.mark.asyncio
+async def test_deep_mode_uses_stricter_confidence_than_standard():
+    orchestrator = ExtractionOrchestrator()
+    raw_paper = RawPaperData(
+        paper_id="local:deep",
+        title="Experimental Transformer Study",
+        abstract="We present a transformer model with improved accuracy.",
+        year=2026,
+        full_text=(
+            "Method\n"
+            "Transformer blocks with learning rate 1e-4 and batch size 16 for 5 epochs.\n"
+            "Results\n"
+            "Accuracy improves to 90.2.\n"
+        ),
+        source_adapter="local_file",
+    )
+
+    standard = await orchestrator.run(
+        GenerateContextRequest(paper_id="local:deep", depth="standard"),
+        raw_paper=raw_paper,
+    )
+    deep = await orchestrator.run(
+        GenerateContextRequest(paper_id="local:deep", depth="deep"),
+        raw_paper=raw_paper,
+    )
+
+    assert deep.confidence.overall < standard.confidence.overall

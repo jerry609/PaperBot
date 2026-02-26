@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import inspect
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Optional, Protocol
+from typing import Awaitable, Callable, Dict, Iterable, List, Optional, Protocol
 
 from .input_pipeline import PaperInputRouter, PaperSectionExtractor, PaperTypeClassifier
 from .models import (
@@ -42,6 +43,12 @@ _STAGE_TO_CONFIDENCE_FIELD = {
     StageName.ROADMAP_PLANNING.value: "roadmap",
     StageName.SUCCESS_CRITERIA.value: "metrics",
 }
+
+
+StageCompleteCallback = Callable[
+    [str, List["ExtractionObservation"], List[str]],
+    Optional[Awaitable[None]],
+]
 
 
 @dataclass
@@ -135,6 +142,7 @@ class ExtractionOrchestrator:
         *,
         raw_paper: Optional[RawPaperData] = None,
         normalized_input: Optional[NormalizedInput] = None,
+        on_stage_complete: Optional[StageCompleteCallback] = None,
     ) -> ReproContextPack:
         depth = request.depth or self._config.default_depth
 
@@ -174,9 +182,26 @@ class ExtractionOrchestrator:
                 pack.task_roadmap.extend(result.roadmap)
             if result.warnings:
                 pack.warnings.extend(result.warnings)
+            await self._emit_stage_complete(
+                on_stage_complete,
+                stage_name=stage_name,
+                observations=result.observations,
+                warnings=result.warnings,
+            )
+
+        if depth == "deep":
+            await self._run_deep_verification(stage_order, stage_input, stage_scores, pack)
+            pack.observations.sort(key=lambda item: item.confidence, reverse=True)
 
         self._apply_confidence(pack.confidence, stage_scores)
-        if pack.observations:
+        if depth == "deep":
+            available_stage_scores = [score for score in stage_scores.values() if score > 0]
+            pack.confidence.overall = (
+                float(sum(available_stage_scores) / len(available_stage_scores))
+                if available_stage_scores
+                else 0.0
+            )
+        elif pack.observations:
             pack.confidence.overall = stage_mean_confidence(pack.observations)
         return pack
 
@@ -186,3 +211,58 @@ class ExtractionOrchestrator:
             field = _STAGE_TO_CONFIDENCE_FIELD.get(stage_name)
             if field:
                 setattr(confidence, field, score)
+
+    async def _run_deep_verification(
+        self,
+        stage_order: List[str],
+        stage_input: StageInput,
+        stage_scores: Dict[str, float],
+        pack: ReproContextPack,
+    ) -> None:
+        verification_targets = [
+            StageName.BLUEPRINT_EXTRACT.value,
+            StageName.SPEC_EXTRACT.value,
+            StageName.SUCCESS_CRITERIA.value,
+        ]
+        for stage_name in verification_targets:
+            if stage_name not in stage_order:
+                continue
+            stage = self._stages.get(stage_name)
+            if stage is None:
+                continue
+
+            verification = await stage.run(stage_input)
+            baseline = stage_scores.get(stage_name, 0.0)
+            if not verification.observations:
+                if baseline > 0:
+                    stage_scores[stage_name] = baseline * 0.85
+                    pack.warnings.append(
+                        f"Deep verification found no observations for stage {stage_name}; confidence reduced."
+                    )
+                continue
+
+            verified_score = stage_mean_confidence(verification.observations)
+            if baseline <= 0:
+                stage_scores[stage_name] = verified_score * 0.95
+                continue
+
+            if abs(verified_score - baseline) > 0.1:
+                pack.warnings.append(
+                    f"Deep verification mismatch on stage {stage_name}: baseline={baseline:.2f}, verified={verified_score:.2f}."
+                )
+
+            stage_scores[stage_name] = min(baseline, verified_score) * 0.95
+
+    @staticmethod
+    async def _emit_stage_complete(
+        callback: Optional[StageCompleteCallback],
+        *,
+        stage_name: str,
+        observations: List["ExtractionObservation"],
+        warnings: List[str],
+    ) -> None:
+        if callback is None:
+            return
+        result = callback(stage_name, observations, warnings)
+        if inspect.isawaitable(result):
+            await result
