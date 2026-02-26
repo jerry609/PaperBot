@@ -52,7 +52,7 @@ function StudioContent() {
     }, [searchParams, papers])
 
     return (
-        <div className="flex h-[calc(100vh_-_theme(spacing.16))] min-h-0 flex-col">
+        <div className="flex h-screen min-h-0 flex-col">
             {/* Top Bar - minimal */}
             <div className="border-b bg-background h-11 px-4 flex items-center gap-2 shrink-0">
                 <PanelsTopLeft className="h-4 w-4 text-primary" />
