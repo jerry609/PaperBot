@@ -3,15 +3,18 @@ from __future__ import annotations
 import pytest
 
 from paperbot.application.services.p2c import (
+    ArXivAdapter,
     ExtractionObservation,
     ExtractionOrchestrator,
     GenerateContextRequest,
     NormalizedInput,
     PaperIdentity,
+    PaperInputRouter,
     PaperType,
     PaperTypeClassifier,
     RawPaperData,
     ReproContextPack,
+    SemanticScholarAdapter,
 )
 
 
@@ -98,3 +101,116 @@ async def test_orchestrator_run_builds_context_pack_from_raw_text():
     assert any(obs.type == "architecture" for obs in pack.observations)
     assert any(obs.type == "metric" for obs in pack.observations)
     assert pack.confidence.overall > 0
+
+
+@pytest.mark.asyncio
+async def test_semantic_scholar_adapter_fetch_maps_metadata_from_client():
+    class _FakeS2Client:
+        def __init__(self):
+            self.calls = []
+
+        async def get_paper(self, paper_id, fields=None):
+            self.calls.append((paper_id, fields))
+            return {
+                "paperId": "abcdef123456",
+                "title": "Attention Is All You Need",
+                "abstract": "We propose the Transformer architecture.",
+                "year": 2017,
+                "authors": [{"name": "Ashish Vaswani"}, {"name": "Noam Shazeer"}],
+                "externalIds": {"DOI": "10.48550/arXiv.1706.03762", "ArXiv": "1706.03762"},
+            }
+
+        async def close(self):
+            return None
+
+    fake_client = _FakeS2Client()
+    adapter = SemanticScholarAdapter(client=fake_client)
+    result = await adapter.fetch("https://doi.org/10.48550/ARXIV.1706.03762")
+
+    assert fake_client.calls
+    assert fake_client.calls[0][0] == "DOI:10.48550/arxiv.1706.03762"
+    assert result.paper_id == "s2:abcdef123456"
+    assert result.title == "Attention Is All You Need"
+    assert result.authors == ["Ashish Vaswani", "Noam Shazeer"]
+    assert result.identifiers["semantic_scholar"] == "abcdef123456"
+    assert result.identifiers["doi"] == "10.48550/arxiv.1706.03762"
+    assert result.identifiers["arxiv"] == "1706.03762"
+
+
+@pytest.mark.asyncio
+async def test_arxiv_adapter_fetch_maps_metadata_from_atom_feed():
+    async def _fake_atom_feed(_: str) -> str:
+        return """<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xmlns:arxiv="http://arxiv.org/schemas/atom">
+  <entry>
+    <id>http://arxiv.org/abs/1706.03762v1</id>
+    <title>Attention Is All You Need</title>
+    <summary>Transformer based sequence modeling.</summary>
+    <published>2017-06-12T00:00:00Z</published>
+    <updated>2017-06-12T00:00:00Z</updated>
+    <author><name>Ashish Vaswani</name></author>
+    <author><name>Noam Shazeer</name></author>
+    <link rel="alternate" type="text/html" href="https://arxiv.org/abs/1706.03762v1" />
+    <link rel="related" type="application/pdf" href="https://arxiv.org/pdf/1706.03762v1.pdf" />
+  </entry>
+</feed>
+"""
+
+    adapter = ArXivAdapter(fetch_atom_xml=_fake_atom_feed)
+    result = await adapter.fetch("https://arxiv.org/abs/1706.03762")
+
+    assert result.paper_id == "arxiv:1706.03762v1"
+    assert result.title == "Attention Is All You Need"
+    assert result.abstract == "Transformer based sequence modeling."
+    assert result.year == 2017
+    assert result.authors == ["Ashish Vaswani", "Noam Shazeer"]
+    assert result.identifiers["arxiv"] == "1706.03762v1"
+
+
+@pytest.mark.asyncio
+async def test_input_router_dispatches_to_arxiv_and_semantic_scholar_adapters():
+    async def _fake_atom_feed(_: str) -> str:
+        return """<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xmlns:arxiv="http://arxiv.org/schemas/atom">
+  <entry>
+    <id>http://arxiv.org/abs/2401.00001v2</id>
+    <title>ArXiv Sample</title>
+    <summary>Sample abstract.</summary>
+    <published>2024-01-01T00:00:00Z</published>
+    <updated>2024-01-01T00:00:00Z</updated>
+    <author><name>Author A</name></author>
+    <link rel="alternate" type="text/html" href="https://arxiv.org/abs/2401.00001v2" />
+  </entry>
+</feed>
+"""
+
+    class _FakeS2Client:
+        async def get_paper(self, paper_id, fields=None):
+            if paper_id != "hash123":
+                return {}
+            return {
+                "paperId": "hash123",
+                "title": "S2 Sample",
+                "abstract": "S2 abstract",
+                "year": 2025,
+                "authors": [{"name": "Author B"}],
+                "externalIds": {},
+            }
+
+        async def close(self):
+            return None
+
+    router = PaperInputRouter(
+        adapters=[
+            ArXivAdapter(fetch_atom_xml=_fake_atom_feed),
+            SemanticScholarAdapter(client=_FakeS2Client()),
+        ]
+    )
+
+    arxiv_raw = await router.fetch("arXiv:2401.00001")
+    s2_raw = await router.fetch("s2:hash123")
+
+    assert arxiv_raw.source_adapter == "arxiv"
+    assert arxiv_raw.title == "ArXiv Sample"
+    assert s2_raw.source_adapter == "semantic_scholar"
+    assert s2_raw.title == "S2 Sample"
