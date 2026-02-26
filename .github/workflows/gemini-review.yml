@@ -23,13 +23,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Skip if GEMINI_API_KEY is missing
-        if: ${{ secrets.GEMINI_API_KEY == '' }}
+      - name: Check GEMINI_API_KEY availability
+        id: key_check
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
-          echo "::notice::GEMINI_API_KEY is not configured, skipping Gemini auto review."
+          if [ -z "${GEMINI_API_KEY}" ]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::GEMINI_API_KEY is not configured, skipping Gemini auto review."
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Run Gemini auto review
-        if: ${{ secrets.GEMINI_API_KEY != '' }}
+        if: ${{ steps.key_check.outputs.enabled == 'true' }}
         uses: google-github-actions/run-gemini-cli@v0
         env:
           GITHUB_TOKEN: ${{ github.token }}
