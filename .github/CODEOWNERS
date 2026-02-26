@@ -1,0 +1,7 @@
+# Default owners for automatic review requests.
+* @jerry609
+
+# Area owners
+src/ @jerry609
+web/ @jerry609
+cli/ @jerry609

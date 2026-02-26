@@ -1,0 +1,81 @@
+name: gemini-review
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+  id-token: write
+
+concurrency:
+  group: gemini-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    if: ${{ github.event.pull_request.draft == false }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Skip if GEMINI_API_KEY is missing
+        if: ${{ secrets.GEMINI_API_KEY == '' }}
+        run: |
+          echo "::notice::GEMINI_API_KEY is not configured, skipping Gemini auto review."
+
+      - name: Run Gemini auto review
+        if: ${{ secrets.GEMINI_API_KEY != '' }}
+        uses: google-github-actions/run-gemini-cli@v0
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PULL_REQUEST_NUMBER: ${{ github.event.pull_request.number }}
+          REPOSITORY: ${{ github.repository }}
+          ADDITIONAL_CONTEXT: "Focus on correctness, regressions, and missing tests."
+        with:
+          gemini_api_key: ${{ secrets.GEMINI_API_KEY }}
+          gemini_cli_version: ${{ vars.GEMINI_CLI_VERSION || 'latest' }}
+          gemini_model: ${{ vars.GEMINI_MODEL }}
+          gemini_debug: ${{ fromJSON(vars.GEMINI_DEBUG || 'false') }}
+          workflow_name: gemini-review
+          settings: |-
+            {
+              "tools": {
+                "core": [
+                  "run_shell_command(gh)",
+                  "run_shell_command(cat)",
+                  "run_shell_command(head)",
+                  "run_shell_command(tail)",
+                  "run_shell_command(grep)",
+                  "run_shell_command(sed)",
+                  "run_shell_command(jq)",
+                  "run_shell_command(echo)"
+                ]
+              }
+            }
+          prompt: |
+            You are a pull request review assistant.
+
+            Repository: ${REPOSITORY}
+            Pull request number: ${PULL_REQUEST_NUMBER}
+            Additional context: ${ADDITIONAL_CONTEXT}
+
+            Do this sequence:
+            1) Use gh to fetch PR metadata and diff:
+               - gh pr view "${PULL_REQUEST_NUMBER}" --repo "${REPOSITORY}" --json title,body,files,additions,deletions,changedFiles
+               - gh pr diff "${PULL_REQUEST_NUMBER}" --repo "${REPOSITORY}" > /tmp/pr.diff
+            2) Review the changes with focus on correctness, behavior regressions, security, and missing tests.
+            3) Write a concise markdown review to /tmp/review.md with sections:
+               - Critical findings
+               - Medium findings
+               - Low findings
+               - Suggested tests
+               If no issues exist, clearly state: "No blocking findings." and mention residual risks.
+            4) Post exactly one PR review comment:
+               gh pr review "${PULL_REQUEST_NUMBER}" --repo "${REPOSITORY}" --comment --body-file /tmp/review.md
+
+            Keep feedback concrete, actionable, and tied to changed code.
