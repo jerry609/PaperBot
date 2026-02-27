@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import asyncio
+import json
+import logging
 import re
 from dataclasses import dataclass
-from typing import Dict
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 from .evidence import EvidenceLinker, calibrate_confidence
 from .models import (
@@ -12,7 +15,19 @@ from .models import (
     TaskCheckpoint,
     new_observation_id,
 )
+from .prompts import (
+    blueprint_extract_prompt,
+    environment_extract_prompt,
+    literature_distill_prompt,
+    roadmap_planning_prompt,
+    spec_extract_prompt,
+    success_criteria_prompt,
+)
 
+if TYPE_CHECKING:
+    from paperbot.application.services.llm_service import LLMService
+
+logger = logging.getLogger(__name__)
 _evidence_linker = EvidenceLinker()
 
 
@@ -23,6 +38,65 @@ class StageInput:
     full_text: str
     sections: Dict[str, str]
 
+
+# ---------------------------------------------------------------------------
+# JSON parsing helpers
+# ---------------------------------------------------------------------------
+
+def _safe_parse_json_array(raw: str) -> Optional[List[Dict[str, Any]]]:
+    """Parse a JSON array from LLM output, tolerating markdown fences."""
+    text = (raw or "").strip()
+    if not text:
+        return None
+    # Strip markdown code fences
+    if text.startswith("```"):
+        lines = text.split("\n")
+        lines = [l for l in lines if not l.strip().startswith("```")]
+        text = "\n".join(lines).strip()
+    try:
+        obj = json.loads(text)
+        if isinstance(obj, list):
+            return obj
+        return None
+    except Exception:
+        pass
+    # Try to find array brackets
+    start = text.find("[")
+    end = text.rfind("]")
+    if start >= 0 and end > start:
+        try:
+            obj = json.loads(text[start : end + 1])
+            if isinstance(obj, list):
+                return obj
+        except Exception:
+            pass
+    return None
+
+
+def _llm_complete_async(llm: "LLMService", system: str, user: str, task_type: str) -> str:
+    """Call LLMService.complete() — sync method, run in thread for async context."""
+    return llm.complete(task_type=task_type, system=system, user=user)
+
+
+def _obs_from_dict(
+    raw: Dict[str, Any], *, stage: str, default_type: str = "method"
+) -> ExtractionObservation:
+    """Build an ExtractionObservation from an LLM-returned dict."""
+    return ExtractionObservation(
+        id=new_observation_id(),
+        stage=stage,
+        type=str(raw.get("type", default_type)),
+        title=str(raw.get("title", "")),
+        narrative=str(raw.get("narrative", "")),
+        structured_data=raw.get("structured_data") or {},
+        confidence=float(raw.get("confidence", 0.7)),
+        concepts=raw.get("concepts") or [],
+    )
+
+
+# ---------------------------------------------------------------------------
+# Heuristic helpers (kept for fallback)
+# ---------------------------------------------------------------------------
 
 def _first_sentence(text: str, fallback: str = "") -> str:
     cleaned = " ".join(text.split())
@@ -47,10 +121,35 @@ def _detect_architecture(text: str) -> str:
     return "unknown"
 
 
+# ===================================================================
+# Stage classes — each tries LLM first, falls back to heuristic
+# ===================================================================
+
+
 class LiteratureDistillStage:
     name = StageName.LITERATURE_DISTILL.value
 
+    def __init__(self, llm: Optional["LLMService"] = None) -> None:
+        self._llm = llm
+
     async def run(self, data: StageInput) -> StageResult:
+        if self._llm is not None:
+            try:
+                return await self._run_llm(data)
+            except Exception:
+                logger.warning("LiteratureDistillStage LLM failed, falling back to heuristic")
+        return self._run_heuristic(data)
+
+    async def _run_llm(self, data: StageInput) -> StageResult:
+        system, user = literature_distill_prompt(data.title, data.abstract, data.sections)
+        raw = await asyncio.to_thread(_llm_complete_async, self._llm, system, user, "extraction")
+        items = _safe_parse_json_array(raw)
+        if not items:
+            return self._run_heuristic(data)
+        observations = [_obs_from_dict(item, stage=self.name, default_type="method") for item in items]
+        return StageResult(observations=observations)
+
+    def _run_heuristic(self, data: StageInput) -> StageResult:
         narrative = _first_sentence(
             data.abstract,
             fallback="No abstract summary detected; review the original manuscript.",
@@ -80,7 +179,29 @@ class LiteratureDistillStage:
 class BlueprintExtractStage:
     name = StageName.BLUEPRINT_EXTRACT.value
 
+    def __init__(self, llm: Optional["LLMService"] = None) -> None:
+        self._llm = llm
+
     async def run(self, data: StageInput) -> StageResult:
+        if self._llm is not None:
+            try:
+                return await self._run_llm(data)
+            except Exception:
+                logger.warning("BlueprintExtractStage LLM failed, falling back to heuristic")
+        return self._run_heuristic(data)
+
+    async def _run_llm(self, data: StageInput) -> StageResult:
+        system, user = blueprint_extract_prompt(data.title, data.abstract, data.sections)
+        raw = await asyncio.to_thread(_llm_complete_async, self._llm, system, user, "extraction")
+        items = _safe_parse_json_array(raw)
+        if not items:
+            return self._run_heuristic(data)
+        observations = [
+            _obs_from_dict(item, stage=self.name, default_type="architecture") for item in items
+        ]
+        return StageResult(observations=observations)
+
+    def _run_heuristic(self, data: StageInput) -> StageResult:
         source_text = f"{data.title}\n{data.abstract}\n{data.sections.get('method', '')}"
         architecture = _detect_architecture(source_text)
         evidence = (
@@ -106,7 +227,7 @@ class BlueprintExtractStage:
             confidence=confidence,
             concepts=["architecture"],
         )
-        warnings = []
+        warnings: List[str] = []
         if architecture != "unknown" and not evidence:
             warnings.append("Blueprint extraction lacks direct evidence span for architecture.")
         return StageResult(observations=[obs], warnings=warnings)
@@ -115,7 +236,29 @@ class BlueprintExtractStage:
 class EnvironmentExtractStage:
     name = StageName.ENVIRONMENT_EXTRACT.value
 
+    def __init__(self, llm: Optional["LLMService"] = None) -> None:
+        self._llm = llm
+
     async def run(self, data: StageInput) -> StageResult:
+        if self._llm is not None:
+            try:
+                return await self._run_llm(data)
+            except Exception:
+                logger.warning("EnvironmentExtractStage LLM failed, falling back to heuristic")
+        return self._run_heuristic(data)
+
+    async def _run_llm(self, data: StageInput) -> StageResult:
+        system, user = environment_extract_prompt(data.title, data.abstract, data.sections)
+        raw = await asyncio.to_thread(_llm_complete_async, self._llm, system, user, "extraction")
+        items = _safe_parse_json_array(raw)
+        if not items:
+            return self._run_heuristic(data)
+        observations = [
+            _obs_from_dict(item, stage=self.name, default_type="environment") for item in items
+        ]
+        return StageResult(observations=observations)
+
+    def _run_heuristic(self, data: StageInput) -> StageResult:
         text = f"{data.abstract}\n{data.full_text}".lower()
         framework = (
             "pytorch"
@@ -151,7 +294,7 @@ class EnvironmentExtractStage:
             confidence=confidence,
             concepts=["environment"],
         )
-        warnings = []
+        warnings: List[str] = []
         if framework == "unknown":
             warnings.append("Environment extraction could not find explicit framework evidence.")
         return StageResult(observations=[obs], warnings=warnings)
@@ -169,7 +312,29 @@ class SpecExtractStage:
         "epochs": re.compile(r"(?:epoch|epochs)\s*[:=]?\s*(\d+)", re.IGNORECASE),
     }
 
+    def __init__(self, llm: Optional["LLMService"] = None) -> None:
+        self._llm = llm
+
     async def run(self, data: StageInput) -> StageResult:
+        if self._llm is not None:
+            try:
+                return await self._run_llm(data)
+            except Exception:
+                logger.warning("SpecExtractStage LLM failed, falling back to heuristic")
+        return self._run_heuristic(data)
+
+    async def _run_llm(self, data: StageInput) -> StageResult:
+        system, user = spec_extract_prompt(data.title, data.abstract, data.sections)
+        raw = await asyncio.to_thread(_llm_complete_async, self._llm, system, user, "extraction")
+        items = _safe_parse_json_array(raw)
+        if not items:
+            return self._run_heuristic(data)
+        observations = [
+            _obs_from_dict(item, stage=self.name, default_type="hyperparameter") for item in items
+        ]
+        return StageResult(observations=observations)
+
+    def _run_heuristic(self, data: StageInput) -> StageResult:
         blob = f"{data.abstract}\n{data.full_text}"
         extracted: Dict[str, str] = {}
         evidence = []
@@ -204,7 +369,7 @@ class SpecExtractStage:
             confidence=confidence,
             concepts=["hyperparameter", "gotcha"],
         )
-        warnings = []
+        warnings: List[str] = []
         if not evidence:
             warnings.append("Spec extraction produced values without evidence spans.")
         return StageResult(observations=[obs], warnings=warnings)
@@ -213,7 +378,50 @@ class SpecExtractStage:
 class RoadmapPlanningStage:
     name = StageName.ROADMAP_PLANNING.value
 
+    def __init__(self, llm: Optional["LLMService"] = None) -> None:
+        self._llm = llm
+
     async def run(self, data: StageInput) -> StageResult:
+        if self._llm is not None:
+            try:
+                return await self._run_llm(data)
+            except Exception:
+                logger.warning("RoadmapPlanningStage LLM failed, falling back to heuristic")
+        return self._run_heuristic(data)
+
+    async def _run_llm(self, data: StageInput) -> StageResult:
+        system, user = roadmap_planning_prompt(data.title, data.abstract, data.sections)
+        raw = await asyncio.to_thread(_llm_complete_async, self._llm, system, user, "reasoning")
+        items = _safe_parse_json_array(raw)
+        if not items:
+            return self._run_heuristic(data)
+
+        roadmap: List[TaskCheckpoint] = []
+        for item in items:
+            roadmap.append(
+                TaskCheckpoint(
+                    id=str(item.get("id", f"T{len(roadmap) + 1}")),
+                    title=str(item.get("title", "")),
+                    description=str(item.get("description", "")),
+                    acceptance_criteria=item.get("acceptance_criteria") or [],
+                    depends_on=item.get("depends_on") or [],
+                    estimated_difficulty=item.get("estimated_difficulty", "medium"),
+                )
+            )
+
+        obs = ExtractionObservation(
+            id=new_observation_id(),
+            stage=self.name,
+            type="roadmap",
+            title="Paper-specific reproduction roadmap",
+            narrative=f"Generated a {len(roadmap)}-step reproduction roadmap tailored to this paper.",
+            structured_data={"task_count": len(roadmap)},
+            confidence=0.78,
+            concepts=["reproduction_hint"],
+        )
+        return StageResult(observations=[obs], roadmap=roadmap)
+
+    def _run_heuristic(self, data: StageInput) -> StageResult:
         roadmap = [
             TaskCheckpoint(
                 id="T1",
@@ -257,7 +465,29 @@ class SuccessCriteriaStage:
         re.IGNORECASE,
     )
 
+    def __init__(self, llm: Optional["LLMService"] = None) -> None:
+        self._llm = llm
+
     async def run(self, data: StageInput) -> StageResult:
+        if self._llm is not None:
+            try:
+                return await self._run_llm(data)
+            except Exception:
+                logger.warning("SuccessCriteriaStage LLM failed, falling back to heuristic")
+        return self._run_heuristic(data)
+
+    async def _run_llm(self, data: StageInput) -> StageResult:
+        system, user = success_criteria_prompt(data.title, data.abstract, data.sections)
+        raw = await asyncio.to_thread(_llm_complete_async, self._llm, system, user, "extraction")
+        items = _safe_parse_json_array(raw)
+        if not items:
+            return self._run_heuristic(data)
+        observations = [
+            _obs_from_dict(item, stage=self.name, default_type="metric") for item in items
+        ]
+        return StageResult(observations=observations)
+
+    def _run_heuristic(self, data: StageInput) -> StageResult:
         blob = f"{data.abstract}\n{data.full_text}"
         matches = list(self._metric_re.finditer(blob))
         metrics = sorted({m.group(1).lower() for m in matches})
@@ -286,7 +516,7 @@ class SuccessCriteriaStage:
             confidence=confidence,
             concepts=["baseline"],
         )
-        warnings = []
+        warnings: List[str] = []
         if not evidence:
             warnings.append(
                 "Success criteria metrics are inferred without explicit metric span evidence."

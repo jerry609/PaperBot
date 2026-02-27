@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Textarea } from "@/components/ui/textarea"
@@ -10,9 +10,10 @@ import { readSSE } from "@/lib/sse"
 import { CodeBlock } from "@/components/ai-elements"
 import { DiffModal } from "./DiffViewer"
 import { WorkspaceSetupDialog } from "./WorkspaceSetupDialog"
+import { ContextPackPanel } from "./ContextPackPanel"
+import { GenerationProgressPanel } from "./GenerationProgressPanel"
 import { cn } from "@/lib/utils"
 import {
-    Sparkles,
     CheckCircle2,
     AlertCircle,
     FileText,
@@ -27,18 +28,21 @@ import {
     X,
     Save,
     Send,
-    Paperclip,
     Code,
+    Activity,
+    Package,
+    MessageSquare,
 } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import Editor from "@monaco-editor/react"
 import { useTheme } from "next-themes"
+import type { ContextPackSession } from "@/lib/types/p2c"
 
 type StepStatus = "idle" | "running" | "success" | "error"
 type Mode = "Code" | "Plan" | "Ask"
 
 const actionIcons: Record<string, React.ElementType> = {
-    thinking: Sparkles,
+    thinking: Loader2,
     file_change: FileCode,
     function_call: Wrench,
     error: AlertCircle,
@@ -163,6 +167,11 @@ export function ReproductionLog() {
         activeTaskId,
         selectedPaperId,
         lastGenCodeResult,
+        contextPack,
+        contextPackLoading,
+        contextPackError,
+        generationProgress,
+        liveObservations,
         addTask,
         addAction,
         updateTaskStatus,
@@ -180,7 +189,6 @@ export function ReproductionLog() {
     )
 
     const [status, setStatus] = useState<StepStatus>("idle")
-    const runIdRef = useRef<string | null>(null)
     const [mode, setMode] = useState<Mode>("Code")
     const [model, setModel] = useState("claude-sonnet-4-5")
     const [lastError, setLastError] = useState<string | null>(null)
@@ -188,11 +196,20 @@ export function ReproductionLog() {
     const [saving, setSaving] = useState(false)
     const [messageInput, setMessageInput] = useState("")
     const [showWorkspaceSetup, setShowWorkspaceSetup] = useState(false)
-    const [pendingAction, setPendingAction] = useState<"generate" | "install" | "chat" | null>(null)
+    const [pendingAction, setPendingAction] = useState<"chat" | null>(null)
+    const [viewMode, setViewMode] = useState<"log" | "generating" | "context_pack">("log")
+
+    // Switch to "generating" view when generation starts
+    useEffect(() => {
+        if (contextPackLoading) {
+            setViewMode("generating")
+        }
+    }, [contextPackLoading])
+
+    // Do not auto-switch away from "generating"; keep it open until the user changes tabs.
 
     const activeTask = tasks.find(t => t.id === activeTaskId)
     const projectDir = selectedPaper?.outputDir || lastGenCodeResult?.outputDir || null
-    const canRun = (selectedPaper?.title.trim().length ?? 0) > 0 && (selectedPaper?.abstract.trim().length ?? 0) > 0
     const isBusy = status === "running"
 
     const saveActiveFile = async () => {
@@ -221,180 +238,10 @@ export function ReproductionLog() {
         if (selectedPaperId) {
             updatePaper(selectedPaperId, { outputDir: directory })
         }
-        // Execute the pending action
-        if (pendingAction === "generate") {
-            runPaper2CodeWithDir(directory)
-        } else if (pendingAction === "install") {
-            runInstallWithDir(directory)
-        } else if (pendingAction === "chat") {
+        if (pendingAction === "chat") {
             runChatWithDir(directory)
         }
         setPendingAction(null)
-    }
-
-    const runPaper2Code = async () => {
-        if (!selectedPaper || !canRun || isBusy) return
-
-        // If no project directory, show workspace setup dialog
-        if (!projectDir) {
-            setPendingAction("generate")
-            setShowWorkspaceSetup(true)
-            return
-        }
-
-        runPaper2CodeWithDir(projectDir)
-    }
-
-    const runPaper2CodeWithDir = async (targetDir: string) => {
-        if (!selectedPaper || !canRun) return
-
-        setStatus("running")
-        setLastError(null)
-
-        if (selectedPaperId) {
-            updatePaper(selectedPaperId, { status: 'generating' })
-        }
-
-        const taskId = addTask(`Paper2Code — ${selectedPaper.title.slice(0, 40)}${selectedPaper.title.length > 40 ? "…" : ""}`)
-        addAction(taskId, { type: "thinking", content: "Starting Paper2Code run…" })
-        runIdRef.current = null
-        let outputDir: string | undefined
-
-        try {
-            const res = await fetch("/api/gen-code", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    title: selectedPaper.title,
-                    abstract: selectedPaper.abstract,
-                    method_section: selectedPaper.methodSection || undefined,
-                    use_orchestrator: true,
-                    use_rag: true,
-                }),
-            })
-
-            if (!res.ok || !res.body) {
-                throw new Error(`Failed to start run (${res.status})`)
-            }
-
-            updateTaskStatus(taskId, "running")
-
-            for await (const evt of readSSE(res.body)) {
-                if (evt?.type === "progress") {
-                    const data = (evt.data ?? {}) as { phase?: string; message?: string; run_id?: string }
-                    if (data.run_id && !runIdRef.current) {
-                        runIdRef.current = data.run_id
-                    }
-                    addAction(taskId, {
-                        type: "thinking",
-                        content: `${data.phase ? `[${data.phase}] ` : ""}${data.message || "Working…"}`,
-                    })
-                } else if (evt?.type === "result") {
-                    const result = evt.data as GenCodeResult
-                    outputDir = result?.outputDir
-                    setLastGenCodeResult(result)
-                    addAction(taskId, { type: "complete", content: "Run completed" })
-                    updateTaskStatus(taskId, "completed")
-                    if (selectedPaperId && outputDir) {
-                        updatePaper(selectedPaperId, { status: 'ready', outputDir })
-                    }
-                    setStatus("success")
-                } else if (evt?.type === "error") {
-                    addAction(taskId, { type: "error", content: evt.message || "Run failed" })
-                    updateTaskStatus(taskId, "error")
-                    if (selectedPaperId) updatePaper(selectedPaperId, { status: 'error' })
-                    setLastError(evt.message || "Run failed")
-                    setStatus("error")
-                    return
-                }
-            }
-        } catch (e) {
-            const message = e instanceof Error ? e.message : String(e)
-            addAction(taskId, { type: "error", content: message })
-            updateTaskStatus(taskId, "error")
-            if (selectedPaperId) updatePaper(selectedPaperId, { status: 'error' })
-            setLastError(message)
-            setStatus("error")
-        }
-    }
-
-    const runInstall = async () => {
-        if (isBusy) return
-
-        // If no project directory, show workspace setup dialog
-        if (!projectDir) {
-            if (!selectedPaper) {
-                setLastError("Select or create a paper first.")
-                return
-            }
-            setPendingAction("install")
-            setShowWorkspaceSetup(true)
-            return
-        }
-
-        runInstallWithDir(projectDir)
-    }
-
-    const runInstallWithDir = async (targetDir: string) => {
-        if (!targetDir) return
-
-        setStatus("running")
-        setLastError(null)
-
-        const taskId = addTask(`Install — ${targetDir.split("/").pop()}`)
-        addAction(taskId, { type: "thinking", content: "Installing dependencies via Claude..." })
-
-        try {
-            // Use Claude chat to run the install command
-            const res = await fetch("/api/studio/chat", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    message: "Please install the project dependencies. Look for requirements.txt, setup.py, or pyproject.toml and run the appropriate pip install command.",
-                    mode: "Code",
-                    model,
-                    paper: selectedPaper ? {
-                        title: selectedPaper.title,
-                        abstract: selectedPaper.abstract,
-                        method_section: selectedPaper.methodSection,
-                    } : undefined,
-                    project_dir: targetDir,
-                }),
-            })
-
-            if (!res.ok || !res.body) {
-                throw new Error(`Failed to start install (${res.status})`)
-            }
-
-            updateTaskStatus(taskId, "running")
-
-            for await (const evt of readSSE(res.body)) {
-                if (evt?.type === "progress") {
-                    const data = (evt.data ?? {}) as { delta?: string; content?: string; phase?: string; message?: string }
-                    if (data.delta) {
-                        addAction(taskId, { type: "text", content: data.delta })
-                    } else if (data.message) {
-                        addAction(taskId, { type: "thinking", content: data.message })
-                    }
-                } else if (evt?.type === "result") {
-                    addAction(taskId, { type: "complete", content: "Install completed" })
-                    updateTaskStatus(taskId, "completed")
-                    setStatus("success")
-                } else if (evt?.type === "error") {
-                    addAction(taskId, { type: "error", content: evt.message || "Install failed" })
-                    updateTaskStatus(taskId, "error")
-                    setLastError(evt.message || "Install failed")
-                    setStatus("error")
-                    return
-                }
-            }
-        } catch (e) {
-            const message = e instanceof Error ? e.message : String(e)
-            addAction(taskId, { type: "error", content: message })
-            updateTaskStatus(taskId, "error")
-            setLastError(message)
-            setStatus("error")
-        }
     }
 
     const runChatWithDir = async (targetDir: string) => {
@@ -427,6 +274,7 @@ export function ReproductionLog() {
     const handleSendMessageWithDir = async (message: string, targetDir?: string) => {
         setStatus("running")
         setLastError(null)
+        setViewMode("log")
 
         const taskId = addTask(`Chat — ${message.slice(0, 30)}${message.length > 30 ? "…" : ""}`)
         addAction(taskId, { type: "thinking", content: `[${mode}] Sending to Claude...` })
@@ -484,38 +332,67 @@ export function ReproductionLog() {
         }
     }
 
+    const handleSessionCreated = (session: ContextPackSession) => {
+        setViewMode("log")
+        if (session.initial_prompt) {
+            setMessageInput(session.initial_prompt)
+        }
+    }
+
     return (
         <div className="h-full flex flex-col min-w-0 min-h-0 bg-background">
-            {/* Simplified Action Bar */}
-            <div className="px-4 py-2 flex items-center gap-2 shrink-0 border-b">
-                <button
-                    onClick={runPaper2Code}
-                    disabled={!canRun || isBusy}
-                    className="px-4 py-2 text-sm font-medium rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors inline-flex items-center gap-2"
-                >
-                    <Sparkles className="h-4 w-4" />
-                    Generate code
-                </button>
-                <button
-                    onClick={runInstall}
-                    disabled={!projectDir || isBusy}
-                    className="px-4 py-2 text-sm font-medium rounded-lg hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                >
-                    Install
-                </button>
+            {/* Tab Navigation */}
+            <div className="flex items-center shrink-0 border-b">
+                {([
+                    { key: "generating" as const, label: "Progress", icon: Activity },
+                    { key: "context_pack" as const, label: "Context Pack", icon: Package },
+                    { key: "log" as const, label: "Chat", icon: MessageSquare },
+                ]).map(({ key, label, icon: TabIcon }) => (
+                    <button
+                        key={key}
+                        onClick={() => setViewMode(key)}
+                        className={cn(
+                            "flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium transition-colors relative",
+                            viewMode === key
+                                ? "text-foreground"
+                                : "text-muted-foreground hover:text-foreground/80"
+                        )}
+                    >
+                        <TabIcon className="h-3.5 w-3.5" />
+                        {label}
+                        {viewMode === key && (
+                            <span className="absolute bottom-0 left-2 right-2 h-0.5 bg-primary rounded-full" />
+                        )}
+                    </button>
+                ))}
             </div>
 
             {/* Error banner */}
-            {lastError && (
+            {(lastError || contextPackError) && (
                 <div className="px-4 py-2 flex items-start gap-2 shrink-0 bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400">
                     <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
-                    <span className="text-xs">{lastError}</span>
+                    <span className="text-xs">{contextPackError || lastError}</span>
                 </div>
             )}
 
             {/* Main content area */}
             <div className="flex-1 min-h-0 overflow-hidden">
-                {activeFileData ? (
+                {viewMode === "generating" ? (
+                    <GenerationProgressPanel
+                        stages={generationProgress}
+                        liveObservations={liveObservations}
+                        error={contextPackError}
+                    />
+                ) : viewMode === "context_pack" ? (
+                    contextPack ? (
+                        <ContextPackPanel pack={contextPack} onSessionCreated={handleSessionCreated} />
+                    ) : (
+                        <div className="flex flex-col items-center justify-center text-muted-foreground py-20 space-y-4">
+                            <Package className="h-8 w-8 opacity-30" />
+                            <p className="text-sm">No context pack available yet</p>
+                        </div>
+                    )
+                ) : activeFileData ? (
                     /* File Viewer */
                     <div className="h-full flex flex-col">
                         <div className="px-4 py-2 border-b flex items-center justify-between bg-muted/30 shrink-0">
@@ -563,19 +440,19 @@ export function ReproductionLog() {
                         </div>
                     </div>
                 ) : (
-                    /* Timeline */
+                    /* Chat Timeline */
                     <ScrollArea className="h-full">
                         <div className="p-4">
                             {!activeTask || activeTask.actions.length === 0 ? (
                                 <div className="flex flex-col items-center justify-center text-muted-foreground py-20 space-y-4">
                                     <div className="w-16 h-16 rounded-full bg-muted/50 flex items-center justify-center">
-                                        <Sparkles className="h-8 w-8 opacity-30" />
+                                        <MessageSquare className="h-8 w-8 opacity-30" />
                                     </div>
                                     <div className="text-center space-y-2">
-                                        <p className="font-medium">Ready to reproduce</p>
+                                        <p className="font-medium">Ready to chat</p>
                                         <p className="text-xs max-w-[280px]">
                                             {selectedPaper
-                                                ? "Click Generate code to generate code from the selected paper"
+                                                ? "Send a message to start working with Claude on this paper"
                                                 : "Select or create a paper to get started"}
                                         </p>
                                     </div>

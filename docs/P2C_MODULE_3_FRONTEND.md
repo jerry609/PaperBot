@@ -1,8 +1,8 @@
-# P2C Module 3: Frontend Integration — Research/Studio UI 对接
+# P2C Module 3: Frontend Integration — Papers Library/Studio UI 对接
 
 - 日期：2026-02-22
 - 状态：Draft
-- 负责范围：Research 页面入口、Studio 页面注入、前端状态管理
+- 负责范围：Papers Library 详情页入口、Studio 页面注入、前端状态管理
 - 上游依赖：Module 2（API & Storage）提供的 HTTP 接口
 - 技术栈：Next.js 16 + React 19 + Tailwind CSS
 
@@ -10,7 +10,7 @@
 
 ## 1. 模块职责
 
-1. 在 Research 页面的论文卡片上新增 "Generate Reproduction Session" 入口；
+1. 复用 Papers Library 论文详情页的入口按钮（不新增入口按钮）；
 2. 展示生成进度（SSE 实时 / 轮询回退）；
 3. 生成完成后跳转 Studio 并注入 context pack 数据；
 4. 在 Studio 中可视化 context pack（Blueprint、Roadmap、Metrics）；
@@ -25,7 +25,7 @@
 | Studio Store | `web/src/lib/store/studio-store.ts` | 扩展 state，注入 context pack |
 | RunbookPanel | `web/src/components/studio/RunbookPanel.tsx` | 复用 runbook 渲染能力 |
 | FilesPanel | `web/src/components/studio/FilesPanel.tsx` | 展示生成的文件结构 |
-| Research 页面 | `web/src/app/research/` 或相关路由 | 增加入口按钮 |
+| Papers Library 详情页 | `web/src/app/papers/[id]/page.tsx` | 复用现有入口按钮触发 P2C |
 | API 调用约定 | `web/src/app/api/` | 新增 proxy route |
 
 ---
@@ -295,65 +295,31 @@ export function useContextPackGeneration() {
 
 ## 6. UI 组件设计
 
-### 6.1 Research 页面入口按钮
+### 6.1 Papers Library 详情页入口按钮（复用现有）
 
-**位置**：论文卡片（discovery、collections、saved papers）的操作区域。
+**位置**：Papers Library 论文详情页头部操作区（不新增入口按钮）。
 
 ```
 ┌─────────────────────────────────────────┐
-│  📄 Attention Is All You Need (2017)    │
+│  Attention Is All You Need (2017)       │
 │  Vaswani et al.                         │
-│  ─────────────────────────────────────  │
-│  Abstract: We propose a new simple...   │
 │                                         │
-│  [View Details]  [Save]                 │
-│  [🔬 Generate Reproduction Session]  ← 新增按钮
+│  [PDF] [Chat] [Run Reproduction]  ← 复用现有按钮
 └─────────────────────────────────────────┘
 ```
 
-**组件**：`GenerateReproButton`
+**现有入口位置**：`web/src/app/papers/[id]/page.tsx`
 
 ```typescript
-// web/src/components/research/GenerateReproButton.tsx
-
-interface Props {
-  paperId: string;
-  paperTitle: string;
-  disabled?: boolean;
-}
-
-export function GenerateReproButton({ paperId, paperTitle, disabled }: Props) {
-  const { status, progress, result, error, generate } = useContextPackGeneration();
-  const router = useRouter();
-
-  const handleClick = async () => {
-    await generate({ paperId });
-  };
-
-  useEffect(() => {
-    if (result) {
-      // 生成完成，跳转 Studio
-      router.push(`/studio?context_pack_id=${result.context_pack_id}`);
-    }
-  }, [result, router]);
-
-  return (
-    <div>
-      <button onClick={handleClick} disabled={disabled || status === "generating"}>
-        {status === "generating" ? "Generating..." : "Generate Reproduction Session"}
-      </button>
-
-      {/* 进度指示器 */}
-      {status === "generating" && (
-        <GenerationProgressBar stages={progress} />
-      )}
-
-      {/* 错误提示 */}
-      {error && <p className="text-red-500 text-sm mt-1">{error}</p>}
-    </div>
-  );
-}
+// web/src/app/papers/[id]/page.tsx
+<Button asChild>
+  <Link href={`/studio?title=${encodeURIComponent(paper.title)}&abstract=${encodeURIComponent(paper.abstract)}`}>
+    <Play className="mr-2 h-4 w-4" /> Run Reproduction
+  </Link>
+</Button>
 ```
+
+**约定**：在此按钮上接入 P2C 生成逻辑；不创建新的入口按钮组件。
 
 ### 6.2 生成进度条
 
@@ -629,24 +595,24 @@ function MetricsView({ criteria }: { criteria: SuccessCriterion[] }) {
 ### 7.1 完整用户流程
 
 ```
-Research Page                    Studio Page
-┌──────────────┐                ┌──────────────────────────────┐
-│ 论文卡片      │                │                              │
-│              │  ① click       │  ContextPackPanel            │
-│ [Generate    │ ──────────→    │  ┌────────────────────────┐  │
-│  Repro       │  ② SSE 进度    │  │ Blueprint / Env /      │  │
-│  Session]    │ ←─────────→    │  │ Roadmap / Metrics      │  │
-│              │  ③ 完成后跳转  │  └────────────────────────┘  │
-└──────────────┘  ──────────→   │                              │
-                                │  ④ [Create Repro Session]    │
-                                │     ↓                        │
-                                │  RunbookPanel (现有)          │
-                                │  ┌────────────────────────┐  │
-                                │  │ Step 1: Setup env      │  │
-                                │  │ Step 2: Implement      │  │
-                                │  │ Step 3: Verify         │  │
-                                │  └────────────────────────┘  │
-                                └──────────────────────────────┘
+Papers Library Detail Page       Studio Page
+┌────────────────────────┐      ┌──────────────────────────────┐
+│ 论文详情页              │      │                              │
+│                        │ ① click       │  ContextPackPanel    │
+│ [Run Reproduction]     │ ──────────→   │  ┌────────────────┐  │
+│ （复用现有按钮）        │ ② SSE 进度    │  │ Blueprint/Env │  │
+│                        │ ←─────────→   │  │ Roadmap/Metrics│ │
+│                        │ ③ 完成后跳转  │  └────────────────┘  │
+└────────────────────────┘ ──────────→  │                      │
+                                        │ ④ [Create Repro Session]
+                                        │     ↓                 │
+                                        │ RunbookPanel (现有)    │
+                                        │  ┌────────────────┐   │
+                                        │  │ Step 1: Setup │   │
+                                        │  │ Step 2: Impl  │   │
+                                        │  │ Step 3: Verify│   │
+                                        │  └────────────────┘   │
+                                        └────────────────────────┘
 ```
 
 ### 7.2 Studio 页面加载逻辑

@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import inspect
+import logging
 from dataclasses import dataclass
-from typing import Awaitable, Callable, Dict, Iterable, List, Optional, Protocol
+from typing import Awaitable, Callable, Dict, Iterable, List, Optional, Protocol, TYPE_CHECKING
 
 from .input_pipeline import PaperInputRouter, PaperSectionExtractor, PaperTypeClassifier
+
+if TYPE_CHECKING:
+    from paperbot.application.services.llm_service import LLMService
 from .models import (
     ConfidenceScores,
     Depth,
@@ -56,6 +60,20 @@ class OrchestratorConfig:
     default_depth: Depth = "standard"
 
 
+logger = logging.getLogger(__name__)
+
+
+def _try_get_llm_service() -> Optional["LLMService"]:
+    """Try to obtain the default LLMService; return None on failure."""
+    try:
+        from paperbot.application.services.llm_service import get_llm_service
+
+        return get_llm_service()
+    except Exception:
+        logger.debug("LLMService unavailable, stages will use heuristic fallback")
+        return None
+
+
 class ExtractionOrchestrator:
     def __init__(
         self,
@@ -65,16 +83,20 @@ class ExtractionOrchestrator:
         section_extractor: Optional[PaperSectionExtractor] = None,
         paper_type_classifier: Optional[PaperTypeClassifier] = None,
         config: Optional[OrchestratorConfig] = None,
+        llm: Optional["LLMService"] = None,
     ):
+        resolved_llm = llm
+        if resolved_llm is None:
+            resolved_llm = _try_get_llm_service()
         active_stages = list(
             stages
             or [
-                LiteratureDistillStage(),
-                BlueprintExtractStage(),
-                EnvironmentExtractStage(),
-                SpecExtractStage(),
-                RoadmapPlanningStage(),
-                SuccessCriteriaStage(),
+                LiteratureDistillStage(llm=resolved_llm),
+                BlueprintExtractStage(llm=resolved_llm),
+                EnvironmentExtractStage(llm=resolved_llm),
+                SpecExtractStage(llm=resolved_llm),
+                RoadmapPlanningStage(llm=resolved_llm),
+                SuccessCriteriaStage(llm=resolved_llm),
             ]
         )
         self._stages: Dict[str, P2CStage] = {stage.name: stage for stage in active_stages}
@@ -144,6 +166,12 @@ class ExtractionOrchestrator:
         normalized_input: Optional[NormalizedInput] = None,
         on_stage_complete: Optional[StageCompleteCallback] = None,
     ) -> ReproContextPack:
+        from paperbot.utils.logging_config import Logger, LogFiles
+
+        Logger.info(
+            f"[M1] orchestrator_start paper_id={request.paper_id} depth={request.depth}",
+            file=LogFiles.API,
+        )
         depth = request.depth or self._config.default_depth
 
         if normalized_input is None:
@@ -174,6 +202,10 @@ class ExtractionOrchestrator:
                 pack.warnings.append(f"Stage {stage_name} is not registered.")
                 continue
 
+            Logger.info(
+                f"[M1] stage_start paper_id={request.paper_id} stage={stage_name}",
+                file=LogFiles.API,
+            )
             result = await stage.run(stage_input)
             if result.observations:
                 pack.observations.extend(result.observations)
@@ -182,6 +214,10 @@ class ExtractionOrchestrator:
                 pack.task_roadmap.extend(result.roadmap)
             if result.warnings:
                 pack.warnings.extend(result.warnings)
+            Logger.info(
+                f"[M1] stage_done paper_id={request.paper_id} stage={stage_name} obs={len(result.observations)} warnings={len(result.warnings)}",
+                file=LogFiles.API,
+            )
             await self._emit_stage_complete(
                 on_stage_complete,
                 stage_name=stage_name,
@@ -203,6 +239,10 @@ class ExtractionOrchestrator:
             )
         elif pack.observations:
             pack.confidence.overall = stage_mean_confidence(pack.observations)
+        Logger.info(
+            f"[M1] orchestrator_complete paper_id={request.paper_id} observations={len(pack.observations)} warnings={len(pack.warnings)}",
+            file=LogFiles.API,
+        )
         return pack
 
     @staticmethod

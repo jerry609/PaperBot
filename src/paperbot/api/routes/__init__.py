@@ -15,6 +15,7 @@ from . import (
     paperscool,
     newsletter,
     model_endpoints,
+    repro_context,
 )
 
 __all__ = [
@@ -32,4 +33,5 @@ __all__ = [
     "paperscool",
     "newsletter",
     "model_endpoints",
+    "repro_context",
 ]

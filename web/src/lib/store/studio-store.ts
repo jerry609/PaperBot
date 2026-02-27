@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import type { ReproContextPack, StageObservationsEvent, StageProgressEvent } from '@/lib/types/p2c'
 
 // Agent Action Types
 export type ActionType = 'thinking' | 'file_change' | 'function_call' | 'mcp_call' | 'error' | 'complete' | 'text'
@@ -113,6 +114,13 @@ interface StudioState {
     lastGenCodeResult: GenCodeResult | null
     workspaceSnapshotId: number | null
 
+    // P2C state (scoped to selected paper)
+    contextPack: ReproContextPack | null
+    contextPackLoading: boolean
+    contextPackError: string | null
+    generationProgress: StageProgressEvent[]
+    liveObservations: StageObservationsEvent[]
+
     // Paper actions
     addPaper: (paper: Omit<StudioPaper, 'id' | 'createdAt' | 'updatedAt' | 'taskIds' | 'status'>) => string
     updatePaper: (paperId: string, updates: Partial<Omit<StudioPaper, 'id' | 'createdAt'>>) => void
@@ -130,6 +138,15 @@ interface StudioState {
     setPaperDraft: (partial: Partial<PaperDraft>) => void
     setLastGenCodeResult: (result: GenCodeResult | null) => void
     setWorkspaceSnapshotId: (snapshotId: number | null) => void
+
+    // P2C actions
+    setContextPack: (pack: ReproContextPack | null) => void
+    setContextPackLoading: (loading: boolean) => void
+    setContextPackError: (error: string | null) => void
+    appendGenerationProgress: (event: StageProgressEvent) => void
+    clearGenerationProgress: () => void
+    appendLiveObservations: (event: StageObservationsEvent) => void
+    clearLiveObservations: () => void
 }
 
 export const useStudioStore = create<StudioState>((set, get) => ({
@@ -144,6 +161,13 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     paperDraft: { title: "", abstract: "", methodSection: "" },
     lastGenCodeResult: null,
     workspaceSnapshotId: null,
+
+    // P2C state
+    contextPack: null,
+    contextPackLoading: false,
+    contextPackError: null,
+    generationProgress: [],
+    liveObservations: [],
 
     // Paper actions
     addPaper: (paper) => {
@@ -171,6 +195,11 @@ export const useStudioStore = create<StudioState>((set, get) => ({
                 },
                 lastGenCodeResult: null,
                 workspaceSnapshotId: null,
+                contextPack: null,
+                contextPackLoading: false,
+                contextPackError: null,
+                generationProgress: [],
+                liveObservations: [],
             }
         })
         return id
@@ -220,6 +249,10 @@ export const useStudioStore = create<StudioState>((set, get) => ({
             workspaceSnapshotId: null,
             // Clear active task when switching papers
             activeTaskId: null,
+            contextPack: null,
+            contextPackLoading: false,
+            contextPackError: null,
+            generationProgress: [],
         })
     },
 
@@ -325,4 +358,22 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     },
 
     setWorkspaceSnapshotId: (snapshotId) => set({ workspaceSnapshotId: snapshotId }),
+
+    setContextPack: (pack) => set({ contextPack: pack }),
+    setContextPackLoading: (loading) => set({ contextPackLoading: loading }),
+    setContextPackError: (error) => set({ contextPackError: error }),
+    appendGenerationProgress: (event) => set((state) => ({
+        generationProgress: [...state.generationProgress, event],
+    })),
+    clearGenerationProgress: () => set({ generationProgress: [] }),
+    appendLiveObservations: (event) => set((state) => {
+        const existingIndex = state.liveObservations.findIndex(item => item.stage === event.stage)
+        if (existingIndex === -1) {
+            return { liveObservations: [...state.liveObservations, event] }
+        }
+        const updated = [...state.liveObservations]
+        updated[existingIndex] = event
+        return { liveObservations: updated }
+    }),
+    clearLiveObservations: () => set({ liveObservations: [] }),
 }))
