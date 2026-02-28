@@ -21,6 +21,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from paperbot.api.streaming import StreamEvent, wrap_generator
+from paperbot.utils.logging_config import LogFiles, Logger
 from paperbot.application.services.p2c.models import (
     GenerateContextRequest as P2CRequest,
     new_context_pack_id,
@@ -153,12 +154,15 @@ async def _generate_stream(request: GenerateContextPackRequest):
             pack = await orchestrator.run(p2c_request, on_stage_complete=on_stage_complete)
             result_holder.append(pack)
             await queue.put(_DONE)
+        except ValueError as exc:
+            result_holder.append({"kind": "client", "message": str(exc)})
+            await queue.put(_ERROR)
         except Exception as exc:  # noqa: BLE001
             Logger.error(
                 f"[M2] generation_failed pack_id={pack_id} error={exc}",
                 file=LogFiles.ERROR,
             )
-            result_holder.append(exc)
+            result_holder.append({"kind": "server", "message": str(exc)})
             await queue.put(_ERROR)
 
     asyncio.create_task(_run())
@@ -169,8 +173,9 @@ async def _generate_stream(request: GenerateContextPackRequest):
         if item is _DONE:
             break
         elif item is _ERROR:
+            err = result_holder[0]
             _store.update_status(pack_id, status="failed")
-            yield StreamEvent(type="error", data={"message": str(result_holder[0])})
+            yield StreamEvent(type="error", data=err)
             return
         else:
             yield item  # StreamEvent from on_stage_complete
@@ -319,7 +324,7 @@ async def create_repro_session(pack_id: str, request: CreateSessionRequest):
     session_id = f"sess_{uuid.uuid4().hex[:16]}"
     runbook_id = f"rb_{uuid.uuid4().hex[:12]}"
 
-    roadmap = pack.get("pack", {}).get("task_roadmap", [])
+    roadmap = pack.get("task_roadmap", [])
     initial_steps = [
         {
             "step_id": f"S{i + 1}",

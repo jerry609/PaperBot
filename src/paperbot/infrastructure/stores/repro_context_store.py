@@ -214,9 +214,12 @@ class SqlAlchemyReproContextStore:
         base.update({
             "user_id": row.user_id,
             "project_id": row.project_id,
-            "objective": row.objective,
             "version": row.version,
             "updated_at": row.updated_at.isoformat() if row.updated_at else None,
-            "pack": row.get_pack(),
         })
+        # Merge pack contents directly into the top-level dict so the frontend
+        # can access `response.paper` instead of `response.pack.paper`.
+        # Pack fields (e.g. objective) take precedence over the summary placeholders.
+        pack = row.get_pack()
+        base.update(pack)
         return base
