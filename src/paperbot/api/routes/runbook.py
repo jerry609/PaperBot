@@ -30,6 +30,36 @@ _provider = SessionProvider()
 Base.metadata.create_all(_provider.engine)
 
 
+def _runtime_allowed_dirs_file() -> Path:
+    return Path("data/runbook_allowed_dirs.json")
+
+
+def _load_runtime_allowed_dirs() -> List[Path]:
+    f = _runtime_allowed_dirs_file()
+    if not f.exists():
+        return []
+    try:
+        data = json.loads(f.read_text(encoding="utf-8"))
+        if isinstance(data, list):
+            return [Path(p).resolve() for p in data if isinstance(p, str) and p.strip()]
+    except Exception:
+        pass
+    return []
+
+
+def _save_runtime_allowed_dir(dir_path: Path) -> None:
+    f = _runtime_allowed_dirs_file()
+    f.parent.mkdir(parents=True, exist_ok=True)
+    existing = _load_runtime_allowed_dirs()
+    resolved = dir_path.resolve()
+    if resolved not in existing:
+        existing.append(resolved)
+    f.write_text(
+        json.dumps([str(p) for p in existing], ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
 def _allowed_workdir_prefixes() -> List[Path]:
     prefixes: List[Path] = [Path(tempfile.gettempdir()).resolve()]
     try:
@@ -43,6 +73,8 @@ def _allowed_workdir_prefixes() -> List[Path]:
             p = p.strip()
             if p:
                 prefixes.append(Path(p).expanduser().resolve())
+
+    prefixes.extend(_load_runtime_allowed_dirs())
 
     # Preserve order and deduplicate
     unique: List[Path] = []
@@ -113,6 +145,35 @@ async def prepare_project_dir(body: PrepareProjectDirRequest):
         "created": created,
         "allowed_prefixes": [str(p) for p in _allowed_workdir_prefixes()],
     }
+
+
+class AddAllowedDirRequest(BaseModel):
+    directory: str
+
+
+@router.post("/runbook/allowed-dirs")
+async def add_allowed_dir(body: AddAllowedDirRequest):
+    """Add a directory to the runtime-allowed prefixes list."""
+    try:
+        resolved = Path(body.directory).expanduser().resolve()
+    except Exception:
+        raise HTTPException(status_code=400, detail="invalid directory path")
+
+    if not resolved.exists() or not resolved.is_dir():
+        raise HTTPException(status_code=400, detail="directory does not exist or is not a directory")
+
+    _save_runtime_allowed_dir(resolved)
+    return {
+        "ok": True,
+        "directory": str(resolved),
+        "allowed_prefixes": [str(p) for p in _allowed_workdir_prefixes()],
+    }
+
+
+@router.get("/runbook/allowed-dirs")
+async def get_allowed_dirs():
+    """Return all currently allowed workspace directory prefixes."""
+    return {"prefixes": [str(p) for p in _allowed_workdir_prefixes()]}
 
 
 def _resolve_under_root(root: Path, relative_path: str) -> Path:

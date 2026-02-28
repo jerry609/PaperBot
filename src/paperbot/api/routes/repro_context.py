@@ -28,6 +28,7 @@ from paperbot.application.services.p2c.models import (
 )
 from paperbot.application.services.p2c.orchestrator import ExtractionOrchestrator
 from paperbot.infrastructure.stores.repro_context_store import SqlAlchemyReproContextStore
+from paperbot.utils.logging_config import Logger, LogFiles, set_trace_id
 
 router = APIRouter()
 
@@ -59,6 +60,10 @@ class CreateSessionRequest(BaseModel):
 async def _generate_stream(request: GenerateContextPackRequest):
     """SSE generator for context pack generation via Module 1 ExtractionOrchestrator."""
     pack_id = new_context_pack_id()
+    Logger.info(
+        f"[M2] start generate pack_id={pack_id} paper_id={request.paper_id} depth={request.depth}",
+        file=LogFiles.API,
+    )
 
     # Persist initial "running" record so the frontend can poll status.
     _store.save(
@@ -81,15 +86,27 @@ async def _generate_stream(request: GenerateContextPackRequest):
 
     total_stages = 2 if request.depth == "fast" else 6
     stages_done = 0
+    last_stage_name: Optional[str] = None
 
     async def on_stage_complete(stage_name: str, observations: list, warnings: list) -> None:
         nonlocal stages_done
+        nonlocal last_stage_name
         stages_done += 1
+        last_stage_name = stage_name
         confidence = (
             sum(o.confidence for o in observations) / len(observations)
             if observations
             else 0.0
         )
+        observation_summaries = [
+            {
+                "id": o.id,
+                "type": o.type,
+                "title": o.title,
+                "confidence": o.confidence,
+            }
+            for o in observations
+        ]
         _store.save_stage_result(
             pack_id=pack_id,
             stage_name=stage_name,
@@ -97,6 +114,19 @@ async def _generate_stream(request: GenerateContextPackRequest):
             result_data={"observations": [o.to_full() for o in observations]},
             confidence=confidence,
             duration_ms=0,
+        )
+        Logger.info(
+            f"[M2] stage_complete pack_id={pack_id} stage={stage_name} obs={len(observations)} warnings={len(warnings)}",
+            file=LogFiles.API,
+        )
+        await queue.put(
+            StreamEvent(
+                type="stage_observations",
+                data={
+                    "stage": stage_name,
+                    "observations": observation_summaries,
+                },
+            )
         )
         await queue.put(
             StreamEvent(
@@ -150,6 +180,16 @@ async def _generate_stream(request: GenerateContextPackRequest):
         else:
             yield item  # StreamEvent from on_stage_complete
 
+    if last_stage_name:
+        yield StreamEvent(
+            type="progress",
+            data={
+                "stage": last_stage_name,
+                "progress": 1.0,
+                "message": f"Completed {last_stage_name}",
+            },
+        )
+
     # Serialize and persist the final pack.
     pack = result_holder[0]
     pack_dict = _asdict(pack)
@@ -162,6 +202,10 @@ async def _generate_stream(request: GenerateContextPackRequest):
         confidence_overall=pack.confidence.overall,
         warning_count=len(pack.warnings),
         objective=pack.objective,
+    )
+    Logger.info(
+        f"[M2] generation_completed pack_id={pack_id} observations={len(pack.observations)} warnings={len(pack.warnings)}",
+        file=LogFiles.API,
     )
 
     yield StreamEvent(
@@ -180,6 +224,11 @@ async def _generate_stream(request: GenerateContextPackRequest):
 @router.post("/generate")
 async def generate_context_pack(request: GenerateContextPackRequest):
     """Generate a P2C context pack for the given paper. Returns SSE stream."""
+    trace_id = set_trace_id()
+    Logger.info(
+        f"[M2] generate_request trace_id={trace_id} paper_id={request.paper_id} user_id={request.user_id}",
+        file=LogFiles.API,
+    )
     return StreamingResponse(
         wrap_generator(
             _generate_stream(request),
@@ -203,6 +252,11 @@ async def list_context_packs(
     offset: int = 0,
 ):
     """List context packs for a user, with optional filters."""
+    set_trace_id()
+    Logger.info(
+        f"[M2] list_packs user_id={user_id} paper_id={paper_id} project_id={project_id} limit={limit} offset={offset}",
+        file=LogFiles.API,
+    )
     items, total = _store.list_by_user(
         user_id=user_id,
         paper_id=paper_id,
@@ -220,10 +274,31 @@ async def list_context_packs(
 @router.get("/{pack_id}")
 async def get_context_pack(pack_id: str):
     """Return the full context pack detail."""
+    set_trace_id()
+    Logger.info(f"[M2] get_pack pack_id={pack_id}", file=LogFiles.API)
     pack = _store.get(pack_id)
     if pack is None:
+        Logger.warning(f"[M2] pack_not_found pack_id={pack_id}", file=LogFiles.API)
         raise HTTPException(status_code=404, detail="Context pack not found.")
     return pack
+
+
+@router.get("/{pack_id}/observation/{observation_id}")
+async def get_observation_detail(pack_id: str, observation_id: str):
+    """Return a single observation detail by ID."""
+    set_trace_id()
+    Logger.info(
+        f"[M2] get_observation pack_id={pack_id} observation_id={observation_id}",
+        file=LogFiles.API,
+    )
+    observation = _store.get_observation(pack_id, observation_id)
+    if observation is None:
+        Logger.warning(
+            f"[M2] observation_not_found pack_id={pack_id} observation_id={observation_id}",
+            file=LogFiles.API,
+        )
+        raise HTTPException(status_code=404, detail="Observation not found.")
+    return observation
 
 
 # ------------------------------------------------------------------ #
@@ -239,7 +314,12 @@ async def create_repro_session(pack_id: str, request: CreateSessionRequest):
     """
     pack = _store.get(pack_id)
     if pack is None:
+        Logger.warning(f"[M2] session_pack_not_found pack_id={pack_id}", file=LogFiles.API)
         raise HTTPException(status_code=404, detail="Context pack not found.")
+    Logger.info(
+        f"[M2] create_session pack_id={pack_id} executor={request.executor_preference}",
+        file=LogFiles.API,
+    )
 
     session_id = f"sess_{uuid.uuid4().hex[:16]}"
     runbook_id = f"rb_{uuid.uuid4().hex[:12]}"
@@ -273,7 +353,10 @@ async def create_repro_session(pack_id: str, request: CreateSessionRequest):
 @router.delete("/{pack_id}")
 async def delete_context_pack(pack_id: str):
     """Soft-delete a context pack."""
+    set_trace_id()
+    Logger.info(f"[M2] delete_pack pack_id={pack_id}", file=LogFiles.API)
     deleted = _store.soft_delete(pack_id)
     if not deleted:
+        Logger.warning(f"[M2] delete_pack_not_found pack_id={pack_id}", file=LogFiles.API)
         raise HTTPException(status_code=404, detail="Context pack not found.")
     return {"status": "deleted", "context_pack_id": pack_id}

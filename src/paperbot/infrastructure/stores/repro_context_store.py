@@ -134,6 +134,34 @@ class SqlAlchemyReproContextStore:
                 return None
             return self._row_to_full_dict(row)
 
+    def get_observation(self, pack_id: str, observation_id: str) -> Optional[Dict[str, Any]]:
+        with self._provider.session() as session:
+            stage_rows = session.scalars(
+                select(ReproContextStageResultModel)
+                .where(ReproContextStageResultModel.context_pack_id == pack_id)
+                .order_by(ReproContextStageResultModel.created_at.asc())
+            ).all()
+
+            for row in stage_rows:
+                if not row.result_json:
+                    continue
+                try:
+                    payload = json.loads(row.result_json)
+                except Exception:
+                    continue
+                for obs in payload.get("observations", []) if isinstance(payload, dict) else []:
+                    if isinstance(obs, dict) and obs.get("id") == observation_id:
+                        return obs
+
+            pack_row = session.get(ReproContextPackModel, pack_id)
+            if pack_row is None or pack_row.deleted_at is not None:
+                return None
+            pack = pack_row.get_pack() if pack_row else {}
+            for obs in pack.get("observations", []) if isinstance(pack, dict) else []:
+                if isinstance(obs, dict) and obs.get("id") == observation_id:
+                    return obs
+        return None
+
     def list_by_user(
         self,
         *,

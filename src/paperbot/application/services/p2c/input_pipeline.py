@@ -229,16 +229,85 @@ class LocalFileAdapter(PaperInputAdapter):
         )
 
 
+class InternalPaperStoreAdapter(PaperInputAdapter):
+    name = "paper_store"
+
+    def __init__(self) -> None:
+        from paperbot.infrastructure.stores.paper_store import PaperStore
+
+        self._store = PaperStore()
+
+    def can_handle(self, paper_id: str) -> bool:
+        return paper_id.strip().isdigit()
+
+    async def fetch(self, paper_id: str) -> RawPaperData:
+        from paperbot.utils.logging_config import Logger, LogFiles
+
+        paper_db_id = int(paper_id)
+        row = self._store.get_paper_by_id(paper_db_id)
+        if row is None:
+            Logger.error(
+                f"[M1] paper_store_not_found paper_id={paper_id}",
+                file=LogFiles.ERROR,
+            )
+            raise ValueError(f"Paper not found in store: {paper_id}")
+
+        identifiers: dict[str, str] = {}
+        if row.semantic_scholar_id:
+            identifiers["semantic_scholar"] = row.semantic_scholar_id
+        if row.arxiv_id:
+            identifiers["arxiv"] = row.arxiv_id
+        if row.doi:
+            identifiers["doi"] = row.doi
+        if row.openalex_id:
+            identifiers["openalex"] = row.openalex_id
+
+        Logger.info(
+            f"[M1] paper_store_fetch paper_id={paper_id} title={row.title}",
+            file=LogFiles.API,
+        )
+
+        return RawPaperData(
+            paper_id=str(row.id),
+            title=row.title or "",
+            abstract=row.abstract or "",
+            authors=row.get_authors(),
+            year=int(row.year or 0),
+            identifiers=identifiers,
+            source_adapter=self.name,
+        )
+
+
 class PaperInputRouter:
     def __init__(self, adapters: Optional[Iterable[PaperInputAdapter]] = None):
         self.adapters: List[PaperInputAdapter] = list(
-            adapters or [LocalFileAdapter(), ArXivAdapter(), SemanticScholarAdapter()]
+            adapters
+            or [
+                InternalPaperStoreAdapter(),
+                LocalFileAdapter(),
+                ArXivAdapter(),
+                SemanticScholarAdapter(),
+            ]
         )
 
     async def fetch(self, paper_id: str) -> RawPaperData:
+        from paperbot.utils.logging_config import Logger, LogFiles
+
+        Logger.info(
+            f"[M1] input_router_fetch paper_id={paper_id} adapters={[a.name for a in self.adapters]}",
+            file=LogFiles.API,
+        )
         for adapter in self.adapters:
             if adapter.can_handle(paper_id):
+                Logger.info(
+                    f"[M1] adapter_selected paper_id={paper_id} adapter={adapter.name}",
+                    file=LogFiles.API,
+                )
                 return await adapter.fetch(paper_id)
+        Logger.error(
+            f"[M1] no_adapter_found paper_id={paper_id} adapters={[a.name for a in self.adapters]}",
+            file=LogFiles.ERROR,
+        )
         raise ValueError(f"No adapter can handle paper id: {paper_id}")
 
 
