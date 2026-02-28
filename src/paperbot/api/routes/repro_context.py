@@ -21,6 +21,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from paperbot.api.streaming import StreamEvent, wrap_generator
+from paperbot.utils.logging_config import LogFiles, Logger
 from paperbot.application.services.p2c.models import (
     GenerateContextRequest as P2CRequest,
     new_context_pack_id,
@@ -127,6 +128,10 @@ async def _generate_stream(request: GenerateContextPackRequest):
             result_holder.append({"kind": "client", "message": str(exc)})
             await queue.put(_ERROR)
         except Exception as exc:  # noqa: BLE001
+            Logger.error(
+                f"[M2] generation_failed pack_id={pack_id} error={exc}",
+                file=LogFiles.ERROR,
+            )
             result_holder.append({"kind": "server", "message": str(exc)})
             await queue.put(_ERROR)
 
