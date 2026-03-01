@@ -136,6 +136,11 @@ class SqlAlchemyReproContextStore:
 
     def get_observation(self, pack_id: str, observation_id: str) -> Optional[Dict[str, Any]]:
         with self._provider.session() as session:
+            # Check soft-delete first to avoid leaking data from deleted packs
+            pack_row = session.get(ReproContextPackModel, pack_id)
+            if pack_row is None or pack_row.deleted_at is not None:
+                return None
+
             stage_rows = session.scalars(
                 select(ReproContextStageResultModel)
                 .where(ReproContextStageResultModel.context_pack_id == pack_id)
@@ -147,16 +152,13 @@ class SqlAlchemyReproContextStore:
                     continue
                 try:
                     payload = json.loads(row.result_json)
-                except Exception:
+                except (json.JSONDecodeError, ValueError):
                     continue
                 for obs in payload.get("observations", []) if isinstance(payload, dict) else []:
                     if isinstance(obs, dict) and obs.get("id") == observation_id:
                         return obs
 
-            pack_row = session.get(ReproContextPackModel, pack_id)
-            if pack_row is None or pack_row.deleted_at is not None:
-                return None
-            pack = pack_row.get_pack() if pack_row else {}
+            pack = pack_row.get_pack()
             for obs in pack.get("observations", []) if isinstance(pack, dict) else []:
                 if isinstance(obs, dict) and obs.get("id") == observation_id:
                     return obs

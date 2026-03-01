@@ -12,6 +12,8 @@ from paperbot.domain.paper_identity import normalize_arxiv_id, normalize_doi
 from paperbot.infrastructure.api_clients.semantic_scholar import SemanticScholarClient
 from paperbot.infrastructure.connectors.arxiv_connector import ArxivConnector
 
+from paperbot.utils.logging_config import Logger, LogFiles
+
 from .models import NormalizedInput, PaperIdentity, PaperType, RawPaperData
 
 _HEX40_RE = re.compile(r"^[0-9a-f]{40}$", re.IGNORECASE)
@@ -209,14 +211,36 @@ class ArXivAdapter(PaperInputAdapter):
 
 
 class LocalFileAdapter(PaperInputAdapter):
+    """Read a local .txt/.md file as paper input.
+
+    Restricted to explicit allowed directories to prevent path-traversal attacks.
+    """
+
     name = "local_file"
+
+    def __init__(self, allowed_dirs: Optional[Iterable[str]] = None) -> None:
+        self._allowed_dirs: List[Path] = [
+            Path(d).resolve() for d in (allowed_dirs or [])
+        ]
+
+    def _is_allowed(self, path: Path) -> bool:
+        try:
+            resolved = path.resolve()
+        except (OSError, ValueError):
+            return False
+        return any(
+            resolved == d or str(resolved).startswith(str(d) + os.sep)
+            for d in self._allowed_dirs
+        )
 
     def can_handle(self, paper_id: str) -> bool:
         path = Path(paper_id).expanduser()
-        return path.exists() and path.is_file()
+        return self._is_allowed(path) and path.exists() and path.is_file()
 
     async def fetch(self, paper_id: str) -> RawPaperData:
         path = Path(paper_id).expanduser()
+        if not self._is_allowed(path):
+            raise ValueError(f"Path not in allowed directories: {paper_id}")
         text = ""
         if path.suffix.lower() in {".txt", ".md"}:
             text = path.read_text(encoding="utf-8", errors="ignore")
@@ -241,7 +265,7 @@ class InternalPaperStoreAdapter(PaperInputAdapter):
         return paper_id.strip().isdigit()
 
     async def fetch(self, paper_id: str) -> RawPaperData:
-        from paperbot.utils.logging_config import Logger, LogFiles
+
 
         paper_db_id = int(paper_id)
         row = self._store.get_paper_by_id(paper_db_id)
@@ -284,14 +308,13 @@ class PaperInputRouter:
             adapters
             or [
                 InternalPaperStoreAdapter(),
-                LocalFileAdapter(),
                 ArXivAdapter(),
                 SemanticScholarAdapter(),
             ]
         )
 
     async def fetch(self, paper_id: str) -> RawPaperData:
-        from paperbot.utils.logging_config import Logger, LogFiles
+
 
         Logger.info(
             f"[M1] input_router_fetch paper_id={paper_id} adapters={[a.name for a in self.adapters]}",

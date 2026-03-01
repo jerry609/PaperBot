@@ -9,6 +9,7 @@ Provides file management endpoints for DeepCode Studio:
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
 import os
@@ -42,7 +43,7 @@ def _load_runtime_allowed_dirs() -> List[Path]:
         data = json.loads(f.read_text(encoding="utf-8"))
         if isinstance(data, list):
             return [Path(p).resolve() for p in data if isinstance(p, str) and p.strip()]
-    except Exception:
+    except (OSError, json.JSONDecodeError, ValueError):
         pass
     return []
 
@@ -50,14 +51,35 @@ def _load_runtime_allowed_dirs() -> List[Path]:
 def _save_runtime_allowed_dir(dir_path: Path) -> None:
     f = _runtime_allowed_dirs_file()
     f.parent.mkdir(parents=True, exist_ok=True)
-    existing = _load_runtime_allowed_dirs()
     resolved = dir_path.resolve()
-    if resolved not in existing:
-        existing.append(resolved)
-    f.write_text(
-        json.dumps([str(p) for p in existing], ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+
+    # Use file lock to prevent concurrent read-modify-write races
+    lock_path = f.with_suffix(".lock")
+    with open(lock_path, "w") as lock_fd:
+        fcntl.flock(lock_fd, fcntl.LOCK_EX)
+        try:
+            existing = _load_runtime_allowed_dirs()
+            if resolved not in existing:
+                existing.append(resolved)
+            # Atomic write via temp file + rename
+            tmp_fd, tmp_path = tempfile.mkstemp(
+                dir=str(f.parent), suffix=".tmp", prefix=".allowed_dirs_"
+            )
+            try:
+                with os.fdopen(tmp_fd, "w", encoding="utf-8") as tmp_f:
+                    json.dump(
+                        [str(p) for p in existing], tmp_f, ensure_ascii=False, indent=2
+                    )
+                os.replace(tmp_path, str(f))
+            except BaseException:
+                # Clean up temp file on failure
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+                raise
+        finally:
+            fcntl.flock(lock_fd, fcntl.LOCK_UN)
 
 
 def _allowed_workdir_prefixes() -> List[Path]:
@@ -151,13 +173,36 @@ class AddAllowedDirRequest(BaseModel):
     directory: str
 
 
+def _runtime_allowlist_mutation_enabled() -> bool:
+    return os.getenv("PAPERBOT_RUNBOOK_ALLOWLIST_MUTATION", "false").lower() == "true"
+
+
+# Directories that must never be added to the allowlist (too broad / sensitive).
+_DENIED_PATHS = frozenset({
+    "/", "/bin", "/sbin", "/usr", "/etc", "/var", "/root", "/sys", "/proc",
+    "/dev", "/boot", "/lib", "/lib64", "/opt",
+})
+
+
 @router.post("/runbook/allowed-dirs")
 async def add_allowed_dir(body: AddAllowedDirRequest):
     """Add a directory to the runtime-allowed prefixes list."""
+    if not _runtime_allowlist_mutation_enabled():
+        raise HTTPException(
+            status_code=403,
+            detail="runtime allowlist mutation is disabled"
+        )
+
     try:
         resolved = Path(body.directory).expanduser().resolve()
     except Exception:
         raise HTTPException(status_code=400, detail="invalid directory path")
+
+    if str(resolved) in _DENIED_PATHS:
+        raise HTTPException(
+            status_code=403,
+            detail=f"adding '{resolved}' is not allowed — path is too broad or sensitive"
+        )
 
     if not resolved.exists() or not resolved.is_dir():
         raise HTTPException(status_code=400, detail="directory does not exist or is not a directory")

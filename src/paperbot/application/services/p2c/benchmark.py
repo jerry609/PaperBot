@@ -76,7 +76,7 @@ def evaluate_case(case: BenchmarkCase, pack: ReproContextPack) -> Dict[str, Any]
         hyperparam_candidates.extend((obs.structured_data or {}).keys())
     hyperparam_scores = _f1_score(case.expected_hyperparams, hyperparam_candidates)
 
-    architecture = None
+    architecture = ""
     architecture_obs = pack.get_by_type("architecture")
     if architecture_obs:
         architecture = str(architecture_obs[0].structured_data.get("architecture_type") or "")
@@ -84,7 +84,7 @@ def evaluate_case(case: BenchmarkCase, pack: ReproContextPack) -> Dict[str, Any]
     architecture_hit = (
         1.0
         if not case.expected_architecture
-        else float(architecture.lower() == case.expected_architecture.lower())
+        else float(architecture.lower() == str(case.expected_architecture).lower())
     )
 
     required = case.evidence_required_types

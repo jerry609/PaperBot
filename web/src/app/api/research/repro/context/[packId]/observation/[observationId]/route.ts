@@ -1,12 +1,13 @@
 import { apiBaseUrl, proxyJson } from "../../../../../_base"
+import type { NextRequest } from "next/server"
 
 export const runtime = "nodejs"
 
 export async function GET(
-  req: Request,
-  { params }: { params: { packId: string; observationId: string } }
+  req: NextRequest,
+  { params }: { params: Promise<{ packId: string; observationId: string }> }
 ) {
-  const { packId, observationId } = params
+  const { packId, observationId } = await params
   return proxyJson(
     req,
     `${apiBaseUrl()}/api/research/repro/context/${encodeURIComponent(packId)}/observation/${encodeURIComponent(observationId)}`,
