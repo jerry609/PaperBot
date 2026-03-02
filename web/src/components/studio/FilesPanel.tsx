@@ -25,6 +25,30 @@ type FileIndexResponse = {
     truncated?: boolean
 }
 
+type PrepareProjectDirResponse = {
+    project_dir: string
+    created?: boolean
+}
+
+async function readErrorDetail(res: Response): Promise<string> {
+    const cloned = res.clone()
+    try {
+        const data = await cloned.json() as { detail?: string }
+        if (typeof data?.detail === "string" && data.detail.trim()) {
+            return data.detail
+        }
+    } catch {
+        // Fall back to plain text below.
+    }
+    try {
+        const text = await res.text()
+        if (text.trim()) return text
+    } catch {
+        // ignore
+    }
+    return `Request failed (${res.status})`
+}
+
 function languageForPath(path: string): string {
     const lower = path.toLowerCase()
     if (lower.endsWith(".py")) return "python"
@@ -174,6 +198,9 @@ export function FilesPanel() {
     const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set())
     const [dirDialogOpen, setDirDialogOpen] = useState(false)
     const [newDirPath, setNewDirPath] = useState("")
+    const [dirError, setDirError] = useState<string | null>(null)
+    const [indexError, setIndexError] = useState<string | null>(null)
+    const [settingDir, setSettingDir] = useState(false)
 
     const filteredFiles = useMemo(() => {
         const q = query.trim().toLowerCase()
@@ -186,9 +213,15 @@ export function FilesPanel() {
     const refreshIndex = async () => {
         if (!projectDir) return
         setLoadingIndex(true)
+        setIndexError(null)
         try {
             const res = await fetch(`/api/runbook/files?project_dir=${encodeURIComponent(projectDir)}&recursive=true`)
-            if (!res.ok) return
+            if (!res.ok) {
+                const detail = await readErrorDetail(res)
+                setFileIndex([])
+                setIndexError(detail)
+                return
+            }
             const data = (await res.json()) as FileIndexResponse
             setFileIndex(data.files || [])
             const firstLevelDirs = new Set<string>()
@@ -208,6 +241,7 @@ export function FilesPanel() {
         setFileIndex([])
         setQuery("")
         setExpandedDirs(new Set())
+        setIndexError(null)
         if (projectDir) refreshIndex()
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [projectDir])
@@ -233,15 +267,39 @@ export function FilesPanel() {
         })
     }
 
-    const handleSetDirectory = () => {
+    const handleSetDirectory = async () => {
         if (!selectedPaperId || !newDirPath.trim()) return
-        updatePaper(selectedPaperId, { outputDir: newDirPath.trim() })
-        setDirDialogOpen(false)
-        setNewDirPath("")
+        setSettingDir(true)
+        setDirError(null)
+        try {
+            const res = await fetch("/api/runbook/project-dir/prepare", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    project_dir: newDirPath.trim(),
+                    create_if_missing: true,
+                }),
+            })
+            if (!res.ok) {
+                const detail = await readErrorDetail(res)
+                setDirError(detail)
+                return
+            }
+            const data = (await res.json()) as PrepareProjectDirResponse
+            updatePaper(selectedPaperId, { outputDir: data.project_dir || newDirPath.trim() })
+            setDirDialogOpen(false)
+            setNewDirPath("")
+            setDirError(null)
+        } catch {
+            setDirError("Failed to validate directory. Please try again.")
+        } finally {
+            setSettingDir(false)
+        }
     }
 
     const openDirDialog = () => {
         setNewDirPath(projectDir || "")
+        setDirError(null)
         setDirDialogOpen(true)
     }
 
@@ -288,6 +346,9 @@ export function FilesPanel() {
                         disabled={!projectDir}
                     />
                 </div>
+                {indexError && (
+                    <p className="mt-2 text-xs text-destructive">{indexError}</p>
+                )}
             </div>
 
             {/* File Tree */}
@@ -356,14 +417,17 @@ export function FilesPanel() {
                             <p className="text-xs text-muted-foreground">
                                 This directory will be used to save generated code and can be accessed by Claude CLI.
                             </p>
+                            {dirError && (
+                                <p className="text-xs text-destructive">{dirError}</p>
+                            )}
                         </div>
                     </div>
                     <DialogFooter>
                         <Button variant="outline" onClick={() => setDirDialogOpen(false)}>
                             Cancel
                         </Button>
-                        <Button onClick={handleSetDirectory} disabled={!newDirPath.trim() || !selectedPaperId}>
-                            Set Directory
+                        <Button onClick={handleSetDirectory} disabled={!newDirPath.trim() || !selectedPaperId || settingDir}>
+                            {settingDir ? "Validating..." : "Set Directory"}
                         </Button>
                     </DialogFooter>
                 </DialogContent>

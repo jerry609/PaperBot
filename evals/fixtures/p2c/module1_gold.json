@@ -1,0 +1,41 @@
+[
+  {
+    "case_id": "transformer_benchmark",
+    "title": "Transformer Benchmark Study",
+    "year": 2025,
+    "abstract": "We introduce a transformer model and report strong accuracy gains.",
+    "full_text": "Introduction\nA benchmark-oriented study.\nMethod\nOur model uses transformer layers. Learning rate 1e-4, batch size 32, epochs 10.\nResults\nAccuracy reaches 92.1 on test split.\nConclusion\nThe method is effective.\n",
+    "expected": {
+      "architecture": "transformer",
+      "metrics": ["accuracy"],
+      "hyperparameters": ["learning_rate", "batch_size", "epochs"],
+      "evidence_required_types": ["metric", "hyperparameter"]
+    }
+  },
+  {
+    "case_id": "gnn_auc",
+    "title": "Graph Neural Ranking",
+    "year": 2024,
+    "abstract": "We propose a graph neural ranking model.",
+    "full_text": "Background\nWe study retrieval ranking.\nMethod\nA graph neural network encoder is trained with learning rate 0.0005 and batch size 64.\nEvaluation\nAUC improves to 0.89.\nConclusion\nThe method generalizes.\n",
+    "expected": {
+      "architecture": "gnn",
+      "metrics": ["auc"],
+      "hyperparameters": ["learning_rate", "batch_size"],
+      "evidence_required_types": ["metric", "hyperparameter", "environment"]
+    }
+  },
+  {
+    "case_id": "cnn_mrr",
+    "title": "Convolutional Retrieval Model",
+    "year": 2023,
+    "abstract": "A convolutional architecture for retrieval tasks.",
+    "full_text": "1 Introduction\nTask setup.\n2 Methodology\nA convolution encoder with lr=0.001 and epochs 12.\n3 Results\nMRR reaches 0.71 in our experiments.\n4 Future Work\nAnalyze robustness.\n",
+    "expected": {
+      "architecture": "cnn",
+      "metrics": ["mrr"],
+      "hyperparameters": ["learning_rate", "epochs"],
+      "evidence_required_types": ["metric", "hyperparameter"]
+    }
+  }
+]

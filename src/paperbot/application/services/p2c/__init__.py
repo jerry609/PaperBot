@@ -1,0 +1,63 @@
+from .benchmark import (
+    BenchmarkCase,
+    aggregate_results,
+    evaluate_case,
+    load_benchmark_cases,
+    run_module1_benchmark,
+)
+from .evidence import EvidenceLinker, calibrate_confidence
+from .input_pipeline import (
+    ArXivAdapter,
+    LocalFileAdapter,
+    PaperInputAdapter,
+    PaperInputRouter,
+    PaperSectionExtractor,
+    PaperTypeClassifier,
+    SemanticScholarAdapter,
+)
+from .models import (
+    ConfidenceScores,
+    EvidenceLink,
+    ExtractionObservation,
+    GenerateContextRequest,
+    NormalizedInput,
+    PaperIdentity,
+    PaperType,
+    RawPaperData,
+    ReproContextPack,
+    StageName,
+    StageResult,
+    TaskCheckpoint,
+)
+from .orchestrator import ExtractionOrchestrator, OrchestratorConfig
+
+__all__ = [
+    "ArXivAdapter",
+    "BenchmarkCase",
+    "LocalFileAdapter",
+    "PaperInputAdapter",
+    "PaperInputRouter",
+    "PaperSectionExtractor",
+    "PaperTypeClassifier",
+    "SemanticScholarAdapter",
+    "aggregate_results",
+    "evaluate_case",
+    "load_benchmark_cases",
+    "run_module1_benchmark",
+    "EvidenceLinker",
+    "calibrate_confidence",
+    "ConfidenceScores",
+    "EvidenceLink",
+    "ExtractionObservation",
+    "GenerateContextRequest",
+    "NormalizedInput",
+    "PaperIdentity",
+    "PaperType",
+    "RawPaperData",
+    "ReproContextPack",
+    "StageName",
+    "StageResult",
+    "TaskCheckpoint",
+    "ExtractionOrchestrator",
+    "OrchestratorConfig",
+]

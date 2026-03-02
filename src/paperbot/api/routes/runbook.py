@@ -9,6 +9,7 @@ Provides file management endpoints for DeepCode Studio:
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
 import os
@@ -30,14 +31,87 @@ _provider = SessionProvider()
 Base.metadata.create_all(_provider.engine)
 
 
-def _allowed_workdir(workdir: Path) -> bool:
-    allowed_prefixes = [Path(tempfile.gettempdir()).resolve()]
+def _runtime_allowed_dirs_file() -> Path:
+    return Path("data/runbook_allowed_dirs.json")
+
+
+def _load_runtime_allowed_dirs() -> List[Path]:
+    f = _runtime_allowed_dirs_file()
+    if not f.exists():
+        return []
+    try:
+        data = json.loads(f.read_text(encoding="utf-8"))
+        if isinstance(data, list):
+            return [Path(p).resolve() for p in data if isinstance(p, str) and p.strip()]
+    except (OSError, json.JSONDecodeError, ValueError):
+        pass
+    return []
+
+
+def _save_runtime_allowed_dir(dir_path: Path) -> None:
+    f = _runtime_allowed_dirs_file()
+    f.parent.mkdir(parents=True, exist_ok=True)
+    resolved = dir_path.resolve()
+
+    # Use file lock to prevent concurrent read-modify-write races
+    lock_path = f.with_suffix(".lock")
+    with open(lock_path, "w") as lock_fd:
+        fcntl.flock(lock_fd, fcntl.LOCK_EX)
+        try:
+            existing = _load_runtime_allowed_dirs()
+            if resolved not in existing:
+                existing.append(resolved)
+            # Atomic write via temp file + rename
+            tmp_fd, tmp_path = tempfile.mkstemp(
+                dir=str(f.parent), suffix=".tmp", prefix=".allowed_dirs_"
+            )
+            try:
+                with os.fdopen(tmp_fd, "w", encoding="utf-8") as tmp_f:
+                    json.dump(
+                        [str(p) for p in existing], tmp_f, ensure_ascii=False, indent=2
+                    )
+                os.replace(tmp_path, str(f))
+            except BaseException:
+                # Clean up temp file on failure
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+                raise
+        finally:
+            fcntl.flock(lock_fd, fcntl.LOCK_UN)
+
+
+def _allowed_workdir_prefixes() -> List[Path]:
+    prefixes: List[Path] = [Path(tempfile.gettempdir()).resolve()]
+    try:
+        prefixes.append(Path.cwd().resolve())
+    except Exception:
+        pass
+
     extra = os.getenv("PAPERBOT_RUNBOOK_ALLOW_DIR_PREFIXES", "").strip()
     if extra:
         for p in extra.split(","):
             p = p.strip()
             if p:
-                allowed_prefixes.append(Path(p).expanduser().resolve())
+                prefixes.append(Path(p).expanduser().resolve())
+
+    prefixes.extend(_load_runtime_allowed_dirs())
+
+    # Preserve order and deduplicate
+    unique: List[Path] = []
+    seen = set()
+    for prefix in prefixes:
+        key = str(prefix)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(prefix)
+    return unique
+
+
+def _allowed_workdir(workdir: Path) -> bool:
+    allowed_prefixes = _allowed_workdir_prefixes()
 
     try:
         resolved = workdir.resolve()
@@ -52,6 +126,99 @@ def _allowed_workdir(workdir: Path) -> bool:
             continue
 
     return False
+
+
+class PrepareProjectDirRequest(BaseModel):
+    project_dir: str
+    create_if_missing: bool = True
+
+
+@router.post("/runbook/project-dir/prepare")
+async def prepare_project_dir(body: PrepareProjectDirRequest):
+    """
+    Validate and normalize a project directory for runbook operations.
+
+    If the path is under allowed prefixes and does not exist yet, this endpoint
+    can create it to make Studio directory selection smoother.
+    """
+    requested = Path(body.project_dir).expanduser()
+    try:
+        resolved = requested.resolve(strict=False)
+    except Exception:
+        raise HTTPException(status_code=400, detail="invalid project_dir")
+
+    if not _allowed_workdir(resolved):
+        raise HTTPException(status_code=403, detail="project_dir is not allowed")
+
+    created = False
+    if resolved.exists() and not resolved.is_dir():
+        raise HTTPException(status_code=400, detail="project_dir must be a directory")
+    if not resolved.exists():
+        if not body.create_if_missing:
+            raise HTTPException(status_code=400, detail="project_dir must be an existing directory")
+        try:
+            resolved.mkdir(parents=True, exist_ok=True)
+            created = True
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"failed to create project_dir: {exc}") from exc
+
+    return {
+        "project_dir": str(resolved),
+        "created": created,
+        "allowed_prefixes": [str(p) for p in _allowed_workdir_prefixes()],
+    }
+
+
+class AddAllowedDirRequest(BaseModel):
+    directory: str
+
+
+def _runtime_allowlist_mutation_enabled() -> bool:
+    return os.getenv("PAPERBOT_RUNBOOK_ALLOWLIST_MUTATION", "false").lower() == "true"
+
+
+# Directories that must never be added to the allowlist (too broad / sensitive).
+_DENIED_PATHS = frozenset({
+    "/", "/bin", "/sbin", "/usr", "/etc", "/var", "/root", "/sys", "/proc",
+    "/dev", "/boot", "/lib", "/lib64", "/opt",
+})
+
+
+@router.post("/runbook/allowed-dirs")
+async def add_allowed_dir(body: AddAllowedDirRequest):
+    """Add a directory to the runtime-allowed prefixes list."""
+    if not _runtime_allowlist_mutation_enabled():
+        raise HTTPException(
+            status_code=403,
+            detail="runtime allowlist mutation is disabled"
+        )
+
+    try:
+        resolved = Path(body.directory).expanduser().resolve()
+    except Exception:
+        raise HTTPException(status_code=400, detail="invalid directory path")
+
+    if str(resolved) in _DENIED_PATHS:
+        raise HTTPException(
+            status_code=403,
+            detail=f"adding '{resolved}' is not allowed — path is too broad or sensitive"
+        )
+
+    if not resolved.exists() or not resolved.is_dir():
+        raise HTTPException(status_code=400, detail="directory does not exist or is not a directory")
+
+    _save_runtime_allowed_dir(resolved)
+    return {
+        "ok": True,
+        "directory": str(resolved),
+        "allowed_prefixes": [str(p) for p in _allowed_workdir_prefixes()],
+    }
+
+
+@router.get("/runbook/allowed-dirs")
+async def get_allowed_dirs():
+    """Return all currently allowed workspace directory prefixes."""
+    return {"prefixes": [str(p) for p in _allowed_workdir_prefixes()]}
 
 
 def _resolve_under_root(root: Path, relative_path: str) -> Path:

@@ -12,7 +12,7 @@ import {
     DialogHeader,
     DialogTitle,
 } from "@/components/ui/dialog"
-import { Folder, FolderOpen, Loader2, Circle, CheckCircle2 } from "lucide-react"
+import { Folder, FolderOpen, Loader2, Circle, CheckCircle2, ShieldAlert } from "lucide-react"
 import { StudioPaper } from "@/lib/store/studio-store"
 import { cn } from "@/lib/utils"
 
@@ -34,6 +34,8 @@ export function WorkspaceSetupDialog({
     const [choice, setChoice] = useState<"current" | "custom">("current")
     const [customDir, setCustomDir] = useState("")
     const [error, setError] = useState<string | null>(null)
+    const [validating, setValidating] = useState(false)
+    const [pendingAllowDir, setPendingAllowDir] = useState<string | null>(null)
 
     // Fetch current working directory on mount
     useEffect(() => {
@@ -62,13 +64,84 @@ export function WorkspaceSetupDialog({
         }
     }, [open, paper.title])
 
-    const handleConfirm = () => {
+    const prepareDirectory = async (directory: string): Promise<boolean> => {
+        const res = await fetch("/api/runbook/project-dir/prepare", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                project_dir: directory,
+                create_if_missing: true,
+            }),
+        })
+        if (!res.ok) {
+            if (res.status === 403) {
+                // Extract parent directory to add as allowed prefix
+                const parts = directory.replace(/\/+$/, "").split("/")
+                const parentDir = parts.length > 1 ? parts.slice(0, -1).join("/") : directory
+                setPendingAllowDir(parentDir)
+                return false
+            }
+            const text = await res.text()
+            try {
+                const payload = JSON.parse(text) as { detail?: string }
+                setError(payload.detail || `Directory is not available (${res.status})`)
+            } catch {
+                setError(text || `Directory is not available (${res.status})`)
+            }
+            return false
+        }
+        const data = await res.json() as { project_dir?: string }
+        onConfirm(data.project_dir || directory)
+        return true
+    }
+
+    const handleConfirm = async () => {
         const directory = choice === "current" ? currentDir : customDir.trim()
         if (!directory) {
             setError("Please enter a valid directory path")
             return
         }
-        onConfirm(directory)
+        setValidating(true)
+        setError(null)
+        setPendingAllowDir(null)
+        try {
+            await prepareDirectory(directory)
+        } catch {
+            setError("Failed to validate directory path")
+        } finally {
+            setValidating(false)
+        }
+    }
+
+    const handleAllowDir = async () => {
+        if (!pendingAllowDir) return
+        setValidating(true)
+        setError(null)
+        try {
+            const res = await fetch("/api/runbook/allowed-dirs", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ directory: pendingAllowDir }),
+            })
+            if (!res.ok) {
+                const text = await res.text()
+                try {
+                    const payload = JSON.parse(text) as { detail?: string }
+                    setError(payload.detail || "Failed to add directory to allowed list")
+                } catch {
+                    setError(text || "Failed to add directory to allowed list")
+                }
+                return
+            }
+            setPendingAllowDir(null)
+            // Retry the original prepare call
+            const directory = choice === "current" ? currentDir : customDir.trim()
+            await prepareDirectory(directory)
+        } catch {
+            setError("Failed to add directory to allowed list")
+        } finally {
+            setValidating(false)
+        }
     }
 
     const selectedDir = choice === "current" ? currentDir : customDir
@@ -93,6 +166,26 @@ export function WorkspaceSetupDialog({
                     </div>
                 ) : (
                     <div className="space-y-4 py-4">
+                        {pendingAllowDir && (
+                            <div className="text-sm bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 px-3 py-3 rounded-md space-y-2">
+                                <div className="flex items-start gap-2">
+                                    <ShieldAlert className="h-4 w-4 text-blue-600 dark:text-blue-400 shrink-0 mt-0.5" />
+                                    <div className="text-blue-700 dark:text-blue-300">
+                                        This directory is outside the allowed workspace paths.
+                                        Allow access to <code className="bg-blue-100 dark:bg-blue-900 px-1 rounded text-xs">{pendingAllowDir}</code>?
+                                    </div>
+                                </div>
+                                <div className="flex gap-2 ml-6">
+                                    <Button size="sm" onClick={handleAllowDir} disabled={validating}>
+                                        {validating ? "Allowing..." : "Allow Access"}
+                                    </Button>
+                                    <Button size="sm" variant="ghost" onClick={() => setPendingAllowDir(null)}>
+                                        Cancel
+                                    </Button>
+                                </div>
+                            </div>
+                        )}
+
                         {error && (
                             <div className="text-sm text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30 px-3 py-2 rounded-md">
                                 {error}
@@ -182,8 +275,8 @@ export function WorkspaceSetupDialog({
                     <Button variant="outline" onClick={onCancel}>
                         Cancel
                     </Button>
-                    <Button onClick={handleConfirm} disabled={loading || !selectedDir}>
-                        Start Session
+                    <Button onClick={handleConfirm} disabled={loading || !selectedDir || validating}>
+                        {validating ? "Preparing..." : "Start Session"}
                     </Button>
                 </DialogFooter>
             </DialogContent>

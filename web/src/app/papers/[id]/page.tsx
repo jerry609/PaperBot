@@ -34,7 +34,7 @@ export default async function PaperPage({ params }: { params: Promise<{ id: stri
                         <MessageSquare className="mr-2 h-4 w-4" /> Chat
                     </Button>
                     <Button asChild>
-                        <Link href={`/studio?title=${encodeURIComponent(paper.title)}&abstract=${encodeURIComponent(paper.abstract)}`}>
+                        <Link href={`/studio?paper_id=${encodeURIComponent(paper.id)}&title=${encodeURIComponent(paper.title)}&abstract=${encodeURIComponent(paper.abstract)}&generate=true`}>
                             <Play className="mr-2 h-4 w-4" /> Run Reproduction
                         </Link>
                     </Button>

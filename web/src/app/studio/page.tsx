@@ -8,11 +8,43 @@ import { ReproductionLog } from "@/components/studio/ReproductionLog"
 import { FilesPanel } from "@/components/studio/FilesPanel"
 import { MCPProvider } from "@/lib/mcp"
 import { useStudioStore } from "@/lib/store/studio-store"
+import { useContextPackGeneration } from "@/hooks/useContextPackGeneration"
+import type { ReproContextPack } from "@/lib/types/p2c"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable"
 
+function isReproContextPack(payload: unknown): payload is ReproContextPack {
+    if (!payload || typeof payload !== "object") return false
+    const value = payload as Partial<ReproContextPack> & {
+        paper?: { paper_id?: unknown }
+        confidence?: { overall?: unknown }
+    }
+    return (
+        typeof value.context_pack_id === "string" &&
+        typeof value.version === "string" &&
+        typeof value.created_at === "string" &&
+        typeof value.objective === "string" &&
+        typeof value.paper_type === "string" &&
+        Array.isArray(value.observations) &&
+        Array.isArray(value.task_roadmap) &&
+        Array.isArray(value.warnings) &&
+        typeof value.paper?.paper_id === "string" &&
+        typeof value.confidence?.overall === "number"
+    )
+}
+
 function StudioContent() {
-    const { addPaper, selectPaper, loadPapers, papers } = useStudioStore()
+    const {
+        addPaper,
+        selectPaper,
+        loadPapers,
+        papers,
+        setContextPack,
+        setContextPackLoading,
+        setContextPackError,
+        clearGenerationProgress,
+    } = useStudioStore()
+    const { generate } = useContextPackGeneration()
     const searchParams = useSearchParams()
     const router = useRouter()
     const hasProcessedParams = useRef(false)
@@ -23,16 +55,34 @@ function StudioContent() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [])
 
-    // Handle URL params for paper_id (from /papers page "Run Reproduction" button)
+    const normalizePack = (payload: unknown): ReproContextPack | null => {
+        if (!payload || typeof payload !== "object") return null
+        const raw = payload as Record<string, unknown>
+        if (raw.pack && typeof raw.pack === "object") {
+            const pack = raw.pack as Record<string, unknown>
+            const maybePack: Record<string, unknown> =
+                !pack.context_pack_id && typeof raw.context_pack_id === "string"
+                    ? { ...pack, context_pack_id: raw.context_pack_id }
+                    : pack
+            return isReproContextPack(maybePack) ? maybePack : null
+        }
+        return isReproContextPack(raw) ? raw : null
+    }
+
+    // Handle URL params from the Papers detail entry point and context pack deep links
     useEffect(() => {
         if (hasProcessedParams.current) return
 
         const paperId = searchParams.get("paper_id")
         const title = searchParams.get("title")
         const abstract = searchParams.get("abstract")
+        const generateFlag = searchParams.get("generate") === "true"
+        const contextPackId = searchParams.get("context_pack_id")
+        console.info("[P2C:M3] studio:params", { paperId, generateFlag, contextPackId })
+
+        let shouldCleanUrl = false
 
         if (paperId) {
-            hasProcessedParams.current = true
             const existingPaper = papers.find(p => p.id === paperId)
             if (existingPaper) {
                 selectPaper(paperId)
@@ -42,17 +92,62 @@ function StudioContent() {
                     abstract: abstract || "",
                 })
             }
-            router.replace("/studio", { scroll: false })
+            shouldCleanUrl = true
         } else if (title && abstract) {
-            hasProcessedParams.current = true
             addPaper({ title, abstract })
+            shouldCleanUrl = true
+        }
+
+        if (contextPackId) {
+            shouldCleanUrl = true
+            setContextPackLoading(true)
+            setContextPackError(null)
+            clearGenerationProgress()
+            fetch(`/api/research/repro/context/${contextPackId}`)
+                .then((res) => {
+                    if (!res.ok) {
+                        throw new Error(`Failed to load context pack (${res.status})`)
+                    }
+                    return res.json()
+                })
+                .then((payload) => {
+                    const pack = normalizePack(payload)
+                    if (pack) setContextPack(pack)
+                })
+                .catch((err) => setContextPackError(err instanceof Error ? err.message : String(err)))
+                .finally(() => setContextPackLoading(false))
+        }
+
+        if (generateFlag) {
+            shouldCleanUrl = true
+            if (paperId) {
+                console.info("[P2C:M3] studio:trigger_generate", { paperId })
+                generate({ paperId })
+            } else {
+                console.warn("[P2C:M3] studio:missing_paper_id")
+                setContextPackError("Missing paper_id for generation.")
+            }
+        }
+
+        if (shouldCleanUrl) {
+            hasProcessedParams.current = true
             router.replace("/studio", { scroll: false })
         }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [searchParams, papers])
+    }, [
+        addPaper,
+        clearGenerationProgress,
+        generate,
+        papers,
+        router,
+        searchParams,
+        selectPaper,
+        setContextPack,
+        setContextPackError,
+        setContextPackLoading,
+    ])
 
     return (
-        <div className="flex h-[calc(100vh_-_theme(spacing.16))] min-h-0 flex-col">
+        <div className="flex h-screen min-h-0 flex-col">
             {/* Top Bar - minimal */}
             <div className="border-b bg-background h-11 px-4 flex items-center gap-2 shrink-0">
                 <PanelsTopLeft className="h-4 w-4 text-primary" />
