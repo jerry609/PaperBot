@@ -1,0 +1,36 @@
+# Push Channel Configuration for PaperBot DailyPaper
+# Uses Apprise URL format: https://github.com/caronc/apprise/wiki
+#
+# Each channel has a URL and optional tags for routing.
+# Use 'daily' tag for channels that receive DailyPaper digests.
+#
+# Examples (uncomment and fill in credentials):
+
+channels: []
+  # ── Telegram ──
+  # - url: "tgram://bot_token/chat_id"
+  #   tags: ["daily", "telegram"]
+
+  # ── Discord ──
+  # - url: "discord://webhook_id/webhook_token"
+  #   tags: ["daily", "discord"]
+
+  # ── WeCom (企业微信) ──
+  # - url: "wecom://corp_id/secret/agent_id/@user"
+  #   tags: ["daily", "wecom"]
+
+  # ── Feishu / Lark (飞书) ──
+  # - url: "lark://app_id/app_secret/user_id"
+  #   tags: ["daily", "lark"]
+
+  # ── Slack ──
+  # - url: "slack://token_a/token_b/token_c/#channel"
+  #   tags: ["daily", "slack"]
+
+  # ── Email ──
+  # - url: "mailto://user:pass@smtp.example.com?to=recipient@example.com"
+  #   tags: ["daily", "email"]
+
+  # ── DingTalk ──
+  # - url: "dingtalk://token/?secret=SEC..."
+  #   tags: ["daily", "dingtalk"]

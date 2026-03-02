@@ -132,6 +132,8 @@ class DailyPushService:
                     self._send_dingtalk(subject=subject, body=text)
                 elif channel == "resend":
                     self._send_resend(report=report, markdown=markdown or text)
+                elif channel == "apprise":
+                    self._send_apprise(report=report, markdown=markdown or text, html_body=html_body)
                 else:
                     raise ValueError(f"unsupported channel: {channel}")
                 results["results"][channel] = {"ok": True}
@@ -301,3 +303,20 @@ class DailyPushService:
         ok_count = sum(1 for v in result.values() if v.get("ok"))
         fail_count = len(result) - ok_count
         logger.info("Resend digest sent: ok=%d fail=%d", ok_count, fail_count)
+
+    def _send_apprise(
+        self, *, report: Dict[str, Any], markdown: str, html_body: str = ""
+    ) -> None:
+        from paperbot.infrastructure.push.apprise_notifier import AppriseNotifier
+
+        config_path = os.getenv("PAPERBOT_PUSH_CHANNELS_CONFIG", "config/push_channels.yaml")
+        notifier = AppriseNotifier.from_yaml(config_path)
+        if not notifier.available:
+            raise ValueError(
+                "Apprise not available — install 'apprise' package and configure push_channels.yaml"
+            )
+        result = notifier.push_daily_digest(
+            report=report, markdown=markdown, html=html_body, tag="daily"
+        )
+        if not result.get("ok"):
+            raise RuntimeError(f"Apprise push failed: {result.get('error', 'unknown')}")
