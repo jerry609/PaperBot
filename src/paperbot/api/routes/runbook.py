@@ -112,9 +112,9 @@ def _allowed_workdir_prefixes() -> List[Path]:
 
 def _is_under_prefix(path: Path, prefix: Path) -> bool:
     try:
-        resolved = path.resolve(strict=False)
-        normalized_prefix = prefix.resolve(strict=False)
-        return resolved == normalized_prefix or resolved.is_relative_to(normalized_prefix)
+        path_str = os.path.normpath(str(path))
+        prefix_str = os.path.normpath(str(prefix))
+        return path_str == prefix_str or path_str.startswith(prefix_str + os.sep)
     except Exception:
         return False
 
@@ -123,7 +123,7 @@ def _allowed_workdir(workdir: Path) -> bool:
     allowed_prefixes = _allowed_workdir_prefixes()
 
     try:
-        resolved = workdir.resolve(strict=False)
+        resolved = Path(os.path.normpath(str(workdir)))
     except Exception:
         return False
 
