@@ -51,3 +51,33 @@ def test_prepare_project_dir_rejects_file_path(tmp_path: Path, monkeypatch):
 
     assert resp.status_code == 400
     assert "must be a directory" in resp.json()["detail"]
+
+
+def test_add_allowed_dir_accepts_existing_directory_under_cwd(tmp_path: Path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("PAPERBOT_RUNBOOK_ALLOWLIST_MUTATION", "true")
+
+    target = tmp_path / "workspace" / "team-a"
+    target.mkdir(parents=True, exist_ok=True)
+
+    with TestClient(api_main.app) as client:
+        resp = client.post("/api/runbook/allowed-dirs", json={"directory": str(target)})
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["ok"] is True
+    assert payload["directory"] == str(target.resolve())
+
+
+def test_add_allowed_dir_rejects_outside_allowed_prefixes(tmp_path: Path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("PAPERBOT_RUNBOOK_ALLOWLIST_MUTATION", "true")
+
+    outside = Path.home().parent / "paperbot-unsafe"
+    outside.mkdir(parents=True, exist_ok=True)
+
+    with TestClient(api_main.app) as client:
+        resp = client.post("/api/runbook/allowed-dirs", json={"directory": str(outside)})
+
+    assert resp.status_code == 403
+    assert "not allowed" in resp.json()["detail"]

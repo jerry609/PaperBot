@@ -110,22 +110,64 @@ def _allowed_workdir_prefixes() -> List[Path]:
     return unique
 
 
+def _is_under_prefix(path: Path, prefix: Path) -> bool:
+    try:
+        path_str = os.path.normpath(str(path))
+        prefix_str = os.path.normpath(str(prefix))
+        return path_str == prefix_str or path_str.startswith(prefix_str + os.sep)
+    except Exception:
+        return False
+
+
 def _allowed_workdir(workdir: Path) -> bool:
     allowed_prefixes = _allowed_workdir_prefixes()
 
     try:
-        resolved = workdir.resolve()
+        resolved = Path(os.path.normpath(str(workdir)))
     except Exception:
         return False
 
     for prefix in allowed_prefixes:
-        try:
-            if resolved == prefix or str(resolved).startswith(str(prefix) + os.sep):
-                return True
-        except Exception:
-            continue
+        if _is_under_prefix(resolved, prefix):
+            return True
 
     return False
+
+
+def _normalize_user_directory(raw_path: str, field_name: str) -> Path:
+    """
+    Normalize a user-supplied directory path and enforce allow-prefix policy.
+    """
+    raw = raw_path.strip()
+    if not raw:
+        raise HTTPException(status_code=400, detail=f"{field_name} cannot be empty")
+    if "\x00" in raw:
+        raise HTTPException(status_code=400, detail=f"{field_name} contains invalid character")
+
+    # Manual '~' expansion keeps home shorthand support while avoiding direct
+    # path construction from the untrusted input before policy checks.
+    if raw == "~":
+        normalized = str(Path.home())
+    elif raw.startswith("~/"):
+        normalized = str(Path.home() / raw[2:])
+    else:
+        normalized = raw
+
+    if not os.path.isabs(normalized):
+        normalized = str((Path.cwd() / normalized).resolve(strict=False))
+
+    for prefix in _allowed_workdir_prefixes():
+        prefix_str = str(prefix)
+        if normalized == prefix_str:
+            return prefix
+        if normalized.startswith(prefix_str + os.sep):
+            suffix = normalized[len(prefix_str):].lstrip("/\\")
+            candidate = (prefix / suffix).resolve(strict=False) if suffix else prefix
+            if _is_under_prefix(candidate, prefix):
+                return candidate
+            raise HTTPException(status_code=403, detail=f"{field_name} is not allowed")
+
+    raise HTTPException(status_code=403, detail=f"{field_name} is not allowed")
 
 
 class PrepareProjectDirRequest(BaseModel):
@@ -141,14 +183,10 @@ async def prepare_project_dir(body: PrepareProjectDirRequest):
     If the path is under allowed prefixes and does not exist yet, this endpoint
     can create it to make Studio directory selection smoother.
     """
-    requested = Path(body.project_dir).expanduser()
     try:
-        resolved = requested.resolve(strict=False)
-    except Exception:
-        raise HTTPException(status_code=400, detail="invalid project_dir")
-
-    if not _allowed_workdir(resolved):
-        raise HTTPException(status_code=403, detail="project_dir is not allowed")
+        resolved = _normalize_user_directory(body.project_dir, field_name="project_dir")
+    except HTTPException:
+        raise
 
     created = False
     if resolved.exists() and not resolved.is_dir():
@@ -194,9 +232,9 @@ async def add_allowed_dir(body: AddAllowedDirRequest):
         )
 
     try:
-        resolved = Path(body.directory).expanduser().resolve()
-    except Exception:
-        raise HTTPException(status_code=400, detail="invalid directory path")
+        resolved = _normalize_user_directory(body.directory, field_name="directory")
+    except HTTPException:
+        raise
 
     if str(resolved) in _DENIED_PATHS:
         raise HTTPException(
