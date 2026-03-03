@@ -5,6 +5,7 @@ import json
 import logging
 import re
 import struct
+import threading
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
@@ -437,8 +438,13 @@ class SqlAlchemyMemoryStore:
                 session.refresh(row)
                 created += 1
                 created_rows.append(row)
-                # Generate and store embedding after the row is committed (best-effort).
-                self._store_embedding(row.id, content)
+                # Generate and store embedding in a background thread (best-effort).
+                _row_id, _content = row.id, content
+                threading.Thread(
+                    target=self._store_embedding,
+                    args=(_row_id, _content),
+                    daemon=True,
+                ).start()
 
         return created, skipped, created_rows
 
@@ -461,7 +467,7 @@ class SqlAlchemyMemoryStore:
             return None
 
     def _store_embedding(self, row_id: int, content: str) -> None:
-        """Generate embedding for *content* and persist it (best-effort, non-blocking)."""
+        """Generate embedding for *content* and persist it (best-effort)."""
         provider = self._get_embedding_provider()
         if provider is None:
             return
@@ -475,19 +481,8 @@ class SqlAlchemyMemoryStore:
                     text("UPDATE memory_items SET embedding = :blob WHERE id = :rid"),
                     {"blob": blob, "rid": row_id},
                 )
-                if self._vec_available:
-                    try:
-                        conn.execute(
-                            text("DELETE FROM vec_items WHERE rowid = :rid"), {"rid": row_id}
-                        )
-                        conn.execute(
-                            text(
-                                "INSERT INTO vec_items(rowid, embedding) VALUES (:rid, :blob)"
-                            ),
-                            {"rid": row_id, "blob": blob},
-                        )
-                    except Exception:  # noqa: BLE001 — vec table may not exist yet
-                        pass
+                # The memory_items_vec_au trigger keeps vec_items in sync; no
+                # manual DELETE/INSERT needed here.
                 conn.commit()
         except Exception:  # noqa: BLE001 — non-critical, degrade gracefully
             logger.warning(
@@ -632,14 +627,17 @@ class SqlAlchemyMemoryStore:
 
         try:
             with self._provider.engine.connect() as conn:
-                # Fetch candidate rowids from FTS5 ordered by BM25 rank.
+                # Join with memory_items so user_id filtering and LIMIT both
+                # apply only to the current user's data (multi-tenant isolation).
                 fts_rows = conn.execute(
                     text(
-                        "SELECT rowid FROM memory_items_fts"
-                        " WHERE memory_items_fts MATCH :q"
+                        "SELECT f.rowid FROM memory_items_fts f"
+                        " JOIN memory_items m ON m.id = f.rowid"
+                        " WHERE f MATCH :q"
+                        " AND m.user_id = :uid"
                         " ORDER BY rank LIMIT 250"
                     ),
-                    {"q": fts_query},
+                    {"q": fts_query, "uid": user_id},
                 ).fetchall()
         except Exception:
             return None  # FTS5 table not available yet
@@ -766,13 +764,17 @@ class SqlAlchemyMemoryStore:
         query_blob = _pack_embedding(query_vec)
         try:
             with self._provider.engine.connect() as conn:
+                # Join with memory_items so user_id filtering and LIMIT both
+                # apply only to the current user's data (multi-tenant isolation).
                 rows = conn.execute(
                     text(
-                        "SELECT rowid, distance FROM vec_items"
-                        " WHERE embedding MATCH :blob"
-                        " ORDER BY distance LIMIT :k"
+                        "SELECT v.rowid, v.distance FROM vec_items v"
+                        " JOIN memory_items m ON m.id = v.rowid"
+                        " WHERE v.embedding MATCH :blob"
+                        " AND m.user_id = :uid"
+                        " ORDER BY v.distance LIMIT :k"
                     ),
-                    {"blob": query_blob, "k": limit * 5},
+                    {"blob": query_blob, "k": limit * 5, "uid": user_id},
                 ).fetchall()
         except Exception:  # noqa: BLE001 — vec table may not exist yet
             return None

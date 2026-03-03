@@ -161,7 +161,10 @@ Provide ONLY the corrected full file content. No explanations.
                             code_snippet=repair_result.original_error[:1000],
                         )
                     except Exception:  # noqa: BLE001
-                        pass
+                        logger.warning(
+                            "Failed to persist code experience for failure reason.",
+                            exc_info=True,
+                        )
 
                 return AgentResult.success(
                     data={
