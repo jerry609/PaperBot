@@ -52,6 +52,8 @@ from paperbot.api.routes.feed import (
     _build_atom_xml,
     _build_rss_xml,
     _collect_papers_from_report,
+    _filter_reports_by_keyword,
+    _filter_reports_by_track,
     _load_latest_reports,
 )
 
@@ -95,6 +97,16 @@ def test_build_rss_xml():
     assert "rss" in xml.lower()
     assert "FlashKV" in xml
     assert "PagedAttention" in xml
+
+
+def test_build_rss_xml_includes_main_figure_enclosure():
+    report = _sample_report()
+    report["queries"][0]["top_items"][0]["main_figure"] = {
+        "url": "https://example.com/figure.png",
+        "caption": "Architecture",
+    }
+    xml = _build_rss_xml([report])
+    assert "https://example.com/figure.png" in xml
 
 
 def test_build_rss_xml_empty():
@@ -143,38 +155,31 @@ def test_track_rss_filters_by_query(tmp_path):
     report_path.write_text(json.dumps(_sample_report()))
 
     reports = _load_latest_reports(tmp_path)
-
-    # Filter to matching track
-    filtered = []
-    for report in reports:
-        track_report = {
-            **report,
-            "queries": [
-                q for q in (report.get("queries") or [])
-                if "kv cache" in (q.get("normalized_query") or "").lower()
-            ],
-        }
-        if track_report["queries"]:
-            filtered.append(track_report)
+    filtered = _filter_reports_by_track(reports, track_name="kv cache")
 
     xml = _build_rss_xml(filtered, title="PaperBot · KV cache")
     assert "FlashKV" in xml
 
-    # Non-matching track
-    filtered_none = []
-    for report in reports:
-        track_report = {
-            **report,
-            "queries": [
-                q for q in (report.get("queries") or [])
-                if "nonexistent" in (q.get("normalized_query") or "").lower()
-            ],
-        }
-        if track_report["queries"]:
-            filtered_none.append(track_report)
+    filtered_none = _filter_reports_by_track(reports, track_name="nonexistent")
 
     xml_empty = _build_rss_xml(filtered_none)
     assert "FlashKV" not in xml_empty
+
+
+def test_keyword_filter_matches_digest_card(tmp_path):
+    report = _sample_report()
+    report["queries"][0]["top_items"][0]["digest_card"] = {
+        "highlight": "Faster KV cache compression",
+        "tags": ["KV Cache", "Inference"],
+    }
+    report_path = tmp_path / "2026-03-02-digest.json"
+    report_path.write_text(json.dumps(report))
+
+    reports = _load_latest_reports(tmp_path)
+    filtered = _filter_reports_by_keyword(reports, keyword="compression")
+    xml = _build_rss_xml(filtered, title="PaperBot · keyword:compression")
+    assert "FlashKV" in xml
+    assert "PagedAttention" not in xml
 
 
 # ── Feed service export test ─────────────────────────────────

@@ -5,7 +5,7 @@ import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Tuple
 
 from fastapi import APIRouter, Query
 from fastapi.responses import Response
@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 _REPORTS_DIR = Path("./reports/dailypaper")
+_FEED_CACHE: Dict[str, Dict[str, Any]] = {}
 
 
 def _load_latest_reports(
@@ -47,6 +48,92 @@ def _collect_papers_from_report(report: Dict[str, Any]) -> List[Dict[str, Any]]:
                 seen.add(key)
                 papers.append(item)
     return papers
+
+
+def _filter_reports_by_track(
+    reports: List[Dict[str, Any]],
+    *,
+    track_name: str,
+) -> List[Dict[str, Any]]:
+    filtered: List[Dict[str, Any]] = []
+    needle = (track_name or "").strip().lower()
+    if not needle:
+        return filtered
+
+    for report in reports:
+        track_report = {
+            **report,
+            "queries": [
+                q
+                for q in (report.get("queries") or [])
+                if needle in (q.get("normalized_query") or q.get("raw_query") or "").lower()
+            ],
+        }
+        if track_report["queries"]:
+            filtered.append(track_report)
+    return filtered
+
+
+def _paper_matches_keyword(item: Dict[str, Any], keyword: str) -> bool:
+    needle = (keyword or "").strip().lower()
+    if not needle:
+        return False
+    fields = [
+        str(item.get("title") or ""),
+        str(item.get("snippet") or item.get("abstract") or ""),
+        str((item.get("judge") or {}).get("one_line_summary") or ""),
+        str((item.get("digest_card") or {}).get("highlight") or ""),
+        str((item.get("digest_card") or {}).get("method") or ""),
+        str((item.get("digest_card") or {}).get("finding") or ""),
+    ]
+    tags = (item.get("digest_card") or {}).get("tags") or []
+    fields.extend(str(tag) for tag in tags)
+    text = " ".join(fields).lower()
+    return needle in text
+
+
+def _filter_reports_by_keyword(
+    reports: List[Dict[str, Any]],
+    *,
+    keyword: str,
+) -> List[Dict[str, Any]]:
+    filtered: List[Dict[str, Any]] = []
+    for report in reports:
+        queries = []
+        for query in report.get("queries") or []:
+            top_items = [
+                item
+                for item in (query.get("top_items") or [])
+                if _paper_matches_keyword(item, keyword)
+            ]
+            if top_items:
+                queries.append({**query, "top_items": top_items})
+        if queries:
+            filtered.append({**report, "queries": queries})
+    return filtered
+
+
+def _reports_signature(reports_dir: Path) -> Tuple[int, int]:
+    if not reports_dir.exists():
+        return (0, 0)
+    json_files = list(reports_dir.glob("*.json"))
+    if not json_files:
+        return (0, 0)
+    latest_mtime_ns = max(int(p.stat().st_mtime_ns) for p in json_files)
+    return (len(json_files), latest_mtime_ns)
+
+
+def _cached_xml(cache_key: str, reports_dir: Path) -> str:
+    signature = _reports_signature(reports_dir)
+    row = _FEED_CACHE.get(cache_key)
+    if row and row.get("signature") == signature:
+        return str(row.get("xml") or "")
+    return ""
+
+
+def _store_cached_xml(cache_key: str, reports_dir: Path, xml: str) -> str:
+    _FEED_CACHE[cache_key] = {"signature": _reports_signature(reports_dir), "xml": xml}
+    return xml
 
 
 def _build_rss_xml(
@@ -109,6 +196,14 @@ def _build_rss_xml(
                     fe.category(term=rec)
                 for tag in tags[:5]:
                     fe.category(term=tag)
+                main_figure = item.get("main_figure") or {}
+                if isinstance(main_figure, dict):
+                    fig_url = str(main_figure.get("url") or "").strip()
+                    if fig_url:
+                        try:
+                            fe.enclosure(url=fig_url, length=0, type="image/jpeg")
+                        except Exception:
+                            pass
 
                 # Publication date
                 if generated_at:
@@ -224,8 +319,11 @@ async def daily_rss(
     limit: int = Query(default=20, ge=1, le=100),
 ):
     """RSS 2.0 feed of recent DailyPaper digest papers."""
-    reports = _load_latest_reports(_REPORTS_DIR, limit=limit)
-    xml = _build_rss_xml(reports)
+    cache_key = f"daily_rss:{limit}"
+    xml = _cached_xml(cache_key, _REPORTS_DIR)
+    if not xml:
+        reports = _load_latest_reports(_REPORTS_DIR, limit=limit)
+        xml = _store_cached_xml(cache_key, _REPORTS_DIR, _build_rss_xml(reports))
     return Response(content=xml, media_type="application/rss+xml; charset=utf-8")
 
 
@@ -234,8 +332,11 @@ async def daily_atom(
     limit: int = Query(default=20, ge=1, le=100),
 ):
     """Atom feed of recent DailyPaper digest papers."""
-    reports = _load_latest_reports(_REPORTS_DIR, limit=limit)
-    xml = _build_atom_xml(reports)
+    cache_key = f"daily_atom:{limit}"
+    xml = _cached_xml(cache_key, _REPORTS_DIR)
+    if not xml:
+        reports = _load_latest_reports(_REPORTS_DIR, limit=limit)
+        xml = _store_cached_xml(cache_key, _REPORTS_DIR, _build_atom_xml(reports))
     return Response(content=xml, media_type="application/atom+xml; charset=utf-8")
 
 
@@ -245,26 +346,41 @@ async def track_rss(
     limit: int = Query(default=20, ge=1, le=100),
 ):
     """RSS 2.0 feed filtered to a specific query/track."""
-    reports = _load_latest_reports(_REPORTS_DIR, limit=limit)
+    cache_key = f"track_rss:{track_name}:{limit}"
+    xml = _cached_xml(cache_key, _REPORTS_DIR)
+    if not xml:
+        reports = _load_latest_reports(_REPORTS_DIR, limit=limit)
+        filtered = _filter_reports_by_track(reports, track_name=track_name)
+        xml = _store_cached_xml(
+            cache_key,
+            _REPORTS_DIR,
+            _build_rss_xml(
+                filtered,
+                title=f"PaperBot · {track_name}",
+                description=f"Papers matching '{track_name}'",
+            ),
+        )
+    return Response(content=xml, media_type="application/rss+xml; charset=utf-8")
 
-    # Filter to only papers from the specified track/query
-    filtered: List[Dict[str, Any]] = []
-    for report in reports:
-        track_report = {
-            **report,
-            "queries": [
-                q
-                for q in (report.get("queries") or [])
-                if track_name.lower()
-                in (q.get("normalized_query") or q.get("raw_query") or "").lower()
-            ],
-        }
-        if track_report["queries"]:
-            filtered.append(track_report)
 
-    xml = _build_rss_xml(
-        filtered,
-        title=f"PaperBot · {track_name}",
-        description=f"Papers matching '{track_name}'",
-    )
+@router.get("/feed/keyword/{keyword}.xml")
+async def keyword_rss(
+    keyword: str,
+    limit: int = Query(default=20, ge=1, le=100),
+):
+    """RSS 2.0 feed filtered by keyword over digest-card fields and summaries."""
+    cache_key = f"keyword_rss:{keyword}:{limit}"
+    xml = _cached_xml(cache_key, _REPORTS_DIR)
+    if not xml:
+        reports = _load_latest_reports(_REPORTS_DIR, limit=limit)
+        filtered = _filter_reports_by_keyword(reports, keyword=keyword)
+        xml = _store_cached_xml(
+            cache_key,
+            _REPORTS_DIR,
+            _build_rss_xml(
+                filtered,
+                title=f"PaperBot · keyword:{keyword}",
+                description=f"Papers matching keyword '{keyword}'",
+            ),
+        )
     return Response(content=xml, media_type="application/rss+xml; charset=utf-8")
