@@ -1258,3 +1258,27 @@ class ReproContextFeedbackModel(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
 
     pack = relationship("ReproContextPackModel", back_populates="feedback_rows")
+
+
+# ============================================================================
+# Issue #162: CodeMemory Persistence
+# ============================================================================
+
+
+class ReproCodeExperienceModel(Base):
+    """Persisted code generation experience from the Paper2Code pipeline.
+
+    Stores success patterns, failure reasons, and verified structures so that
+    CodeMemory can pre-load prior experience when regenerating for the same paper.
+    """
+
+    __tablename__ = "repro_code_experience"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    pack_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
+    paper_id: Mapped[Optional[str]] = mapped_column(String(256), nullable=True, index=True)
+    # pattern_type: success_pattern | failure_reason | verified_structure
+    pattern_type: Mapped[str] = mapped_column(String(32), index=True)
+    content: Mapped[str] = mapped_column(Text, default="")
+    code_snippet: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)

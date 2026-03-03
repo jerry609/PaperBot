@@ -15,9 +15,12 @@ import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple
+from typing import TYPE_CHECKING, Dict, List, Optional, Set, Tuple
 
 from .symbol_index import SymbolIndex, SymbolInfo
+
+if TYPE_CHECKING:
+    from paperbot.infrastructure.stores.repro_experience_store import ReproExperienceStore
 
 logger = logging.getLogger(__name__)
 
@@ -58,17 +61,25 @@ class CodeMemory:
     # Approximate tokens per character (conservative estimate)
     CHARS_PER_TOKEN = 4
 
-    def __init__(self, max_context_tokens: int = 8000):
+    def __init__(
+        self,
+        max_context_tokens: int = 8000,
+        experience_store: "Optional[ReproExperienceStore]" = None,
+    ):
         """
         Initialize CodeMemory.
 
         Args:
             max_context_tokens: Maximum tokens for context injection
+            experience_store: Optional store for persisting/loading experiences
         """
         self.max_context_tokens = max_context_tokens
         self._files: Dict[str, FileInfo] = {}
         self._symbol_index = SymbolIndex()
         self._generation_order: List[str] = []
+        self._experience_store: "Optional[ReproExperienceStore]" = experience_store
+        # Prior experiences loaded from DB for context injection
+        self._prior_experiences: List[Dict] = []
 
     def add_file(self, path: str, content: str, purpose: str = "") -> None:
         """
@@ -198,6 +209,19 @@ class CodeMemory:
             if len(interfaces) < remaining_chars:
                 context_parts.append(f"\n# === Available Interfaces ===\n{interfaces}")
 
+        # 4. Prior experiences from DB (success patterns / verified structures)
+        if self._prior_experiences and remaining_chars > 200:
+            exp_lines = []
+            for exp in self._prior_experiences[:5]:
+                ptype = exp.get("pattern_type", "")
+                content = exp.get("content", "")
+                if ptype in ("success_pattern", "verified_structure") and content:
+                    exp_lines.append(f"  [{ptype}] {content}")
+            if exp_lines:
+                prior_ctx = "# === Prior Experience (same paper) ===\n" + "\n".join(exp_lines)
+                if len(prior_ctx) < remaining_chars:
+                    context_parts.append(prior_ctx)
+
         return "\n\n".join(context_parts)
 
     def _predict_dependencies(self, current_file: str) -> List[str]:
@@ -325,11 +349,108 @@ class CodeMemory:
         """Get the file dependency graph."""
         return {path: info.dependencies for path, info in self._files.items()}
 
+    # ------------------------------------------------------------------
+    # Persistence helpers (issue #162)
+    # ------------------------------------------------------------------
+
+    def load_experiences_from_db(
+        self,
+        paper_id: str,
+        *,
+        pack_id: Optional[str] = None,
+        limit: int = 20,
+    ) -> None:
+        """Pre-load prior experiences for *paper_id* from the DB into memory.
+
+        Loaded records are stored in ``_prior_experiences`` and injected into
+        ``get_relevant_context()`` so the LLM can see what worked before.
+        """
+        if not self._experience_store or not paper_id:
+            return
+        try:
+            rows = self._experience_store.get_by_paper_id(paper_id, limit=limit)
+            if pack_id:
+                pack_rows = self._experience_store.get_by_pack_id(pack_id, limit=limit)
+                seen_ids = {r["id"] for r in rows}
+                rows += [r for r in pack_rows if r["id"] not in seen_ids]
+            self._prior_experiences = rows
+            logger.debug("Loaded %d prior experiences for paper_id=%s", len(rows), paper_id)
+        except Exception:  # noqa: BLE001
+            logger.debug("Failed to load experiences from DB", exc_info=True)
+
+    def record_success_pattern(
+        self,
+        *,
+        paper_id: Optional[str],
+        pack_id: Optional[str] = None,
+        filepath: str,
+        code_snippet: Optional[str] = None,
+    ) -> None:
+        """Record that *filepath* was successfully generated (best-effort)."""
+        if not self._experience_store:
+            return
+        try:
+            self._experience_store.add(
+                pattern_type="success_pattern",
+                content=f"Successfully generated {filepath}",
+                paper_id=paper_id,
+                pack_id=pack_id,
+                code_snippet=(code_snippet or "")[:2000] or None,
+            )
+        except Exception:  # noqa: BLE001
+            logger.debug("Failed to record success_pattern", exc_info=True)
+
+    def record_verified_structure(
+        self,
+        *,
+        paper_id: Optional[str],
+        pack_id: Optional[str] = None,
+        description: str,
+        code_snippet: Optional[str] = None,
+    ) -> None:
+        """Record that a code structure passed verification (best-effort)."""
+        if not self._experience_store:
+            return
+        try:
+            self._experience_store.add(
+                pattern_type="verified_structure",
+                content=description,
+                paper_id=paper_id,
+                pack_id=pack_id,
+                code_snippet=(code_snippet or "")[:2000] or None,
+            )
+        except Exception:  # noqa: BLE001
+            logger.debug("Failed to record verified_structure", exc_info=True)
+
+    def record_failure_reason(
+        self,
+        *,
+        paper_id: Optional[str],
+        pack_id: Optional[str] = None,
+        error_type: str,
+        fix_applied: str,
+        code_snippet: Optional[str] = None,
+    ) -> None:
+        """Record a debugging fix so future runs can avoid the same error (best-effort)."""
+        if not self._experience_store:
+            return
+        try:
+            self._experience_store.add(
+                pattern_type="failure_reason",
+                content=f"[{error_type}] fixed: {fix_applied}",
+                paper_id=paper_id,
+                pack_id=pack_id,
+                code_snippet=(code_snippet or "")[:2000] or None,
+            )
+        except Exception:  # noqa: BLE001
+            logger.debug("Failed to record failure_reason", exc_info=True)
+
     def clear(self) -> None:
         """Clear all memory."""
         self._files.clear()
         self._symbol_index = SymbolIndex()
         self._generation_order.clear()
+        self._prior_experiences.clear()
 
     @property
     def files(self) -> Dict[str, str]:
