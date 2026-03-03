@@ -5,9 +5,13 @@ Falls back gracefully when the service is unavailable.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import re
-from dataclasses import dataclass, field
+import time
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import httpx
@@ -46,10 +50,14 @@ class MineruClient:
         api_key: str = "",
         base_url: str = _DEFAULT_BASE_URL,
         timeout: float = _DEFAULT_TIMEOUT,
+        cache_dir: str = "",
+        cache_ttl_seconds: int = 24 * 3600,
     ):
         self._api_key = api_key
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout
+        self._cache_dir = Path(cache_dir).expanduser() if cache_dir else None
+        self._cache_ttl_seconds = max(0, int(cache_ttl_seconds))
 
     def extract_figures(self, pdf_url: str) -> List[Figure]:
         """Extract figures from a PDF URL via MinerU Cloud API.
@@ -63,8 +71,14 @@ class MineruClient:
         if not pdf_url or not pdf_url.strip():
             return []
 
+        cached = self._load_cached_figures(pdf_url)
+        if cached is not None:
+            return cached
+
         try:
-            return self._call_extract(pdf_url)
+            figures = self._call_extract(pdf_url)
+            self._store_cached_figures(pdf_url, figures)
+            return figures
         except Exception as exc:
             logger.warning("MinerU figure extraction failed: %s", exc)
             return []
@@ -86,6 +100,68 @@ class MineruClient:
             data = resp.json()
 
         return self._parse_figures(data)
+
+    def _cache_path(self, pdf_url: str) -> Optional[Path]:
+        if self._cache_dir is None:
+            return None
+        key = hashlib.sha256(pdf_url.strip().encode("utf-8")).hexdigest()
+        return self._cache_dir / f"{key}.json"
+
+    def _load_cached_figures(self, pdf_url: str) -> Optional[List[Figure]]:
+        cache_path = self._cache_path(pdf_url)
+        if cache_path is None or not cache_path.exists():
+            return None
+        try:
+            raw = json.loads(cache_path.read_text(encoding="utf-8"))
+            if not isinstance(raw, dict):
+                return None
+            saved_at = float(raw.get("saved_at") or 0)
+            if self._cache_ttl_seconds > 0 and (time.time() - saved_at) > self._cache_ttl_seconds:
+                return None
+            rows = raw.get("figures") or []
+            figures: List[Figure] = []
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                figures.append(
+                    Figure(
+                        url=str(row.get("url") or "").strip(),
+                        caption=str(row.get("caption") or "").strip(),
+                        page=int(row.get("page") or 0),
+                        width=int(row.get("width") or 0),
+                        height=int(row.get("height") or 0),
+                        index=int(row.get("index") or 0),
+                    )
+                )
+            if figures:
+                return figures
+        except Exception:
+            return None
+        return None
+
+    def _store_cached_figures(self, pdf_url: str, figures: List[Figure]) -> None:
+        cache_path = self._cache_path(pdf_url)
+        if cache_path is None:
+            return
+        try:
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            payload = {
+                "saved_at": time.time(),
+                "figures": [
+                    {
+                        "url": figure.url,
+                        "caption": figure.caption,
+                        "page": figure.page,
+                        "width": figure.width,
+                        "height": figure.height,
+                        "index": figure.index,
+                    }
+                    for figure in figures
+                ],
+            }
+            cache_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        except Exception:
+            return
 
     def _parse_figures(self, data: Dict[str, Any]) -> List[Figure]:
         figures: List[Figure] = []

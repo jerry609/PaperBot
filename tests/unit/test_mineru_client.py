@@ -133,3 +133,32 @@ def test_extract_figures_for_report():
     result = extract_figures_for_report(report, api_key="fake-key", max_items=1)
     # Should return a copy even if extraction fails (graceful fallback)
     assert isinstance(result, dict)
+
+
+def test_extract_figures_uses_local_cache(tmp_path, monkeypatch):
+    url = "https://arxiv.org/pdf/2401.00001.pdf"
+    client = MineruClient(api_key="test-key", cache_dir=str(tmp_path), cache_ttl_seconds=3600)
+
+    calls = {"count": 0}
+
+    def _fake_call_extract(pdf_url: str):
+        calls["count"] += 1
+        return [
+            Figure(
+                url="https://cdn.mineru.net/fig-main.png",
+                caption="Figure 1: Overview",
+                page=1,
+                width=800,
+                height=600,
+            )
+        ]
+
+    monkeypatch.setattr(client, "_call_extract", _fake_call_extract)
+
+    first = client.extract_figures(url)
+    second = client.extract_figures(url)
+
+    assert calls["count"] == 1
+    assert len(first) == 1
+    assert len(second) == 1
+    assert second[0].url == "https://cdn.mineru.net/fig-main.png"
