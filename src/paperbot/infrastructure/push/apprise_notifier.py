@@ -7,6 +7,8 @@ Falls back gracefully when Apprise is not installed.
 from __future__ import annotations
 
 import logging
+import os
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -32,6 +34,19 @@ _SCHEME_TO_FORMATTER = {
     "feishu": "feishu",
     "lark": "lark",
 }
+
+_RETRYABLE_ERROR_HINTS = (
+    "429",
+    "too many requests",
+    "timed out",
+    "timeout",
+    "temporarily unavailable",
+    "connection reset",
+    "network is unreachable",
+    "503",
+    "502",
+    "504",
+)
 
 
 @dataclass
@@ -183,6 +198,8 @@ class AppriseNotifier:
 
         details: List[Dict[str, Any]] = []
         all_ok = True
+        retry_attempts = max(1, int(os.getenv("PAPERBOT_PUSH_RETRY_ATTEMPTS", "3")))
+        retry_backoff_s = max(0.0, float(os.getenv("PAPERBOT_PUSH_RETRY_BACKOFF_S", "0.8")))
         for channel in matched:
             body, body_format = self._build_channel_body(
                 channel.url,
@@ -194,22 +211,23 @@ class AppriseNotifier:
             try:
                 channel_apprise = apprise.Apprise()
                 channel_apprise.add(channel.url, tag=channel.tags or None)
-
                 fmt_map = {
                     "text": apprise.NotifyFormat.TEXT,
                     "html": apprise.NotifyFormat.HTML,
                     "markdown": apprise.NotifyFormat.MARKDOWN,
                 }
-                ok = bool(
-                    channel_apprise.notify(
-                        title=subject,
-                        body=body,
-                        notify_type=apprise.NotifyType.INFO,
-                        body_format=fmt_map.get(body_format, apprise.NotifyFormat.TEXT),
-                        tag=apprise.common.MATCH_ALL_TAG,
-                    )
+                ok, attempts, error = self._notify_with_retry(
+                    channel_apprise=channel_apprise,
+                    title=subject,
+                    body=body,
+                    body_format=fmt_map.get(body_format, apprise.NotifyFormat.TEXT),
+                    retry_attempts=retry_attempts,
+                    retry_backoff_s=retry_backoff_s,
                 )
-                details.append({"url": channel.url, "ok": ok})
+                row = {"url": channel.url, "ok": ok, "attempts": attempts}
+                if error:
+                    row["error"] = error
+                details.append(row)
                 all_ok = all_ok and ok
             except Exception as exc:
                 logger.warning("Apprise digest push failed url=%s err=%s", channel.url, exc)
@@ -220,6 +238,69 @@ class AppriseNotifier:
         if not all_ok:
             result["error"] = "one or more channel pushes failed"
         return result
+
+    @staticmethod
+    def _is_retryable_error(error_text: str) -> bool:
+        normalized = str(error_text or "").strip().lower()
+        return any(hint in normalized for hint in _RETRYABLE_ERROR_HINTS)
+
+    def _notify_with_retry(
+        self,
+        *,
+        channel_apprise: Any,
+        title: str,
+        body: str,
+        body_format: Any,
+        retry_attempts: int,
+        retry_backoff_s: float,
+    ) -> tuple[bool, int, str]:
+        last_error = ""
+        for attempt in range(1, max(1, retry_attempts) + 1):
+            try:
+                ok = bool(
+                    channel_apprise.notify(
+                        title=title,
+                        body=body,
+                        notify_type=apprise.NotifyType.INFO,
+                        body_format=body_format,
+                        tag=apprise.common.MATCH_ALL_TAG,
+                    )
+                )
+            except Exception as exc:
+                ok = False
+                last_error = str(exc)
+                retryable = self._is_retryable_error(last_error)
+                if not retryable or attempt >= retry_attempts:
+                    return False, attempt, last_error
+                delay = retry_backoff_s * (2 ** (attempt - 1))
+                logger.info(
+                    "Apprise push retryable failure attempt=%s/%s delay=%.2fs err=%s",
+                    attempt,
+                    retry_attempts,
+                    delay,
+                    last_error,
+                )
+                if delay > 0:
+                    time.sleep(delay)
+                continue
+
+            if ok:
+                return True, attempt, ""
+
+            last_error = "notification rejected by downstream channel"
+            if attempt >= retry_attempts:
+                return False, attempt, last_error
+            delay = retry_backoff_s * (2 ** (attempt - 1))
+            logger.info(
+                "Apprise push returned not-ok attempt=%s/%s delay=%.2fs",
+                attempt,
+                retry_attempts,
+                delay,
+            )
+            if delay > 0:
+                time.sleep(delay)
+
+        return False, max(1, retry_attempts), last_error
 
     def _build_channel_body(
         self,
