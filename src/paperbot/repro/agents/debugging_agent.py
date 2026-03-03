@@ -102,10 +102,11 @@ Provide ONLY the corrected full file content. No explanations.
         "bs4": "beautifulsoup4",
     }
 
-    def __init__(self, output_dir: Optional[Path] = None, **kwargs):
+    def __init__(self, output_dir: Optional[Path] = None, experience_store=None, **kwargs):
         super().__init__(name="DebuggingAgent", **kwargs)
         self.output_dir = output_dir
         self.repair_history: List[RepairAttempt] = []
+        self._experience_store = experience_store
 
     async def execute(self, context: Dict[str, Any]) -> AgentResult:
         """Execute debugging pipeline."""
@@ -143,6 +144,25 @@ Provide ONLY the corrected full file content. No explanations.
             if repair_result.success:
                 self.log(f"Repair successful: {repair_result.fix_applied}")
                 context["last_repair"] = repair_result
+
+                # Persist failure reason + fix for future runs (issue #162)
+                if self._experience_store:
+                    paper_context = context.get("paper_context")
+                    paper_id = (
+                        getattr(paper_context, "paper_id", None)
+                        or getattr(paper_context, "arxiv_id", None)
+                        if paper_context else None
+                    )
+                    try:
+                        self._experience_store.add(
+                            pattern_type="failure_reason",
+                            content=f"[{error_type.value}] fixed: {repair_result.fix_applied}",
+                            paper_id=paper_id,
+                            code_snippet=repair_result.original_error[:1000],
+                        )
+                    except Exception:  # noqa: BLE001
+                        pass
+
                 return AgentResult.success(
                     data={
                         "repair": repair_result,

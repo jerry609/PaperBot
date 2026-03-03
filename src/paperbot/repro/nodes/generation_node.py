@@ -85,6 +85,7 @@ Output ONLY the Python code, no markdown or explanations.
         llm_client=None,
         max_context_tokens: int = 8000,
         use_rag: bool = True,
+        experience_store=None,
         **kwargs
     ):
         super().__init__(node_name="GenerationNode", **kwargs)
@@ -92,8 +93,11 @@ Output ONLY the Python code, no markdown or explanations.
         self.max_context_tokens = max_context_tokens
         self.use_rag = use_rag
 
-        # Initialize Code Memory
-        self.memory = CodeMemory(max_context_tokens=max_context_tokens)
+        # Initialize Code Memory (with optional experience store for persistence)
+        self.memory = CodeMemory(
+            max_context_tokens=max_context_tokens,
+            experience_store=experience_store,
+        )
 
         # Initialize Knowledge Base
         self.knowledge_base = CodeKnowledgeBase.from_builtin() if use_rag else None
@@ -114,6 +118,11 @@ Output ONLY the Python code, no markdown or explanations.
 
         # Clear memory for fresh generation
         self.memory.clear()
+
+        # Pre-load prior experiences for the same paper (issue #162)
+        paper_id = getattr(paper_context, "paper_id", None) or getattr(paper_context, "arxiv_id", None)
+        if paper_id:
+            self.memory.load_experiences_from_db(paper_id)
 
         files = {}
 
@@ -142,6 +151,13 @@ Output ONLY the Python code, no markdown or explanations.
             # Add to memory for subsequent files
             self.memory.add_file(filepath, code, purpose=purpose)
             logger.debug(f"Generated {filepath} ({len(code)} chars)")
+
+            # Persist success pattern (issue #162)
+            self.memory.record_success_pattern(
+                paper_id=paper_id,
+                filepath=filepath,
+                code_snippet=code[:1000],
+            )
 
         # Add requirements.txt
         files["requirements.txt"] = self._generate_requirements(plan)
