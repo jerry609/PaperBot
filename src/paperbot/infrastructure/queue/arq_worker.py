@@ -201,6 +201,8 @@ async def cron_daily_papers(ctx) -> Dict[str, Any]:
     judge_runs = int(os.getenv("PAPERBOT_DAILYPAPER_JUDGE_RUNS", "1"))
     judge_max_items = int(os.getenv("PAPERBOT_DAILYPAPER_JUDGE_MAX_ITEMS", "5"))
     judge_token_budget = int(os.getenv("PAPERBOT_DAILYPAPER_JUDGE_TOKEN_BUDGET", "0"))
+    enable_figures = _parse_bool_env("PAPERBOT_DAILYPAPER_ENABLE_FIGURES", False)
+    figures_max_items = int(os.getenv("PAPERBOT_DAILYPAPER_FIGURES_MAX_ITEMS", "5"))
 
     job = await redis.enqueue_job(
         "daily_papers_job",
@@ -218,6 +220,8 @@ async def cron_daily_papers(ctx) -> Dict[str, Any]:
         judge_runs=judge_runs,
         judge_max_items_per_query=judge_max_items,
         judge_token_budget=judge_token_budget,
+        enable_figures=enable_figures,
+        figures_max_items=max(1, int(figures_max_items)),
         notify=notify_enabled,
         notify_channels=notify_channels,
         save=True,
@@ -228,6 +232,8 @@ async def cron_daily_papers(ctx) -> Dict[str, Any]:
         "queries": queries,
         "sources": sources,
         "branches": branches,
+        "enable_figures": enable_figures,
+        "figures_max_items": max(1, int(figures_max_items)),
     }
     elog.append(
         make_event(
