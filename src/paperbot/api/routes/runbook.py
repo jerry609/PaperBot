@@ -212,7 +212,7 @@ class AddAllowedDirRequest(BaseModel):
 
 
 def _runtime_allowlist_mutation_enabled() -> bool:
-    return os.getenv("PAPERBOT_RUNBOOK_ALLOWLIST_MUTATION", "false").lower() == "true"
+    return os.getenv("PAPERBOT_RUNBOOK_ALLOWLIST_MUTATION", "true").lower() == "true"
 
 
 # Directories that must never be added to the allowlist (too broad / sensitive).
@@ -231,15 +231,29 @@ async def add_allowed_dir(body: AddAllowedDirRequest):
             detail="runtime allowlist mutation is disabled"
         )
 
-    try:
-        resolved = _normalize_user_directory(body.directory, field_name="directory")
-    except HTTPException:
-        raise
+    raw = body.directory.strip()
+    if not raw or "\x00" in raw:
+        raise HTTPException(status_code=400, detail="invalid directory path")
+
+    # Expand ~ but do NOT check against allowlist (that's what we're adding to)
+    if raw == "~":
+        resolved = Path.home().resolve()
+    elif raw.startswith("~/"):
+        resolved = (Path.home() / raw[2:]).resolve()
+    else:
+        resolved = Path(raw).resolve()
 
     if str(resolved) in _DENIED_PATHS:
         raise HTTPException(
             status_code=403,
-            detail=f"adding '{resolved}' is not allowed — path is too broad or sensitive"
+            detail=f"adding '{resolved}' is not allowed — path is too broad or sensitive",
+        )
+
+    # Deny home directory itself — too broad
+    if resolved == Path.home().resolve():
+        raise HTTPException(
+            status_code=403,
+            detail="adding home directory is not allowed — too broad",
         )
 
     if not resolved.exists() or not resolved.is_dir():

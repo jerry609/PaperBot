@@ -23,6 +23,7 @@ from pydantic import BaseModel
 from paperbot.api.streaming import StreamEvent, wrap_generator
 from paperbot.application.services.p2c.models import (
     GenerateContextRequest as P2CRequest,
+    RawPaperData,
     new_context_pack_id,
 )
 from paperbot.application.services.p2c.orchestrator import ExtractionOrchestrator
@@ -44,6 +45,9 @@ class GenerateContextPackRequest(BaseModel):
     project_id: Optional[str] = None
     track_id: Optional[int] = None
     depth: Literal["fast", "standard", "deep"] = "standard"
+    # Optional inline paper data — when provided, skips the input router lookup.
+    title: Optional[str] = None
+    abstract: Optional[str] = None
 
 
 class CreateSessionRequest(BaseModel):
@@ -65,17 +69,23 @@ async def _generate_stream(request: GenerateContextPackRequest):
     )
 
     # Persist initial "running" record so the frontend can poll status.
-    await asyncio.to_thread(
-        _store.save,
-        pack_id=pack_id,
-        user_id=request.user_id,
-        paper_id=request.paper_id,
-        depth=request.depth,
-        pack_data={},
-        project_id=request.project_id,
-        confidence_overall=0.0,
-        warning_count=0,
-    )
+    try:
+        await asyncio.to_thread(
+            _store.save,
+            pack_id=pack_id,
+            user_id=request.user_id,
+            paper_id=request.paper_id,
+            depth=request.depth,
+            pack_data={},
+            project_id=request.project_id,
+            confidence_overall=0.0,
+            warning_count=0,
+        )
+    except Exception as exc:
+        Logger.warning(
+            f"[M2] store_save_failed pack_id={pack_id} error={exc} (continuing without persistence)",
+            file=LogFiles.ERROR,
+        )
 
     yield StreamEvent(type="status", data={"pack_id": pack_id, "status": "running"})
 
@@ -107,15 +117,18 @@ async def _generate_stream(request: GenerateContextPackRequest):
             }
             for o in observations
         ]
-        await asyncio.to_thread(
-            _store.save_stage_result,
-            pack_id=pack_id,
-            stage_name=stage_name,
-            status="completed",
-            result_data={"observations": [o.to_full() for o in observations]},
-            confidence=confidence,
-            duration_ms=0,
-        )
+        try:
+            await asyncio.to_thread(
+                _store.save_stage_result,
+                pack_id=pack_id,
+                stage_name=stage_name,
+                status="completed",
+                result_data={"observations": [o.to_full() for o in observations]},
+                confidence=confidence,
+                duration_ms=0,
+            )
+        except Exception:
+            pass
         Logger.info(
             f"[M2] stage_complete pack_id={pack_id} stage={stage_name} obs={len(observations)} warnings={len(warnings)}",
             file=LogFiles.API,
@@ -150,9 +163,24 @@ async def _generate_stream(request: GenerateContextPackRequest):
     orchestrator = ExtractionOrchestrator()
     result_holder: list = []
 
+    # When title+abstract are provided inline, build RawPaperData directly
+    # so the orchestrator skips the input router (which cannot handle studio IDs).
+    inline_raw: Optional[RawPaperData] = None
+    if request.title and request.abstract:
+        inline_raw = RawPaperData(
+            paper_id=request.paper_id,
+            title=request.title,
+            abstract=request.abstract,
+            source_adapter="inline",
+        )
+
     async def _run() -> None:
         try:
-            pack = await orchestrator.run(p2c_request, on_stage_complete=on_stage_complete)
+            pack = await orchestrator.run(
+                p2c_request,
+                raw_paper=inline_raw,
+                on_stage_complete=on_stage_complete,
+            )
             result_holder.append(pack)
             await queue.put(_DONE)
         except ValueError as exc:
@@ -175,8 +203,12 @@ async def _generate_stream(request: GenerateContextPackRequest):
             break
         elif item is _ERROR:
             err = result_holder[0]
-            await asyncio.to_thread(_store.update_status, pack_id, status="failed")
-            yield StreamEvent(type="error", data=err)
+            err_message = err.get("message", "Generation failed") if isinstance(err, dict) else str(err)
+            try:
+                await asyncio.to_thread(_store.update_status, pack_id, status="failed")
+            except Exception:
+                pass
+            yield StreamEvent(type="error", data=err, message=err_message)
             return
         else:
             yield item  # StreamEvent from on_stage_complete
@@ -196,15 +228,21 @@ async def _generate_stream(request: GenerateContextPackRequest):
     pack_dict = _asdict(pack)
     pack_dict["context_pack_id"] = pack_id  # align with our DB record
 
-    await asyncio.to_thread(
-        _store.update_status,
-        pack_id,
-        status="completed",
-        pack_data=pack_dict,
-        confidence_overall=pack.confidence.overall,
-        warning_count=len(pack.warnings),
-        objective=pack.objective,
-    )
+    try:
+        await asyncio.to_thread(
+            _store.update_status,
+            pack_id,
+            status="completed",
+            pack_data=pack_dict,
+            confidence_overall=pack.confidence.overall,
+            warning_count=len(pack.warnings),
+            objective=pack.objective,
+        )
+    except Exception as exc:
+        Logger.warning(
+            f"[M2] store_update_failed pack_id={pack_id} error={exc}",
+            file=LogFiles.ERROR,
+        )
     Logger.info(
         f"[M2] generation_completed pack_id={pack_id} observations={len(pack.observations)} warnings={len(pack.warnings)}",
         file=LogFiles.API,

@@ -98,6 +98,13 @@ export function NewPaperModal({ open, onOpenChange }: NewPaperModalProps) {
             return
         }
 
+        const normalizedTitle = title.trim().toLowerCase()
+        const duplicate = papers.find(p => p.title.trim().toLowerCase() === normalizedTitle)
+        if (duplicate) {
+            setError("A paper with this title already exists in the studio.")
+            return
+        }
+
         addPaper({
             title: title.trim(),
             abstract: abstract.trim(),
@@ -109,18 +116,36 @@ export function NewPaperModal({ open, onOpenChange }: NewPaperModalProps) {
 
     const handleImportSelected = () => {
         const existingIds = new Set(papers.map(p => p.id))
+        const existingTitles = new Set(papers.map(p => p.title.trim().toLowerCase()))
+
+        let importedCount = 0
+        const skippedTitles: string[] = []
 
         for (const paperId of selectedPaperIds) {
-            // Skip if already in studio
-            if (existingIds.has(paperId)) continue
-
             const paper = libraryPapers.find(p => p.id === paperId)
-            if (paper) {
-                addPaper({
-                    title: paper.title,
-                    abstract: paper.abstract || "",
-                })
+            if (!paper) continue
+
+            // Skip if already in studio (by ID or title)
+            if (existingIds.has(paperId) || existingTitles.has(paper.title.trim().toLowerCase())) {
+                skippedTitles.push(paper.title)
+                continue
             }
+
+            addPaper({
+                title: paper.title,
+                abstract: paper.abstract || "",
+            })
+            existingTitles.add(paper.title.trim().toLowerCase())
+            importedCount++
+        }
+
+        if (importedCount === 0 && skippedTitles.length > 0) {
+            setError(
+                skippedTitles.length === 1
+                    ? "This paper already exists in the studio."
+                    : "The selected papers already exist in the studio."
+            )
+            return
         }
 
         resetAndClose()
@@ -166,6 +191,11 @@ export function NewPaperModal({ open, onOpenChange }: NewPaperModalProps) {
 
                     <TabsContent value="library" className="mt-4">
                         <div className="space-y-3">
+                            {error && (
+                                <div className="text-sm text-destructive bg-destructive/10 rounded-md px-3 py-2">
+                                    {error}
+                                </div>
+                            )}
                             <Input
                                 value={searchQuery}
                                 onChange={(e) => setSearchQuery(e.target.value)}
