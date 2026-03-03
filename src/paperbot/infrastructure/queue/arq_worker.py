@@ -338,6 +338,8 @@ async def daily_papers_job(
     notify: bool = False,
     notify_channels: Optional[List[str]] = None,
     save: bool = True,
+    enable_figures: bool = False,
+    figures_max_items: int = 5,
 ) -> Dict[str, Any]:
     """ARQ job: generate DailyPaper report and bridge highlights into feed events."""
     run_id = new_run_id()
@@ -382,6 +384,7 @@ async def daily_papers_job(
         apply_judge_scores_to_report,
         build_daily_paper_report,
         enrich_daily_paper_report,
+        extract_figures_for_report,
         ingest_daily_report_to_registry,
         normalize_llm_features,
         normalize_output_formats,
@@ -420,6 +423,15 @@ async def daily_papers_job(
             n_runs=max(1, int(judge_runs)),
             judge_token_budget=max(0, int(judge_token_budget)),
         )
+
+    if enable_figures:
+        mineru_key = os.getenv("MINERU_API_KEY", "")
+        if mineru_key:
+            report = extract_figures_for_report(
+                report,
+                api_key=mineru_key,
+                max_items=max(1, int(figures_max_items)),
+            )
 
     try:
         report["registry_ingest"] = ingest_daily_report_to_registry(report)
