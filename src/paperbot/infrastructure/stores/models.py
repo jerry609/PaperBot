@@ -4,7 +4,7 @@ import json
 from datetime import datetime
 from typing import Any, Dict, Optional
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, LargeBinary, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -283,6 +283,9 @@ class MemoryItemModel(Base):
         DateTime(timezone=True), nullable=True, index=True
     )
     deleted_reason: Mapped[str] = mapped_column(Text, default="")
+
+    # Float32 vector blob for semantic search (sqlite-vec); None = not yet embedded.
+    embedding: Mapped[Optional[bytes]] = mapped_column(LargeBinary, nullable=True)
 
     source_id: Mapped[Optional[int]] = mapped_column(
         Integer, ForeignKey("memory_sources.id"), nullable=True, index=True
