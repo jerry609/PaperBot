@@ -441,3 +441,26 @@ class ScholarFeedService:
             "total_events": len(self.generator._events),
             "weekly_digest": self.generator.get_weekly_digest(),
         }
+
+    def export_feed_entries(self, limit: int = 50) -> List[Dict[str, Any]]:
+        """Export feed events as dicts suitable for feedgen entry creation.
+
+        Each entry has: title, description, link, published, categories.
+        """
+        events = self.get_feed(limit=limit)
+        entries: List[Dict[str, Any]] = []
+        for event in events:
+            entry: Dict[str, Any] = {
+                "title": event.title,
+                "description": event.description,
+                "published": event.timestamp.isoformat(),
+                "categories": [event.event_type.value],
+            }
+            if event.paper and hasattr(event.paper, "url"):
+                entry["link"] = getattr(event.paper, "url", "") or ""
+            if event.metadata:
+                url = event.metadata.get("url")
+                if url:
+                    entry["link"] = url
+            entries.append(entry)
+        return entries

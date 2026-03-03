@@ -52,3 +52,18 @@ End with a brief summary of the research gap.
 At the end, list all citations used in the format:
 ## References
 - [Author2025] Full Title. Venue, Year."""
+
+DAILY_DIGEST_CARD_SYSTEM = """You are a research paper analyst writing a daily digest card.
+Extract structured information for a newsletter audience.
+Return ONLY valid JSON, no markdown."""
+
+DAILY_DIGEST_CARD_USER = """Title: {title}
+Abstract: {abstract}
+
+Extract JSON with these fields:
+- highlight: One-sentence key takeaway for a newsletter reader (max 30 words)
+- method: Core methodology or approach (1 sentence)
+- finding: Main result or contribution (1 sentence)
+- tags: Array of 2-4 short topic tags (e.g. ["LLM", "efficiency", "KV cache"])
+
+Return ONLY valid JSON, no markdown."""

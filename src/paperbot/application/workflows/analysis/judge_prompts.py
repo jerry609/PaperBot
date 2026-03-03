@@ -16,6 +16,7 @@ def build_paper_judge_user_prompt(*, query: str, paper: Dict[str, Any], rubric: 
     authors = ", ".join(paper.get("authors") or [])
     venue = paper.get("subject_or_venue") or paper.get("venue") or ""
     keywords = ", ".join(paper.get("keywords") or [])
+    upvotes = paper.get("upvotes")
 
     rubric_blocks = []
     for idx, dim in enumerate(rubric.dimensions, start=1):
@@ -41,7 +42,9 @@ def build_paper_judge_user_prompt(*, query: str, paper: Dict[str, Any], rubric: 
         f"- Abstract: {abstract}\n"
         f"- Authors: {authors}\n"
         f"- Venue/Subject: {venue}\n"
-        f"- Keywords: {keywords}\n\n"
+        f"- Keywords: {keywords}\n"
+        + (f"- Community Upvotes (HuggingFace): {upvotes}\n" if upvotes is not None else "")
+        + "\n"
         "Use integer scores 1-5. Abstract length should not affect scoring.\n\n"
         "## Rubric\n"
         f"{rubric_text}\n\n"

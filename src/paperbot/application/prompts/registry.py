@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from typing import Dict
 
 from paperbot.application.prompts.paper_analysis import (
+    DAILY_DIGEST_CARD_SYSTEM,
+    DAILY_DIGEST_CARD_USER,
     PAPER_SUMMARY_SYSTEM,
     PAPER_SUMMARY_USER,
     RELEVANCE_ASSESS_SYSTEM,
@@ -60,6 +62,11 @@ class PromptRegistry:
                 name="related_work",
                 system=RELATED_WORK_SYSTEM,
                 user=RELATED_WORK_USER,
+            ),
+            "daily_digest_card": PromptTemplate(
+                name="daily_digest_card",
+                system=DAILY_DIGEST_CARD_SYSTEM,
+                user=DAILY_DIGEST_CARD_USER,
             ),
         }
 

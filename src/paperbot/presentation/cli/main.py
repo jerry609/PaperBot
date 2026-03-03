@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import sys
 from typing import Optional
 
@@ -19,6 +20,7 @@ from paperbot.application.workflows.dailypaper import (
     apply_judge_scores_to_report,
     build_daily_paper_report,
     enrich_daily_paper_report,
+    extract_figures_for_report,
     ingest_daily_report_to_registry,
     normalize_llm_features,
     persist_judge_scores_to_registry,
@@ -155,6 +157,22 @@ def create_parser() -> argparse.ArgumentParser:
         type=int,
         default=0,
         help="Judge 的 token 预算上限（0 表示不限制）",
+    )
+    daily_parser.add_argument(
+        "--with-figures",
+        action="store_true",
+        help="启用 MinerU 图表提取（需要 --mineru-api-key 或 MINERU_API_KEY 环境变量）",
+    )
+    daily_parser.add_argument(
+        "--mineru-api-key",
+        default=None,
+        help="MinerU Cloud API Key（也可通过 MINERU_API_KEY 环境变量设置）",
+    )
+    daily_parser.add_argument(
+        "--figures-max-items",
+        type=int,
+        default=5,
+        help="每次图表提取最多处理的论文数",
     )
     daily_parser.add_argument("--notify", action="store_true", help="生成后推送日报通知")
     daily_parser.add_argument(
@@ -376,6 +394,19 @@ def _run_daily_paper(parsed: argparse.Namespace) -> int:
             judge_token_budget=max(0, int(parsed.judge_token_budget)),
         )
 
+    figures_enabled = bool(parsed.with_figures)
+    if figures_enabled:
+        mineru_key = parsed.mineru_api_key or os.getenv("MINERU_API_KEY", "")
+        if mineru_key:
+            report = extract_figures_for_report(
+                report,
+                api_key=mineru_key,
+                max_items=max(1, int(parsed.figures_max_items)),
+            )
+        else:
+            print("warning: --with-figures requires --mineru-api-key or MINERU_API_KEY env var",
+                  file=sys.stderr)
+
     try:
         report["registry_ingest"] = ingest_daily_report_to_registry(report)
     except Exception as exc:
@@ -450,6 +481,13 @@ def _run_daily_paper(parsed: argparse.Namespace) -> int:
             f"max_items={max(1, int(parsed.judge_max_items))}, "
             f"token_budget={max(0, int(parsed.judge_token_budget))})"
         )
+    if figures_enabled:
+        fig_count = sum(
+            1 for q in (report.get("queries") or [])
+            for item in (q.get("top_items") or [])
+            if item.get("main_figure")
+        )
+        print(f"figures: extracted main_figure for {fig_count} papers")
     if markdown_path or json_path:
         print(f"saved markdown: {markdown_path}")
         print(f"saved json: {json_path}")

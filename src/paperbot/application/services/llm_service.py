@@ -188,6 +188,26 @@ class LLMService:
             "limitations": str(parsed.get("limitations") or "Not stated"),
         }
 
+    def extract_daily_digest_card(self, title: str, abstract: str) -> Dict[str, Any]:
+        prompt = self._prompts.get("daily_digest_card")
+        raw = self.complete(
+            task_type="extraction",
+            system=prompt.system,
+            user=prompt.user.format(title=title or "", abstract=abstract or ""),
+        )
+        parsed = _safe_parse_json(raw)
+        if parsed is None:
+            return {"highlight": "", "method": "", "finding": "", "tags": []}
+        tags = parsed.get("tags") or []
+        if not isinstance(tags, list):
+            tags = [str(tags)]
+        return {
+            "highlight": str(parsed.get("highlight") or ""),
+            "method": str(parsed.get("method") or ""),
+            "finding": str(parsed.get("finding") or ""),
+            "tags": [str(t) for t in tags[:6]],
+        }
+
     def generate_related_work(self, papers: List[Dict[str, Any]], topic: str) -> str:
         prompt = self._prompts.get("related_work")
         formatted = _format_papers_for_related_work(papers)
