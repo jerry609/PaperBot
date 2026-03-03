@@ -11,6 +11,7 @@ logger = logging.getLogger(__name__)
 
 _MAX_MEMORY_ITEMS = 5
 _MAX_TASKS = 3
+_MAX_PAPER_MEMORIES = 6
 
 
 class ContextEngineBridge:
@@ -42,10 +43,14 @@ class ContextEngineBridge:
         *,
         user_id: str,
         track_id: Optional[int] = None,
+        paper_id: Optional[str] = None,
     ) -> NormalizedInput:
         """
         Query ContextEngine for user memory and track goals, then inject them into
         normalized_input.user_memory and normalized_input.project_context.
+
+        Also queries paper-scoped memories (previous analyses of the same paper)
+        and prepends them to user_memory so extraction stages can avoid redundant work.
 
         Returns the same NormalizedInput object (mutated in place).
         """
@@ -62,9 +67,17 @@ class ContextEngineBridge:
                 user_id=user_id,
                 query=query,
                 track_id=track_id,
+                paper_id=paper_id,
             )
             user_memory = _format_user_memory(context_pack)
             project_context = _format_project_context(context_pack)
+            paper_analysis = _format_paper_analysis(context_pack)
+
+            # Prepend previous paper analysis so it appears first in context.
+            if paper_analysis:
+                user_memory = (
+                    paper_analysis + ("\n\n" + user_memory if user_memory else "")
+                )
             if user_memory:
                 normalized_input.user_memory = user_memory
             if project_context:
@@ -121,3 +134,16 @@ def _format_project_context(context_pack: Dict[str, Any]) -> Optional[str]:
             parts.append("Active tasks:\n" + "\n".join(task_lines))
 
     return "\n".join(parts) if parts else None
+
+
+def _format_paper_analysis(context_pack: Dict[str, Any]) -> Optional[str]:
+    """Format previously extracted paper-scope memories into a summary block."""
+    memories = context_pack.get("paper_memories", [])[:_MAX_PAPER_MEMORIES]
+    if not memories:
+        return None
+    lines = ["## Previously extracted from this paper:"]
+    for m in memories:
+        content = (m.get("content") or "").strip()
+        if content:
+            lines.append(f"- {content}")
+    return "\n".join(lines) if len(lines) > 1 else None

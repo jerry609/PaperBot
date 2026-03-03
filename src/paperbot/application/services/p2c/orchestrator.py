@@ -184,6 +184,7 @@ class ExtractionOrchestrator:
             normalized_input,
             user_id=request.user_id,
             track_id=request.track_id,
+            paper_id=request.paper_id,
         )
 
         paper_type = self._paper_type_classifier.classify(normalized_input)

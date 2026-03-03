@@ -557,6 +557,7 @@ class ContextEngine:
         query: str,
         track_id: Optional[int] = None,
         include_cross_track: bool = False,
+        paper_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         active_track = self.research_store.get_active_track(user_id=user_id)
         routed_track = (
@@ -931,6 +932,19 @@ class ContextEngine:
         except Exception:
             context_run_id = None
 
+        paper_memories: List[Dict[str, Any]] = []
+        if paper_id:
+            try:
+                paper_memories = self.memory_store.list_memories(
+                    user_id=user_id,
+                    limit=10,
+                    scope_type="paper",
+                    scope_id=paper_id,
+                    include_pending=False,
+                )
+            except Exception:
+                pass  # Non-critical; degrade silently
+
         return {
             "user_id": user_id,
             "context_run_id": context_run_id,
@@ -940,6 +954,7 @@ class ContextEngine:
             "progress_state": {"tasks": progress_tasks, "milestones": progress_milestones},
             "relevant_memories": relevant_memories,
             "cross_track_memories": cross_track_memories,
+            "paper_memories": paper_memories,
             "paper_recommendations": papers,
             "paper_recommendation_scores": paper_scores,
             "paper_recommendation_reasons": paper_reasons,
