@@ -24,7 +24,7 @@
 | **Deadline Radar** | 会议截止日期追踪，CCF 分级过滤，Research Track 关键词匹配 |
 | **论文发现** | 种子论文扩展（引用/被引/共作者），Discovery Graph 可视化，论文集合（Collections）管理 |
 | **论文收割** | 批量 arXiv/OpenAlex/Semantic Scholar 收割，元数据补全 + 去重 |
-| **DeepCode Studio** | 在线代码工作台（Runbook 文件管理/Diff/Snapshot + Sandbox 沙箱执行 + Claude Copilot 对话） |
+| **AgentSwarm** | 多 Agent 协作平台，统一接入不同 Code Agent（Claude Code/Codex/Cursor/Devin/OpenHands 等），提供任务编排、Runbook 文件管理/Diff/Snapshot、Sandbox 沙箱执行与 Agent 对话；当前已接入 Claude Code |
 | **集成导入** | BibTeX 导入 + Zotero 双向同步（Pull/Push） |
 
 ## 模块成熟度
@@ -45,7 +45,7 @@
 | Deadline Radar | ✅ 可用 | `/research/deadlines/radar` | — | CCF 会议截止日期追踪，Track 关键词匹配 |
 | Paper Library | ✅ 可用 | `/api/papers/library` | — | 论文收藏/保存/反馈，Enrichment Pipeline 自动补全元数据 |
 | Discovery | 🟡 基本可用 | `/research/discovery/seed` | — | 种子扩展（S2/OpenAlex 引用图）+ Collections CRUD + Graph 可视化 |
-| DeepCode Studio | 🟡 基本可用 | `/api/runbook/*`, `/api/sandbox/*` | — | Runbook 文件管理 + Sandbox 执行 + Claude Copilot 对话 |
+| AgentSwarm | 🟡 基本可用 | `/api/runbook/*`, `/api/sandbox/*` | — | 已接入 Claude Code；Codex/Cursor/Devin/OpenHands 待集成 + Runbook 文件管理 + Sandbox 执行 |
 | Harvest | 🟡 基本可用 | `/api/harvest/*` | — | arXiv/OpenAlex/S2 批量收割，元数据补全 |
 | Import/Sync | 🟡 基本可用 | `/research/integrations/*` | — | BibTeX 导入 + Zotero Pull/Push |
 
@@ -146,7 +146,7 @@ Search → Build Report → LLM Enrichment → Judge Scoring → Filter → Save
 |----------|----------|
 | ![Paper](asset/ui/paper.jpg) | ![Scholar](asset/ui/scholar2.jpg) |
 
-| Wiki 知识库 | DeepCode Studio |
+| Wiki 知识库 | AgentSwarm |
 |-------------|-----------------|
 | ![Wiki](asset/ui/wiki.jpg) | ![Studio](asset/ui/deepcode.jpg) |
 
@@ -352,7 +352,7 @@ arq paperbot.infrastructure.queue.arq_worker.WorkerSettings
 | `/api/jobs/*` | GET/POST | 后台任务管理（ARQ） |
 | `/api/runs/*` | GET | Pipeline 运行记录 |
 | `/api/newsletter/*` | GET/POST | Newsletter 生成与管理 |
-| `/api/studio-chat` | POST | DeepCode Studio AI 对话（SSE） |
+| `/api/studio-chat` | POST | AgentSwarm 多 Agent 对话（SSE，支持 Claude Code/Codex/Cursor/Devin/OpenHands 路由） |
 
 ## CLI 命令
 
@@ -464,7 +464,7 @@ MinerU PDF 图表提取（主方法图自动识别）、推送内容增强（一
 | [`docs/ROADMAP_TODO.md`](docs/ROADMAP_TODO.md) | 功能规划与迭代清单（参考 HF/AlphaXiv） |
 | [`docs/PLAN.md`](docs/PLAN.md) | 架构评估与重构计划 |
 | [`docs/PAPERSCOOL_WORKFLOW.md`](docs/PAPERSCOOL_WORKFLOW.md) | Topic Workflow 端到端流程与配置 |
-| [`docs/DEEPCODE_TODO.md`](docs/DEEPCODE_TODO.md) | Paper2Code 迭代清单 |
+| [`docs/DEEPCODE_TODO.md`](docs/DEEPCODE_TODO.md) | AgentSwarm / Paper2Code 迭代清单 |
 | [`docs/memory_system.md`](docs/memory_system.md) | 记忆系统设计文档（跨平台中间件 + 架构提案） |
 | [`docs/anchor_system.md`](docs/anchor_system.md) | 锚点作者系统（理论模型 + 实施设计 + TODO） |
 | [`docs/TOPIC_SOURCE_TEMPLATE.md`](docs/TOPIC_SOURCE_TEMPLATE.md) | 数据源开发模板 |
