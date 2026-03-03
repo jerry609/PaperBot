@@ -60,7 +60,7 @@ def _safe_parse_json_array(raw: str) -> Optional[List[Dict[str, Any]]]:
         if isinstance(obj, list):
             return obj
         return None
-    except Exception:
+    except json.JSONDecodeError:
         pass
     # Try to find array brackets
     start = text.find("[")
@@ -70,7 +70,7 @@ def _safe_parse_json_array(raw: str) -> Optional[List[Dict[str, Any]]]:
             obj = json.loads(text[start : end + 1])
             if isinstance(obj, list):
                 return obj
-        except Exception:
+        except json.JSONDecodeError:
             pass
     return None
 
@@ -138,7 +138,7 @@ class LiteratureDistillStage:
         if self._llm is not None:
             try:
                 return await self._run_llm(data)
-            except Exception:
+            except Exception:  # noqa: BLE001 — network/API errors, graceful degradation
                 logger.warning("LiteratureDistillStage LLM failed, falling back to heuristic")
         return self._run_heuristic(data)
 
@@ -190,7 +190,7 @@ class BlueprintExtractStage:
         if self._llm is not None:
             try:
                 return await self._run_llm(data)
-            except Exception:
+            except Exception:  # noqa: BLE001 — network/API errors, graceful degradation
                 logger.warning("BlueprintExtractStage LLM failed, falling back to heuristic")
         return self._run_heuristic(data)
 
@@ -247,7 +247,7 @@ class EnvironmentExtractStage:
         if self._llm is not None:
             try:
                 return await self._run_llm(data)
-            except Exception:
+            except Exception:  # noqa: BLE001 — network/API errors, graceful degradation
                 logger.warning("EnvironmentExtractStage LLM failed, falling back to heuristic")
         return self._run_heuristic(data)
 
@@ -323,7 +323,7 @@ class SpecExtractStage:
         if self._llm is not None:
             try:
                 return await self._run_llm(data)
-            except Exception:
+            except Exception:  # noqa: BLE001 — network/API errors, graceful degradation
                 logger.warning("SpecExtractStage LLM failed, falling back to heuristic")
         return self._run_heuristic(data)
 
@@ -389,7 +389,7 @@ class RoadmapPlanningStage:
         if self._llm is not None:
             try:
                 return await self._run_llm(data)
-            except Exception:
+            except Exception:  # noqa: BLE001 — network/API errors, graceful degradation
                 logger.warning("RoadmapPlanningStage LLM failed, falling back to heuristic")
         return self._run_heuristic(data)
 
@@ -478,7 +478,7 @@ class SuccessCriteriaStage:
         if self._llm is not None:
             try:
                 return await self._run_llm(data)
-            except Exception:
+            except Exception:  # noqa: BLE001 — network/API errors, graceful degradation
                 logger.warning("SuccessCriteriaStage LLM failed, falling back to heuristic")
         return self._run_heuristic(data)
 

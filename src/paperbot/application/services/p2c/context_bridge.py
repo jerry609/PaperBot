@@ -31,9 +31,12 @@ class ContextEngineBridge:
             return self._engine
         try:
             from paperbot.context_engine.engine import ContextEngine
-
+        except ImportError:
+            logger.debug("ContextEngine not installed, skipping context enrichment")
+            return None
+        try:
             return ContextEngine()
-        except Exception:
+        except Exception:  # noqa: BLE001 — DB/config failure, graceful degradation
             logger.debug("ContextEngine unavailable, skipping context enrichment")
             return None
 
@@ -82,7 +85,7 @@ class ContextEngineBridge:
                 normalized_input.user_memory = user_memory
             if project_context:
                 normalized_input.project_context = project_context
-        except Exception:
+        except Exception:  # noqa: BLE001 — network/DB errors, graceful degradation
             logger.warning(
                 "ContextEngineBridge.enrich failed, continuing without user context",
                 exc_info=True,
