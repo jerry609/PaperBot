@@ -22,6 +22,7 @@ from .models import (
     new_context_pack_id,
     stage_mean_confidence,
 )
+from .context_bridge import ContextEngineBridge
 from .stages import (
     BlueprintExtractStage,
     EnvironmentExtractStage,
@@ -179,6 +180,12 @@ class ExtractionOrchestrator:
                 raw_paper = await self._input_router.fetch(request.paper_id)
             normalized_input = await self._section_extractor.extract(raw_paper)
 
+        normalized_input = await ContextEngineBridge().enrich(
+            normalized_input,
+            user_id=request.user_id,
+            track_id=request.track_id,
+        )
+
         paper_type = self._paper_type_classifier.classify(normalized_input)
         pack = ReproContextPack(
             context_pack_id=new_context_pack_id(),
@@ -194,6 +201,8 @@ class ExtractionOrchestrator:
             abstract=normalized_input.abstract,
             full_text=normalized_input.full_text,
             sections=normalized_input.sections,
+            user_memory=normalized_input.user_memory,
+            project_context=normalized_input.project_context,
         )
 
         for stage_name in stage_order:

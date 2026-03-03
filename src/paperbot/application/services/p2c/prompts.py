@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Dict, Tuple
+from typing import Dict, Optional, Tuple
 
 
 def _truncate(text: str, max_chars: int = 6000) -> str:
@@ -21,14 +21,20 @@ def _paper_context(title: str, abstract: str, sections: Dict[str, str]) -> str:
 
 
 def literature_distill_prompt(
-    title: str, abstract: str, sections: Dict[str, str]
+    title: str, abstract: str, sections: Dict[str, str],
+    *, user_memory: Optional[str] = None,
 ) -> Tuple[str, str]:
     system = (
         "You are a research paper analysis expert. "
         "Extract the core problem definition, proposed method, and key limitations. "
         "Return a JSON array of 2-3 observations."
     )
-    user = f"""{_paper_context(title, abstract, sections)}
+    user_context_block = (
+        f"\n\nUser's research background (use to highlight relevance to their work):\n{user_memory}"
+        if user_memory
+        else ""
+    )
+    user = f"""{_paper_context(title, abstract, sections)}{user_context_block}
 
 Return a JSON array of 2-3 observations. Each observation must have:
 - "type": "method" or "limitation"
@@ -126,14 +132,20 @@ Return ONLY the JSON array, no other text."""
 
 
 def roadmap_planning_prompt(
-    title: str, abstract: str, sections: Dict[str, str]
+    title: str, abstract: str, sections: Dict[str, str],
+    *, project_context: Optional[str] = None,
 ) -> Tuple[str, str]:
     system = (
         "You are a research paper reproduction expert. "
         "Generate a paper-specific step-by-step reproduction roadmap. "
         "Return a JSON array."
     )
-    user = f"""{_paper_context(title, abstract, sections)}
+    project_block = (
+        f"\n\nProject goals (align the roadmap steps to these goals):\n{project_context}"
+        if project_context
+        else ""
+    )
+    user = f"""{_paper_context(title, abstract, sections)}{project_block}
 
 Generate a reproduction roadmap with 4-6 steps tailored to THIS specific paper.
 Return a JSON array where each step has:
