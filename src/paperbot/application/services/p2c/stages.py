@@ -37,6 +37,8 @@ class StageInput:
     abstract: str
     full_text: str
     sections: Dict[str, str]
+    user_memory: Optional[str] = None
+    project_context: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -141,7 +143,9 @@ class LiteratureDistillStage:
         return self._run_heuristic(data)
 
     async def _run_llm(self, data: StageInput) -> StageResult:
-        system, user = literature_distill_prompt(data.title, data.abstract, data.sections)
+        system, user = literature_distill_prompt(
+            data.title, data.abstract, data.sections, user_memory=data.user_memory
+        )
         raw = await asyncio.to_thread(_llm_complete_async, self._llm, system, user, "extraction")
         items = _safe_parse_json_array(raw)
         if not items:
@@ -390,7 +394,9 @@ class RoadmapPlanningStage:
         return self._run_heuristic(data)
 
     async def _run_llm(self, data: StageInput) -> StageResult:
-        system, user = roadmap_planning_prompt(data.title, data.abstract, data.sections)
+        system, user = roadmap_planning_prompt(
+            data.title, data.abstract, data.sections, project_context=data.project_context
+        )
         raw = await asyncio.to_thread(_llm_complete_async, self._llm, system, user, "reasoning")
         items = _safe_parse_json_array(raw)
         if not items:
