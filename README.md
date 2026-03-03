@@ -472,13 +472,14 @@ MinerU PDF 图表提取（主方法图自动识别）、推送内容增强（一
 | [`docs/ROADMAP_TODO.md`](docs/ROADMAP_TODO.md) | 功能规划与迭代清单（参考 HF/AlphaXiv） |
 | [`docs/PLAN.md`](docs/PLAN.md) | 架构评估与重构计划 |
 | [`docs/PAPERSCOOL_WORKFLOW.md`](docs/PAPERSCOOL_WORKFLOW.md) | Topic Workflow 端到端流程与配置 |
-| [`docs/DEEPCODE_TODO.md`](docs/DEEPCODE_TODO.md) | AgentSwarm / Paper2Code 迭代清单 |
+| [`docs/AGENTSWARM_TODO.md`](docs/AGENTSWARM_TODO.md) | AgentSwarm / Paper2Code 迭代清单 |
 | [`docs/memory_system.md`](docs/memory_system.md) | 记忆系统设计文档（跨平台中间件 + 架构提案） |
 | [`docs/anchor_system.md`](docs/anchor_system.md) | 锚点作者系统（理论模型 + 实施设计 + TODO） |
 | [`docs/TOPIC_SOURCE_TEMPLATE.md`](docs/TOPIC_SOURCE_TEMPLATE.md) | 数据源开发模板 |
 | [`docs/p2c/`](docs/p2c/) | Paper2Context 模块设计文档（设计/API/前端/Benchmark/优化） |
 | [`docs/AGENTIC_RESEARCH_EVOLUTION.md`](docs/AGENTIC_RESEARCH_EVOLUTION.md) | Agentic Research 演进方案（Gap Analysis + 实施路线图） |
 | [`docs/OPENCLAW_RESEARCH_REPORT.md`](docs/OPENCLAW_RESEARCH_REPORT.md) | OpenClaw 源码综述（22 模块深度分析） |
+| [`docs/archive/`](docs/archive/) | 归档文档（过期 issue 草案/历史 backlog） |
 
 ## 测试
 
