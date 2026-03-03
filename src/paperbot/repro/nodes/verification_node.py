@@ -409,12 +409,14 @@ class VerificationNode(BaseNode[VerificationResult]):
         timeout: int = 30,
         max_repair_attempts: int = 3,
         enable_self_healing: bool = True,
+        experience_store=None,
         **kwargs
     ):
         super().__init__(node_name="VerificationNode", **kwargs)
         self.timeout = timeout
         self.max_repair_attempts = max_repair_attempts
         self.enable_self_healing = enable_self_healing
+        self._experience_store = experience_store
     
     def _validate_input(self, input_data: Any, **kwargs) -> Optional[str]:
         """Validate input is a valid directory path or tuple."""
@@ -497,12 +499,30 @@ class VerificationNode(BaseNode[VerificationResult]):
         if result.imports_ok:
             test_result = self._run_tests(output_dir)
             result.tests_ok = test_result["passed"]
-        
+
         # Step 4: Smoke run (optional, no repair)
         if result.imports_ok:
             smoke_result = self._smoke_run(output_dir)
             result.smoke_ok = smoke_result["passed"]
-        
+
+        # Persist verified structure when all essential checks pass (issue #162)
+        if result.all_passed and self._experience_store:
+            paper_context = input_data[1] if isinstance(input_data, tuple) and len(input_data) > 1 else None
+            paper_id = (
+                getattr(paper_context, "paper_id", None)
+                or getattr(paper_context, "arxiv_id", None)
+                if paper_context else None
+            )
+            try:
+                py_files = [f.name for f in output_dir.glob("*.py")]
+                self._experience_store.add(
+                    pattern_type="verified_structure",
+                    content=f"Verified structure in {output_dir.name}: {', '.join(py_files[:10])}",
+                    paper_id=paper_id,
+                )
+            except Exception:  # noqa: BLE001
+                pass
+
         return result
     
     def _check_syntax(self, output_dir: Path) -> Dict[str, Any]:
