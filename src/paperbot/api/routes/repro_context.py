@@ -127,8 +127,12 @@ async def _generate_stream(request: GenerateContextPackRequest):
                 confidence=confidence,
                 duration_ms=0,
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            Logger.warning(
+                f"[M2] store_save_stage_result_failed pack_id={pack_id} "
+                f"stage={stage_name} error={exc}",
+                file=LogFiles.ERROR,
+            )
         Logger.info(
             f"[M2] stage_complete pack_id={pack_id} stage={stage_name} obs={len(observations)} warnings={len(warnings)}",
             file=LogFiles.API,
@@ -206,8 +210,12 @@ async def _generate_stream(request: GenerateContextPackRequest):
             err_message = err.get("message", "Generation failed") if isinstance(err, dict) else str(err)
             try:
                 await asyncio.to_thread(_store.update_status, pack_id, status="failed")
-            except Exception:
-                pass
+            except Exception as exc:
+                Logger.warning(
+                    f"[M2] store_update_status_failed pack_id={pack_id} "
+                    f"status=failed error={exc}",
+                    file=LogFiles.ERROR,
+                )
             yield StreamEvent(type="error", data=err, message=err_message)
             return
         else:

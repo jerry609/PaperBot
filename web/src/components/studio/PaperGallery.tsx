@@ -55,6 +55,7 @@ export function PaperGallery() {
         outputDir?: string
     } | null>(null)
     const [deleting, setDeleting] = useState(false)
+    const [deleteError, setDeleteError] = useState<string | null>(null)
 
     const filteredPapers = useMemo(() => {
         const q = query.trim().toLowerCase()
@@ -83,31 +84,46 @@ export function PaperGallery() {
             title: paper.title,
             outputDir: paper.outputDir,
         })
+        setDeleteError(null)
         setDeleteConfirmOpen(true)
     }
 
     const handleConfirmDelete = async () => {
         if (!paperToDelete) return
         setDeleting(true)
+        setDeleteError(null)
+        let deleted = false
         try {
             if (paperToDelete.outputDir) {
                 try {
-                    await fetch("/api/runbook/delete", {
+                    const response = await fetch("/api/runbook/delete", {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({
                             project_dir: paperToDelete.outputDir,
                         }),
                     })
+                    if (!response.ok) {
+                        throw new Error(
+                            `Delete failed with status ${response.status}`,
+                        )
+                    }
                 } catch (e) {
                     console.error("Failed to delete project files:", e)
+                    setDeleteError(
+                        "Failed to delete project files. Please try again.",
+                    )
+                    return
                 }
             }
             deletePaper(paperToDelete.id)
+            deleted = true
         } finally {
             setDeleting(false)
-            setDeleteConfirmOpen(false)
-            setPaperToDelete(null)
+            if (deleted) {
+                setDeleteConfirmOpen(false)
+                setPaperToDelete(null)
+            }
         }
     }
 
@@ -244,7 +260,13 @@ export function PaperGallery() {
             {/* Delete Confirmation Dialog */}
             <AlertDialog
                 open={deleteConfirmOpen}
-                onOpenChange={setDeleteConfirmOpen}
+                onOpenChange={(open) => {
+                    setDeleteConfirmOpen(open)
+                    if (!open) {
+                        setPaperToDelete(null)
+                        setDeleteError(null)
+                    }
+                }}
             >
                 <AlertDialogContent>
                     <AlertDialogHeader>
@@ -256,6 +278,11 @@ export function PaperGallery() {
                                 <span className="mt-2 block text-destructive">
                                     This will also delete all generated code
                                     files.
+                                </span>
+                            )}
+                            {deleteError && (
+                                <span className="mt-2 block text-sm text-destructive">
+                                    {deleteError}
                                 </span>
                             )}
                         </AlertDialogDescription>
