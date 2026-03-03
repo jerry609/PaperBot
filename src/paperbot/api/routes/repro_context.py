@@ -30,6 +30,8 @@ from paperbot.application.services.p2c.orchestrator import ExtractionOrchestrato
 from paperbot.infrastructure.stores.repro_context_store import SqlAlchemyReproContextStore
 from paperbot.utils.logging_config import LogFiles, Logger, set_trace_id
 
+_MAX_OBSERVATION_NARRATIVE = 400  # chars stored per memory item
+
 router = APIRouter()
 
 _store = SqlAlchemyReproContextStore()
@@ -251,6 +253,13 @@ async def _generate_stream(request: GenerateContextPackRequest):
             f"[M2] store_update_failed pack_id={pack_id} error={exc}",
             file=LogFiles.ERROR,
         )
+
+    # Write observations to paper-scope memory so future P2C runs can reuse them.
+    await _write_paper_scope_memories(
+        paper_id=request.paper_id,
+        user_id=request.user_id,
+        observations=pack.observations,
+    )
     Logger.info(
         f"[M2] generation_completed pack_id={pack_id} observations={len(pack.observations)} warnings={len(pack.warnings)}",
         file=LogFiles.API,
@@ -267,6 +276,51 @@ async def _generate_stream(request: GenerateContextPackRequest):
             "next_action": "create_repro_session",
         },
     )
+
+
+async def _write_paper_scope_memories(
+    *,
+    paper_id: str,
+    user_id: str,
+    observations: list,
+) -> None:
+    """Persist P2C observations as paper-scoped memory items for future reuse."""
+    if user_id == "default" or not observations:
+        return
+    try:
+        from paperbot.infrastructure.stores.memory_store import SqlAlchemyMemoryStore
+        from paperbot.memory.schema import MemoryCandidate
+
+        candidates = []
+        for obs in observations:
+            narrative = (obs.narrative or "")[:_MAX_OBSERVATION_NARRATIVE]
+            content = f"[{obs.stage}/{obs.type}] {obs.title}: {narrative}"
+            candidates.append(
+                MemoryCandidate(
+                    kind="note",
+                    content=content,
+                    confidence=obs.confidence,
+                    scope_type="paper",
+                    scope_id=paper_id,
+                    tags=[obs.stage, obs.type] + list(obs.concepts[:3]),
+                )
+            )
+        store = SqlAlchemyMemoryStore()
+        created, skipped, _ = await asyncio.to_thread(
+            store.add_memories,
+            user_id=user_id,
+            memories=candidates,
+            actor_id="p2c_orchestrator",
+        )
+        Logger.info(
+            f"[M2] paper_memory_written paper_id={paper_id} created={created} skipped={skipped}",
+            file=LogFiles.API,
+        )
+    except Exception:
+        Logger.warning(
+            f"[M2] paper_memory_write_failed paper_id={paper_id}",
+            file=LogFiles.API,
+        )
 
 
 @router.post("/generate")
