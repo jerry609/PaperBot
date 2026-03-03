@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import re
+import struct
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
@@ -12,6 +14,53 @@ from sqlalchemy.exc import IntegrityError
 from paperbot.infrastructure.stores.models import Base, MemoryAuditLogModel, MemoryItemModel, MemorySourceModel
 from paperbot.infrastructure.stores.sqlalchemy_db import SessionProvider, get_db_url
 from paperbot.memory.schema import MemoryCandidate
+
+logger = logging.getLogger(__name__)
+
+_EMBEDDING_DIM = 1536  # text-embedding-3-small default dimension
+
+
+def _pack_embedding(vec: List[float]) -> bytes:
+    """Pack a float32 vector into a byte blob for sqlite storage."""
+    return struct.pack(f"{len(vec)}f", *vec)
+
+
+def _hybrid_merge(
+    vec_results: List[Dict[str, Any]],
+    fts_results: List[Dict[str, Any]],
+    *,
+    limit: int,
+    vec_weight: float = 0.6,
+    bm25_weight: float = 0.4,
+) -> List[Dict[str, Any]]:
+    """Merge vector and BM25 results with weighted scoring (Phase C).
+
+    Scoring: final_score = 0.6 × vec_score + 0.4 × rank_score
+    where rank_score = 1 / (1 + rank_position) for BM25 results.
+    """
+    scores: Dict[int, float] = {}
+    items: Dict[int, Dict[str, Any]] = {}
+
+    for rank, item in enumerate(vec_results):
+        item_id = int(item.get("id", 0))
+        vec_score = float(item.get("vec_score", 1.0 / (1.0 + rank)))
+        scores[item_id] = scores.get(item_id, 0.0) + vec_weight * vec_score
+        items[item_id] = item
+
+    for rank, item in enumerate(fts_results):
+        item_id = int(item.get("id", 0))
+        bm25_score = 1.0 / (1.0 + rank)
+        scores[item_id] = scores.get(item_id, 0.0) + bm25_weight * bm25_score
+        if item_id not in items:
+            items[item_id] = item
+
+    ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+    result = []
+    for item_id, score in ranked[:limit]:
+        entry = items[item_id].copy()
+        entry["hybrid_score"] = round(score, 4)
+        result.append(entry)
+    return result
 
 
 def _sha256_bytes(data: bytes) -> str:
@@ -46,11 +95,42 @@ class SqlAlchemyMemoryStore:
     - Stores provenance via MemorySourceModel rows.
     """
 
-    def __init__(self, db_url: Optional[str] = None, *, auto_create_schema: bool = True):
+    def __init__(
+        self,
+        db_url: Optional[str] = None,
+        *,
+        auto_create_schema: bool = True,
+        embedding_provider=None,
+    ):
         self.db_url = db_url or get_db_url()
         self._provider = SessionProvider(self.db_url)
+        # embedding_provider: None = lazy-init, False = permanently unavailable, else provider
+        self._embedding_provider = embedding_provider
+        self._vec_available = False
+        if str(self.db_url).startswith("sqlite:"):
+            self._try_enable_vec_extension()
         if auto_create_schema:
             self._ensure_schema()
+
+    def _try_enable_vec_extension(self) -> None:
+        """Register sqlite-vec extension loader on every new SQLAlchemy connection."""
+        try:
+            import sqlite_vec  # type: ignore  # noqa: PLC0415
+            from sqlalchemy import event
+
+            @event.listens_for(self._provider.engine, "connect")
+            def _load_vec(dbapi_conn, _):
+                dbapi_conn.enable_load_extension(True)
+                sqlite_vec.load(dbapi_conn)
+                dbapi_conn.enable_load_extension(False)
+
+            # Probe: confirm the extension is loadable right now.
+            with self._provider.engine.connect() as conn:
+                conn.execute(text("SELECT vec_version()"))
+            self._vec_available = True
+            logger.debug("sqlite-vec loaded, vector search enabled")
+        except Exception:
+            logger.debug("sqlite-vec unavailable, vector search disabled")
 
     def _ensure_schema(self) -> None:
         """
@@ -77,6 +157,7 @@ class SqlAlchemyMemoryStore:
             "pii_risk": "INTEGER DEFAULT 0",
             "deleted_at": "DATETIME",
             "deleted_reason": "TEXT DEFAULT ''",
+            "embedding": "BLOB",
         }
 
         with self._provider.engine.connect() as conn:
@@ -92,10 +173,139 @@ class SqlAlchemyMemoryStore:
                     conn.execute(text(f"ALTER TABLE memory_items ADD COLUMN {col} {ddl}"))
                 except Exception:
                     pass
+            self._ensure_fts5(conn)
+            if self._vec_available:
+                self._ensure_vec_table(conn)
             try:
                 conn.commit()
             except Exception:
                 pass
+
+    @staticmethod
+    def _ensure_fts5(conn) -> None:
+        """Create FTS5 virtual table + sync triggers if they don't exist (SQLite only)."""
+        try:
+            tables = {
+                r[0]
+                for r in conn.execute(
+                    text("SELECT name FROM sqlite_master WHERE type IN ('table', 'shadow')")
+                ).fetchall()
+            }
+            if "memory_items_fts" not in tables:
+                conn.execute(
+                    text(
+                        "CREATE VIRTUAL TABLE memory_items_fts"
+                        " USING fts5(content, tokenize='porter ascii')"
+                    )
+                )
+                # Back-fill existing approved rows.
+                conn.execute(
+                    text(
+                        "INSERT INTO memory_items_fts(rowid, content)"
+                        " SELECT id, content FROM memory_items WHERE deleted_at IS NULL"
+                    )
+                )
+
+            triggers = {
+                r[0]
+                for r in conn.execute(
+                    text("SELECT name FROM sqlite_master WHERE type='trigger'")
+                ).fetchall()
+            }
+            if "memory_items_fts_ai" not in triggers:
+                conn.execute(
+                    text(
+                        "CREATE TRIGGER memory_items_fts_ai"
+                        " AFTER INSERT ON memory_items BEGIN"
+                        "   INSERT INTO memory_items_fts(rowid, content)"
+                        "   VALUES (new.id, new.content);"
+                        " END"
+                    )
+                )
+            if "memory_items_fts_ad" not in triggers:
+                conn.execute(
+                    text(
+                        "CREATE TRIGGER memory_items_fts_ad"
+                        " AFTER DELETE ON memory_items BEGIN"
+                        "   DELETE FROM memory_items_fts WHERE rowid = old.id;"
+                        " END"
+                    )
+                )
+            if "memory_items_fts_au" not in triggers:
+                conn.execute(
+                    text(
+                        "CREATE TRIGGER memory_items_fts_au"
+                        " AFTER UPDATE OF content ON memory_items BEGIN"
+                        "   DELETE FROM memory_items_fts WHERE rowid = old.id;"
+                        "   INSERT INTO memory_items_fts(rowid, content)"
+                        "   VALUES (new.id, new.content);"
+                        " END"
+                    )
+                )
+        except Exception:
+            pass  # FTS5 not available or already set up — degrade silently
+
+    @staticmethod
+    def _ensure_vec_table(conn, dim: int = _EMBEDDING_DIM) -> None:
+        """Create vec_items sqlite-vec virtual table + sync triggers if absent."""
+        try:
+            tables = {
+                r[0]
+                for r in conn.execute(
+                    text("SELECT name FROM sqlite_master WHERE type IN ('table', 'shadow')")
+                ).fetchall()
+            }
+            if "vec_items" not in tables:
+                conn.execute(
+                    text(f"CREATE VIRTUAL TABLE vec_items USING vec0(embedding float[{dim}])")
+                )
+                # Back-fill existing embeddings.
+                conn.execute(
+                    text(
+                        "INSERT OR IGNORE INTO vec_items(rowid, embedding)"
+                        " SELECT id, embedding FROM memory_items"
+                        " WHERE embedding IS NOT NULL AND deleted_at IS NULL"
+                    )
+                )
+            triggers = {
+                r[0]
+                for r in conn.execute(
+                    text("SELECT name FROM sqlite_master WHERE type='trigger'")
+                ).fetchall()
+            }
+            if "memory_items_vec_ai" not in triggers:
+                conn.execute(
+                    text(
+                        "CREATE TRIGGER memory_items_vec_ai"
+                        " AFTER INSERT ON memory_items"
+                        " WHEN new.embedding IS NOT NULL BEGIN"
+                        "   INSERT OR REPLACE INTO vec_items(rowid, embedding)"
+                        "   VALUES (new.id, new.embedding);"
+                        " END"
+                    )
+                )
+            if "memory_items_vec_au" not in triggers:
+                conn.execute(
+                    text(
+                        "CREATE TRIGGER memory_items_vec_au"
+                        " AFTER UPDATE OF embedding ON memory_items BEGIN"
+                        "   DELETE FROM vec_items WHERE rowid = old.id;"
+                        "   INSERT OR IGNORE INTO vec_items(rowid, embedding)"
+                        "   SELECT new.id, new.embedding WHERE new.embedding IS NOT NULL;"
+                        " END"
+                    )
+                )
+            if "memory_items_vec_ad" not in triggers:
+                conn.execute(
+                    text(
+                        "CREATE TRIGGER memory_items_vec_ad"
+                        " AFTER DELETE ON memory_items BEGIN"
+                        "   DELETE FROM vec_items WHERE rowid = old.id;"
+                        " END"
+                    )
+                )
+        except Exception:
+            pass  # sqlite-vec not available — degrade silently
 
     def upsert_source(
         self,
@@ -227,8 +437,62 @@ class SqlAlchemyMemoryStore:
                 session.refresh(row)
                 created += 1
                 created_rows.append(row)
+                # Generate and store embedding after the row is committed (best-effort).
+                self._store_embedding(row.id, content)
 
         return created, skipped, created_rows
+
+    def _get_embedding_provider(self):
+        """Lazy-initialise embedding provider; returns None if unavailable."""
+        if self._embedding_provider is False:
+            return None
+        if self._embedding_provider is not None:
+            return self._embedding_provider
+        try:
+            from paperbot.context_engine.embeddings import (  # noqa: PLC0415
+                try_build_default_embedding_provider,
+            )
+
+            provider = try_build_default_embedding_provider()
+            self._embedding_provider = provider if provider is not None else False
+            return provider
+        except Exception:
+            self._embedding_provider = False
+            return None
+
+    def _store_embedding(self, row_id: int, content: str) -> None:
+        """Generate embedding for *content* and persist it (best-effort, non-blocking)."""
+        provider = self._get_embedding_provider()
+        if provider is None:
+            return
+        try:
+            vec = provider.embed(content)
+            if vec is None:
+                return
+            blob = _pack_embedding(vec)
+            with self._provider.engine.connect() as conn:
+                conn.execute(
+                    text("UPDATE memory_items SET embedding = :blob WHERE id = :rid"),
+                    {"blob": blob, "rid": row_id},
+                )
+                if self._vec_available:
+                    try:
+                        conn.execute(
+                            text("DELETE FROM vec_items WHERE rowid = :rid"), {"rid": row_id}
+                        )
+                        conn.execute(
+                            text(
+                                "INSERT INTO vec_items(rowid, embedding) VALUES (:rid, :blob)"
+                            ),
+                            {"rid": row_id, "blob": blob},
+                        )
+                    except Exception:  # noqa: BLE001 — vec table may not exist yet
+                        pass
+                conn.commit()
+        except Exception:  # noqa: BLE001 — non-critical, degrade gracefully
+            logger.warning(
+                "Failed to store embedding for memory item %d", row_id, exc_info=True
+            )
 
     def list_memories(
         self,
@@ -306,22 +570,157 @@ class SqlAlchemyMemoryStore:
                 scope_id=scope_id,
             )
 
+        _fallback = lambda: self.list_memories(  # noqa: E731
+            user_id=user_id, limit=limit, workspace_id=workspace_id,
+            scope_type=scope_type, scope_id=scope_id,
+        )
+        _scope = dict(
+            user_id=user_id, limit=limit,
+            workspace_id=workspace_id, scope_type=scope_type, scope_id=scope_id,
+        )
+
+        # --- Phase B+C: vector search + hybrid fusion ---
+        vec_results: Optional[List[Dict[str, Any]]] = None
+        provider = self._get_embedding_provider()
+        if provider is not None:
+            try:
+                query_vec = provider.embed(query[:500])
+                if query_vec is not None:
+                    vec_results = self._search_vec(query_vec=query_vec, **_scope)
+            except Exception:  # noqa: BLE001
+                pass
+
+        # --- Phase A: FTS5 BM25 search ---
+        fts_results = self._search_fts5(tokens=tokens, **_scope)
+
+        # Hybrid fusion when both channels return results.
+        if vec_results is not None and fts_results is not None:
+            merged = _hybrid_merge(vec_results, fts_results, limit=limit)
+            return merged or _fallback()
+
+        if vec_results is not None:
+            return vec_results or _fallback()
+
+        if fts_results is not None:
+            return fts_results or _fallback()
+
+        return self._search_like(tokens=tokens, **_scope)
+
+    def _search_fts5(
+        self,
+        *,
+        user_id: str,
+        tokens: List[str],
+        limit: int,
+        workspace_id: Optional[str],
+        scope_type: Optional[str],
+        scope_id: Optional[str],
+    ) -> Optional[List[Dict[str, Any]]]:
+        """
+        FTS5 BM25 search. Returns a list on success, None if FTS5 is unavailable.
+        Results are already filtered by user_id / scope / status.
+        """
+        if not str(self.db_url).startswith("sqlite:"):
+            return None  # FTS5 is SQLite-only
+
+        # Build a safe FTS5 query: wrap each token in double quotes to treat as
+        # phrase tokens, joined with AND (FTS5 default when space-separated).
+        def _escape_fts(token: str) -> str:
+            return '"' + token.replace('"', '""') + '"'
+
+        fts_query = " ".join(_escape_fts(t) for t in tokens[:8])
+
+        try:
+            with self._provider.engine.connect() as conn:
+                # Fetch candidate rowids from FTS5 ordered by BM25 rank.
+                fts_rows = conn.execute(
+                    text(
+                        "SELECT rowid FROM memory_items_fts"
+                        " WHERE memory_items_fts MATCH :q"
+                        " ORDER BY rank LIMIT 250"
+                    ),
+                    {"q": fts_query},
+                ).fetchall()
+        except Exception:
+            return None  # FTS5 table not available yet
+
+        if not fts_rows:
+            return []
+
+        candidate_ids = [r[0] for r in fts_rows]
+        # Preserve FTS5 BM25 rank order via a mapping.
+        rank_map = {rid: idx for idx, rid in enumerate(candidate_ids)}
+
+        now = datetime.now(timezone.utc)
+        with self._provider.session() as session:
+            stmt = (
+                select(MemoryItemModel)
+                .where(MemoryItemModel.id.in_(candidate_ids))
+                .where(MemoryItemModel.user_id == user_id)
+                .where(MemoryItemModel.deleted_at.is_(None))
+                .where(MemoryItemModel.status == "approved")
+                .where(
+                    or_(
+                        MemoryItemModel.expires_at.is_(None),
+                        MemoryItemModel.expires_at > now,
+                    )
+                )
+            )
+            if workspace_id is not None:
+                stmt = stmt.where(MemoryItemModel.workspace_id == workspace_id)
+            if scope_type is not None:
+                if scope_type == "global":
+                    stmt = stmt.where(
+                        or_(
+                            MemoryItemModel.scope_type == scope_type,
+                            MemoryItemModel.scope_type.is_(None),
+                        )
+                    )
+                else:
+                    stmt = stmt.where(MemoryItemModel.scope_type == scope_type)
+            if scope_id is not None:
+                stmt = stmt.where(MemoryItemModel.scope_id == scope_id)
+
+            rows = session.execute(stmt).scalars().all()
+
+        results = [self._row_to_dict(r) for r in rows]
+        # Sort by FTS5 BM25 rank (lower rank index = better match).
+        results.sort(key=lambda d: rank_map.get(int(d.get("id", 0)), 9999))
+        return results[: int(limit)]
+
+    def _search_like(
+        self,
+        *,
+        user_id: str,
+        tokens: List[str],
+        limit: int,
+        workspace_id: Optional[str],
+        scope_type: Optional[str],
+        scope_id: Optional[str],
+    ) -> List[Dict[str, Any]]:
+        """Legacy LIKE + token-overlap scoring fallback."""
+        now = datetime.now(timezone.utc)
         with self._provider.session() as session:
             stmt = select(MemoryItemModel).where(MemoryItemModel.user_id == user_id)
             if workspace_id is not None:
                 stmt = stmt.where(MemoryItemModel.workspace_id == workspace_id)
             if scope_type is not None:
                 if scope_type == "global":
-                    stmt = stmt.where(or_(MemoryItemModel.scope_type == scope_type, MemoryItemModel.scope_type.is_(None)))
+                    stmt = stmt.where(
+                        or_(
+                            MemoryItemModel.scope_type == scope_type,
+                            MemoryItemModel.scope_type.is_(None),
+                        )
+                    )
                 else:
                     stmt = stmt.where(MemoryItemModel.scope_type == scope_type)
             if scope_id is not None:
                 stmt = stmt.where(MemoryItemModel.scope_id == scope_id)
-            now = datetime.now(timezone.utc)
             stmt = stmt.where(MemoryItemModel.deleted_at.is_(None))
             stmt = stmt.where(MemoryItemModel.status == "approved")
-            stmt = stmt.where(or_(MemoryItemModel.expires_at.is_(None), MemoryItemModel.expires_at > now))
-            # Coarse filter in SQL
+            stmt = stmt.where(
+                or_(MemoryItemModel.expires_at.is_(None), MemoryItemModel.expires_at > now)
+            )
             ors = [MemoryItemModel.content.contains(t) for t in tokens[:8]]
             if ors:
                 stmt = stmt.where(or_(*ors))
@@ -350,6 +749,80 @@ class SqlAlchemyMemoryStore:
             scope_type=scope_type,
             scope_id=scope_id,
         )
+
+    def _search_vec(
+        self,
+        *,
+        user_id: str,
+        query_vec: List[float],
+        limit: int,
+        workspace_id: Optional[str],
+        scope_type: Optional[str],
+        scope_id: Optional[str],
+    ) -> Optional[List[Dict[str, Any]]]:
+        """sqlite-vec ANN search. Returns None if vec is unavailable or errors."""
+        if not self._vec_available:
+            return None
+        query_blob = _pack_embedding(query_vec)
+        try:
+            with self._provider.engine.connect() as conn:
+                rows = conn.execute(
+                    text(
+                        "SELECT rowid, distance FROM vec_items"
+                        " WHERE embedding MATCH :blob"
+                        " ORDER BY distance LIMIT :k"
+                    ),
+                    {"blob": query_blob, "k": limit * 5},
+                ).fetchall()
+        except Exception:  # noqa: BLE001 — vec table may not exist yet
+            return None
+
+        if not rows:
+            return []
+
+        candidate_ids = [r[0] for r in rows]
+        distance_map = {int(r[0]): float(r[1]) for r in rows}
+
+        now = datetime.now(timezone.utc)
+        with self._provider.session() as session:
+            stmt = (
+                select(MemoryItemModel)
+                .where(MemoryItemModel.id.in_(candidate_ids))
+                .where(MemoryItemModel.user_id == user_id)
+                .where(MemoryItemModel.deleted_at.is_(None))
+                .where(MemoryItemModel.status == "approved")
+                .where(
+                    or_(
+                        MemoryItemModel.expires_at.is_(None),
+                        MemoryItemModel.expires_at > now,
+                    )
+                )
+            )
+            if workspace_id is not None:
+                stmt = stmt.where(MemoryItemModel.workspace_id == workspace_id)
+            if scope_type is not None:
+                if scope_type == "global":
+                    stmt = stmt.where(
+                        or_(
+                            MemoryItemModel.scope_type == scope_type,
+                            MemoryItemModel.scope_type.is_(None),
+                        )
+                    )
+                else:
+                    stmt = stmt.where(MemoryItemModel.scope_type == scope_type)
+            if scope_id is not None:
+                stmt = stmt.where(MemoryItemModel.scope_id == scope_id)
+            db_rows = session.execute(stmt).scalars().all()
+
+        results = []
+        for r in db_rows:
+            d = self._row_to_dict(r)
+            dist = distance_map.get(int(d.get("id", 0)), 1e9)
+            d["vec_distance"] = dist
+            d["vec_score"] = 1.0 / (1.0 + dist)
+            results.append(d)
+        results.sort(key=lambda x: x["vec_distance"])
+        return results[:limit]
 
     def touch_usage(self, *, item_ids: List[int], actor_id: str = "system") -> None:
         """
