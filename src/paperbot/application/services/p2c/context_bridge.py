@@ -153,7 +153,9 @@ def _format_paper_analysis(context_pack: Dict[str, Any]) -> Optional[str]:
     for m in memories:
         content = (m.get("content") or "").strip()
         if content:
-            lines.append(f"- {content}")
+            # Sanitize to prevent tag-escape injection from stored memories.
+            safe = content.replace("</paper_analysis>", "[/paper_analysis]")
+            lines.append(f"- {safe}")
     if not lines:
         return None
     inner = "## Previously extracted from this paper:\n" + "\n".join(lines)
