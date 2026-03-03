@@ -224,8 +224,8 @@ class NormalizedInput:
     full_text: Optional[str] = None        # 全文（deep 模式用）
     algorithm_blocks: List[str] = field(default_factory=list)
     tables: List[Dict[str, Any]] = field(default_factory=list)
-    user_memory: Optional[Dict] = None     # 用户个性化上下文
-    project_context: Optional[Dict] = None # 项目上下文
+    user_memory: Optional[str] = None      # 用户个性化上下文（格式化文本）
+    project_context: Optional[str] = None  # 项目上下文（格式化文本）
 ```
 
 ### 4.2 Stage A: 文献机制蒸馏
