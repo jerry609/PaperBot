@@ -94,3 +94,86 @@ def test_hf_daily_connector_search_handles_empty_query():
     connector = HFDailyPapersConnector()
     rows = connector.search(query="   ", max_results=5)
     assert rows == []
+
+
+def test_hf_daily_connector_fetch_uses_cache(monkeypatch):
+    calls = []
+
+    def _fake_get(url, params, headers, timeout):
+        calls.append({"url": url, "params": dict(params)})
+        return _DummyResponse(
+            [
+                {
+                    "paper": {
+                        "id": "2602.12345",
+                        "title": "Cached Paper",
+                    }
+                }
+            ]
+        )
+
+    monkeypatch.setattr(
+        "paperbot.infrastructure.connectors.hf_daily_papers_connector.requests.get", _fake_get
+    )
+
+    connector = HFDailyPapersConnector(cache_ttl_s=600)
+    first = connector.fetch_daily_papers(limit=20, page=0)
+    second = connector.fetch_daily_papers(limit=20, page=0)
+
+    assert first == second
+    assert len(calls) == 1
+    assert connector.metrics["cache_hits"] == 1
+
+
+def test_hf_daily_connector_get_trending_modes(monkeypatch):
+    payload = [
+        {
+            "paper": {
+                "id": "2602.00002",
+                "title": "Older but many upvotes",
+                "submittedOnDailyAt": "2026-02-01T00:00:00.000Z",
+                "upvotes": 100,
+            }
+        },
+        {
+            "paper": {
+                "id": "2602.00003",
+                "title": "Newest paper",
+                "submittedOnDailyAt": "2026-02-10T00:00:00.000Z",
+                "upvotes": 30,
+            }
+        },
+    ]
+
+    def _fake_get(url, params, headers, timeout):
+        return _DummyResponse(payload if int(params.get("p", 0)) == 0 else [])
+
+    monkeypatch.setattr(
+        "paperbot.infrastructure.connectors.hf_daily_papers_connector.requests.get", _fake_get
+    )
+
+    connector = HFDailyPapersConnector(cache_ttl_s=0)
+    hot = connector.get_trending(mode="hot", limit=2)
+    newest = connector.get_trending(mode="new", limit=2)
+
+    assert hot[0].paper_id == "2602.00002"
+    assert newest[0].paper_id == "2602.00003"
+
+
+def test_hf_daily_connector_search_degrades_on_request_error(monkeypatch):
+    class _Boom(Exception):
+        pass
+
+    def _fake_get(url, params, headers, timeout):
+        raise _Boom("timeout")
+
+    monkeypatch.setattr(
+        "paperbot.infrastructure.connectors.hf_daily_papers_connector.requests.get", _fake_get
+    )
+
+    connector = HFDailyPapersConnector()
+    rows = connector.search(query="kv cache", max_results=5)
+
+    assert rows == []
+    assert connector.metrics["errors"] >= 1
+    assert connector.metrics["degraded"] >= 1

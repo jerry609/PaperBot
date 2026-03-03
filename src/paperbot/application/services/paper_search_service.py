@@ -188,10 +188,40 @@ class PaperSearchService:
 
     @staticmethod
     def _paper_key(paper: PaperCandidate) -> str:
+        identity_key = PaperSearchService._stable_identity_key(paper)
+        if identity_key:
+            return identity_key
         if paper.title_hash:
             return paper.title_hash
         normalized = _TOKEN_SEP_RX.sub(" ", (paper.title or "").strip().lower())
         return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _stable_identity_key(paper: PaperCandidate) -> str:
+        identities = paper.identities or []
+        if not identities:
+            return ""
+
+        def _normalized(source: str, external_id: str) -> str:
+            value = (external_id or "").strip().lower()
+            if source == "arxiv":
+                value = value.removeprefix("arxiv:")
+                if "v" in value:
+                    head, tail = value.rsplit("v", 1)
+                    if head and tail.isdigit():
+                        value = head
+            if source == "doi":
+                value = value.strip().lower()
+            return value
+
+        for source in ("doi", "arxiv", "openalex", "semantic_scholar", "hf_daily", "papers_cool"):
+            for ident in identities:
+                if ident.source != source:
+                    continue
+                normalized = _normalized(source, ident.external_id)
+                if normalized:
+                    return f"id:{source}:{normalized}"
+        return ""
 
     @staticmethod
     def _paper_quality(paper: PaperCandidate) -> Tuple[int, int, int, int]:

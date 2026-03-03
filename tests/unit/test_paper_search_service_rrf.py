@@ -6,6 +6,7 @@ from typing import Optional
 import pytest
 
 from paperbot.application.services.paper_search_service import PaperSearchService
+from paperbot.domain.identity import PaperIdentity
 from paperbot.domain.paper import PaperCandidate
 
 
@@ -95,3 +96,33 @@ async def test_persist_search_results_disables_author_sync_for_latency() -> None
 
     assert len(result.papers) == 1
     assert registry.sync_flags == [False]
+
+
+@pytest.mark.asyncio
+async def test_rrf_dedup_prefers_shared_arxiv_identity_over_title_hash() -> None:
+    from_s2 = PaperCandidate(
+        title="Different title from S2",
+        identities=[PaperIdentity("arxiv", "2602.12345v2")],
+    )
+    from_hf = PaperCandidate(
+        title="Different title from HF",
+        identities=[PaperIdentity("arxiv", "2602.12345")],
+    )
+
+    service = PaperSearchService(
+        adapters={
+            "semantic_scholar": _FakeAdapter("semantic_scholar", [from_s2]),
+            "hf_daily": _FakeAdapter("hf_daily", [from_hf]),
+        }
+    )
+
+    result = await service.search(
+        "kv cache",
+        sources=["semantic_scholar", "hf_daily"],
+        persist=False,
+    )
+
+    assert result.total_raw == 2
+    assert result.duplicates_removed == 1
+    assert len(result.papers) == 1
+    assert set(result.papers[0].retrieval_sources) == {"semantic_scholar", "hf_daily"}

@@ -1,6 +1,6 @@
 # PaperBot
 
-论文检索、LLM 评审、学者追踪与 Paper2Code 的研究工作流工具链。
+论文检索、LLM 评审、学者追踪与 Paper2Code/AgentSwarm 的研究工作流工具链。
 
 **后端** Python + FastAPI（SSE 流式） · **前端** Next.js Web + Ink CLI · **数据源** papers.cool / arXiv API / Hugging Face Daily Papers / Semantic Scholar / OpenAlex
 
@@ -38,7 +38,7 @@
 | Push/Notify | 🟡 基本可用 | `/research/paperscool/daily` | `--notify` | Email/Slack/钉钉 已落地；Apprise 多渠道（Telegram/Discord/企业微信/飞书/RSS）+ MinerU 图表提取待集成 |
 | 学者追踪 | 🟡 基本可用 | `/track` | `track` | 多 Agent 管线 + PIS 评分完整；依赖 Semantic Scholar API Key |
 | 深度评审 | 🟡 基本可用 | `/review` | `review` | 模拟同行评审流程完整；输出质量取决于 LLM 后端配置 |
-| Paper2Code | 🟡 基本可用 | `/gen-code` | `gen-code` | 编排 + RAG + CodeMemory 完整；需配置 Docker 或 E2B 沙箱运行验证 |
+| Paper2Code | 🟡 基本可用 | `/gen-code`（兼容） + `/research/repro/context/*` | `gen-code` | 编排 + RAG + CodeMemory 完整；执行层计划迁移为 AgentSwarm/Codex 专业执行器 |
 | 记忆系统 | 🟡 基本可用 | `/research/memory/*` | — | FTS5 + BM25 文件记忆优先, Embedding 可选增强; OpenClaw 三层架构参考 |
 | Context Engine | 🟡 基本可用 | `/research/context` | — | Track Router + Engine 框架 + 本地 DB 搜索回退; 推荐系统采用文件系统 + BM25 优先策略, 无需重型 ML 模型 |
 | Model Provider | ✅ 可用 | `/api/model-endpoints/*` | — | 多提供商 CRUD + 连接测试 + 任务路由 + Keychain 安全存储 |
@@ -53,6 +53,12 @@
 > 🟡 基本可用 = 实现完整但有外部依赖或配置要求
 > 🔴 早期 = 骨架已搭建，核心流程待完善
 
+### 复现执行层迁移说明（2026-03）
+
+- 当前：`/api/gen-code` 仍作为兼容入口，底层是现有 Paper2Code 管线。
+- 已具备：`/api/research/repro/context/*` 的 Context Pack 与 Session 入口。
+- 下一步：待 AgentSwarm 分支合并后，复现执行将优先路由到 Codex/Swarm 专业执行器，再逐步收敛旧的单体 `gen-code` 路径。
+
 ## 架构
 
 > 完整架构图（可编辑）：[Excalidraw](asset/architecture.excalidraw) · [drawio](asset/architecture.drawio)
@@ -64,7 +70,7 @@
                              ▼
 ┌─────────────────── FastAPI Gateway (SSE) ───────────────────────┐
 │  /search  /daily  /analyze  /track  /review  /gen-code  /chat  │
-│  /model-endpoints  /deadlines  /papers  /research              │
+│  /model-endpoints  /deadlines  /papers  /research/repro/context │
 └────────────────────────────┬────────────────────────────────────┘
                              ▼
 ┌─ Application (Ports & Services) ──────────────────────────────┐
@@ -317,7 +323,7 @@ arq paperbot.infrastructure.queue.arq_worker.WorkerSettings
 | `/health` | GET | 健康检查 |
 | `/api/track` | GET | 学者追踪（SSE） |
 | `/api/analyze` | POST | 论文分析（SSE） |
-| `/api/gen-code` | POST | Paper2Code（SSE） |
+| `/api/gen-code` | POST | Paper2Code（SSE，兼容入口） |
 | `/api/review` | POST | 深度评审（SSE） |
 | `/api/chat` | POST | AI 对话（SSE） |
 | `/api/research/paperscool/search` | POST | 主题检索（多源聚合，支持 `min_score` 过滤） |
@@ -334,6 +340,8 @@ arq paperbot.infrastructure.queue.arq_worker.WorkerSettings
 | `/api/research/papers/related-work` | POST | Related Work 草稿生成 |
 | `/api/research/deadlines/radar` | GET | 会议截止日期雷达（CCF 分级 + Track 匹配） |
 | `/api/research/context` | POST | ContextPack 构建（含 Track Router） |
+| `/api/research/repro/context/generate` | POST | Paper-to-Context 生成（SSE） |
+| `/api/research/repro/context/{pack_id}/session` | POST | 从 Context Pack 创建复现 Session（`auto/claude_code/codex/local`） |
 | `/api/research/discovery/seed` | POST | 种子论文发现（S2/OpenAlex 引用图扩展） |
 | `/api/research/collections` | GET/POST | 论文集合管理 |
 | `/api/research/collections/:id/items` | GET/POST/DELETE | 集合内论文 CRUD |
@@ -464,13 +472,14 @@ MinerU PDF 图表提取（主方法图自动识别）、推送内容增强（一
 | [`docs/ROADMAP_TODO.md`](docs/ROADMAP_TODO.md) | 功能规划与迭代清单（参考 HF/AlphaXiv） |
 | [`docs/PLAN.md`](docs/PLAN.md) | 架构评估与重构计划 |
 | [`docs/PAPERSCOOL_WORKFLOW.md`](docs/PAPERSCOOL_WORKFLOW.md) | Topic Workflow 端到端流程与配置 |
-| [`docs/DEEPCODE_TODO.md`](docs/DEEPCODE_TODO.md) | AgentSwarm / Paper2Code 迭代清单 |
+| [`docs/AGENTSWARM_TODO.md`](docs/AGENTSWARM_TODO.md) | AgentSwarm / Paper2Code 迭代清单 |
 | [`docs/memory_system.md`](docs/memory_system.md) | 记忆系统设计文档（跨平台中间件 + 架构提案） |
 | [`docs/anchor_system.md`](docs/anchor_system.md) | 锚点作者系统（理论模型 + 实施设计 + TODO） |
 | [`docs/TOPIC_SOURCE_TEMPLATE.md`](docs/TOPIC_SOURCE_TEMPLATE.md) | 数据源开发模板 |
 | [`docs/p2c/`](docs/p2c/) | Paper2Context 模块设计文档（设计/API/前端/Benchmark/优化） |
 | [`docs/AGENTIC_RESEARCH_EVOLUTION.md`](docs/AGENTIC_RESEARCH_EVOLUTION.md) | Agentic Research 演进方案（Gap Analysis + 实施路线图） |
 | [`docs/OPENCLAW_RESEARCH_REPORT.md`](docs/OPENCLAW_RESEARCH_REPORT.md) | OpenClaw 源码综述（22 模块深度分析） |
+| [`docs/archive/`](docs/archive/) | 归档文档（过期 issue 草案/历史 backlog） |
 
 ## 测试
 

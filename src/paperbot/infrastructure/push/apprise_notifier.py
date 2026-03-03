@@ -7,6 +7,9 @@ Falls back gracefully when Apprise is not installed.
 from __future__ import annotations
 
 import logging
+import os
+import hashlib
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -33,6 +36,19 @@ _SCHEME_TO_FORMATTER = {
     "lark": "lark",
 }
 
+_RETRYABLE_ERROR_HINTS = (
+    "429",
+    "too many requests",
+    "timed out",
+    "timeout",
+    "temporarily unavailable",
+    "connection reset",
+    "network is unreachable",
+    "503",
+    "502",
+    "504",
+)
+
 
 @dataclass
 class PushChannel:
@@ -56,6 +72,10 @@ class AppriseNotifier:
         self._tags = tags or {}
         self._channels = [PushChannel(url=url, tags=self._resolve_tags(url)) for url in self._urls]
         self._apprise: Optional[Any] = None
+        self._sent_fingerprints: Dict[str, float] = {}
+        self._idempotency_ttl_s = max(
+            0.0, float(os.getenv("PAPERBOT_PUSH_IDEMPOTENCY_TTL_S", "600"))
+        )
 
         if _HAS_APPRISE and self._urls:
             self._apprise = apprise.Apprise()
@@ -183,6 +203,8 @@ class AppriseNotifier:
 
         details: List[Dict[str, Any]] = []
         all_ok = True
+        retry_attempts = max(1, int(os.getenv("PAPERBOT_PUSH_RETRY_ATTEMPTS", "3")))
+        retry_backoff_s = max(0.0, float(os.getenv("PAPERBOT_PUSH_RETRY_BACKOFF_S", "0.8")))
         for channel in matched:
             body, body_format = self._build_channel_body(
                 channel.url,
@@ -191,35 +213,161 @@ class AppriseNotifier:
                 fallback_markdown=markdown,
                 subject=subject,
             )
+            fingerprint = self._delivery_fingerprint(channel.url, subject, body)
+            if self._is_recent_duplicate(fingerprint):
+                details.append(
+                    {
+                        "url": channel.url,
+                        "ok": True,
+                        "attempts": 0,
+                        "skipped": True,
+                        "error_code": "idempotent_replay",
+                    }
+                )
+                continue
             try:
                 channel_apprise = apprise.Apprise()
                 channel_apprise.add(channel.url, tag=channel.tags or None)
-
                 fmt_map = {
                     "text": apprise.NotifyFormat.TEXT,
                     "html": apprise.NotifyFormat.HTML,
                     "markdown": apprise.NotifyFormat.MARKDOWN,
                 }
-                ok = bool(
-                    channel_apprise.notify(
-                        title=subject,
-                        body=body,
-                        notify_type=apprise.NotifyType.INFO,
-                        body_format=fmt_map.get(body_format, apprise.NotifyFormat.TEXT),
-                        tag=apprise.common.MATCH_ALL_TAG,
-                    )
+                ok, attempts, error = self._notify_with_retry(
+                    channel_apprise=channel_apprise,
+                    title=subject,
+                    body=body,
+                    body_format=fmt_map.get(body_format, apprise.NotifyFormat.TEXT),
+                    retry_attempts=retry_attempts,
+                    retry_backoff_s=retry_backoff_s,
                 )
-                details.append({"url": channel.url, "ok": ok})
+                row = {"url": channel.url, "ok": ok, "attempts": attempts}
+                if error:
+                    row["error"] = error
+                    row["error_code"] = self._map_error_code(error)
+                else:
+                    row["error_code"] = ""
+                if ok:
+                    self._mark_sent(fingerprint)
+                details.append(row)
                 all_ok = all_ok and ok
             except Exception as exc:
                 logger.warning("Apprise digest push failed url=%s err=%s", channel.url, exc)
-                details.append({"url": channel.url, "ok": False, "error": str(exc)})
+                error_text = str(exc)
+                details.append(
+                    {
+                        "url": channel.url,
+                        "ok": False,
+                        "error": error_text,
+                        "error_code": self._map_error_code(error_text),
+                    }
+                )
                 all_ok = False
 
         result: Dict[str, Any] = {"ok": all_ok, "channels": details}
         if not all_ok:
             result["error"] = "one or more channel pushes failed"
         return result
+
+    @staticmethod
+    def _is_retryable_error(error_text: str) -> bool:
+        normalized = str(error_text or "").strip().lower()
+        return any(hint in normalized for hint in _RETRYABLE_ERROR_HINTS)
+
+    @staticmethod
+    def _map_error_code(error_text: str) -> str:
+        normalized = str(error_text or "").strip().lower()
+        if not normalized:
+            return ""
+        if "429" in normalized or "too many requests" in normalized:
+            return "rate_limited"
+        if "timed out" in normalized or "timeout" in normalized:
+            return "timeout"
+        if "401" in normalized or "403" in normalized or "invalid webhook" in normalized:
+            return "auth_failed"
+        if any(code in normalized for code in ("502", "503", "504", "temporarily unavailable")):
+            return "downstream_unavailable"
+        if "network" in normalized or "connection" in normalized:
+            return "network_error"
+        return "delivery_failed"
+
+    def _notify_with_retry(
+        self,
+        *,
+        channel_apprise: Any,
+        title: str,
+        body: str,
+        body_format: Any,
+        retry_attempts: int,
+        retry_backoff_s: float,
+    ) -> tuple[bool, int, str]:
+        last_error = ""
+        for attempt in range(1, max(1, retry_attempts) + 1):
+            try:
+                ok = bool(
+                    channel_apprise.notify(
+                        title=title,
+                        body=body,
+                        notify_type=apprise.NotifyType.INFO,
+                        body_format=body_format,
+                        tag=apprise.common.MATCH_ALL_TAG,
+                    )
+                )
+            except Exception as exc:
+                ok = False
+                last_error = str(exc)
+                retryable = self._is_retryable_error(last_error)
+                if not retryable or attempt >= retry_attempts:
+                    return False, attempt, last_error
+                delay = retry_backoff_s * (2 ** (attempt - 1))
+                logger.info(
+                    "Apprise push retryable failure attempt=%s/%s delay=%.2fs err=%s",
+                    attempt,
+                    retry_attempts,
+                    delay,
+                    last_error,
+                )
+                if delay > 0:
+                    time.sleep(delay)
+                continue
+
+            if ok:
+                return True, attempt, ""
+
+            last_error = "notification rejected by downstream channel"
+            if attempt >= retry_attempts:
+                return False, attempt, last_error
+            delay = retry_backoff_s * (2 ** (attempt - 1))
+            logger.info(
+                "Apprise push returned not-ok attempt=%s/%s delay=%.2fs",
+                attempt,
+                retry_attempts,
+                delay,
+            )
+            if delay > 0:
+                time.sleep(delay)
+
+        return False, max(1, retry_attempts), last_error
+
+    @staticmethod
+    def _delivery_fingerprint(url: str, title: str, body: str) -> str:
+        digest = hashlib.sha1(f"{url}|{title}|{body}".encode("utf-8")).hexdigest()
+        return digest
+
+    def _is_recent_duplicate(self, fingerprint: str) -> bool:
+        if self._idempotency_ttl_s <= 0:
+            return False
+        now = time.time()
+        for key, expires_at in list(self._sent_fingerprints.items()):
+            if expires_at <= now:
+                self._sent_fingerprints.pop(key, None)
+        expiry = self._sent_fingerprints.get(fingerprint)
+        return bool(expiry and expiry > now)
+
+    def _mark_sent(self, fingerprint: str) -> None:
+        if self._idempotency_ttl_s <= 0:
+            return
+        self._sent_fingerprints[fingerprint] = time.time() + self._idempotency_ttl_s
 
     def _build_channel_body(
         self,

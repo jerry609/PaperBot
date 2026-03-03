@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from typing import List, Optional
 
 from paperbot.domain.identity import PaperIdentity
@@ -10,6 +11,8 @@ from paperbot.domain.paper import PaperCandidate
 from paperbot.infrastructure.connectors.hf_daily_papers_connector import (
     HFDailyPapersConnector,
 )
+
+_ARXIV_ABS_RE = re.compile(r"arxiv\.org/abs/([^/?#]+)")
 
 
 class HFDailyAdapter:
@@ -40,9 +43,25 @@ class HFDailyAdapter:
         )
         return [self._to_candidate(r) for r in records]
 
+    async def get_daily(self, *, limit: int = 100) -> List[PaperCandidate]:
+        records = await asyncio.to_thread(self._connector.get_daily, limit=limit)
+        return [self._to_candidate(r) for r in records]
+
+    async def get_trending(
+        self,
+        *,
+        mode: str = "hot",
+        limit: int = 30,
+    ) -> List[PaperCandidate]:
+        records = await asyncio.to_thread(self._connector.get_trending, mode=mode, limit=limit)
+        return [self._to_candidate(r) for r in records]
+
     @staticmethod
     def _to_candidate(r) -> PaperCandidate:
         identities = [PaperIdentity("hf_daily", r.paper_id)] if r.paper_id else []
+        arxiv_id = _extract_arxiv_id(r.external_url)
+        if arxiv_id:
+            identities.append(PaperIdentity("arxiv", arxiv_id))
         return PaperCandidate(
             title=r.title,
             abstract=r.summary[:2000] if r.summary else "",
@@ -57,3 +76,11 @@ class HFDailyAdapter:
 
     async def close(self) -> None:
         pass
+
+
+def _extract_arxiv_id(url: str) -> str:
+    text = str(url or "").strip()
+    match = _ARXIV_ABS_RE.search(text)
+    if not match:
+        return ""
+    return match.group(1).strip()

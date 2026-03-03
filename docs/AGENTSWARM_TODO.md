@@ -1,6 +1,6 @@
-# DeepCode TODO (PaperBot)
+# AgentSwarm Studio TODO (PaperBot)
 
-本文件是 DeepCode（论文 → 可运行工程 → 可验证证据）的长期迭代清单。每完成一个功能，请把对应条目从 `[ ]` 更新为 `[x]`，并在 “Progress Log” 追加一行记录（日期 + 简述 + 关联文件/接口/commit）。
+本文件是 AgentSwarm Studio（论文 → 可运行工程 → 可验证证据）的长期迭代清单。每完成一个功能，请把对应条目从 `[ ]` 更新为 `[x]`，并在 “Progress Log” 追加一行记录（日期 + 简述 + 关联文件/接口/commit）。
 
 ## North Star（不变的验收标准）
 
