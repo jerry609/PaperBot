@@ -68,9 +68,12 @@ def _try_get_llm_service() -> Optional["LLMService"]:
     """Try to obtain the default LLMService; return None on failure."""
     try:
         from paperbot.application.services.llm_service import get_llm_service
-
+    except ImportError:
+        logger.debug("LLMService not installed, stages will use heuristic fallback")
+        return None
+    try:
         return get_llm_service()
-    except Exception:
+    except Exception:  # noqa: BLE001 — config/connection failure, graceful degradation
         logger.debug("LLMService unavailable, stages will use heuristic fallback")
         return None
 
@@ -105,6 +108,7 @@ class ExtractionOrchestrator:
         self._section_extractor = section_extractor or PaperSectionExtractor()
         self._paper_type_classifier = paper_type_classifier or PaperTypeClassifier()
         self._config = config or OrchestratorConfig()
+        self._context_bridge = ContextEngineBridge()
 
     @staticmethod
     def resolve_stage_sequence(depth: Depth, paper_type: PaperType) -> List[str]:
@@ -180,7 +184,7 @@ class ExtractionOrchestrator:
                 raw_paper = await self._input_router.fetch(request.paper_id)
             normalized_input = await self._section_extractor.extract(raw_paper)
 
-        normalized_input = await ContextEngineBridge().enrich(
+        normalized_input = await self._context_bridge.enrich(
             normalized_input,
             user_id=request.user_id,
             track_id=request.track_id,
