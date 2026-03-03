@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import os
+import hashlib
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -71,6 +72,10 @@ class AppriseNotifier:
         self._tags = tags or {}
         self._channels = [PushChannel(url=url, tags=self._resolve_tags(url)) for url in self._urls]
         self._apprise: Optional[Any] = None
+        self._sent_fingerprints: Dict[str, float] = {}
+        self._idempotency_ttl_s = max(
+            0.0, float(os.getenv("PAPERBOT_PUSH_IDEMPOTENCY_TTL_S", "600"))
+        )
 
         if _HAS_APPRISE and self._urls:
             self._apprise = apprise.Apprise()
@@ -208,6 +213,18 @@ class AppriseNotifier:
                 fallback_markdown=markdown,
                 subject=subject,
             )
+            fingerprint = self._delivery_fingerprint(channel.url, subject, body)
+            if self._is_recent_duplicate(fingerprint):
+                details.append(
+                    {
+                        "url": channel.url,
+                        "ok": True,
+                        "attempts": 0,
+                        "skipped": True,
+                        "error_code": "idempotent_replay",
+                    }
+                )
+                continue
             try:
                 channel_apprise = apprise.Apprise()
                 channel_apprise.add(channel.url, tag=channel.tags or None)
@@ -227,11 +244,24 @@ class AppriseNotifier:
                 row = {"url": channel.url, "ok": ok, "attempts": attempts}
                 if error:
                     row["error"] = error
+                    row["error_code"] = self._map_error_code(error)
+                else:
+                    row["error_code"] = ""
+                if ok:
+                    self._mark_sent(fingerprint)
                 details.append(row)
                 all_ok = all_ok and ok
             except Exception as exc:
                 logger.warning("Apprise digest push failed url=%s err=%s", channel.url, exc)
-                details.append({"url": channel.url, "ok": False, "error": str(exc)})
+                error_text = str(exc)
+                details.append(
+                    {
+                        "url": channel.url,
+                        "ok": False,
+                        "error": error_text,
+                        "error_code": self._map_error_code(error_text),
+                    }
+                )
                 all_ok = False
 
         result: Dict[str, Any] = {"ok": all_ok, "channels": details}
@@ -243,6 +273,23 @@ class AppriseNotifier:
     def _is_retryable_error(error_text: str) -> bool:
         normalized = str(error_text or "").strip().lower()
         return any(hint in normalized for hint in _RETRYABLE_ERROR_HINTS)
+
+    @staticmethod
+    def _map_error_code(error_text: str) -> str:
+        normalized = str(error_text or "").strip().lower()
+        if not normalized:
+            return ""
+        if "429" in normalized or "too many requests" in normalized:
+            return "rate_limited"
+        if "timed out" in normalized or "timeout" in normalized:
+            return "timeout"
+        if "401" in normalized or "403" in normalized or "invalid webhook" in normalized:
+            return "auth_failed"
+        if any(code in normalized for code in ("502", "503", "504", "temporarily unavailable")):
+            return "downstream_unavailable"
+        if "network" in normalized or "connection" in normalized:
+            return "network_error"
+        return "delivery_failed"
 
     def _notify_with_retry(
         self,
@@ -301,6 +348,26 @@ class AppriseNotifier:
                 time.sleep(delay)
 
         return False, max(1, retry_attempts), last_error
+
+    @staticmethod
+    def _delivery_fingerprint(url: str, title: str, body: str) -> str:
+        digest = hashlib.sha1(f"{url}|{title}|{body}".encode("utf-8")).hexdigest()
+        return digest
+
+    def _is_recent_duplicate(self, fingerprint: str) -> bool:
+        if self._idempotency_ttl_s <= 0:
+            return False
+        now = time.time()
+        for key, expires_at in list(self._sent_fingerprints.items()):
+            if expires_at <= now:
+                self._sent_fingerprints.pop(key, None)
+        expiry = self._sent_fingerprints.get(fingerprint)
+        return bool(expiry and expiry > now)
+
+    def _mark_sent(self, fingerprint: str) -> None:
+        if self._idempotency_ttl_s <= 0:
+            return
+        self._sent_fingerprints[fingerprint] = time.time() + self._idempotency_ttl_s
 
     def _build_channel_body(
         self,
