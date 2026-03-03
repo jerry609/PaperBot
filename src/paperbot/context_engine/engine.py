@@ -942,8 +942,11 @@ class ContextEngine:
                     scope_id=paper_id,
                     include_pending=False,
                 )
-            except Exception:
-                pass  # Non-critical; degrade silently
+            except Exception as exc:  # noqa: BLE001 — non-critical, degrade gracefully
+                Logger.warning(
+                    f"[engine] paper_memories_query_failed paper_id={paper_id} error={exc!r}",
+                    file=LogFiles.API,
+                )
 
         return {
             "user_id": user_id,

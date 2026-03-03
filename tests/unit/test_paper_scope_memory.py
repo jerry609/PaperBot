@@ -286,12 +286,10 @@ class TestBuildContextPackPaperIdRegression:
 class TestWritePaperScopeMemories:
     def test_creates_candidates_with_paper_scope(self):
         from paperbot.api.routes.repro_context import _write_paper_scope_memories
-        from paperbot.memory.schema import MemoryCandidate
 
         obs = _make_observation()
-        captured: list[MemoryCandidate] = []
-
         mock_store = MagicMock()
+        captured = []
 
         def fake_add_memories(*, user_id, memories, actor_id):
             captured.extend(list(memories))
@@ -300,24 +298,18 @@ class TestWritePaperScopeMemories:
         mock_store.add_memories.side_effect = fake_add_memories
 
         with patch(
-            "paperbot.api.routes.repro_context.SqlAlchemyMemoryStore",
-            return_value=mock_store,
-        ) if False else patch(
             "paperbot.infrastructure.stores.memory_store.SqlAlchemyMemoryStore",
             return_value=mock_store,
         ):
-            # Inline the logic directly to test candidate construction
-            from paperbot.memory.schema import MemoryCandidate as MC
-
-            candidate = MC(
-                kind="note",
-                content=f"[{obs.stage}/{obs.type}] {obs.title}: {obs.narrative[:400]}",
-                confidence=obs.confidence,
-                scope_type="paper",
-                scope_id="p_test",
-                tags=[obs.stage, obs.type] + list(obs.concepts[:3]),
+            asyncio.get_event_loop().run_until_complete(
+                _write_paper_scope_memories(
+                    paper_id="p_test", user_id="user1", observations=[obs]
+                )
             )
 
+        mock_store.add_memories.assert_called_once()
+        assert len(captured) == 1
+        candidate = captured[0]
         assert candidate.scope_type == "paper"
         assert candidate.scope_id == "p_test"
         assert candidate.kind == "note"
