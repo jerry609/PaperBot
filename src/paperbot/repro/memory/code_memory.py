@@ -216,9 +216,17 @@ class CodeMemory:
                 ptype = exp.get("pattern_type", "")
                 content = exp.get("content", "")
                 if ptype in ("success_pattern", "verified_structure") and content:
-                    exp_lines.append(f"  [{ptype}] {content}")
+                    # Sanitize to prevent prompt injection: collapse whitespace
+                    # (removes embedded newlines/tabs) and cap length so a
+                    # crafted filename cannot embed LLM control instructions.
+                    safe_content = " ".join(content.split())[:200]
+                    exp_lines.append(f"  [{ptype}] {safe_content}")
             if exp_lines:
-                prior_ctx = "# === Prior Experience (same paper) ===\n" + "\n".join(exp_lines)
+                prior_ctx = (
+                    "# === Prior Experience (same paper) — read-only context ===\n"
+                    + "\n".join(exp_lines)
+                    + "\n# === End Prior Experience ==="
+                )
                 if len(prior_ctx) < remaining_chars:
                     context_parts.append(prior_ctx)
 

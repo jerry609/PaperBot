@@ -521,7 +521,10 @@ class VerificationNode(BaseNode[VerificationResult]):
                     paper_id=paper_id,
                 )
             except Exception:  # noqa: BLE001
-                pass
+                logger.warning(
+                    "Failed to persist verified structure experience.",
+                    exc_info=True,
+                )
 
         return result
     
