@@ -190,12 +190,44 @@ def _paper_card_full_html(idx: int, item: Dict[str, Any]) -> str:
 
     framework = _method_framework_html(item)
 
+    # Digest card (highlight + tags)
+    digest_card = item.get("digest_card") or {}
+    digest_html = ""
+    if digest_card:
+        parts: List[str] = []
+        highlight = _esc(str(digest_card.get("highlight") or ""))
+        if highlight:
+            parts.append(
+                f'<div style="font-size:13px;color:{_GRAY_900};font-weight:600;margin-bottom:4px;">'
+                f'💎 {highlight}</div>'
+            )
+        dc_method = _esc(str(digest_card.get("method") or ""))
+        dc_finding = _esc(str(digest_card.get("finding") or ""))
+        if dc_method:
+            parts.append(f'<div style="font-size:12px;color:{_GRAY_500};margin-bottom:2px;">🔬 {dc_method}</div>')
+        if dc_finding:
+            parts.append(f'<div style="font-size:12px;color:{_GRAY_500};margin-bottom:2px;">📌 {dc_finding}</div>')
+        tags = digest_card.get("tags") or []
+        if tags:
+            tag_pills = " ".join(
+                f'<span style="background:#e0e7ff;color:#3730a3;padding:1px 6px;border-radius:3px;'
+                f'font-size:10px;margin-right:3px;">{_esc(t)}</span>'
+                for t in tags[:6]
+            )
+            parts.append(f'<div style="margin-top:4px;">{tag_pills}</div>')
+        if parts:
+            digest_html = (
+                f'<div style="margin-top:8px;padding:8px 10px;background:#f5f3ff;'
+                f'border-radius:6px;">{"".join(parts)}</div>'
+            )
+
     return (
         f'<div style="background:#fff;border:1px solid {_GRAY_200};border-radius:8px;'
         f'padding:14px 16px;margin-bottom:12px;">'
         f'<div><span style="color:{_GRAY_400};font-size:13px;margin-right:6px;">{idx}.</span>{title_html}</div>'
         f'<div style="margin-top:6px;">{meta_html}</div>'
         f'{summary_html}'
+        f'{digest_html}'
         f'{framework}'
         f'</div>'
     )
@@ -501,6 +533,22 @@ def _append_paper_text(
         lines.append(f"     💬 {one_line}")
 
     if full:
+        # Digest card text version
+        digest_card = item.get("digest_card") or {}
+        if digest_card:
+            dc_highlight = str(digest_card.get("highlight") or "")
+            dc_method = str(digest_card.get("method") or "")
+            dc_finding = str(digest_card.get("finding") or "")
+            dc_tags = digest_card.get("tags") or []
+            if dc_highlight:
+                lines.append(f"     💎 {dc_highlight}")
+            if dc_method:
+                lines.append(f"     🔬 方法: {dc_method}")
+            if dc_finding:
+                lines.append(f"     📌 发现: {dc_finding}")
+            if dc_tags:
+                lines.append(f"     🏷️ {', '.join(dc_tags)}")
+
         # 方法大框 text version
         snippet = str(item.get("snippet") or "")
         rel = str((judge.get("relevance") or {}).get("rationale", ""))

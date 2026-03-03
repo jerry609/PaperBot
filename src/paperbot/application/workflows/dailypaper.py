@@ -13,7 +13,47 @@ from paperbot.application.workflows.analysis.paper_judge import PaperJudge
 from paperbot.infrastructure.stores.paper_store import SqlAlchemyPaperStore
 
 
-SUPPORTED_LLM_FEATURES = ("summary", "trends", "insight", "relevance")
+SUPPORTED_LLM_FEATURES = ("summary", "trends", "insight", "relevance", "digest_card")
+
+
+def extract_figures_for_report(
+    report: Dict[str, Any],
+    *,
+    api_key: str = "",
+    max_items: int = 5,
+) -> Dict[str, Any]:
+    """Optionally extract figures from top papers using MinerU Cloud API.
+
+    Attaches ``main_figure`` to each item that has a PDF URL.
+    Returns a copy of the report with figure data attached.
+    """
+    if not api_key:
+        return report
+
+    from paperbot.infrastructure.extractors.mineru_client import MineruClient
+
+    client = MineruClient(api_key=api_key)
+    enriched = copy.deepcopy(report)
+    count = 0
+
+    for query in enriched.get("queries") or []:
+        for item in query.get("top_items") or []:
+            if count >= max_items:
+                break
+            pdf_url = item.get("pdf_url") or ""
+            if not pdf_url:
+                continue
+            figures = client.extract_figures(pdf_url)
+            if figures:
+                main = client.identify_main_figure(figures)
+                item["figures"] = [
+                    {"url": f.url, "caption": f.caption, "page": f.page} for f in figures[:5]
+                ]
+                if main:
+                    item["main_figure"] = {"url": main.url, "caption": main.caption}
+            count += 1
+
+    return enriched
 
 
 def build_daily_paper_report(
@@ -145,6 +185,13 @@ def enrich_daily_paper_report(
         if "summary" in features:
             for item in top_items:
                 item["ai_summary"] = svc.summarize_paper(
+                    title=item.get("title") or "",
+                    abstract=item.get("snippet") or item.get("abstract") or "",
+                )
+
+        if "digest_card" in features:
+            for item in top_items:
+                item["digest_card"] = svc.extract_daily_digest_card(
                     title=item.get("title") or "",
                     abstract=item.get("snippet") or item.get("abstract") or "",
                 )
@@ -365,6 +412,21 @@ def render_daily_paper_markdown(report: Dict[str, Any]) -> str:
                 one_line = judge.get("one_line_summary") or ""
                 if one_line:
                     lines.append(f"  - Judge Summary: {one_line}")
+
+            digest_card = item.get("digest_card")
+            if isinstance(digest_card, dict):
+                highlight = digest_card.get("highlight") or ""
+                if highlight:
+                    lines.append(f"  - Highlight: {highlight}")
+                method = digest_card.get("method") or ""
+                if method:
+                    lines.append(f"  - Method: {method}")
+                finding = digest_card.get("finding") or ""
+                if finding:
+                    lines.append(f"  - Finding: {finding}")
+                tags = digest_card.get("tags") or []
+                if tags:
+                    lines.append(f"  - Tags: {', '.join(tags)}")
         lines.append("")
 
     lines.append("## Global Top")

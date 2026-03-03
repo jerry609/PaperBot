@@ -27,6 +27,40 @@ def test_build_daily_paper_cron_jobs_enabled(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_cron_daily_papers_enqueues_figure_flags(monkeypatch):
+    from paperbot.infrastructure.queue import arq_worker
+
+    class _FakeRedis:
+        def __init__(self):
+            self.kwargs = None
+
+        async def enqueue_job(self, name, **kwargs):
+            self.kwargs = {"name": name, **kwargs}
+
+            class _FakeJob:
+                job_id = "job-123"
+
+            return _FakeJob()
+
+    class _NoopEventLog:
+        def append(self, event):
+            return None
+
+    monkeypatch.setattr(arq_worker, "_event_log", lambda: _NoopEventLog())
+    monkeypatch.setenv("PAPERBOT_DAILYPAPER_ENABLE_FIGURES", "true")
+    monkeypatch.setenv("PAPERBOT_DAILYPAPER_FIGURES_MAX_ITEMS", "7")
+
+    redis = _FakeRedis()
+    result = await arq_worker.cron_daily_papers({"redis": redis})
+
+    assert result["status"] == "ok"
+    assert redis.kwargs is not None
+    assert redis.kwargs["name"] == "daily_papers_job"
+    assert redis.kwargs["enable_figures"] is True
+    assert redis.kwargs["figures_max_items"] == 7
+
+
+@pytest.mark.asyncio
 async def test_daily_papers_job_generates_report_and_feed(tmp_path, monkeypatch):
     _fake_search_result = {
         "source": "papers.cool",

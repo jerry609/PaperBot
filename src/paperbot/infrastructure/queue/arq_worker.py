@@ -201,6 +201,8 @@ async def cron_daily_papers(ctx) -> Dict[str, Any]:
     judge_runs = int(os.getenv("PAPERBOT_DAILYPAPER_JUDGE_RUNS", "1"))
     judge_max_items = int(os.getenv("PAPERBOT_DAILYPAPER_JUDGE_MAX_ITEMS", "5"))
     judge_token_budget = int(os.getenv("PAPERBOT_DAILYPAPER_JUDGE_TOKEN_BUDGET", "0"))
+    enable_figures = _parse_bool_env("PAPERBOT_DAILYPAPER_ENABLE_FIGURES", False)
+    figures_max_items = int(os.getenv("PAPERBOT_DAILYPAPER_FIGURES_MAX_ITEMS", "5"))
 
     job = await redis.enqueue_job(
         "daily_papers_job",
@@ -218,6 +220,8 @@ async def cron_daily_papers(ctx) -> Dict[str, Any]:
         judge_runs=judge_runs,
         judge_max_items_per_query=judge_max_items,
         judge_token_budget=judge_token_budget,
+        enable_figures=enable_figures,
+        figures_max_items=max(1, int(figures_max_items)),
         notify=notify_enabled,
         notify_channels=notify_channels,
         save=True,
@@ -228,6 +232,8 @@ async def cron_daily_papers(ctx) -> Dict[str, Any]:
         "queries": queries,
         "sources": sources,
         "branches": branches,
+        "enable_figures": enable_figures,
+        "figures_max_items": max(1, int(figures_max_items)),
     }
     elog.append(
         make_event(
@@ -338,6 +344,8 @@ async def daily_papers_job(
     notify: bool = False,
     notify_channels: Optional[List[str]] = None,
     save: bool = True,
+    enable_figures: bool = False,
+    figures_max_items: int = 5,
 ) -> Dict[str, Any]:
     """ARQ job: generate DailyPaper report and bridge highlights into feed events."""
     run_id = new_run_id()
@@ -382,6 +390,7 @@ async def daily_papers_job(
         apply_judge_scores_to_report,
         build_daily_paper_report,
         enrich_daily_paper_report,
+        extract_figures_for_report,
         ingest_daily_report_to_registry,
         normalize_llm_features,
         normalize_output_formats,
@@ -420,6 +429,15 @@ async def daily_papers_job(
             n_runs=max(1, int(judge_runs)),
             judge_token_budget=max(0, int(judge_token_budget)),
         )
+
+    if enable_figures:
+        mineru_key = os.getenv("MINERU_API_KEY", "")
+        if mineru_key:
+            report = extract_figures_for_report(
+                report,
+                api_key=mineru_key,
+                max_items=max(1, int(figures_max_items)),
+            )
 
     try:
         report["registry_ingest"] = ingest_daily_report_to_registry(report)

@@ -208,3 +208,36 @@ Format:
   - Collection editor currently supports one-row-at-a-time editing to keep UX simple.
 - Next:
   - If needed, add graph pan/zoom/layout modes and timeline playback animation as follow-up polish.
+
+---
+
+- Date: 2026-03-02
+- Owner: claude
+- Branch: feat/daily-push-epic-179
+- Done:
+  - Issue #187: Integrated HF upvotes into Judge scoring prompt (conditional display)
+  - Issue #180: Added daily_digest_card prompt (highlight/method/finding/tags), registered in PromptRegistry, added extract_daily_digest_card() to LLMService, integrated into DailyPaper enrichment pipeline, updated email template HTML+text rendering
+  - Issue #181: Created MinerU Cloud API client (figure extraction + main figure identification via caption NLP/position/size heuristics), added extract_figures_for_report() to pipeline
+  - Issue #182: Created AppriseNotifier with YAML config loading, integrated as "apprise" channel in DailyPushService, added push_channels.yaml config template
+  - Issues #183-185: Created push formatters for Telegram (MarkdownV2 + InlineKeyboard), Discord (Rich Embed), WeCom (markdown + news card), Feishu (interactive card + post), with formatter registry
+  - Issue #186: Created RSS 2.0 + Atom feed endpoints (/api/feed/daily.xml, /api/feed/daily.atom, /api/feed/track/{name}.xml) using feedgen, registered feed router in API main, added export_feed_entries() to ScholarFeedService
+  - Added apprise>=1.9.0 and feedgen>=1.0.0 to requirements.txt
+- Validation:
+  - pytest tests/unit/test_hf_upvote_judge_integration.py -v (3 passed)
+  - pytest tests/unit/test_daily_digest_card.py -v (8 passed)
+  - pytest tests/unit/test_mineru_client.py -v (10 passed)
+  - pytest tests/unit/test_apprise_notifier.py -v (9 passed)
+  - pytest tests/unit/test_push_formatters.py -v (14 passed)
+  - pytest tests/unit/test_feed_routes.py -v (12 passed)
+  - All 56 new tests pass
+  - All existing CI tests (test_dailypaper, test_paper_judge, test_llm_service, test_di_container, test_pipeline, test_hf_daily_papers_connector, test_source_registry_modes, test_arq_worker_settings, test_jobs_routes_import, test_memory_module, test_memory_metric_collector) pass
+- Risks/Notes:
+  - MinerU client uses Cloud API (no heavy SDK dependency); requires MINERU_API_KEY env var
+  - Apprise requires pip install apprise; falls back gracefully when not installed
+  - feedgen required for Atom feeds; RSS has fallback XML builder without it
+  - Push formatters are format-only; actual sending goes through Apprise URL schemes
+  - feed routes test avoids TestClient due to python-multipart import chain issue in CI
+- Next:
+  - Web dashboard push channel configuration UI (optional follow-up)
+  - E2E testing with Playwright MCP
+  - Integration with ARQ worker for figure extraction and Apprise push
