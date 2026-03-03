@@ -78,9 +78,10 @@ class ContextEngineBridge:
 
             # Prepend previous paper analysis so it appears first in context.
             if paper_analysis:
-                user_memory = (
-                    paper_analysis + ("\n\n" + user_memory if user_memory else "")
-                )
+                if user_memory:
+                    user_memory = paper_analysis + "\n\n" + user_memory
+                else:
+                    user_memory = paper_analysis
             if user_memory:
                 normalized_input.user_memory = user_memory
             if project_context:
@@ -140,13 +141,20 @@ def _format_project_context(context_pack: Dict[str, Any]) -> Optional[str]:
 
 
 def _format_paper_analysis(context_pack: Dict[str, Any]) -> Optional[str]:
-    """Format previously extracted paper-scope memories into a summary block."""
+    """Format previously extracted paper-scope memories into a delimited summary block.
+
+    Wraps content in <paper_analysis> tags so LLMs treat it as read-only data,
+    not as instructions (mitigates indirect prompt injection via stored memories).
+    """
     memories = context_pack.get("paper_memories", [])[:_MAX_PAPER_MEMORIES]
     if not memories:
         return None
-    lines = ["## Previously extracted from this paper:"]
+    lines = []
     for m in memories:
         content = (m.get("content") or "").strip()
         if content:
             lines.append(f"- {content}")
-    return "\n".join(lines) if len(lines) > 1 else None
+    if not lines:
+        return None
+    inner = "## Previously extracted from this paper:\n" + "\n".join(lines)
+    return f"<paper_analysis>\n{inner}\n</paper_analysis>"

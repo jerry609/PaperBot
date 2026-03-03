@@ -271,9 +271,9 @@ async def _write_paper_scope_memories(
             f"[M2] paper_memory_written paper_id={paper_id} created={created} skipped={skipped}",
             file=LogFiles.API,
         )
-    except Exception:  # noqa: BLE001 — DB/store errors, non-critical path
+    except Exception as exc:  # noqa: BLE001 — DB/store errors, non-critical path
         Logger.warning(
-            f"[M2] paper_memory_write_failed paper_id={paper_id}",
+            f"[M2] paper_memory_write_failed paper_id={paper_id} error={exc!r}",
             file=LogFiles.API,
         )
 
