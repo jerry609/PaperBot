@@ -170,7 +170,7 @@ async def _generate_stream(request: GenerateContextPackRequest):
     # When title+abstract are provided inline, build RawPaperData directly
     # so the orchestrator skips the input router (which cannot handle studio IDs).
     inline_raw: Optional[RawPaperData] = None
-    if request.title and request.abstract:
+    if request.title is not None and request.abstract is not None:
         inline_raw = RawPaperData(
             paper_id=request.paper_id,
             title=request.title,

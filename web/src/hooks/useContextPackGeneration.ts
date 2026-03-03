@@ -84,8 +84,8 @@ export function useContextPackGeneration() {
         user_id: params.userId ?? "default",
         depth: params.depth ?? "standard",
       }
-      if (params.title) payload.title = params.title
-      if (params.abstract) payload.abstract = params.abstract
+      if (params.title !== undefined) payload.title = params.title
+      if (params.abstract !== undefined) payload.abstract = params.abstract
 
       const response = await fetch("/api/research/repro/context", {
         method: "POST",

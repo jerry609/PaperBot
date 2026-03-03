@@ -115,7 +115,6 @@ export function NewPaperModal({ open, onOpenChange }: NewPaperModalProps) {
     }
 
     const handleImportSelected = () => {
-        const existingIds = new Set(papers.map(p => p.id))
         const existingTitles = new Set(papers.map(p => p.title.trim().toLowerCase()))
 
         let importedCount = 0
@@ -125,8 +124,10 @@ export function NewPaperModal({ open, onOpenChange }: NewPaperModalProps) {
             const paper = libraryPapers.find(p => p.id === paperId)
             if (!paper) continue
 
-            // Skip if already in studio (by ID or title)
-            if (existingIds.has(paperId) || existingTitles.has(paper.title.trim().toLowerCase())) {
+            const normalizedTitle = paper.title.trim().toLowerCase()
+
+            // Skip if already in studio (by title)
+            if (existingTitles.has(normalizedTitle)) {
                 skippedTitles.push(paper.title)
                 continue
             }
@@ -135,7 +136,7 @@ export function NewPaperModal({ open, onOpenChange }: NewPaperModalProps) {
                 title: paper.title,
                 abstract: paper.abstract || "",
             })
-            existingTitles.add(paper.title.trim().toLowerCase())
+            existingTitles.add(normalizedTitle)
             importedCount++
         }
 
@@ -171,7 +172,7 @@ export function NewPaperModal({ open, onOpenChange }: NewPaperModalProps) {
     })
 
     // Check which papers are already in studio
-    const studioPaperIds = new Set(papers.map(p => p.id))
+    const studioPaperTitles = new Set(papers.map(p => p.title.trim().toLowerCase()))
 
     return (
         <Dialog open={open} onOpenChange={resetAndClose}>
@@ -219,7 +220,9 @@ export function NewPaperModal({ open, onOpenChange }: NewPaperModalProps) {
                                     <div className="p-2 space-y-1">
                                         {filteredLibraryPapers.map(paper => {
                                             const isSelected = selectedPaperIds.has(paper.id)
-                                            const isInStudio = studioPaperIds.has(paper.id)
+                                            const isInStudio = studioPaperTitles.has(
+                                                paper.title.trim().toLowerCase(),
+                                            )
 
                                             return (
                                                 <button

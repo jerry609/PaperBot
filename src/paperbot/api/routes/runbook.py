@@ -243,7 +243,7 @@ async def add_allowed_dir(body: AddAllowedDirRequest):
     else:
         resolved = Path(raw).resolve()
 
-    if str(resolved) in _DENIED_PATHS:
+    if any(_is_under_prefix(resolved, Path(denied).resolve()) for denied in _DENIED_PATHS):
         raise HTTPException(
             status_code=403,
             detail=f"adding '{resolved}' is not allowed — path is too broad or sensitive",
