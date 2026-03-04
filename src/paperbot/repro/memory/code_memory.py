@@ -365,6 +365,7 @@ class CodeMemory:
         self,
         paper_id: str,
         *,
+        user_id: str = "default",
         pack_id: Optional[str] = None,
         limit: int = 20,
     ) -> None:
@@ -376,9 +377,18 @@ class CodeMemory:
         if not self._experience_store or not paper_id:
             return
         try:
-            rows = self._experience_store.get_by_paper_id(paper_id, limit=limit)
+            effective_user_id = (user_id or "default").strip() or "default"
+            rows = self._experience_store.get_by_paper_id(
+                paper_id,
+                user_id=effective_user_id,
+                limit=limit,
+            )
             if pack_id:
-                pack_rows = self._experience_store.get_by_pack_id(pack_id, limit=limit)
+                pack_rows = self._experience_store.get_by_pack_id(
+                    pack_id,
+                    user_id=effective_user_id,
+                    limit=limit,
+                )
                 seen_ids = {r["id"] for r in rows}
                 rows += [r for r in pack_rows if r["id"] not in seen_ids]
             self._prior_experiences = rows
@@ -389,6 +399,7 @@ class CodeMemory:
     def record_success_pattern(
         self,
         *,
+        user_id: str = "default",
         paper_id: Optional[str],
         pack_id: Optional[str] = None,
         filepath: str,
@@ -399,6 +410,7 @@ class CodeMemory:
             return
         try:
             self._experience_store.add(
+                user_id=(user_id or "default").strip() or "default",
                 pattern_type="success_pattern",
                 content=f"Successfully generated {filepath}",
                 paper_id=paper_id,
@@ -411,6 +423,7 @@ class CodeMemory:
     def record_verified_structure(
         self,
         *,
+        user_id: str = "default",
         paper_id: Optional[str],
         pack_id: Optional[str] = None,
         description: str,
@@ -421,6 +434,7 @@ class CodeMemory:
             return
         try:
             self._experience_store.add(
+                user_id=(user_id or "default").strip() or "default",
                 pattern_type="verified_structure",
                 content=description,
                 paper_id=paper_id,
@@ -433,6 +447,7 @@ class CodeMemory:
     def record_failure_reason(
         self,
         *,
+        user_id: str = "default",
         paper_id: Optional[str],
         pack_id: Optional[str] = None,
         error_type: str,
@@ -444,6 +459,7 @@ class CodeMemory:
             return
         try:
             self._experience_store.add(
+                user_id=(user_id or "default").strip() or "default",
                 pattern_type="failure_reason",
                 content=f"[{error_type}] fixed: {fix_applied}",
                 paper_id=paper_id,
