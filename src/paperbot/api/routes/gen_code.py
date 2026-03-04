@@ -19,6 +19,7 @@ router = APIRouter()
 
 
 class GenCodeRequest(BaseModel):
+    user_id: str = "default"
     title: str
     abstract: str
     method_section: Optional[str] = None
@@ -94,6 +95,7 @@ async def gen_code_stream(
         result = await agent.reproduce_from_paper(
             paper_context,
             output_dir=output_dir,
+            user_id=request.user_id,
             event_log=event_log,
             run_id=run_id,
             trace_id=trace_id,

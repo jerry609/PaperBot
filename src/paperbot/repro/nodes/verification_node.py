@@ -442,6 +442,7 @@ class VerificationNode(BaseNode[VerificationResult]):
         else:
             output_dir = Path(input_data)
             paper_context = None
+        user_id = (kwargs.get("user_id", "default") or "default").strip() or "default"
         
         result = VerificationResult()
         debugger = SelfHealingDebugger(output_dir) if self.enable_self_healing else None
@@ -516,6 +517,7 @@ class VerificationNode(BaseNode[VerificationResult]):
             try:
                 py_files = [f.name for f in output_dir.glob("*.py")]
                 self._experience_store.add(
+                    user_id=user_id,
                     pattern_type="verified_structure",
                     content=f"Verified structure in {output_dir.name}: {', '.join(py_files[:10])}",
                     paper_id=paper_id,
@@ -609,4 +611,3 @@ class VerificationNode(BaseNode[VerificationResult]):
             return {"passed": result.returncode == 0}
         except Exception as e:
             return {"passed": False, "error": str(e)}
-

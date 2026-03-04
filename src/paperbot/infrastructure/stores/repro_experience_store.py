@@ -25,6 +25,7 @@ class ReproExperienceStore:
     def add(
         self,
         *,
+        user_id: str = "default",
         pattern_type: str,
         content: str,
         paper_id: Optional[str] = None,
@@ -39,6 +40,7 @@ class ReproExperienceStore:
             raise ValueError("content must not be empty")
         now = datetime.now(timezone.utc)
         row = ReproCodeExperienceModel(
+            user_id=(user_id or "default").strip() or "default",
             pack_id=pack_id,
             paper_id=paper_id,
             pattern_type=pattern_type,
@@ -49,6 +51,7 @@ class ReproExperienceStore:
         with self._provider.session() as session:
             existing = session.execute(
                 select(ReproCodeExperienceModel).where(
+                    ReproCodeExperienceModel.user_id == row.user_id,
                     ReproCodeExperienceModel.paper_id == paper_id,
                     ReproCodeExperienceModel.pattern_type == pattern_type,
                     ReproCodeExperienceModel.content == normalized_content,
@@ -70,6 +73,7 @@ class ReproExperienceStore:
                 session.rollback()
                 existing = session.execute(
                     select(ReproCodeExperienceModel).where(
+                        ReproCodeExperienceModel.user_id == row.user_id,
                         ReproCodeExperienceModel.paper_id == paper_id,
                         ReproCodeExperienceModel.pattern_type == pattern_type,
                         ReproCodeExperienceModel.content == normalized_content,
@@ -81,6 +85,7 @@ class ReproExperienceStore:
         self,
         paper_id: str,
         *,
+        user_id: str = "default",
         pattern_type: Optional[str] = None,
         limit: int = 50,
     ) -> List[Dict[str, Any]]:
@@ -88,6 +93,7 @@ class ReproExperienceStore:
         with self._provider.session() as session:
             stmt = (
                 select(ReproCodeExperienceModel)
+                .where(ReproCodeExperienceModel.user_id == ((user_id or "default").strip() or "default"))
                 .where(ReproCodeExperienceModel.paper_id == paper_id)
             )
             if pattern_type:
@@ -100,6 +106,7 @@ class ReproExperienceStore:
         self,
         pack_id: str,
         *,
+        user_id: str = "default",
         pattern_type: Optional[str] = None,
         limit: int = 50,
     ) -> List[Dict[str, Any]]:
@@ -107,6 +114,7 @@ class ReproExperienceStore:
         with self._provider.session() as session:
             stmt = (
                 select(ReproCodeExperienceModel)
+                .where(ReproCodeExperienceModel.user_id == ((user_id or "default").strip() or "default"))
                 .where(ReproCodeExperienceModel.pack_id == pack_id)
             )
             if pattern_type:
@@ -119,6 +127,7 @@ class ReproExperienceStore:
     def _to_dict(r: ReproCodeExperienceModel) -> Dict[str, Any]:
         return {
             "id": r.id,
+            "user_id": r.user_id,
             "pack_id": r.pack_id,
             "paper_id": r.paper_id,
             "pattern_type": r.pattern_type,

@@ -121,8 +121,10 @@ Output ONLY the Python code, no markdown or explanations.
 
         # Pre-load prior experiences for the same paper (issue #162)
         paper_id = getattr(paper_context, "paper_id", None) or getattr(paper_context, "arxiv_id", None)
+        user_id = (kwargs.get("user_id", "default") or "default").strip() or "default"
+        pack_id = kwargs.get("pack_id")
         if paper_id:
-            self.memory.load_experiences_from_db(paper_id)
+            self.memory.load_experiences_from_db(paper_id, user_id=user_id, pack_id=pack_id)
 
         files = {}
 
@@ -154,7 +156,9 @@ Output ONLY the Python code, no markdown or explanations.
 
             # Persist success pattern (issue #162)
             self.memory.record_success_pattern(
+                user_id=user_id,
                 paper_id=paper_id,
+                pack_id=pack_id,
                 filepath=filepath,
                 code_snippet=code[:1000],
             )
