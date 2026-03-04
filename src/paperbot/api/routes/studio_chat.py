@@ -202,14 +202,32 @@ def _resolve_cli_project_dir(raw: Optional[str]) -> Path:
     else:
         normalized = cleaned
 
-    resolved = Path(normalized).expanduser().resolve(strict=False)
+    # Normalize to real path and reconstruct from an allowed prefix.
+    # This avoids resolving an arbitrary user-controlled path directly.
+    if not os.path.isabs(normalized):
+        normalized = str((Path.cwd() / normalized).resolve(strict=False))
+    normalized_real = os.path.realpath(normalized)
+
+    resolved: Optional[Path] = None
+    for prefix in _allowed_workdir_prefixes():
+        prefix_real = os.path.realpath(str(prefix))
+        if normalized_real == prefix_real:
+            resolved = prefix
+            break
+        if normalized_real.startswith(prefix_real + os.sep):
+            suffix = normalized_real[len(prefix_real):].lstrip("/\\")
+            candidate = (prefix / suffix).resolve(strict=False) if suffix else prefix
+            if _is_under_prefix(candidate, prefix):
+                resolved = candidate
+                break
+            raise ValueError("project_dir is not allowed")
+
+    if resolved is None:
+        raise ValueError("project_dir is not allowed")
+
     if not resolved.exists() or not resolved.is_dir():
         raise ValueError("project_dir must be an existing directory")
-
-    for prefix in _allowed_workdir_prefixes():
-        if _is_under_prefix(resolved, prefix):
-            return resolved
-    raise ValueError("project_dir is not allowed")
+    return resolved
 
 
 def _load_context_pack(pack_id: str) -> Optional[Dict[str, Any]]:
