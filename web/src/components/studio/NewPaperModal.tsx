@@ -98,6 +98,13 @@ export function NewPaperModal({ open, onOpenChange }: NewPaperModalProps) {
             return
         }
 
+        const normalizedTitle = title.trim().toLowerCase()
+        const duplicate = papers.find(p => p.title.trim().toLowerCase() === normalizedTitle)
+        if (duplicate) {
+            setError("A paper with this title already exists in the studio.")
+            return
+        }
+
         addPaper({
             title: title.trim(),
             abstract: abstract.trim(),
@@ -108,19 +115,38 @@ export function NewPaperModal({ open, onOpenChange }: NewPaperModalProps) {
     }
 
     const handleImportSelected = () => {
-        const existingIds = new Set(papers.map(p => p.id))
+        const existingTitles = new Set(papers.map(p => p.title.trim().toLowerCase()))
+
+        let importedCount = 0
+        const skippedTitles: string[] = []
 
         for (const paperId of selectedPaperIds) {
-            // Skip if already in studio
-            if (existingIds.has(paperId)) continue
-
             const paper = libraryPapers.find(p => p.id === paperId)
-            if (paper) {
-                addPaper({
-                    title: paper.title,
-                    abstract: paper.abstract || "",
-                })
+            if (!paper) continue
+
+            const normalizedTitle = paper.title.trim().toLowerCase()
+
+            // Skip if already in studio (by title)
+            if (existingTitles.has(normalizedTitle)) {
+                skippedTitles.push(paper.title)
+                continue
             }
+
+            addPaper({
+                title: paper.title,
+                abstract: paper.abstract || "",
+            })
+            existingTitles.add(normalizedTitle)
+            importedCount++
+        }
+
+        if (importedCount === 0 && skippedTitles.length > 0) {
+            setError(
+                skippedTitles.length === 1
+                    ? "This paper already exists in the studio."
+                    : "The selected papers already exist in the studio."
+            )
+            return
         }
 
         resetAndClose()
@@ -146,7 +172,7 @@ export function NewPaperModal({ open, onOpenChange }: NewPaperModalProps) {
     })
 
     // Check which papers are already in studio
-    const studioPaperIds = new Set(papers.map(p => p.id))
+    const studioPaperTitles = new Set(papers.map(p => p.title.trim().toLowerCase()))
 
     return (
         <Dialog open={open} onOpenChange={resetAndClose}>
@@ -166,6 +192,11 @@ export function NewPaperModal({ open, onOpenChange }: NewPaperModalProps) {
 
                     <TabsContent value="library" className="mt-4">
                         <div className="space-y-3">
+                            {error && (
+                                <div className="text-sm text-destructive bg-destructive/10 rounded-md px-3 py-2">
+                                    {error}
+                                </div>
+                            )}
                             <Input
                                 value={searchQuery}
                                 onChange={(e) => setSearchQuery(e.target.value)}
@@ -189,7 +220,9 @@ export function NewPaperModal({ open, onOpenChange }: NewPaperModalProps) {
                                     <div className="p-2 space-y-1">
                                         {filteredLibraryPapers.map(paper => {
                                             const isSelected = selectedPaperIds.has(paper.id)
-                                            const isInStudio = studioPaperIds.has(paper.id)
+                                            const isInStudio = studioPaperTitles.has(
+                                                paper.title.trim().toLowerCase(),
+                                            )
 
                                             return (
                                                 <button
