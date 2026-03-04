@@ -172,7 +172,7 @@ Search → Build Report → LLM Enrichment → Judge Scoring → Filter → Save
 
 ### Email 推送
 
-![Email Notification](asset/notify.png)
+![Email Notification](asset/ui/dailypaperdemo.png)
 
 ## 快速开始
 
