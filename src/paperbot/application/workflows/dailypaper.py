@@ -68,8 +68,14 @@ def extract_figures_for_report(
                 item["figures"] = [
                     {"url": f.url, "caption": f.caption, "page": f.page} for f in figures[:5]
                 ]
-                if main and _is_publishable_figure_url(main.url):
-                    item["main_figure"] = {"url": main.url, "caption": main.caption}
+                if main:
+                    if _is_publishable_figure_url(main.url):
+                        item["main_figure"] = {"url": main.url, "caption": main.caption}
+                    elif (main.inline_data_url or "").startswith("data:image/"):
+                        item["main_figure"] = {
+                            "caption": main.caption,
+                            "inline_data_url": main.inline_data_url,
+                        }
             count += 1
 
     return enriched

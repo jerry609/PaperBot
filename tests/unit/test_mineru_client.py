@@ -1,4 +1,7 @@
 """Tests for MinerU Cloud API client."""
+import io
+import zipfile
+
 from paperbot.infrastructure.extractors.mineru_client import Figure, MineruClient
 
 
@@ -119,6 +122,23 @@ Fig. 2: Attention map
     assert figures[0].caption == "Figure 1: System overview"
     assert figures[1].url == "https://cdn.mineru.net/fig2.png"
     assert figures[1].caption == "Fig. 2: Attention map"
+
+
+def test_parse_figures_from_markdown_with_inline_zip_image():
+    client = MineruClient(api_key="test-key")
+    markdown = "![](images/fig1.jpg)\nFigure 1: System overview\n"
+    zip_url = "https://cdn-mineru.example.com/result.zip"
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("images/fig1.jpg", b"fake-jpeg-bytes")
+
+    with zipfile.ZipFile(io.BytesIO(buf.getvalue()), "r") as zf:
+        figures = client._parse_figures_from_markdown(markdown, zip_url=zip_url, zip_file=zf)
+
+    assert len(figures) == 1
+    assert figures[0].url == f"{zip_url}#/images/fig1.jpg"
+    assert figures[0].inline_data_url.startswith("data:image/jpeg;base64,")
 
 
 def test_identify_main_figure_prefers_figure_1():

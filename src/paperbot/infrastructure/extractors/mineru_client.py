@@ -13,6 +13,7 @@ API constraints (as documented by MinerU Cloud):
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import io
 import json
@@ -52,6 +53,7 @@ class Figure:
     width: int = 0
     height: int = 0
     index: int = 0
+    inline_data_url: str = ""
 
     @property
     def area(self) -> int:
@@ -219,10 +221,15 @@ class MineruClient:
             # Prefer the shortest markdown path, usually the top-level document markdown.
             target_md = sorted(md_members, key=len)[0]
             markdown_text = zf.read(target_md).decode("utf-8", errors="ignore")
+            return self._parse_figures_from_markdown(markdown_text, zip_url=zip_url, zip_file=zf)
 
-        return self._parse_figures_from_markdown(markdown_text, zip_url=zip_url)
-
-    def _parse_figures_from_markdown(self, markdown_text: str, *, zip_url: str = "") -> List[Figure]:
+    def _parse_figures_from_markdown(
+        self,
+        markdown_text: str,
+        *,
+        zip_url: str = "",
+        zip_file: Optional[zipfile.ZipFile] = None,
+    ) -> List[Figure]:
         """Parse figures from MinerU markdown output.
 
         Typical pattern:
@@ -259,9 +266,69 @@ class MineruClient:
                     break
 
             figure_url = self._resolve_figure_url(raw_ref=raw_ref, zip_url=zip_url)
-            figures.append(Figure(url=figure_url, caption=caption, index=len(figures)))
+            inline_data_url = self._build_inline_data_url(zip_file=zip_file, raw_ref=raw_ref)
+            figures.append(
+                Figure(
+                    url=figure_url,
+                    caption=caption,
+                    index=len(figures),
+                    inline_data_url=inline_data_url,
+                )
+            )
 
         return figures
+
+    def _build_inline_data_url(
+        self,
+        *,
+        zip_file: Optional[zipfile.ZipFile],
+        raw_ref: str,
+    ) -> str:
+        if zip_file is None:
+            return ""
+        if raw_ref.startswith(("http://", "https://")):
+            return ""
+
+        target = raw_ref.strip().lstrip("/")
+        if not target:
+            return ""
+
+        candidates = {target, f"./{target}"}
+        if "/" in target:
+            candidates.add(target.split("/", 1)[1])
+
+        member_name = ""
+        namelist = set(zip_file.namelist())
+        for c in candidates:
+            if c in namelist:
+                member_name = c
+                break
+        if not member_name:
+            return ""
+
+        try:
+            blob = zip_file.read(member_name)
+        except Exception:
+            return ""
+        if not blob:
+            return ""
+        # Keep inline payload bounded to avoid very large report/cache artifacts.
+        if len(blob) > 1_500_000:
+            return ""
+
+        ext = member_name.lower().rsplit(".", 1)[-1] if "." in member_name else ""
+        mime = {
+            "png": "image/png",
+            "jpg": "image/jpeg",
+            "jpeg": "image/jpeg",
+            "webp": "image/webp",
+            "gif": "image/gif",
+        }.get(ext)
+        if not mime:
+            return ""
+
+        encoded = base64.b64encode(blob).decode("ascii")
+        return f"data:{mime};base64,{encoded}"
 
     def _resolve_figure_url(self, *, raw_ref: str, zip_url: str) -> str:
         if raw_ref.startswith(("http://", "https://")):
@@ -303,6 +370,7 @@ class MineruClient:
                         width=int(row.get("width") or 0),
                         height=int(row.get("height") or 0),
                         index=int(row.get("index") or 0),
+                        inline_data_url=str(row.get("inline_data_url") or "").strip(),
                     )
                 )
             if figures:
@@ -328,6 +396,7 @@ class MineruClient:
                         "width": figure.width,
                         "height": figure.height,
                         "index": figure.index,
+                        "inline_data_url": figure.inline_data_url,
                     }
                     for figure in figures
                 ],

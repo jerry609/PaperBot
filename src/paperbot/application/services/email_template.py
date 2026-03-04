@@ -152,6 +152,41 @@ def _method_framework_html(item: Dict[str, Any]) -> str:
     )
 
 
+def _main_figure_html(item: Dict[str, Any]) -> str:
+    """Render method figure block when image source is displayable."""
+    mf = item.get("main_figure") or {}
+    if not isinstance(mf, dict):
+        return ""
+
+    image_src = ""
+    url = str(mf.get("url") or "").strip()
+    inline_data_url = str(mf.get("inline_data_url") or "").strip()
+
+    if inline_data_url.startswith("data:image/"):
+        image_src = inline_data_url
+    elif url.startswith(("http://", "https://")) and ".zip#" not in url and not url.endswith(".zip"):
+        image_src = url
+
+    if not image_src:
+        return ""
+
+    caption = _esc(str(mf.get("caption") or ""))
+    caption_html = (
+        f'<div style="margin-top:6px;font-size:12px;color:{_GRAY_500};line-height:1.5;">{caption}</div>'
+        if caption
+        else ""
+    )
+    return (
+        f'<div style="margin-top:10px;padding:10px;border:1px solid {_GRAY_200};'
+        f'border-radius:8px;background:{_GRAY_50};">'
+        f'<div style="font-size:12px;color:{_GRAY_500};margin-bottom:6px;">🖼️ 主方法图</div>'
+        f'<img src="{_esc(image_src)}" alt="main-figure" '
+        f'style="max-width:100%;border-radius:6px;display:block;" />'
+        f'{caption_html}'
+        f'</div>'
+    )
+
+
 def _paper_card_full_html(idx: int, item: Dict[str, Any]) -> str:
     """Full paper card with method framework (for must_read / worth_reading)."""
     title = _esc(item.get("title") or "Untitled")
@@ -189,6 +224,7 @@ def _paper_card_full_html(idx: int, item: Dict[str, Any]) -> str:
         summary_html = f'<div style="margin-top:6px;font-size:13px;color:{_GRAY_900};font-style:italic;">💬 {_esc(one_line)}</div>'
 
     framework = _method_framework_html(item)
+    main_figure = _main_figure_html(item)
 
     # Digest card (highlight + tags)
     digest_card = item.get("digest_card") or {}
@@ -227,6 +263,7 @@ def _paper_card_full_html(idx: int, item: Dict[str, Any]) -> str:
         f'<div><span style="color:{_GRAY_400};font-size:13px;margin-right:6px;">{idx}.</span>{title_html}</div>'
         f'<div style="margin-top:6px;">{meta_html}</div>'
         f'{summary_html}'
+        f'{main_figure}'
         f'{digest_html}'
         f'{framework}'
         f'</div>'

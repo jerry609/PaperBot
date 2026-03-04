@@ -154,6 +154,32 @@ def test_digest_card_in_email_html():
     assert "AI" in html
 
 
+def test_main_figure_inline_in_email_html():
+    report = build_daily_paper_report(
+        search_result=_sample_search_result(), title="Digest Test", top_n=5,
+    )
+    item = report["queries"][0]["top_items"][0]
+    item["judge"] = {
+        "overall": 4.0,
+        "recommendation": "must_read",
+        "one_line_summary": "good",
+        "relevance": {"score": 5, "rationale": ""},
+        "novelty": {"score": 4, "rationale": ""},
+        "rigor": {"score": 4, "rationale": ""},
+        "impact": {"score": 4, "rationale": ""},
+        "clarity": {"score": 4, "rationale": ""},
+    }
+    item["main_figure"] = {
+        "caption": "Figure 1: Overview",
+        "inline_data_url": "data:image/png;base64,QUFBQQ==",
+    }
+
+    html = build_digest_html(report)
+    assert "主方法图" in html
+    assert "data:image/png;base64,QUFBQQ==" in html
+    assert "Figure 1: Overview" in html
+
+
 def test_digest_card_in_email_text():
     report = build_daily_paper_report(
         search_result=_sample_search_result(), title="Digest Test", top_n=5,
