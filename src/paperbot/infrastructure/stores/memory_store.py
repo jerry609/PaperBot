@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import atexit
+import concurrent.futures
 import hashlib
 import json
 import logging
 import re
 import struct
-import threading
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
@@ -19,6 +20,7 @@ from paperbot.memory.schema import MemoryCandidate
 logger = logging.getLogger(__name__)
 
 _EMBEDDING_DIM = 1536  # text-embedding-3-small default dimension
+_FTS_TOKEN_RX = re.compile(r"[A-Za-z0-9_+-]+")
 
 
 def _pack_embedding(vec: List[float]) -> bytes:
@@ -43,13 +45,29 @@ def _hybrid_merge(
     items: Dict[int, Dict[str, Any]] = {}
 
     for rank, item in enumerate(vec_results):
-        item_id = int(item.get("id", 0))
+        raw_id = item.get("id")
+        if raw_id is None:
+            logger.warning("Skipping vec result without id: %r", item)
+            continue
+        try:
+            item_id = int(raw_id)
+        except (TypeError, ValueError):
+            logger.warning("Skipping vec result with invalid id=%r: %r", raw_id, item)
+            continue
         vec_score = float(item.get("vec_score", 1.0 / (1.0 + rank)))
         scores[item_id] = scores.get(item_id, 0.0) + vec_weight * vec_score
         items[item_id] = item
 
     for rank, item in enumerate(fts_results):
-        item_id = int(item.get("id", 0))
+        raw_id = item.get("id")
+        if raw_id is None:
+            logger.warning("Skipping FTS result without id: %r", item)
+            continue
+        try:
+            item_id = int(raw_id)
+        except (TypeError, ValueError):
+            logger.warning("Skipping FTS result with invalid id=%r: %r", raw_id, item)
+            continue
         bm25_score = 1.0 / (1.0 + rank)
         scores[item_id] = scores.get(item_id, 0.0) + bm25_weight * bm25_score
         if item_id not in items:
@@ -107,6 +125,12 @@ class SqlAlchemyMemoryStore:
         self._provider = SessionProvider(self.db_url)
         # embedding_provider: None = lazy-init, False = permanently unavailable, else provider
         self._embedding_provider = embedding_provider
+        # Bounded pool prevents unbounded daemon thread growth on heavy writes.
+        self._embed_executor = concurrent.futures.ThreadPoolExecutor(
+            max_workers=2,
+            thread_name_prefix="memory-embed",
+        )
+        atexit.register(self._shutdown_embed_executor)
         self._vec_available = False
         if str(self.db_url).startswith("sqlite:"):
             self._try_enable_vec_extension()
@@ -438,15 +462,17 @@ class SqlAlchemyMemoryStore:
                 session.refresh(row)
                 created += 1
                 created_rows.append(row)
-                # Generate and store embedding in a background thread (best-effort).
-                _row_id, _content = row.id, content
-                threading.Thread(
-                    target=self._store_embedding,
-                    args=(_row_id, _content),
-                    daemon=True,
-                ).start()
+                # Generate and store embedding asynchronously (best-effort).
+                self._schedule_embedding(row.id, content)
 
         return created, skipped, created_rows
+
+    def _schedule_embedding(self, row_id: int, content: str) -> None:
+        try:
+            self._embed_executor.submit(self._store_embedding, row_id, content)
+        except RuntimeError:
+            # Executor may already be shutting down during process teardown.
+            logger.debug("Embedding executor unavailable; skipping row_id=%s", row_id)
 
     def _get_embedding_provider(self):
         """Lazy-initialise embedding provider; returns None if unavailable."""
@@ -621,9 +647,17 @@ class SqlAlchemyMemoryStore:
         # Build a safe FTS5 query: wrap each token in double quotes to treat as
         # phrase tokens, joined with AND (FTS5 default when space-separated).
         def _escape_fts(token: str) -> str:
-            return '"' + token.replace('"', '""') + '"'
+            safe_parts = _FTS_TOKEN_RX.findall(token or "")
+            clean = " ".join(safe_parts).strip()
+            if not clean:
+                return ""
+            return '"' + clean.replace('"', '""') + '"'
 
-        fts_query = " ".join(_escape_fts(t) for t in tokens[:8])
+        escaped_tokens = [_escape_fts(t) for t in tokens[:8]]
+        escaped_tokens = [t for t in escaped_tokens if t]
+        if not escaped_tokens:
+            return []
+        fts_query = " ".join(escaped_tokens)
 
         try:
             with self._provider.engine.connect() as conn:
@@ -1088,8 +1122,18 @@ class SqlAlchemyMemoryStore:
             return True
 
     def close(self) -> None:
+        self._shutdown_embed_executor()
         try:
             self._provider.engine.dispose()
+        except Exception:
+            pass
+
+    def _shutdown_embed_executor(self) -> None:
+        executor = getattr(self, "_embed_executor", None)
+        if executor is None:
+            return
+        try:
+            executor.shutdown(wait=True, cancel_futures=False)
         except Exception:
             pass
 

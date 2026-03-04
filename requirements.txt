@@ -85,5 +85,11 @@ redis>=5.0.0
 # AI SDK (ensure consistent installs)
 openai>=1.0.0
 
+# Multi-channel push notifications
+apprise>=1.9.0
+
+# RSS/Atom feed generation
+feedgen>=1.0.0
+
 # Vector search (optional — graceful fallback to FTS5 if unavailable)
 sqlite-vec>=0.1.6
