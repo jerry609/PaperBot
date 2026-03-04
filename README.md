@@ -169,51 +169,10 @@ python main.py review --title "..." --abstract "..."
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│  Clients:  Web (Next.js)  ·  CLI (Ink)  ·  ARQ Cron  ·  Push  │
-└────────────────────────────┬────────────────────────────────────┘
-                             ▼
-┌─────────────────── FastAPI Gateway (SSE) ───────────────────────┐
-│  /search  /daily  /analyze  /track  /review  /gen-code  /chat  │
-└────────────────────────────┬────────────────────────────────────┘
-                             ▼
-┌─ Application ────────────────────────────────────────────────────┐
-│  Workflows: TopicSearch · DailyPaper · ScholarPipeline · P2C    │
-│  Services:  LLMService · PaperSearch · EnrichmentPipeline       │
-│  Analysis:  Judge · TrendAnalyzer · Summarizer · Reviewer       │
-└────────────────────────────┬─────────────────────────────────────┘
-                             ▼
-┌─ Domain ─────────────────────────────────────────────────────────┐
-│  Paper · Scholar · Track · Feedback · Enrichment · Identity      │
-└────────────────────────────┬─────────────────────────────────────┘
-                             ▼
-┌─ Infrastructure ─────────────────────────────────────────────────┐
-│  Adapters: arXiv / S2 / OpenAlex / papers.cool / HF Daily       │
-│  Stores:   SQLAlchemy (38 tables) · Alembic · ARQ (Redis)       │
-│  LLM:      ModelRouter (OpenAI / Anthropic / OpenRouter / Ollama)│
-│  Sandbox:  Docker / E2B                                          │
-└──────────────────────────────────────────────────────────────────┘
-```
+<!-- TODO: 待重绘高清架构图 -->
+![Architecture](asset/arc.png)
 
-> Full editable diagrams: [Excalidraw](asset/architecture.excalidraw) · [draw.io](asset/architecture.drawio)
-
-<details>
-<summary>Data pipeline</summary>
-
-```
-                   ┌── papers.cool
-                   ├── arXiv API
-Input Queries ──→  ├── HF Daily Papers         → Normalize → Dedup → Score
-                   ├── OpenAlex / S2                          │
-                   └── (PaperSearchPort)       ┌── DailyPaper Report
-                                               ├── LLM Enrichment
-                                        ──→    ├── LLM-as-Judge (SSE)
-                                               ├── Push (Email/Slack/...)
-                                               └── Web UI
-```
-
-</details>
+> Editable source: [Excalidraw](asset/architecture.excalidraw) · [draw.io](asset/architecture.drawio)
 
 ## Module Status
 
