@@ -1273,6 +1273,14 @@ class ReproCodeExperienceModel(Base):
     """
 
     __tablename__ = "repro_code_experience"
+    __table_args__ = (
+        UniqueConstraint(
+            "paper_id",
+            "pattern_type",
+            "content",
+            name="uq_repro_exp_paper_type_content",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     pack_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)

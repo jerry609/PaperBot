@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from paperbot.infrastructure.stores.models import Base, ReproCodeExperienceModel
 from paperbot.infrastructure.stores.sqlalchemy_db import SessionProvider, get_db_url
@@ -33,20 +34,48 @@ class ReproExperienceStore:
         """Persist one experience record. Returns the saved row."""
         if pattern_type not in _VALID_TYPES:
             raise ValueError(f"pattern_type must be one of {_VALID_TYPES}")
+        normalized_content = (content or "").strip()
+        if not normalized_content:
+            raise ValueError("content must not be empty")
         now = datetime.now(timezone.utc)
         row = ReproCodeExperienceModel(
             pack_id=pack_id,
             paper_id=paper_id,
             pattern_type=pattern_type,
-            content=(content or "").strip(),
+            content=normalized_content,
             code_snippet=code_snippet,
             created_at=now,
         )
         with self._provider.session() as session:
+            existing = session.execute(
+                select(ReproCodeExperienceModel).where(
+                    ReproCodeExperienceModel.paper_id == paper_id,
+                    ReproCodeExperienceModel.pattern_type == pattern_type,
+                    ReproCodeExperienceModel.content == normalized_content,
+                )
+            ).scalar_one_or_none()
+            if existing is not None:
+                if pack_id and not existing.pack_id:
+                    existing.pack_id = pack_id
+                    session.commit()
+                    session.refresh(existing)
+                return existing
+
             session.add(row)
-            session.commit()
-            session.refresh(row)
-            return row
+            try:
+                session.commit()
+                session.refresh(row)
+                return row
+            except IntegrityError:
+                session.rollback()
+                existing = session.execute(
+                    select(ReproCodeExperienceModel).where(
+                        ReproCodeExperienceModel.paper_id == paper_id,
+                        ReproCodeExperienceModel.pattern_type == pattern_type,
+                        ReproCodeExperienceModel.content == normalized_content,
+                    )
+                ).scalar_one()
+                return existing
 
     def get_by_paper_id(
         self,
