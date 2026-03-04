@@ -6,10 +6,12 @@ Falls back gracefully when the service is unavailable.
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import logging
 import re
 import time
+import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -20,6 +22,9 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_BASE_URL = "https://mineru.net/api/v4"
 _DEFAULT_TIMEOUT = 60.0
+_DEFAULT_MODEL_VERSION = "pipeline"
+_DEFAULT_POLL_INTERVAL_SECONDS = 2.0
+_DEFAULT_MAX_WAIT_SECONDS = 180.0
 
 
 @dataclass
@@ -52,12 +57,18 @@ class MineruClient:
         timeout: float = _DEFAULT_TIMEOUT,
         cache_dir: str = "",
         cache_ttl_seconds: int = 24 * 3600,
+        model_version: str = _DEFAULT_MODEL_VERSION,
+        poll_interval_seconds: float = _DEFAULT_POLL_INTERVAL_SECONDS,
+        max_wait_seconds: float = _DEFAULT_MAX_WAIT_SECONDS,
     ):
         self._api_key = api_key
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout
         self._cache_dir = Path(cache_dir).expanduser() if cache_dir else None
         self._cache_ttl_seconds = max(0, int(cache_ttl_seconds))
+        self._model_version = (model_version or _DEFAULT_MODEL_VERSION).strip() or _DEFAULT_MODEL_VERSION
+        self._poll_interval_seconds = max(0.5, float(poll_interval_seconds))
+        self._max_wait_seconds = max(5.0, float(max_wait_seconds))
 
     def extract_figures(self, pdf_url: str) -> List[Figure]:
         """Extract figures from a PDF URL via MinerU Cloud API.
@@ -84,6 +95,72 @@ class MineruClient:
             return []
 
     def _call_extract(self, pdf_url: str) -> List[Figure]:
+        """Call MinerU API and return parsed figures.
+
+        Try official async task flow first, then fall back to legacy `/extract`
+        for backward compatibility with self-hosted/older deployments.
+        """
+        try:
+            return self._call_extract_task_flow(pdf_url)
+        except Exception as task_exc:
+            logger.info("MinerU task flow failed, trying legacy endpoint: %s", task_exc)
+            try:
+                return self._call_extract_legacy(pdf_url)
+            except Exception:
+                raise task_exc
+
+    def _call_extract_task_flow(self, pdf_url: str) -> List[Figure]:
+        headers = {
+            "Authorization": f"Bearer {self._api_key}",
+            "Content-Type": "application/json",
+        }
+
+        with httpx.Client(timeout=self._timeout) as client:
+            create_resp = client.post(
+                f"{self._base_url}/extract/task",
+                json={"url": pdf_url, "model_version": self._model_version},
+                headers=headers,
+            )
+            create_resp.raise_for_status()
+            create_data = create_resp.json()
+            task_id = str((create_data.get("data") or {}).get("task_id") or "").strip()
+            if create_data.get("code") != 0 or not task_id:
+                raise RuntimeError(f"invalid MinerU task response: {create_data}")
+
+            deadline = time.time() + self._max_wait_seconds
+            detail: Dict[str, Any] = {}
+
+            while time.time() <= deadline:
+                status_resp = client.get(
+                    f"{self._base_url}/extract/task/{task_id}",
+                    headers=headers,
+                )
+                status_resp.raise_for_status()
+                status_data = status_resp.json()
+                detail = status_data.get("data") or {}
+                state = str(detail.get("state") or "").lower()
+
+                if state == "done":
+                    # Some deployments may return figure arrays directly.
+                    parsed = self._parse_figures(detail) or self._parse_figures(status_data)
+                    if parsed:
+                        return parsed
+
+                    # Official v4 commonly returns a downloadable ZIP artifact.
+                    zip_url = str(detail.get("full_zip_url") or "").strip()
+                    if zip_url:
+                        return self._extract_figures_from_zip(zip_url)
+                    return []
+
+                if state == "failed":
+                    err_msg = str(detail.get("err_msg") or "task failed")
+                    raise RuntimeError(err_msg)
+
+                time.sleep(self._poll_interval_seconds)
+
+            raise TimeoutError(f"MinerU task timed out after {self._max_wait_seconds:.0f}s")
+
+    def _call_extract_legacy(self, pdf_url: str) -> List[Figure]:
         headers = {
             "Authorization": f"Bearer {self._api_key}",
             "Content-Type": "application/json",
@@ -100,6 +177,77 @@ class MineruClient:
             data = resp.json()
 
         return self._parse_figures(data)
+
+    def _extract_figures_from_zip(self, zip_url: str) -> List[Figure]:
+        """Download MinerU result zip and parse figures from generated markdown."""
+        if not zip_url:
+            return []
+
+        with httpx.Client(timeout=self._timeout) as client:
+            resp = client.get(zip_url)
+            resp.raise_for_status()
+            zip_bytes = resp.content
+
+        md_text = ""
+        with zipfile.ZipFile(io.BytesIO(zip_bytes), "r") as zf:
+            md_members = [name for name in zf.namelist() if name.lower().endswith(".md")]
+            if not md_members:
+                return []
+            # Prefer the shortest markdown path, typically the top-level document.
+            target = sorted(md_members, key=len)[0]
+            md_text = zf.read(target).decode("utf-8", errors="ignore")
+
+        return self._parse_figures_from_markdown(md_text, zip_url=zip_url)
+
+    def _parse_figures_from_markdown(self, markdown_text: str, *, zip_url: str = "") -> List[Figure]:
+        """Parse figure references from markdown generated by MinerU.
+
+        Format usually looks like:
+        ![](images/abc.jpg)
+        Figure 1: caption text
+        """
+        if not markdown_text.strip():
+            return []
+
+        lines = markdown_text.splitlines()
+        figures: List[Figure] = []
+        image_pattern = re.compile(r"!\[[^\]]*\]\(([^)]+)\)")
+        caption_pattern = re.compile(r"^\s*(?:Figure|Fig\.?)[\s\d:.\-]+", re.IGNORECASE)
+
+        for i, line in enumerate(lines):
+            match = image_pattern.search(line)
+            if not match:
+                continue
+
+            raw_ref = (match.group(1) or "").strip()
+            if not raw_ref:
+                continue
+
+            caption = ""
+            for j in (i + 1, i + 2):
+                if j >= len(lines):
+                    break
+                candidate = (lines[j] or "").strip()
+                if candidate and caption_pattern.match(candidate):
+                    caption = candidate
+                    break
+
+            if raw_ref.startswith(("http://", "https://")):
+                figure_url = raw_ref
+            elif zip_url:
+                figure_url = f"{zip_url}#/{raw_ref}"
+            else:
+                figure_url = raw_ref
+
+            figures.append(
+                Figure(
+                    url=figure_url,
+                    caption=caption,
+                    index=len(figures),
+                )
+            )
+
+        return figures
 
     def _cache_path(self, pdf_url: str) -> Optional[Path]:
         if self._cache_dir is None:
@@ -211,8 +359,17 @@ class MineruClient:
             caption_lower = fig.caption.lower()
 
             # Caption keyword bonus
-            main_keywords = ["overview", "architecture", "framework", "pipeline",
-                             "main", "proposed", "system", "model", "approach"]
+            main_keywords = [
+                "overview",
+                "architecture",
+                "framework",
+                "pipeline",
+                "main",
+                "proposed",
+                "system",
+                "model",
+                "approach",
+            ]
             for kw in main_keywords:
                 if kw in caption_lower:
                     score += 10.0

@@ -1,5 +1,6 @@
 from paperbot.application.workflows.dailypaper import (
     DailyPaperReporter,
+    _is_publishable_figure_url,
     apply_judge_scores_to_report,
     build_daily_paper_report,
     enrich_daily_paper_report,
@@ -103,6 +104,12 @@ def test_normalize_output_formats_supports_both_alias():
 
 def test_normalize_llm_features_filters_unknown_items():
     assert normalize_llm_features(["summary", "foo", "trends", "summary"]) == ["summary", "trends"]
+
+
+def test_publishable_figure_url_rejects_zip_artifacts():
+    assert _is_publishable_figure_url("https://cdn.example.com/fig1.png")
+    assert not _is_publishable_figure_url("https://cdn.example.com/result.zip")
+    assert not _is_publishable_figure_url("https://cdn.example.com/result.zip#/images/fig1.jpg")
 
 
 def test_apply_judge_scores_to_report(monkeypatch):

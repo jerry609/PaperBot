@@ -16,6 +16,15 @@ from paperbot.infrastructure.stores.paper_store import SqlAlchemyPaperStore
 SUPPORTED_LLM_FEATURES = ("summary", "trends", "insight", "relevance", "digest_card")
 
 
+def _is_publishable_figure_url(url: str) -> bool:
+    u = (url or "").strip().lower()
+    if not u.startswith(("http://", "https://")):
+        return False
+    if u.endswith(".zip") or ".zip#" in u or ".zip?" in u:
+        return False
+    return True
+
+
 def extract_figures_for_report(
     report: Dict[str, Any],
     *,
@@ -49,7 +58,7 @@ def extract_figures_for_report(
                 item["figures"] = [
                     {"url": f.url, "caption": f.caption, "page": f.page} for f in figures[:5]
                 ]
-                if main:
+                if main and _is_publishable_figure_url(main.url):
                     item["main_figure"] = {"url": main.url, "caption": main.caption}
             count += 1
 
