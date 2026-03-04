@@ -154,7 +154,9 @@ Provide ONLY the corrected full file content. No explanations.
                         if paper_context else None
                     )
                     try:
+                        user_id = (context.get("user_id", "default") or "default").strip() or "default"
                         self._experience_store.add(
+                            user_id=user_id,
                             pattern_type="failure_reason",
                             content=f"[{error_type.value}] fixed: {repair_result.fix_applied}",
                             paper_id=paper_id,

@@ -4,7 +4,7 @@ import json
 from datetime import datetime
 from typing import Any, Dict, Optional
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, LargeBinary, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, LargeBinary, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -1273,8 +1273,19 @@ class ReproCodeExperienceModel(Base):
     """
 
     __tablename__ = "repro_code_experience"
+    __table_args__ = (
+        Index(
+            "uq_repro_exp_user_paper_type_content",
+            "user_id",
+            "paper_id",
+            "pattern_type",
+            "content",
+            unique=True,
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True, default="default")
     pack_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
     paper_id: Mapped[Optional[str]] = mapped_column(String(256), nullable=True, index=True)
     # pattern_type: success_pattern | failure_reason | verified_structure

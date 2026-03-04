@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from paperbot.infrastructure.stores.models import Base, ReproCodeExperienceModel
 from paperbot.infrastructure.stores.sqlalchemy_db import SessionProvider, get_db_url
@@ -24,6 +25,7 @@ class ReproExperienceStore:
     def add(
         self,
         *,
+        user_id: str = "default",
         pattern_type: str,
         content: str,
         paper_id: Optional[str] = None,
@@ -33,25 +35,57 @@ class ReproExperienceStore:
         """Persist one experience record. Returns the saved row."""
         if pattern_type not in _VALID_TYPES:
             raise ValueError(f"pattern_type must be one of {_VALID_TYPES}")
+        normalized_content = (content or "").strip()
+        if not normalized_content:
+            raise ValueError("content must not be empty")
         now = datetime.now(timezone.utc)
         row = ReproCodeExperienceModel(
+            user_id=(user_id or "default").strip() or "default",
             pack_id=pack_id,
             paper_id=paper_id,
             pattern_type=pattern_type,
-            content=(content or "").strip(),
+            content=normalized_content,
             code_snippet=code_snippet,
             created_at=now,
         )
         with self._provider.session() as session:
+            existing = session.execute(
+                select(ReproCodeExperienceModel).where(
+                    ReproCodeExperienceModel.user_id == row.user_id,
+                    ReproCodeExperienceModel.paper_id == paper_id,
+                    ReproCodeExperienceModel.pattern_type == pattern_type,
+                    ReproCodeExperienceModel.content == normalized_content,
+                )
+            ).scalar_one_or_none()
+            if existing is not None:
+                if pack_id and not existing.pack_id:
+                    existing.pack_id = pack_id
+                    session.commit()
+                    session.refresh(existing)
+                return existing
+
             session.add(row)
-            session.commit()
-            session.refresh(row)
-            return row
+            try:
+                session.commit()
+                session.refresh(row)
+                return row
+            except IntegrityError:
+                session.rollback()
+                existing = session.execute(
+                    select(ReproCodeExperienceModel).where(
+                        ReproCodeExperienceModel.user_id == row.user_id,
+                        ReproCodeExperienceModel.paper_id == paper_id,
+                        ReproCodeExperienceModel.pattern_type == pattern_type,
+                        ReproCodeExperienceModel.content == normalized_content,
+                    )
+                ).scalar_one()
+                return existing
 
     def get_by_paper_id(
         self,
         paper_id: str,
         *,
+        user_id: str = "default",
         pattern_type: Optional[str] = None,
         limit: int = 50,
     ) -> List[Dict[str, Any]]:
@@ -59,6 +93,7 @@ class ReproExperienceStore:
         with self._provider.session() as session:
             stmt = (
                 select(ReproCodeExperienceModel)
+                .where(ReproCodeExperienceModel.user_id == ((user_id or "default").strip() or "default"))
                 .where(ReproCodeExperienceModel.paper_id == paper_id)
             )
             if pattern_type:
@@ -71,6 +106,7 @@ class ReproExperienceStore:
         self,
         pack_id: str,
         *,
+        user_id: str = "default",
         pattern_type: Optional[str] = None,
         limit: int = 50,
     ) -> List[Dict[str, Any]]:
@@ -78,6 +114,7 @@ class ReproExperienceStore:
         with self._provider.session() as session:
             stmt = (
                 select(ReproCodeExperienceModel)
+                .where(ReproCodeExperienceModel.user_id == ((user_id or "default").strip() or "default"))
                 .where(ReproCodeExperienceModel.pack_id == pack_id)
             )
             if pattern_type:
@@ -90,6 +127,7 @@ class ReproExperienceStore:
     def _to_dict(r: ReproCodeExperienceModel) -> Dict[str, Any]:
         return {
             "id": r.id,
+            "user_id": r.user_id,
             "pack_id": r.pack_id,
             "paper_id": r.paper_id,
             "pattern_type": r.pattern_type,

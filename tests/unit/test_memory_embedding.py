@@ -198,6 +198,12 @@ class TestHybridMerge:
         for item in merged:
             assert "hybrid_score" in item
 
+    def test_skips_items_with_missing_or_invalid_id(self):
+        vec_results = [{"content": "missing id", "vec_score": 0.9}, {"id": "x", "vec_score": 0.3}]
+        fts_results = [{"id": None, "content": "bad"}, {"id": "bad", "content": "bad2"}]
+        merged = _hybrid_merge(vec_results, fts_results, limit=5)
+        assert merged == []
+
 
 # ---------------------------------------------------------------------------
 # 8+9+10. search_memories integration paths

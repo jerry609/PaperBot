@@ -170,6 +170,12 @@ class TestSearchMemoriesFts5:
         # Falls back to list_memories, so should still return something
         assert isinstance(results, list)
 
+    def test_fts_query_with_operators_is_sanitized(self, store):
+        _add(store, "u8", "attention transformer baseline")
+        results = store.search_memories(user_id="u8", query='attention* NOT transformer^')
+        assert isinstance(results, list)
+        assert any("attention" in r["content"].lower() for r in results)
+
 
 # ---------------------------------------------------------------------------
 # 4. Fallback to LIKE when FTS5 unavailable
