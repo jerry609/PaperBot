@@ -37,6 +37,7 @@ from .base_executor import BaseExecutor
 from .docker_executor import DockerExecutor
 from .e2b_executor import E2BExecutor
 from .orchestrator import Orchestrator, OrchestratorConfig
+from paperbot.infrastructure.stores.repro_experience_store import ReproExperienceStore
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +83,11 @@ class ReproAgent:
 
         # Multi-agent mode flag
         self.use_orchestrator = self.config.get("use_orchestrator", False)
+        self.experience_store = None
+        try:
+            self.experience_store = ReproExperienceStore()
+        except Exception as exc:  # noqa: BLE001
+            self.logger.warning("ReproExperienceStore unavailable, persistence disabled: %s", exc)
 
         # Initialize nodes (for legacy mode)
         self.planning_node = PlanningNode()
@@ -89,10 +95,11 @@ class ReproAgent:
             prefer_conda=self.config.get("prefer_conda", False)
         )
         self.analysis_node = AnalysisNode()
-        self.generation_node = GenerationNode()
+        self.generation_node = GenerationNode(experience_store=self.experience_store)
         self.verification_node = VerificationNode(
             max_repair_attempts=self.config.get("max_repair_attempts", 3),
             enable_self_healing=self.config.get("enable_self_healing", True),
+            experience_store=self.experience_store,
         )
 
         # Initialize executor based on config
@@ -190,7 +197,12 @@ class ReproAgent:
                 use_rag=self.config.get("use_rag", True),
                 max_context_tokens=self.config.get("max_context_tokens", 8000),
             )
-            self._orchestrator = Orchestrator(config=config, event_log=event_log, workflow=workflow)
+            self._orchestrator = Orchestrator(
+                config=config,
+                experience_store=self.experience_store,
+                event_log=event_log,
+                workflow=workflow,
+            )
         return self._orchestrator
 
     # ==================== Paper2Code Mode ====================
@@ -200,6 +212,8 @@ class ReproAgent:
         paper_context: PaperContext,
         output_dir: Optional[Path] = None,
         *,
+        user_id: str = "default",
+        pack_id: Optional[str] = None,
         event_log: "Optional[EventLogPort]" = None,
         run_id: Optional[str] = None,
         trace_id: Optional[str] = None,
@@ -235,19 +249,28 @@ class ReproAgent:
             return await self._reproduce_with_orchestrator(
                 paper_context,
                 output_dir,
+                user_id=user_id,
+                pack_id=pack_id,
                 event_log=event_log,
                 run_id=run_id,
                 trace_id=trace_id,
             )
 
         # Legacy mode
-        return await self._reproduce_legacy(paper_context, output_dir)
+        return await self._reproduce_legacy(
+            paper_context,
+            output_dir,
+            user_id=user_id,
+            pack_id=pack_id,
+        )
 
     async def _reproduce_with_orchestrator(
         self,
         paper_context: PaperContext,
         output_dir: Path,
         *,
+        user_id: str = "default",
+        pack_id: Optional[str] = None,
         event_log: "Optional[EventLogPort]" = None,
         run_id: Optional[str] = None,
         trace_id: Optional[str] = None,
@@ -264,7 +287,13 @@ class ReproAgent:
         self.logger.info(f"Reproducing '{paper_context.title}' with multi-agent orchestrator")
 
         orchestrator = self.get_orchestrator(output_dir, event_log=event_log)
-        result = await orchestrator.run(paper_context, run_id=run_id, trace_id=trace_id)
+        result = await orchestrator.run(
+            paper_context,
+            user_id=user_id,
+            pack_id=pack_id,
+            run_id=run_id,
+            trace_id=trace_id,
+        )
 
         # Write environment files if we have the plan
         if result.plan:
@@ -276,7 +305,10 @@ class ReproAgent:
     async def _reproduce_legacy(
         self,
         paper_context: PaperContext,
-        output_dir: Path
+        output_dir: Path,
+        *,
+        user_id: str = "default",
+        pack_id: Optional[str] = None,
     ) -> ReproductionResult:
         """
         Legacy Paper2Code reproduction using node-based pipeline.
@@ -331,7 +363,11 @@ class ReproAgent:
             # Phase 3: Generation
             self.logger.info("Phase 3: Generation")
             result.status = ReproPhase.GENERATION
-            gen_result = await self.generation_node.run((paper_context, plan, spec))
+            gen_result = await self.generation_node.run(
+                (paper_context, plan, spec),
+                user_id=user_id,
+                pack_id=pack_id,
+            )
             if not gen_result.success:
                 return self._fail_result(result, ReproPhase.GENERATION, gen_result.error or "")
             files: Dict[str, str] = gen_result.data
@@ -351,7 +387,12 @@ class ReproAgent:
             # Phase 4: Verification with self-healing
             self.logger.info("Phase 4: Verification with self-healing")
             result.status = ReproPhase.VERIFICATION
-            await self._verify_with_self_healing(output_dir, paper_context, result)
+            await self._verify_with_self_healing(
+                output_dir,
+                paper_context,
+                result,
+                user_id=user_id,
+            )
             
             # Compute final score
             result.compute_score()
@@ -402,11 +443,16 @@ class ReproAgent:
         self,
         output_dir: Path,
         paper_context: PaperContext,
-        result: ReproductionResult
+        result: ReproductionResult,
+        *,
+        user_id: str = "default",
     ) -> None:
         """Run verification with self-healing debugger."""
         # Pass paper context for better repair context
-        verify_result = await self.verification_node.run((output_dir, paper_context))
+        verify_result = await self.verification_node.run(
+            (output_dir, paper_context),
+            user_id=user_id,
+        )
         
         if verify_result.success and verify_result.data.all_passed:
             result.status = ReproPhase.COMPLETED
@@ -485,4 +531,3 @@ class ReproAgent:
             return 0.0
         passed = sum(1 for r in results if r["exit_code"] == 0)
         return passed / len(results)
-

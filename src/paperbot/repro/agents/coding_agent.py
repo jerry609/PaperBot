@@ -46,6 +46,7 @@ class CodingAgent(BaseAgent):
         output_dir: Optional[Path] = None,
         max_context_tokens: int = 8000,
         use_rag: bool = True,
+        experience_store=None,
         **kwargs
     ):
         super().__init__(name="CodingAgent", **kwargs)
@@ -53,7 +54,8 @@ class CodingAgent(BaseAgent):
         self.analysis_node = AnalysisNode()
         self.generation_node = GenerationNode(
             max_context_tokens=max_context_tokens,
-            use_rag=use_rag
+            use_rag=use_rag,
+            experience_store=experience_store,
         )
 
     async def execute(self, context: Dict[str, Any]) -> AgentResult:
@@ -88,7 +90,11 @@ class CodingAgent(BaseAgent):
             else:
                 gen_input = (paper_context, plan, spec)
 
-            gen_result = await self.generation_node.run(gen_input)
+            gen_result = await self.generation_node.run(
+                gen_input,
+                user_id=context.get("user_id", "default"),
+                pack_id=context.get("pack_id"),
+            )
 
             if not gen_result.success:
                 return AgentResult.failure(

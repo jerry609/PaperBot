@@ -104,6 +104,7 @@ class Orchestrator:
         self,
         config: Optional[OrchestratorConfig] = None,
         on_progress: Optional[Callable[[PipelineProgress], None]] = None,
+        experience_store=None,
         *,
         event_log: "Optional[EventLogPort]" = None,
         run_id: Optional[str] = None,
@@ -120,9 +121,13 @@ class Orchestrator:
             output_dir=self.config.output_dir,
             max_context_tokens=self.config.max_context_tokens,
             use_rag=self.config.use_rag,
+            experience_store=experience_store,
         )
         self.verification_agent = VerificationAgent()
-        self.debugging_agent = DebuggingAgent(output_dir=self.config.output_dir)
+        self.debugging_agent = DebuggingAgent(
+            output_dir=self.config.output_dir,
+            experience_store=experience_store,
+        )
 
         # Shared context
         self.context: Dict[str, Any] = {}
@@ -137,6 +142,8 @@ class Orchestrator:
         self,
         paper_context: PaperContext,
         *,
+        user_id: str = "default",
+        pack_id: Optional[str] = None,
         run_id: Optional[str] = None,
         trace_id: Optional[str] = None,
     ) -> ReproductionResult:
@@ -160,6 +167,8 @@ class Orchestrator:
 
         self.context = {
             "paper_context": paper_context,
+            "user_id": (user_id or "default").strip() or "default",
+            "pack_id": pack_id,
             "run_id": self._run_id,
             "trace_id": self._trace_id,
         }
