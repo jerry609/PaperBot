@@ -4,6 +4,7 @@ import { useState, useMemo } from "react"
 import { useStudioStore, type StudioPaperStatus } from "@/lib/store/studio-store"
 import { NewPaperModal } from "./NewPaperModal"
 import { PaperIcon } from "./PaperIcon"
+import { deleteProjectFiles } from "@/lib/runbook/deleteProjectFiles"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card } from "@/components/ui/card"
@@ -96,18 +97,7 @@ export function PaperGallery() {
         try {
             if (paperToDelete.outputDir) {
                 try {
-                    const response = await fetch("/api/runbook/delete", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({
-                            project_dir: paperToDelete.outputDir,
-                        }),
-                    })
-                    if (!response.ok) {
-                        throw new Error(
-                            `Delete failed with status ${response.status}`,
-                        )
-                    }
+                    await deleteProjectFiles(paperToDelete.outputDir)
                 } catch (e) {
                     console.error("Failed to delete project files:", e)
                     setDeleteError(

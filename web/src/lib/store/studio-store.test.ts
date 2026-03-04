@@ -1,5 +1,3 @@
-"use client"
-
 import { beforeEach, describe, expect, it } from "vitest"
 import { useStudioStore } from "./studio-store"
 import type {

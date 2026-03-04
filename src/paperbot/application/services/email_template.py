@@ -160,11 +160,17 @@ def _main_figure_html(item: Dict[str, Any]) -> str:
 
     image_src = ""
     url = str(mf.get("url") or "").strip()
+    url_lower = url.lower()
     inline_data_url = str(mf.get("inline_data_url") or "").strip()
 
     if inline_data_url.startswith("data:image/"):
         image_src = inline_data_url
-    elif url.startswith(("http://", "https://")) and ".zip#" not in url and not url.endswith(".zip"):
+    elif (
+        url_lower.startswith(("http://", "https://"))
+        and ".zip#" not in url_lower
+        and ".zip?" not in url_lower
+        and not url_lower.endswith(".zip")
+    ):
         image_src = url
 
     if not image_src:

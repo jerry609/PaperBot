@@ -28,12 +28,15 @@ const SKIP_WORDS = new Set([
 
 function getAbbreviation(title: string): string {
     const words = title
-        .replace(/[^a-zA-Z0-9\s]/g, "")
+        .normalize("NFKC")
+        .replace(/[^\p{L}\p{N}\s]/gu, "")
         .split(/\s+/)
         .filter(w => w.length > 0 && !SKIP_WORDS.has(w.toLowerCase()))
     if (words.length === 0) return "??"
-    if (words.length === 1) return words[0].slice(0, 2).toUpperCase()
-    return (words[0][0] + words[1][0]).toUpperCase()
+    if (words.length === 1) return Array.from(words[0]).slice(0, 2).join("").toUpperCase()
+    const first = Array.from(words[0])[0] ?? "?"
+    const second = Array.from(words[1])[0] ?? "?"
+    return (first + second).toUpperCase()
 }
 
 interface PaperIconProps {
@@ -43,6 +46,7 @@ interface PaperIconProps {
 }
 
 export function PaperIcon({ paperId, title, size = 48 }: PaperIconProps) {
+    const iconSize = Number.isFinite(size) && size > 0 ? size : 48
     const hash = djb2(paperId)
     const color = PALETTE[hash % PALETTE.length]
     const abbr = getAbbreviation(title)
@@ -50,7 +54,7 @@ export function PaperIcon({ paperId, title, size = 48 }: PaperIconProps) {
     // Generate a 4×4 symmetric pattern (mirror left half → right half)
     // Use 8 bits from the hash for 2×4 cells, then mirror horizontally
     const bits = (hash >>> 8) & 0xffff
-    const cellSize = size / 4
+    const cellSize = iconSize / 4
 
     const cells: { x: number; y: number }[] = []
     for (let row = 0; row < 4; row++) {
@@ -65,14 +69,14 @@ export function PaperIcon({ paperId, title, size = 48 }: PaperIconProps) {
 
     return (
         <svg
-            width={size}
-            height={size}
-            viewBox={`0 0 ${size} ${size}`}
+            width={iconSize}
+            height={iconSize}
+            viewBox={`0 0 ${iconSize} ${iconSize}`}
             xmlns="http://www.w3.org/2000/svg"
             role="img"
             aria-label={abbr}
         >
-            <rect width={size} height={size} rx={size * 0.15} fill={color} opacity={0.15} />
+            <rect width={iconSize} height={iconSize} rx={iconSize * 0.15} fill={color} opacity={0.15} />
             {cells.map((cell, i) => (
                 <rect
                     key={i}
@@ -85,12 +89,12 @@ export function PaperIcon({ paperId, title, size = 48 }: PaperIconProps) {
                 />
             ))}
             <text
-                x={size / 2}
-                y={size / 2}
+                x={iconSize / 2}
+                y={iconSize / 2}
                 textAnchor="middle"
                 dominantBaseline="central"
                 fill="white"
-                fontSize={size * 0.3}
+                fontSize={iconSize * 0.3}
                 fontWeight="bold"
                 fontFamily="system-ui, sans-serif"
                 style={{ textShadow: "0 1px 2px rgba(0,0,0,0.3)" }}

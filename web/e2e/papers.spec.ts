@@ -17,12 +17,7 @@ test.describe("Papers Page E2E", () => {
   });
 
   test("papers page has import/export options", async ({ page }) => {
-    // Look for import or export buttons/links
-    const importBtn = page.locator(
-      'button:has-text("Import"), button:has-text("BibTeX"), button:has-text("Zotero")'
-    );
-    const count = await importBtn.count();
-    // At least some action button should be present
-    expect(count).toBeGreaterThanOrEqual(0);
+    const exportButton = page.getByRole("button", { name: /export/i });
+    await expect(exportButton).toBeVisible();
   });
 });

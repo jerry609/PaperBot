@@ -214,7 +214,7 @@ class AddAllowedDirRequest(BaseModel):
 
 
 def _runtime_allowlist_mutation_enabled() -> bool:
-    return os.getenv("PAPERBOT_RUNBOOK_ALLOWLIST_MUTATION", "true").lower() == "true"
+    return os.getenv("PAPERBOT_RUNBOOK_ALLOWLIST_MUTATION", "false").lower() == "true"
 
 
 # Directories that must never be added to the allowlist (too broad / sensitive).

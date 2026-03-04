@@ -184,7 +184,11 @@ export function NewPaperModal({ open, onOpenChange }: NewPaperModalProps) {
                     </DialogDescription>
                 </DialogHeader>
 
-                <Tabs defaultValue="library" className="w-full">
+                <Tabs
+                    defaultValue="library"
+                    className="w-full"
+                    onValueChange={() => setError(null)}
+                >
                     <TabsList className="grid w-full grid-cols-2">
                         <TabsTrigger value="library">From Library</TabsTrigger>
                         <TabsTrigger value="manual">Manual Entry</TabsTrigger>

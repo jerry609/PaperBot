@@ -14,6 +14,7 @@ import logging
 import os
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Literal, AsyncGenerator
 
@@ -127,6 +128,88 @@ def build_prompt_with_context(message: str, paper: Optional[PaperContext], mode:
 
 
 log = logging.getLogger(__name__)
+
+
+def _load_runtime_allowed_dirs() -> List[Path]:
+    f = Path("data/runbook_allowed_dirs.json")
+    if not f.exists():
+        return []
+    try:
+        data = json.loads(f.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, ValueError):
+        return []
+    if not isinstance(data, list):
+        return []
+    dirs: List[Path] = []
+    for item in data:
+        if isinstance(item, str) and item.strip():
+            try:
+                dirs.append(Path(item).resolve())
+            except Exception:
+                continue
+    return dirs
+
+
+def _allowed_workdir_prefixes() -> List[Path]:
+    prefixes: List[Path] = [Path(tempfile.gettempdir()).resolve()]
+    try:
+        prefixes.append(Path.cwd().resolve())
+    except Exception:
+        pass
+
+    extra = os.getenv("PAPERBOT_RUNBOOK_ALLOW_DIR_PREFIXES", "").strip()
+    if extra:
+        for p in extra.split(","):
+            p = p.strip()
+            if p:
+                try:
+                    prefixes.append(Path(p).expanduser().resolve())
+                except Exception:
+                    continue
+
+    prefixes.extend(_load_runtime_allowed_dirs())
+
+    unique: List[Path] = []
+    seen: set[str] = set()
+    for p in prefixes:
+        key = str(p)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(p)
+    return unique
+
+
+def _is_under_prefix(path: Path, prefix: Path) -> bool:
+    path_real = os.path.realpath(str(path))
+    prefix_real = os.path.realpath(str(prefix))
+    return path_real == prefix_real or path_real.startswith(prefix_real + os.sep)
+
+
+def _resolve_cli_project_dir(raw: Optional[str]) -> Path:
+    """Resolve and validate project_dir used by studio CLI execution."""
+    if not raw:
+        return Path.cwd().resolve()
+
+    cleaned = raw.strip()
+    if not cleaned or "\x00" in cleaned:
+        raise ValueError("invalid project_dir")
+
+    if cleaned == "~":
+        normalized = str(Path.home())
+    elif cleaned.startswith("~/"):
+        normalized = str(Path.home() / cleaned[2:])
+    else:
+        normalized = cleaned
+
+    resolved = Path(normalized).expanduser().resolve(strict=False)
+    if not resolved.exists() or not resolved.is_dir():
+        raise ValueError("project_dir must be an existing directory")
+
+    for prefix in _allowed_workdir_prefixes():
+        if _is_under_prefix(resolved, prefix):
+            return resolved
+    raise ValueError("project_dir is not allowed")
 
 
 def _load_context_pack(pack_id: str) -> Optional[Dict[str, Any]]:
@@ -369,9 +452,11 @@ async def stream_claude_cli(request: StudioChatRequest) -> AsyncGenerator[Stream
     )
 
     try:
-        cwd = request.project_dir or os.getcwd()
-        if not os.path.isdir(cwd):
-            cwd = os.getcwd()
+        try:
+            cwd = str(_resolve_cli_project_dir(request.project_dir))
+        except ValueError as exc:
+            yield StreamEvent(type="error", message=str(exc))
+            return
 
         # Write context pack to working directory so Claude CLI can read it
         if request.context_pack_id:
@@ -388,6 +473,18 @@ async def stream_claude_cli(request: StudioChatRequest) -> AsyncGenerator[Stream
             cwd=cwd,
             env={**os.environ, "FORCE_COLOR": "0"},
         )
+        stderr_chunks: list[str] = []
+
+        async def _drain_stderr() -> None:
+            if process.stderr is None:
+                return
+            while True:
+                chunk = await process.stderr.read(4096)
+                if not chunk:
+                    return
+                stderr_chunks.append(chunk.decode("utf-8", errors="replace"))
+
+        stderr_task = asyncio.create_task(_drain_stderr())
 
         _KEEPALIVE_SECONDS = 15
         line_buffer = ""
@@ -436,10 +533,10 @@ async def stream_claude_cli(request: StudioChatRequest) -> AsyncGenerator[Stream
                 pass
 
         await process.wait()
+        await stderr_task
 
         if process.returncode != 0:
-            stderr = await process.stderr.read()
-            error_msg = stderr.decode("utf-8", errors="replace").strip()
+            error_msg = "".join(stderr_chunks).strip()
             if error_msg:
                 yield StreamEvent(type="error", message=error_msg)
                 return

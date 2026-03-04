@@ -2,6 +2,8 @@
 import io
 import zipfile
 
+import pytest
+
 from paperbot.infrastructure.extractors.mineru_client import Figure, MineruClient
 
 
@@ -19,11 +21,9 @@ def test_empty_url_returns_empty():
 
 def test_validate_source_url_requires_http():
     client = MineruClient(api_key="test-key")
-    try:
+    with pytest.raises(ValueError) as exc:
         client._validate_source_url("file:///tmp/a.pdf")
-        assert False, "expected ValueError for non-http source"
-    except ValueError as exc:
-        assert "http(s)" in str(exc)
+    assert "http(s)" in str(exc.value)
 
 
 def test_validate_source_url_rejects_github_and_aws():
@@ -33,11 +33,9 @@ def test_validate_source_url_rejects_github_and_aws():
         "https://raw.githubusercontent.com/a/b/main/paper.pdf",
         "https://bucket.s3.amazonaws.com/paper.pdf",
     ):
-        try:
+        with pytest.raises(ValueError) as exc:
             client._validate_source_url(url)
-            assert False, f"expected ValueError for URL: {url}"
-        except ValueError as exc:
-            assert "github/aws" in str(exc)
+        assert "github/aws" in str(exc.value)
 
 
 def test_extract_figures_rejects_unsupported_host_early(monkeypatch):

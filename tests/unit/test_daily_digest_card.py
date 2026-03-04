@@ -180,6 +180,47 @@ def test_main_figure_inline_in_email_html():
     assert "Figure 1: Overview" in html
 
 
+def test_main_figure_http_url_in_email_html():
+    report = build_daily_paper_report(
+        search_result=_sample_search_result(), title="Digest Test", top_n=5,
+    )
+    item = report["queries"][0]["top_items"][0]
+    item["judge"] = {
+        "overall": 4.0,
+        "recommendation": "must_read",
+        "one_line_summary": "good",
+    }
+    item["main_figure"] = {
+        "caption": "Figure 1: Public",
+        "url": "https://cdn.example.com/figure1.png",
+    }
+
+    html = build_digest_html(report)
+    assert "主方法图" in html
+    assert "https://cdn.example.com/figure1.png" in html
+    assert "Figure 1: Public" in html
+
+
+def test_main_figure_zip_query_url_is_rejected_in_email_html():
+    report = build_daily_paper_report(
+        search_result=_sample_search_result(), title="Digest Test", top_n=5,
+    )
+    item = report["queries"][0]["top_items"][0]
+    item["judge"] = {
+        "overall": 4.0,
+        "recommendation": "must_read",
+        "one_line_summary": "good",
+    }
+    item["main_figure"] = {
+        "caption": "Figure 1: Should Not Render",
+        "url": "https://cdn.example.com/result.ZIP?token=abc#/images/fig1.jpg",
+    }
+
+    html = build_digest_html(report)
+    assert "主方法图" not in html
+    assert "result.ZIP?token=abc#/images/fig1.jpg" not in html
+
+
 def test_digest_card_in_email_text():
     report = build_daily_paper_report(
         search_result=_sample_search_result(), title="Digest Test", top_n=5,
