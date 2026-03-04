@@ -169,6 +169,22 @@ def create_parser() -> argparse.ArgumentParser:
         help="MinerU Cloud API Key（也可通过 MINERU_API_KEY 环境变量设置）",
     )
     daily_parser.add_argument(
+        "--mineru-api-base-url",
+        default=None,
+        help="MinerU API Base URL（默认 https://mineru.net/api/v4，也可通过 MINERU_API_BASE_URL 设置）",
+    )
+    daily_parser.add_argument(
+        "--mineru-model-version",
+        default=None,
+        help="MinerU model_version（默认 vlm，也可通过 MINERU_MODEL_VERSION 设置）",
+    )
+    daily_parser.add_argument(
+        "--mineru-max-wait-seconds",
+        type=float,
+        default=None,
+        help="MinerU 任务轮询最长等待秒数（默认 180，也可通过 MINERU_MAX_WAIT_SECONDS 设置）",
+    )
+    daily_parser.add_argument(
         "--figures-max-items",
         type=int,
         default=5,
@@ -398,10 +414,25 @@ def _run_daily_paper(parsed: argparse.Namespace) -> int:
     if figures_enabled:
         mineru_key = parsed.mineru_api_key or os.getenv("MINERU_API_KEY", "")
         if mineru_key:
+            mineru_base_url = parsed.mineru_api_base_url or os.getenv("MINERU_API_BASE_URL", "")
+            mineru_model_version = parsed.mineru_model_version or os.getenv(
+                "MINERU_MODEL_VERSION", "vlm"
+            )
+            try:
+                mineru_max_wait_seconds = (
+                    float(parsed.mineru_max_wait_seconds)
+                    if parsed.mineru_max_wait_seconds is not None
+                    else float(os.getenv("MINERU_MAX_WAIT_SECONDS", "180"))
+                )
+            except (TypeError, ValueError):
+                mineru_max_wait_seconds = 180.0
             report = extract_figures_for_report(
                 report,
                 api_key=mineru_key,
                 max_items=max(1, int(parsed.figures_max_items)),
+                base_url=mineru_base_url,
+                model_version=mineru_model_version,
+                max_wait_seconds=max(5.0, mineru_max_wait_seconds),
             )
         else:
             print("warning: --with-figures requires --mineru-api-key or MINERU_API_KEY env var",
