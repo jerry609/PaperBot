@@ -75,6 +75,24 @@ class TestReproExperienceStore:
         rows = store.get_by_paper_id("p_limit", limit=3)
         assert len(rows) == 3
 
+    def test_deduplicates_same_paper_type_and_content(self):
+        store = _make_store()
+        first = store.add(
+            pattern_type="success_pattern",
+            content="Successfully generated model.py",
+            paper_id="p_dup",
+        )
+        second = store.add(
+            pattern_type="success_pattern",
+            content="Successfully generated model.py",
+            paper_id="p_dup",
+            pack_id="ctxp_new",
+        )
+        rows = store.get_by_paper_id("p_dup")
+        assert len(rows) == 1
+        assert first.id == second.id
+        assert rows[0]["pack_id"] == "ctxp_new"
+
 
 # ---------------------------------------------------------------------------
 # CodeMemory persistence methods
