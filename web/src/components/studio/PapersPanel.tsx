@@ -17,6 +17,7 @@ import {
     AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { cn } from "@/lib/utils"
+import { deleteProjectFiles } from "@/lib/runbook/deleteProjectFiles"
 import {
     Plus,
     Search,
@@ -117,11 +118,7 @@ export function PapersPanel() {
             // Delete generated files if outputDir exists
             if (paperToDelete.outputDir) {
                 try {
-                    await fetch('/api/runbook/delete', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ project_dir: paperToDelete.outputDir }),
-                    })
+                    await deleteProjectFiles(paperToDelete.outputDir)
                 } catch (e) {
                     console.error('Failed to delete project files:', e)
                 }

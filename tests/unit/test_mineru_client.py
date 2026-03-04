@@ -1,4 +1,9 @@
 """Tests for MinerU Cloud API client."""
+import io
+import zipfile
+
+import pytest
+
 from paperbot.infrastructure.extractors.mineru_client import Figure, MineruClient
 
 
@@ -11,6 +16,36 @@ def test_no_api_key_returns_empty():
 def test_empty_url_returns_empty():
     client = MineruClient(api_key="test-key")
     result = client.extract_figures("")
+    assert result == []
+
+
+def test_validate_source_url_requires_http():
+    client = MineruClient(api_key="test-key")
+    with pytest.raises(ValueError) as exc:
+        client._validate_source_url("file:///tmp/a.pdf")
+    assert "http(s)" in str(exc.value)
+
+
+def test_validate_source_url_rejects_github_and_aws():
+    client = MineruClient(api_key="test-key")
+    for url in (
+        "https://github.com/a/b/raw/main/paper.pdf",
+        "https://raw.githubusercontent.com/a/b/main/paper.pdf",
+        "https://bucket.s3.amazonaws.com/paper.pdf",
+    ):
+        with pytest.raises(ValueError) as exc:
+            client._validate_source_url(url)
+        assert "github/aws" in str(exc.value)
+
+
+def test_extract_figures_rejects_unsupported_host_early(monkeypatch):
+    client = MineruClient(api_key="test-key")
+
+    def _should_not_call(*args, **kwargs):
+        raise AssertionError("network call should not be reached for unsupported URL")
+
+    monkeypatch.setattr(client, "_create_task", _should_not_call)
+    result = client.extract_figures("https://github.com/a/b/raw/main/paper.pdf")
     assert result == []
 
 
@@ -67,10 +102,53 @@ def test_parse_figures_from_images_key():
     assert figures[0].page == 2
 
 
+def test_parse_figures_from_markdown_zip_refs():
+    client = MineruClient(api_key="test-key")
+    markdown = """
+![](images/fig1.jpg)
+Figure 1: System overview
+
+![](https://cdn.mineru.net/fig2.png)
+Fig. 2: Attention map
+""".strip()
+    zip_url = "https://cdn-mineru.example.com/result.zip"
+
+    figures = client._parse_figures_from_markdown(markdown, zip_url=zip_url)
+
+    assert len(figures) == 2
+    assert figures[0].url == f"{zip_url}#/images/fig1.jpg"
+    assert figures[0].caption == "Figure 1: System overview"
+    assert figures[1].url == "https://cdn.mineru.net/fig2.png"
+    assert figures[1].caption == "Fig. 2: Attention map"
+
+
+def test_parse_figures_from_markdown_with_inline_zip_image():
+    client = MineruClient(api_key="test-key")
+    markdown = "![](images/fig1.jpg)\nFigure 1: System overview\n"
+    zip_url = "https://cdn-mineru.example.com/result.zip"
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("images/fig1.jpg", b"fake-jpeg-bytes")
+
+    with zipfile.ZipFile(io.BytesIO(buf.getvalue()), "r") as zf:
+        figures = client._parse_figures_from_markdown(markdown, zip_url=zip_url, zip_file=zf)
+
+    assert len(figures) == 1
+    assert figures[0].url == f"{zip_url}#/images/fig1.jpg"
+    assert figures[0].inline_data_url.startswith("data:image/jpeg;base64,")
+
+
 def test_identify_main_figure_prefers_figure_1():
     figures = [
         Figure(url="fig2.png", caption="Figure 2: Results table", page=4, width=400, height=300),
-        Figure(url="fig1.png", caption="Figure 1: System architecture overview", page=1, width=600, height=400),
+        Figure(
+            url="fig1.png",
+            caption="Figure 1: System architecture overview",
+            page=1,
+            width=600,
+            height=400,
+        ),
         Figure(url="fig3.png", caption="Figure 3: Comparison chart", page=6, width=500, height=350),
     ]
     client = MineruClient(api_key="test")

@@ -10,10 +10,13 @@ Supports three modes like CodePilot:
 
 import asyncio
 import json
+import logging
 import os
 import shutil
 import subprocess
-from typing import List, Optional, Literal, AsyncGenerator
+import tempfile
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Literal, AsyncGenerator
 
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
@@ -46,6 +49,7 @@ class StudioChatRequest(BaseModel):
     project_dir: Optional[str] = None
     history: List[ChatMessage] = []
     session_id: Optional[str] = None
+    context_pack_id: Optional[str] = None
 
 
 def find_claude_cli() -> Optional[str]:
@@ -123,8 +127,316 @@ def build_prompt_with_context(message: str, paper: Optional[PaperContext], mode:
     return "\n".join(parts)
 
 
+log = logging.getLogger(__name__)
+
+
+def _load_runtime_allowed_dirs() -> List[Path]:
+    f = Path("data/runbook_allowed_dirs.json")
+    if not f.exists():
+        return []
+    try:
+        data = json.loads(f.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, ValueError):
+        return []
+    if not isinstance(data, list):
+        return []
+    dirs: List[Path] = []
+    for item in data:
+        if isinstance(item, str) and item.strip():
+            try:
+                dirs.append(Path(item).resolve())
+            except Exception:
+                continue
+    return dirs
+
+
+def _allowed_workdir_prefixes() -> List[Path]:
+    prefixes: List[Path] = [Path(tempfile.gettempdir()).resolve()]
+    try:
+        prefixes.append(Path.cwd().resolve())
+    except Exception:
+        pass
+
+    extra = os.getenv("PAPERBOT_RUNBOOK_ALLOW_DIR_PREFIXES", "").strip()
+    if extra:
+        for p in extra.split(","):
+            p = p.strip()
+            if p:
+                try:
+                    prefixes.append(Path(p).expanduser().resolve())
+                except Exception:
+                    continue
+
+    prefixes.extend(_load_runtime_allowed_dirs())
+
+    unique: List[Path] = []
+    seen: set[str] = set()
+    for p in prefixes:
+        key = str(p)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(p)
+    return unique
+
+
+def _is_under_prefix(path: Path, prefix: Path) -> bool:
+    path_real = os.path.realpath(str(path))
+    prefix_real = os.path.realpath(str(prefix))
+    return path_real == prefix_real or path_real.startswith(prefix_real + os.sep)
+
+
+def _resolve_cli_project_dir(raw: Optional[str]) -> Path:
+    """Resolve and validate project_dir used by studio CLI execution."""
+    if not raw:
+        return Path.cwd().resolve()
+
+    cleaned = raw.strip()
+    if not cleaned or "\x00" in cleaned:
+        raise ValueError("invalid project_dir")
+
+    if cleaned == "~":
+        normalized = str(Path.home())
+    elif cleaned.startswith("~/"):
+        normalized = str(Path.home() / cleaned[2:])
+    else:
+        normalized = cleaned
+
+    # Normalize to real path and reconstruct from an allowed prefix.
+    # This avoids resolving an arbitrary user-controlled path directly.
+    if not os.path.isabs(normalized):
+        normalized = str((Path.cwd() / normalized).resolve(strict=False))
+    normalized_real = os.path.realpath(normalized)
+
+    resolved: Optional[Path] = None
+    for prefix in _allowed_workdir_prefixes():
+        prefix_real = os.path.realpath(str(prefix))
+        if normalized_real == prefix_real:
+            resolved = prefix
+            break
+        if normalized_real.startswith(prefix_real + os.sep):
+            suffix = normalized_real[len(prefix_real):].lstrip("/\\")
+            candidate = (prefix / suffix).resolve(strict=False) if suffix else prefix
+            if _is_under_prefix(candidate, prefix):
+                resolved = candidate
+                break
+            raise ValueError("project_dir is not allowed")
+
+    if resolved is None:
+        raise ValueError("project_dir is not allowed")
+
+    if not resolved.exists() or not resolved.is_dir():
+        raise ValueError("project_dir must be an existing directory")
+    return resolved
+
+
+def _load_context_pack(pack_id: str) -> Optional[Dict[str, Any]]:
+    """Load a context pack from the database by ID."""
+    try:
+        from ...infrastructure.stores.repro_context_store import SqlAlchemyReproContextStore
+
+        store = SqlAlchemyReproContextStore()
+        return store.get(pack_id)
+    except Exception as exc:
+        log.warning("Failed to load context pack %s: %s", pack_id, exc)
+        return None
+
+
+def _format_context_pack_markdown(pack: Dict[str, Any]) -> str:
+    """Format a context pack as a Markdown document for Claude CLI to read."""
+    lines: list[str] = []
+
+    lines.append("# Reproduction Context Pack")
+    lines.append("")
+
+    # Paper metadata
+    paper = pack.get("paper", {})
+    if paper:
+        lines.append("## Paper")
+        if paper.get("title"):
+            lines.append(f"**Title:** {paper['title']}")
+        if paper.get("authors"):
+            authors = paper["authors"]
+            if isinstance(authors, list):
+                lines.append(f"**Authors:** {', '.join(authors)}")
+            else:
+                lines.append(f"**Authors:** {authors}")
+        if paper.get("year"):
+            lines.append(f"**Year:** {paper['year']}")
+        if paper.get("arxiv_id"):
+            lines.append(f"**arXiv:** {paper['arxiv_id']}")
+        if paper.get("doi"):
+            lines.append(f"**DOI:** {paper['doi']}")
+        lines.append("")
+
+    # Objective
+    if pack.get("objective"):
+        lines.append("## Objective")
+        lines.append(pack["objective"])
+        lines.append("")
+
+    # Task roadmap
+    roadmap = pack.get("task_roadmap", [])
+    if roadmap:
+        lines.append("## Task Roadmap")
+        lines.append("")
+        for i, step in enumerate(roadmap, 1):
+            title = step.get("title", f"Step {i}")
+            lines.append(f"### Step {i}: {title}")
+            if step.get("description"):
+                lines.append(step["description"])
+            if step.get("acceptance_criteria"):
+                lines.append("")
+                lines.append("**Acceptance criteria:**")
+                criteria = step["acceptance_criteria"]
+                if isinstance(criteria, list):
+                    for c in criteria:
+                        lines.append(f"- {c}")
+                else:
+                    lines.append(f"- {criteria}")
+            lines.append("")
+
+    # Observations
+    observations = pack.get("observations", [])
+    if observations:
+        lines.append("## Observations")
+        lines.append("")
+        for obs in observations:
+            obs_type = obs.get("type", "note")
+            title = obs.get("title", "Untitled")
+            confidence = obs.get("confidence", 0)
+            lines.append(f"### [{obs_type.upper()}] {title} (confidence: {confidence:.0%})")
+            if obs.get("content"):
+                lines.append(obs["content"])
+            elif obs.get("description"):
+                lines.append(obs["description"])
+            if obs.get("code_snippet"):
+                lines.append("")
+                lang = obs.get("language", "")
+                lines.append(f"```{lang}")
+                lines.append(obs["code_snippet"])
+                lines.append("```")
+            lines.append("")
+
+    # Warnings
+    warnings = pack.get("warnings", [])
+    if warnings:
+        lines.append("## Warnings")
+        for w in warnings:
+            lines.append(f"- {w}")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+def _ensure_context_pack_on_disk(pack_id: str, project_dir: str) -> Optional[str]:
+    """Load context pack from DB and write CONTEXT.md into project_dir.
+
+    Returns the file path on success, None on failure.
+    """
+    pack = _load_context_pack(pack_id)
+    if pack is None:
+        return None
+
+    md = _format_context_pack_markdown(pack)
+    target = Path(project_dir) / "CONTEXT.md"
+    try:
+        target.write_text(md, encoding="utf-8")
+        return str(target)
+    except OSError as exc:
+        log.warning("Failed to write CONTEXT.md to %s: %s", project_dir, exc)
+        return None
+
+
+def _parse_cli_content_blocks(content_blocks: list) -> list[StreamEvent]:
+    """Convert Claude CLI assistant content blocks into StreamEvents."""
+    events: list[StreamEvent] = []
+    for block in content_blocks:
+        btype = block.get("type", "")
+
+        if btype == "text":
+            text = block.get("text", "")
+            if text:
+                events.append(StreamEvent(
+                    type="progress",
+                    data={"cli_event": "text", "text": text},
+                ))
+
+        elif btype == "tool_use":
+            events.append(StreamEvent(
+                type="progress",
+                data={
+                    "cli_event": "tool_use",
+                    "tool_name": block.get("name", "unknown"),
+                    "tool_input": block.get("input", {}),
+                    "tool_id": block.get("id", ""),
+                },
+            ))
+
+        elif btype == "thinking":
+            thinking = block.get("thinking", "")
+            if thinking:
+                events.append(StreamEvent(
+                    type="progress",
+                    data={"cli_event": "thinking", "text": thinking},
+                ))
+
+    return events
+
+
+def _parse_cli_event(line_data: Dict[str, Any]) -> list[StreamEvent]:
+    """Parse a single NDJSON line from `claude -p --output-format stream-json`.
+
+    Claude CLI stream-json emits one JSON object per line:
+    - {"type":"assistant","message":{...}} — assistant turn with content blocks
+    - {"type":"tool_result","tool_name":"...","content":"..."} — tool output
+    - {"type":"result","subtype":"success","result":"...","cost_usd":...} — final
+    - {"type":"system",...} — session init (ignored)
+    """
+    etype = line_data.get("type", "")
+    events: list[StreamEvent] = []
+
+    if etype == "assistant":
+        msg = line_data.get("message", {})
+        content_blocks = msg.get("content", [])
+        events.extend(_parse_cli_content_blocks(content_blocks))
+
+    elif etype == "tool_result":
+        events.append(StreamEvent(
+            type="progress",
+            data={
+                "cli_event": "tool_result",
+                "tool_name": line_data.get("tool_name", ""),
+                "content": _truncate(str(line_data.get("content", "")), 2000),
+            },
+        ))
+
+    elif etype == "result":
+        events.append(StreamEvent(
+            type="result",
+            data={
+                "cli_event": "done",
+                "result": line_data.get("result", ""),
+                "cost_usd": line_data.get("cost_usd"),
+                "duration_ms": line_data.get("duration_ms"),
+                "num_turns": line_data.get("num_turns"),
+            },
+        ))
+
+    # Ignore "system" and other meta events
+    return events
+
+
+def _truncate(s: str, max_len: int) -> str:
+    return s if len(s) <= max_len else s[:max_len] + "..."
+
+
 async def stream_claude_cli(request: StudioChatRequest) -> AsyncGenerator[StreamEvent, None]:
-    """Stream Claude CLI output as SSE events."""
+    """Stream Claude CLI output as structured SSE events.
+
+    Uses ``--output-format stream-json`` so we get real-time NDJSON events
+    (text, tool_use, tool_result) instead of buffered plain text.
+    """
 
     claude_path = find_claude_cli()
 
@@ -135,24 +447,18 @@ async def stream_claude_cli(request: StudioChatRequest) -> AsyncGenerator[Stream
         )
         return
 
-    # Build command
+    # Build command — use stream-json for structured real-time output
     cmd = [claude_path]
 
-    # Add model flag (use CLI alias)
     model_id = get_model_id(request.model, for_cli=True)
     cmd.extend(["--model", model_id])
 
-    # Add mode flag
     mode_flag = get_mode_flag(request.mode)
     if mode_flag:
         cmd.append(mode_flag)
 
-    # Build prompt with context
     prompt = build_prompt_with_context(request.message, request.paper, request.mode)
-
-    # Add the prompt with proper flags
-    # Note: --print requires --verbose for stream-json, so we use regular output
-    cmd.extend(["--print", prompt])
+    cmd.extend(["-p", prompt, "--output-format", "stream-json", "--verbose"])
 
     yield StreamEvent(
         type="progress",
@@ -164,71 +470,94 @@ async def stream_claude_cli(request: StudioChatRequest) -> AsyncGenerator[Stream
     )
 
     try:
-        # Set working directory
-        cwd = request.project_dir or os.getcwd()
-        if not os.path.isdir(cwd):
-            cwd = os.getcwd()
+        try:
+            cwd = str(_resolve_cli_project_dir(request.project_dir))
+        except ValueError as exc:
+            yield StreamEvent(type="error", message=str(exc))
+            return
 
-        # Spawn Claude CLI process
+        # Write context pack to working directory so Claude CLI can read it
+        if request.context_pack_id:
+            pack_path = await asyncio.to_thread(
+                _ensure_context_pack_on_disk, request.context_pack_id, cwd,
+            )
+            if pack_path:
+                log.info("Wrote context pack to %s", pack_path)
+
         process = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=cwd,
-            env={**os.environ, "FORCE_COLOR": "0"},  # Disable ANSI colors
+            env={**os.environ, "FORCE_COLOR": "0"},
         )
+        stderr_chunks: list[str] = []
 
-        full_content = ""
-
-        # Stream stdout - read chunks for real-time streaming
-        async def read_stream():
-            nonlocal full_content
+        async def _drain_stderr() -> None:
+            if process.stderr is None:
+                return
             while True:
-                # Read in chunks for smoother streaming
-                chunk = await process.stdout.read(100)
+                chunk = await process.stderr.read(4096)
                 if not chunk:
-                    break
+                    return
+                stderr_chunks.append(chunk.decode("utf-8", errors="replace"))
 
-                text = chunk.decode("utf-8", errors="replace")
+        stderr_task = asyncio.create_task(_drain_stderr())
 
-                # Skip ANSI escape codes
-                import re
-                text = re.sub(r'\x1B\[[0-9;]*[a-zA-Z]', '', text)
+        _KEEPALIVE_SECONDS = 15
+        line_buffer = ""
 
-                if text:
-                    full_content += text
-                    yield StreamEvent(
-                        type="progress",
-                        data={
-                            "delta": text,
-                            "content": full_content,
-                            "mode": request.mode,
-                        }
-                    )
+        # Read stdout line-by-line (NDJSON) with keepalive heartbeats.
+        while True:
+            try:
+                chunk = await asyncio.wait_for(
+                    process.stdout.read(4096),
+                    timeout=_KEEPALIVE_SECONDS,
+                )
+            except asyncio.TimeoutError:
+                yield StreamEvent(
+                    type="progress",
+                    data={"keepalive": True, "mode": request.mode},
+                )
+                continue
 
-        async for event in read_stream():
-            yield event
+            if not chunk:
+                break
 
-        # Wait for process to complete
+            line_buffer += chunk.decode("utf-8", errors="replace")
+
+            # Process complete lines (each is a JSON object)
+            while "\n" in line_buffer:
+                line, line_buffer = line_buffer.split("\n", 1)
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    data = json.loads(line)
+                except json.JSONDecodeError:
+                    log.debug("Skipping non-JSON CLI line: %s", line[:120])
+                    continue
+
+                for event in _parse_cli_event(data):
+                    yield event
+
+        # Process any trailing data in buffer
+        if line_buffer.strip():
+            try:
+                data = json.loads(line_buffer.strip())
+                for event in _parse_cli_event(data):
+                    yield event
+            except json.JSONDecodeError:
+                pass
+
         await process.wait()
+        await stderr_task
 
-        # Check for errors
         if process.returncode != 0:
-            stderr = await process.stderr.read()
-            error_msg = stderr.decode("utf-8", errors="replace").strip()
+            error_msg = "".join(stderr_chunks).strip()
             if error_msg:
                 yield StreamEvent(type="error", message=error_msg)
                 return
-
-        # Emit final result
-        yield StreamEvent(
-            type="result",
-            data={
-                "content": full_content,
-                "mode": request.mode,
-                "model": request.model,
-            }
-        )
 
     except FileNotFoundError:
         yield StreamEvent(

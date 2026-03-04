@@ -16,11 +16,23 @@ from paperbot.infrastructure.stores.paper_store import SqlAlchemyPaperStore
 SUPPORTED_LLM_FEATURES = ("summary", "trends", "insight", "relevance", "digest_card")
 
 
+def _is_publishable_figure_url(url: str) -> bool:
+    u = (url or "").strip().lower()
+    if not u.startswith(("http://", "https://")):
+        return False
+    if u.endswith(".zip") or ".zip#" in u or ".zip?" in u:
+        return False
+    return True
+
+
 def extract_figures_for_report(
     report: Dict[str, Any],
     *,
     api_key: str = "",
     max_items: int = 5,
+    base_url: str = "",
+    model_version: str = "vlm",
+    max_wait_seconds: float = 180.0,
 ) -> Dict[str, Any]:
     """Optionally extract figures from top papers using MinerU Cloud API.
 
@@ -32,7 +44,14 @@ def extract_figures_for_report(
 
     from paperbot.infrastructure.extractors.mineru_client import MineruClient
 
-    client = MineruClient(api_key=api_key)
+    client_kwargs: Dict[str, Any] = {
+        "api_key": api_key,
+        "model_version": model_version,
+        "max_wait_seconds": max_wait_seconds,
+    }
+    if (base_url or "").strip():
+        client_kwargs["base_url"] = base_url.strip()
+    client = MineruClient(**client_kwargs)
     enriched = copy.deepcopy(report)
     count = 0
 
@@ -50,7 +69,13 @@ def extract_figures_for_report(
                     {"url": f.url, "caption": f.caption, "page": f.page} for f in figures[:5]
                 ]
                 if main:
-                    item["main_figure"] = {"url": main.url, "caption": main.caption}
+                    if _is_publishable_figure_url(main.url):
+                        item["main_figure"] = {"url": main.url, "caption": main.caption}
+                    elif (main.inline_data_url or "").startswith("data:image/"):
+                        item["main_figure"] = {
+                            "caption": main.caption,
+                            "inline_data_url": main.inline_data_url,
+                        }
             count += 1
 
     return enriched

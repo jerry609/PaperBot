@@ -12,6 +12,7 @@ import { DiffModal } from "./DiffViewer"
 import { WorkspaceSetupDialog } from "./WorkspaceSetupDialog"
 import { ContextPackPanel } from "./ContextPackPanel"
 import { GenerationProgressPanel } from "./GenerationProgressPanel"
+import { useContextPackGeneration } from "@/hooks/useContextPackGeneration"
 import { cn } from "@/lib/utils"
 import {
     CheckCircle2,
@@ -32,6 +33,7 @@ import {
     Activity,
     Package,
     MessageSquare,
+    Play,
 } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import Editor from "@monaco-editor/react"
@@ -174,12 +176,14 @@ export function ReproductionLog() {
         liveObservations,
         addTask,
         addAction,
+        appendToLastAction,
         updateTaskStatus,
         setLastGenCodeResult,
         updatePaper,
         selectPaper,
     } = useStudioStore()
 
+    const { generate: generateContextPack, status: genStatus } = useContextPackGeneration()
     const { files, activeFile, updateFile, setActiveFile } = useProjectContext()
     const activeFileData = activeFile ? files[activeFile] : null
 
@@ -293,6 +297,7 @@ export function ReproductionLog() {
                         method_section: selectedPaper.methodSection,
                     } : undefined,
                     project_dir: targetDir,
+                    context_pack_id: contextPack?.context_pack_id,
                 }),
             })
 
@@ -302,17 +307,73 @@ export function ReproductionLog() {
 
             updateTaskStatus(taskId, "running")
 
+            // Track whether the last action is a text block so we can
+            // append to it (producing one continuous bubble) instead of
+            // creating a new action per chunk.
+            let lastActionIsText = false
+
             for await (const evt of readSSE(res.body)) {
                 if (evt?.type === "progress") {
-                    const data = (evt.data ?? {}) as { delta?: string; content?: string; phase?: string; message?: string }
-                    if (data.delta) {
-                        // Streaming text update
-                        addAction(taskId, { type: "text", content: data.delta })
+                    const data = (evt.data ?? {}) as Record<string, unknown>
+                    const cliEvent = data.cli_event as string | undefined
+
+                    if (cliEvent === "text") {
+                        // Streaming text — append to current text bubble
+                        const text = (data.text as string) || ""
+                        if (text) {
+                            if (lastActionIsText) {
+                                appendToLastAction(taskId, text)
+                            } else {
+                                addAction(taskId, { type: "text", content: text })
+                                lastActionIsText = true
+                            }
+                        }
+                    } else if (cliEvent === "tool_use") {
+                        lastActionIsText = false
+                        addAction(taskId, {
+                            type: "function_call",
+                            content: `${data.tool_name}()`,
+                            metadata: {
+                                functionName: data.tool_name as string,
+                                params: data.tool_input as Record<string, unknown>,
+                            },
+                        })
+                    } else if (cliEvent === "tool_result") {
+                        // Attach result to the most recent function_call action
+                        lastActionIsText = false
+                        addAction(taskId, {
+                            type: "function_call",
+                            content: `${data.tool_name}() result`,
+                            metadata: {
+                                functionName: data.tool_name as string,
+                                result: data.content as string,
+                            },
+                        })
+                    } else if (cliEvent === "thinking") {
+                        lastActionIsText = false
+                        addAction(taskId, { type: "thinking", content: (data.text as string) || "Thinking..." })
+                    } else if (data.keepalive) {
+                        // Keepalive heartbeat — ignore
                     } else if (data.message) {
-                        addAction(taskId, { type: "thinking", content: data.message })
+                        // Legacy status messages (e.g. "Connecting to Claude CLI...")
+                        lastActionIsText = false
+                        addAction(taskId, { type: "thinking", content: data.message as string })
+                    } else if (data.delta) {
+                        // Fallback: legacy plain-text streaming (API fallback path)
+                        const text = data.delta as string
+                        if (lastActionIsText) {
+                            appendToLastAction(taskId, text)
+                        } else {
+                            addAction(taskId, { type: "text", content: text })
+                            lastActionIsText = true
+                        }
                     }
                 } else if (evt?.type === "result") {
-                    addAction(taskId, { type: "complete", content: "Response complete" })
+                    const data = (evt.data ?? {}) as Record<string, unknown>
+                    const summary = data.num_turns
+                        ? `Completed in ${data.num_turns} turns`
+                        : "Completed"
+                    addAction(taskId, { type: "complete", content: summary })
                     updateTaskStatus(taskId, "completed")
                     setStatus("success")
                 } else if (evt?.type === "error") {
@@ -378,11 +439,37 @@ export function ReproductionLog() {
             {/* Main content area */}
             <div className="flex-1 min-h-0 overflow-hidden">
                 {viewMode === "generating" ? (
-                    <GenerationProgressPanel
-                        stages={generationProgress}
-                        liveObservations={liveObservations}
-                        error={contextPackError}
-                    />
+                    generationProgress.length === 0 && !contextPackLoading ? (
+                        /* Idle state — show generate button */
+                        <div className="flex flex-col items-center justify-center text-muted-foreground py-20 space-y-4">
+                            <Activity className="h-8 w-8 opacity-30" />
+                            <p className="text-sm">No generation in progress</p>
+                            {selectedPaper && (
+                                <Button
+                                    size="sm"
+                                    onClick={() => generateContextPack({
+                                        paperId: selectedPaper.id,
+                                        title: selectedPaper.title,
+                                        abstract: selectedPaper.abstract,
+                                    })}
+                                    disabled={genStatus === "generating"}
+                                >
+                                    {genStatus === "generating" ? (
+                                        <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+                                    ) : (
+                                        <Play className="h-4 w-4 mr-1.5" />
+                                    )}
+                                    Generate Context Pack
+                                </Button>
+                            )}
+                        </div>
+                    ) : (
+                        <GenerationProgressPanel
+                            stages={generationProgress}
+                            liveObservations={liveObservations}
+                            error={contextPackError}
+                        />
+                    )
                 ) : viewMode === "context_pack" ? (
                     contextPack ? (
                         <ContextPackPanel pack={contextPack} onSessionCreated={handleSessionCreated} />
@@ -390,6 +477,7 @@ export function ReproductionLog() {
                         <div className="flex flex-col items-center justify-center text-muted-foreground py-20 space-y-4">
                             <Package className="h-8 w-8 opacity-30" />
                             <p className="text-sm">No context pack available yet</p>
+                            <p className="text-xs">Please start in the &ldquo;Progress&rdquo; section.</p>
                         </div>
                     )
                 ) : activeFileData ? (

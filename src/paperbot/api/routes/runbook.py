@@ -155,13 +155,15 @@ def _normalize_user_directory(raw_path: str, field_name: str) -> Path:
 
     if not os.path.isabs(normalized):
         normalized = str((Path.cwd() / normalized).resolve(strict=False))
+    normalized_real = os.path.realpath(normalized)
 
     for prefix in _allowed_workdir_prefixes():
         prefix_str = str(prefix)
-        if normalized == prefix_str:
+        prefix_real = os.path.realpath(prefix_str)
+        if normalized_real == prefix_real:
             return prefix
-        if normalized.startswith(prefix_str + os.sep):
-            suffix = normalized[len(prefix_str):].lstrip("/\\")
+        if normalized_real.startswith(prefix_real + os.sep):
+            suffix = normalized_real[len(prefix_real):].lstrip("/\\")
             candidate = (prefix / suffix).resolve(strict=False) if suffix else prefix
             if _is_under_prefix(candidate, prefix):
                 return candidate
@@ -231,15 +233,26 @@ async def add_allowed_dir(body: AddAllowedDirRequest):
             detail="runtime allowlist mutation is disabled"
         )
 
-    try:
-        resolved = _normalize_user_directory(body.directory, field_name="directory")
-    except HTTPException:
-        raise
+    raw = body.directory.strip()
+    if not raw or "\x00" in raw:
+        raise HTTPException(status_code=400, detail="invalid directory path")
 
-    if str(resolved) in _DENIED_PATHS:
+    # Normalize and validate against configured safe prefixes before touching FS.
+    # This prevents path-injection style access to arbitrary locations.
+    resolved = _normalize_user_directory(raw, field_name="directory")
+
+    denied_roots = {Path(denied).resolve() for denied in _DENIED_PATHS}
+    if resolved in denied_roots:
         raise HTTPException(
             status_code=403,
-            detail=f"adding '{resolved}' is not allowed — path is too broad or sensitive"
+            detail=f"adding '{resolved}' is not allowed — path is too broad or sensitive",
+        )
+
+    # Deny home directory itself — too broad
+    if resolved == Path.home().resolve():
+        raise HTTPException(
+            status_code=403,
+            detail="adding home directory is not allowed — too broad",
         )
 
     if not resolved.exists() or not resolved.is_dir():

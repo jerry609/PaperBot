@@ -1,5 +1,6 @@
 from paperbot.application.workflows.dailypaper import (
     DailyPaperReporter,
+    _is_publishable_figure_url,
     apply_judge_scores_to_report,
     build_daily_paper_report,
     enrich_daily_paper_report,
@@ -7,6 +8,7 @@ from paperbot.application.workflows.dailypaper import (
     normalize_output_formats,
     render_daily_paper_markdown,
 )
+from paperbot.infrastructure.extractors.mineru_client import Figure
 
 
 class _FakeLLMService:
@@ -103,6 +105,50 @@ def test_normalize_output_formats_supports_both_alias():
 
 def test_normalize_llm_features_filters_unknown_items():
     assert normalize_llm_features(["summary", "foo", "trends", "summary"]) == ["summary", "trends"]
+
+
+def test_publishable_figure_url_rejects_zip_artifacts():
+    assert _is_publishable_figure_url("https://cdn.example.com/fig1.png")
+    assert not _is_publishable_figure_url("https://cdn.example.com/result.zip")
+    assert not _is_publishable_figure_url("https://cdn.example.com/result.zip#/images/fig1.jpg")
+
+
+def test_extract_figures_for_report_keeps_inline_main_figure(monkeypatch):
+    import paperbot.application.workflows.dailypaper as daily_mod
+    import paperbot.infrastructure.extractors.mineru_client as mineru_mod
+
+    class _FakeMineruClient:
+        def __init__(self, **kwargs):
+            pass
+
+        def extract_figures(self, pdf_url: str):
+            return [
+                Figure(
+                    url="https://cdn.example.com/result.zip#/images/fig1.jpg",
+                    caption="Figure 1: Demo",
+                    inline_data_url="data:image/jpeg;base64,ZmFrZS1kYXRh",
+                )
+            ]
+
+        def identify_main_figure(self, figures):
+            return figures[0] if figures else None
+
+    monkeypatch.setattr(mineru_mod, "MineruClient", _FakeMineruClient)
+
+    report = {
+        "queries": [
+            {
+                "top_items": [
+                    {"title": "Paper A", "pdf_url": "https://arxiv.org/pdf/2401.00001.pdf"},
+                ]
+            }
+        ]
+    }
+    result = daily_mod.extract_figures_for_report(report, api_key="test-key", max_items=1)
+    item = result["queries"][0]["top_items"][0]
+    assert "main_figure" in item
+    assert "url" not in item["main_figure"]
+    assert item["main_figure"]["inline_data_url"].startswith("data:image/")
 
 
 def test_apply_judge_scores_to_report(monkeypatch):
