@@ -1,8 +1,16 @@
 """MinerU Cloud API client for PDF figure extraction.
 
-Uses the MinerU Cloud API (HTTP) to extract figures from PDFs.
-Falls back gracefully when the service is unavailable.
+This client uses MinerU v4 async task API:
+- POST /extract/task
+- GET /extract/task/{task_id}
+
+API constraints (as documented by MinerU Cloud):
+- Remote file URL only (no direct upload)
+- File size <= 200MB
+- Page count <= 600 pages
+- Some overseas hosts (e.g. github/aws) may timeout from MinerU side
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -15,6 +23,7 @@ import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse
 
 import httpx
 
@@ -22,9 +31,15 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_BASE_URL = "https://mineru.net/api/v4"
 _DEFAULT_TIMEOUT = 60.0
-_DEFAULT_MODEL_VERSION = "pipeline"
+_DEFAULT_MODEL_VERSION = "vlm"
 _DEFAULT_POLL_INTERVAL_SECONDS = 2.0
 _DEFAULT_MAX_WAIT_SECONDS = 180.0
+
+_UNSUPPORTED_HOST_HINTS = (
+    "github.com",
+    "githubusercontent.com",
+    "amazonaws.com",
+)
 
 
 @dataclass
@@ -44,10 +59,7 @@ class Figure:
 
 
 class MineruClient:
-    """Client for MinerU Cloud API figure extraction.
-
-    Falls back gracefully when API is unavailable or API key is not set.
-    """
+    """Client for MinerU Cloud API figure extraction."""
 
     def __init__(
         self,
@@ -73,138 +85,149 @@ class MineruClient:
     def extract_figures(self, pdf_url: str) -> List[Figure]:
         """Extract figures from a PDF URL via MinerU Cloud API.
 
-        Returns an empty list if extraction fails or API is unavailable.
+        Returns an empty list if extraction fails or API key is not set.
         """
         if not self._api_key:
             logger.debug("MinerU API key not set, skipping figure extraction")
             return []
 
-        if not pdf_url or not pdf_url.strip():
+        normalized_url = (pdf_url or "").strip()
+        if not normalized_url:
             return []
 
-        cached = self._load_cached_figures(pdf_url)
+        cached = self._load_cached_figures(normalized_url)
         if cached is not None:
             return cached
 
         try:
-            figures = self._call_extract(pdf_url)
-            self._store_cached_figures(pdf_url, figures)
+            figures = self._call_extract(normalized_url)
+            self._store_cached_figures(normalized_url, figures)
             return figures
         except Exception as exc:
             logger.warning("MinerU figure extraction failed: %s", exc)
             return []
 
     def _call_extract(self, pdf_url: str) -> List[Figure]:
-        """Call MinerU API and return parsed figures.
+        self._validate_source_url(pdf_url)
 
-        Try official async task flow first, then fall back to legacy `/extract`
-        for backward compatibility with self-hosted/older deployments.
-        """
-        try:
-            return self._call_extract_task_flow(pdf_url)
-        except Exception as task_exc:
-            logger.info("MinerU task flow failed, trying legacy endpoint: %s", task_exc)
-            try:
-                return self._call_extract_legacy(pdf_url)
-            except Exception:
-                raise task_exc
-
-    def _call_extract_task_flow(self, pdf_url: str) -> List[Figure]:
         headers = {
             "Authorization": f"Bearer {self._api_key}",
             "Content-Type": "application/json",
         }
 
         with httpx.Client(timeout=self._timeout) as client:
-            create_resp = client.post(
-                f"{self._base_url}/extract/task",
-                json={"url": pdf_url, "model_version": self._model_version},
+            task_id = self._create_task(client, headers=headers, pdf_url=pdf_url)
+            detail = self._poll_until_done(client, headers=headers, task_id=task_id)
+
+            # Some deployments may return figures directly in task payload.
+            parsed = self._parse_figures(detail)
+            if parsed:
+                return parsed
+
+            zip_url = str(detail.get("full_zip_url") or "").strip()
+            if not zip_url:
+                return []
+            return self._extract_figures_from_zip(client, zip_url)
+
+    def _validate_source_url(self, pdf_url: str) -> None:
+        parsed = urlparse(pdf_url)
+        if parsed.scheme not in ("http", "https") or not parsed.netloc:
+            raise ValueError("MinerU source URL must be an absolute http(s) URL")
+
+        host = (parsed.netloc or "").lower()
+        if any(host == hint or host.endswith(f".{hint}") for hint in _UNSUPPORTED_HOST_HINTS):
+            raise ValueError(
+                "MinerU Cloud may timeout on github/aws URLs; provide a publicly "
+                "accessible non-github/non-aws URL"
+            )
+
+    def _create_task(self, client: httpx.Client, *, headers: Dict[str, str], pdf_url: str) -> str:
+        payload = {"url": pdf_url, "model_version": self._model_version}
+        body = self._request_json(
+            client,
+            method="POST",
+            url=f"{self._base_url}/extract/task",
+            headers=headers,
+            json_payload=payload,
+        )
+        task_id = str((body.get("data") or {}).get("task_id") or "").strip()
+        if not task_id:
+            raise RuntimeError(f"invalid MinerU task response: {body}")
+        return task_id
+
+    def _poll_until_done(
+        self,
+        client: httpx.Client,
+        *,
+        headers: Dict[str, str],
+        task_id: str,
+    ) -> Dict[str, Any]:
+        deadline = time.time() + self._max_wait_seconds
+        while time.time() <= deadline:
+            body = self._request_json(
+                client,
+                method="GET",
+                url=f"{self._base_url}/extract/task/{task_id}",
                 headers=headers,
             )
-            create_resp.raise_for_status()
-            create_data = create_resp.json()
-            task_id = str((create_data.get("data") or {}).get("task_id") or "").strip()
-            if create_data.get("code") != 0 or not task_id:
-                raise RuntimeError(f"invalid MinerU task response: {create_data}")
+            detail = body.get("data") or {}
+            state = str(detail.get("state") or "").strip().lower()
 
-            deadline = time.time() + self._max_wait_seconds
-            detail: Dict[str, Any] = {}
+            if state == "done":
+                return detail
+            if state == "failed":
+                err_msg = str(detail.get("err_msg") or "task failed")
+                raise RuntimeError(err_msg)
 
-            while time.time() <= deadline:
-                status_resp = client.get(
-                    f"{self._base_url}/extract/task/{task_id}",
-                    headers=headers,
-                )
-                status_resp.raise_for_status()
-                status_data = status_resp.json()
-                detail = status_data.get("data") or {}
-                state = str(detail.get("state") or "").lower()
+            time.sleep(self._poll_interval_seconds)
 
-                if state == "done":
-                    # Some deployments may return figure arrays directly.
-                    parsed = self._parse_figures(detail) or self._parse_figures(status_data)
-                    if parsed:
-                        return parsed
+        raise TimeoutError(f"MinerU task timed out after {self._max_wait_seconds:.0f}s")
 
-                    # Official v4 commonly returns a downloadable ZIP artifact.
-                    zip_url = str(detail.get("full_zip_url") or "").strip()
-                    if zip_url:
-                        return self._extract_figures_from_zip(zip_url)
-                    return []
+    def _request_json(
+        self,
+        client: httpx.Client,
+        *,
+        method: str,
+        url: str,
+        headers: Dict[str, str],
+        json_payload: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        response = client.request(method, url, headers=headers, json=json_payload)
+        response.raise_for_status()
 
-                if state == "failed":
-                    err_msg = str(detail.get("err_msg") or "task failed")
-                    raise RuntimeError(err_msg)
+        body = response.json()
+        if not isinstance(body, dict):
+            raise RuntimeError("invalid MinerU response payload")
 
-                time.sleep(self._poll_interval_seconds)
+        code = body.get("code")
+        if code is not None and int(code) != 0:
+            msg = str(body.get("msg") or "unknown error")
+            raise RuntimeError(f"MinerU API error code={code}: {msg}")
 
-            raise TimeoutError(f"MinerU task timed out after {self._max_wait_seconds:.0f}s")
+        return body
 
-    def _call_extract_legacy(self, pdf_url: str) -> List[Figure]:
-        headers = {
-            "Authorization": f"Bearer {self._api_key}",
-            "Content-Type": "application/json",
-        }
-        payload = {"url": pdf_url, "extract_figures": True}
-
-        with httpx.Client(timeout=self._timeout) as client:
-            resp = client.post(
-                f"{self._base_url}/extract",
-                json=payload,
-                headers=headers,
-            )
-            resp.raise_for_status()
-            data = resp.json()
-
-        return self._parse_figures(data)
-
-    def _extract_figures_from_zip(self, zip_url: str) -> List[Figure]:
+    def _extract_figures_from_zip(self, client: httpx.Client, zip_url: str) -> List[Figure]:
         """Download MinerU result zip and parse figures from generated markdown."""
-        if not zip_url:
-            return []
+        response = client.get(zip_url)
+        response.raise_for_status()
 
-        with httpx.Client(timeout=self._timeout) as client:
-            resp = client.get(zip_url)
-            resp.raise_for_status()
-            zip_bytes = resp.content
-
-        md_text = ""
-        with zipfile.ZipFile(io.BytesIO(zip_bytes), "r") as zf:
+        with zipfile.ZipFile(io.BytesIO(response.content), "r") as zf:
             md_members = [name for name in zf.namelist() if name.lower().endswith(".md")]
             if not md_members:
                 return []
-            # Prefer the shortest markdown path, typically the top-level document.
-            target = sorted(md_members, key=len)[0]
-            md_text = zf.read(target).decode("utf-8", errors="ignore")
 
-        return self._parse_figures_from_markdown(md_text, zip_url=zip_url)
+            # Prefer the shortest markdown path, usually the top-level document markdown.
+            target_md = sorted(md_members, key=len)[0]
+            markdown_text = zf.read(target_md).decode("utf-8", errors="ignore")
+
+        return self._parse_figures_from_markdown(markdown_text, zip_url=zip_url)
 
     def _parse_figures_from_markdown(self, markdown_text: str, *, zip_url: str = "") -> List[Figure]:
-        """Parse figure references from markdown generated by MinerU.
+        """Parse figures from MinerU markdown output.
 
-        Format usually looks like:
-        ![](images/abc.jpg)
-        Figure 1: caption text
+        Typical pattern:
+            ![](images/xxx.jpg)
+            Figure 1: ...
         """
         if not markdown_text.strip():
             return []
@@ -212,42 +235,40 @@ class MineruClient:
         lines = markdown_text.splitlines()
         figures: List[Figure] = []
         image_pattern = re.compile(r"!\[[^\]]*\]\(([^)]+)\)")
-        caption_pattern = re.compile(r"^\s*(?:Figure|Fig\.?)[\s\d:.\-]+", re.IGNORECASE)
+        caption_pattern = re.compile(r"^\s*(?:Figure|Fig\.?)\s*\d+\s*[:.-]", re.IGNORECASE)
 
-        for i, line in enumerate(lines):
+        for idx, line in enumerate(lines):
             match = image_pattern.search(line)
             if not match:
                 continue
 
-            raw_ref = (match.group(1) or "").strip()
+            raw_ref = str(match.group(1) or "").strip()
             if not raw_ref:
                 continue
 
             caption = ""
-            for j in (i + 1, i + 2):
-                if j >= len(lines):
+            for offset in (1, 2, 3):
+                cursor = idx + offset
+                if cursor >= len(lines):
                     break
-                candidate = (lines[j] or "").strip()
-                if candidate and caption_pattern.match(candidate):
+                candidate = (lines[cursor] or "").strip()
+                if not candidate:
+                    continue
+                if caption_pattern.match(candidate):
                     caption = candidate
                     break
 
-            if raw_ref.startswith(("http://", "https://")):
-                figure_url = raw_ref
-            elif zip_url:
-                figure_url = f"{zip_url}#/{raw_ref}"
-            else:
-                figure_url = raw_ref
-
-            figures.append(
-                Figure(
-                    url=figure_url,
-                    caption=caption,
-                    index=len(figures),
-                )
-            )
+            figure_url = self._resolve_figure_url(raw_ref=raw_ref, zip_url=zip_url)
+            figures.append(Figure(url=figure_url, caption=caption, index=len(figures)))
 
         return figures
+
+    def _resolve_figure_url(self, *, raw_ref: str, zip_url: str) -> str:
+        if raw_ref.startswith(("http://", "https://")):
+            return raw_ref
+        if zip_url:
+            return f"{zip_url}#/{raw_ref}"
+        return raw_ref
 
     def _cache_path(self, pdf_url: str) -> Optional[Path]:
         if self._cache_dir is None:
@@ -259,13 +280,16 @@ class MineruClient:
         cache_path = self._cache_path(pdf_url)
         if cache_path is None or not cache_path.exists():
             return None
+
         try:
             raw = json.loads(cache_path.read_text(encoding="utf-8"))
             if not isinstance(raw, dict):
                 return None
+
             saved_at = float(raw.get("saved_at") or 0)
             if self._cache_ttl_seconds > 0 and (time.time() - saved_at) > self._cache_ttl_seconds:
                 return None
+
             rows = raw.get("figures") or []
             figures: List[Figure] = []
             for row in rows:
@@ -285,6 +309,7 @@ class MineruClient:
                 return figures
         except Exception:
             return None
+
         return None
 
     def _store_cached_figures(self, pdf_url: str, figures: List[Figure]) -> None:
@@ -352,13 +377,11 @@ class MineruClient:
         if not candidates:
             candidates = figures
 
-        # Score each candidate
         scored: List[tuple[float, Figure]] = []
         for fig in candidates:
             score = 0.0
             caption_lower = fig.caption.lower()
 
-            # Caption keyword bonus
             main_keywords = [
                 "overview",
                 "architecture",
@@ -374,15 +397,12 @@ class MineruClient:
                 if kw in caption_lower:
                     score += 10.0
 
-            # Figure 1 / Fig. 1 bonus
             if re.search(r"(?:figure|fig\.?)\s*1\b", caption_lower):
                 score += 15.0
 
-            # Early page bonus (pages 1-3)
             if 1 <= fig.page <= 3:
                 score += 5.0
 
-            # Larger figures get slight bonus
             if fig.area > 0:
                 score += min(fig.area / 100000, 5.0)
 

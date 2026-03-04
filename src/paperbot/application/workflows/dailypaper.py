@@ -30,6 +30,9 @@ def extract_figures_for_report(
     *,
     api_key: str = "",
     max_items: int = 5,
+    base_url: str = "",
+    model_version: str = "vlm",
+    max_wait_seconds: float = 180.0,
 ) -> Dict[str, Any]:
     """Optionally extract figures from top papers using MinerU Cloud API.
 
@@ -41,7 +44,14 @@ def extract_figures_for_report(
 
     from paperbot.infrastructure.extractors.mineru_client import MineruClient
 
-    client = MineruClient(api_key=api_key)
+    client_kwargs: Dict[str, Any] = {
+        "api_key": api_key,
+        "model_version": model_version,
+        "max_wait_seconds": max_wait_seconds,
+    }
+    if (base_url or "").strip():
+        client_kwargs["base_url"] = base_url.strip()
+    client = MineruClient(**client_kwargs)
     enriched = copy.deepcopy(report)
     count = 0
 

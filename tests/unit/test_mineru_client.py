@@ -14,6 +14,40 @@ def test_empty_url_returns_empty():
     assert result == []
 
 
+def test_validate_source_url_requires_http():
+    client = MineruClient(api_key="test-key")
+    try:
+        client._validate_source_url("file:///tmp/a.pdf")
+        assert False, "expected ValueError for non-http source"
+    except ValueError as exc:
+        assert "http(s)" in str(exc)
+
+
+def test_validate_source_url_rejects_github_and_aws():
+    client = MineruClient(api_key="test-key")
+    for url in (
+        "https://github.com/a/b/raw/main/paper.pdf",
+        "https://raw.githubusercontent.com/a/b/main/paper.pdf",
+        "https://bucket.s3.amazonaws.com/paper.pdf",
+    ):
+        try:
+            client._validate_source_url(url)
+            assert False, f"expected ValueError for URL: {url}"
+        except ValueError as exc:
+            assert "github/aws" in str(exc)
+
+
+def test_extract_figures_rejects_unsupported_host_early(monkeypatch):
+    client = MineruClient(api_key="test-key")
+
+    def _should_not_call(*args, **kwargs):
+        raise AssertionError("network call should not be reached for unsupported URL")
+
+    monkeypatch.setattr(client, "_create_task", _should_not_call)
+    result = client.extract_figures("https://github.com/a/b/raw/main/paper.pdf")
+    assert result == []
+
+
 def test_parse_figures_from_api_response():
     client = MineruClient(api_key="test-key")
     data = {
@@ -90,7 +124,13 @@ Fig. 2: Attention map
 def test_identify_main_figure_prefers_figure_1():
     figures = [
         Figure(url="fig2.png", caption="Figure 2: Results table", page=4, width=400, height=300),
-        Figure(url="fig1.png", caption="Figure 1: System architecture overview", page=1, width=600, height=400),
+        Figure(
+            url="fig1.png",
+            caption="Figure 1: System architecture overview",
+            page=1,
+            width=600,
+            height=400,
+        ),
         Figure(url="fig3.png", caption="Figure 3: Comparison chart", page=6, width=500, height=350),
     ]
     client = MineruClient(api_key="test")
