@@ -7,7 +7,8 @@ import json
 import logging
 import re
 import struct
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from math import exp
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from sqlalchemy import select, desc, or_, text
@@ -103,6 +104,71 @@ def _estimate_pii_risk(text_value: str) -> int:
     if _EMAIL_RX.search(s) or _PHONE_RX.search(s):
         return 2
     return 0
+
+
+def _decay_score(
+    item: Dict[str, Any],
+    *,
+    now: Optional[datetime] = None,
+    half_life_days: float = 90.0,
+    relevance_weight: float = 0.7,
+    recency_weight: float = 0.2,
+    usage_weight: float = 0.1,
+) -> float:
+    """Compute a combined decay-aware score for a memory item.
+
+    Score = relevance × 0.7 + recency × 0.2 + usage × 0.1
+    where recency = exp(-age_days / half_life_days)
+    and   usage   = min(use_count / 10, 1.0)
+    """
+    if now is None:
+        now = datetime.now(timezone.utc)
+
+    relevance = float(item.get("confidence", 0.5))
+
+    created_str = item.get("created_at")
+    if isinstance(created_str, str):
+        try:
+            created = datetime.fromisoformat(created_str)
+        except (ValueError, TypeError):
+            created = now
+    elif isinstance(created_str, datetime):
+        created = created_str
+    else:
+        created = now
+
+    if created.tzinfo is None:
+        created = created.replace(tzinfo=timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+
+    age_days = max(0.0, (now - created).total_seconds() / 86400.0)
+    recency_score = exp(-age_days / half_life_days)
+
+    use_count = int(item.get("use_count", 0) or 0)
+    usage_score = min(use_count / 10.0, 1.0)
+
+    return (
+        relevance_weight * relevance
+        + recency_weight * recency_score
+        + usage_weight * usage_score
+    )
+
+
+def _apply_decay_ranking(
+    results: List[Dict[str, Any]],
+    *,
+    now: Optional[datetime] = None,
+) -> List[Dict[str, Any]]:
+    """Re-rank search results by decay-aware score (descending)."""
+    if not results:
+        return results
+    if now is None:
+        now = datetime.now(timezone.utc)
+    for item in results:
+        item["decay_score"] = _decay_score(item, now=now)
+    results.sort(key=lambda x: x.get("decay_score", 0.0), reverse=True)
+    return results
 
 
 class SqlAlchemyMemoryStore:
@@ -426,6 +492,7 @@ class SqlAlchemyMemoryStore:
                     created_at=now,
                     updated_at=now,
                     source_id=source_id,
+                    expires_at=now + timedelta(days=365),
                 )
                 row.tags_json = json.dumps(list(m.tags or []), ensure_ascii=False)
                 row.evidence_json = json.dumps(dict(m.evidence or {}), ensure_ascii=False)
@@ -616,16 +683,27 @@ class SqlAlchemyMemoryStore:
 
         # Hybrid fusion when both channels return results.
         if vec_results is not None and fts_results is not None:
-            merged = _hybrid_merge(vec_results, fts_results, limit=limit)
-            return merged or _fallback()
+            results = _hybrid_merge(vec_results, fts_results, limit=limit)
+            results = results or _fallback()
+        elif vec_results is not None:
+            results = vec_results or _fallback()
+        elif fts_results is not None:
+            results = fts_results or _fallback()
+        else:
+            results = self._search_like(tokens=tokens, **_scope)
 
-        if vec_results is not None:
-            return vec_results or _fallback()
+        # Apply decay-aware re-ranking.
+        results = _apply_decay_ranking(results)[:limit]
 
-        if fts_results is not None:
-            return fts_results or _fallback()
+        # Auto-touch usage for search hits.
+        hit_ids = [int(r["id"]) for r in results if r.get("id")]
+        if hit_ids:
+            try:
+                self.touch_usage(item_ids=hit_ids, actor_id="search")
+            except Exception:  # noqa: BLE001 — best-effort
+                pass
 
-        return self._search_like(tokens=tokens, **_scope)
+        return results
 
     def _search_fts5(
         self,
