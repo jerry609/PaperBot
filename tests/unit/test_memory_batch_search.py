@@ -137,3 +137,25 @@ class TestSearchMemoriesBatch:
             scope_ids=["t1", "t2"],
         )
         assert results == {"t1": [], "t2": []}
+
+    def test_min_score_filters_low_relevance_hits(self, tmp_path):
+        store = _store_with_data(tmp_path)
+        results = store.search_memories_batch(
+            user_id="u1",
+            query="transformer",
+            scope_ids=["t1", "t2"],
+            min_score=0.95,
+        )
+        # With default weights and fresh memories, decay_score stays below 0.95.
+        assert results == {"t1": [], "t2": []}
+
+    def test_candidate_multiplier_keeps_expected_scope_hits(self, tmp_path):
+        store = _store_with_data(tmp_path)
+        results = store.search_memories_batch(
+            user_id="u1",
+            query="transformer",
+            scope_ids=["t1", "t2", "t3"],
+            candidate_multiplier=6,
+        )
+        assert len(results["t1"]) >= 1
+        assert len(results["t2"]) >= 1

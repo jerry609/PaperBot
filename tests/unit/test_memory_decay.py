@@ -9,6 +9,7 @@ import pytest
 from paperbot.infrastructure.stores.memory_store import (
     SqlAlchemyMemoryStore,
     _apply_decay_ranking,
+    _apply_mmr_rerank,
     _decay_score,
     _is_evergreen_memory,
     _to_decay_lambda,
@@ -155,6 +156,27 @@ class TestApplyDecayRanking:
 
     def test_empty_list_returns_empty(self):
         assert _apply_decay_ranking([]) == []
+
+
+class TestMMRRerank:
+    def test_lambda_one_keeps_relevance_order(self):
+        items = [
+            {"id": 1, "content": "transformer attention", "decay_score": 0.9},
+            {"id": 2, "content": "transformer architecture", "decay_score": 0.8},
+            {"id": 3, "content": "graph neural network", "decay_score": 0.6},
+        ]
+        ranked = _apply_mmr_rerank(items, lambda_value=1.0)
+        assert [i["id"] for i in ranked] == [1, 2, 3]
+
+    def test_lambda_zero_promotes_diversity(self):
+        items = [
+            {"id": 1, "content": "transformer attention heads", "decay_score": 0.9},
+            {"id": 2, "content": "transformer attention layers", "decay_score": 0.89},
+            {"id": 3, "content": "graph neural network message passing", "decay_score": 0.6},
+        ]
+        ranked = _apply_mmr_rerank(items, lambda_value=0.0)
+        assert ranked[0]["id"] == 1
+        assert ranked[1]["id"] == 3
 
 
 class TestExpiresAtDefault:
