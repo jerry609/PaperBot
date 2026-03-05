@@ -159,3 +159,46 @@ class TestSearchMemoriesBatch:
         )
         assert len(results["t1"]) >= 1
         assert len(results["t2"]) >= 1
+
+    def test_batch_passes_scope_ids_to_fts_phase(self, tmp_path, monkeypatch):
+        store = _store_with_data(tmp_path)
+        captured = {}
+
+        def _fake_fts5(*, scope_ids=None, **_kwargs):
+            captured["scope_ids"] = scope_ids
+            return []
+
+        monkeypatch.setattr(store, "_search_fts5", _fake_fts5)
+        monkeypatch.setattr(store, "_get_embedding_provider", lambda: None)
+
+        store.search_memories_batch(
+            user_id="u1",
+            query="transformer",
+            scope_ids=["t1", "t2"],
+        )
+
+        assert captured["scope_ids"] == ["t1", "t2"]
+
+    def test_batch_passes_scope_ids_to_vector_phase(self, tmp_path, monkeypatch):
+        store = _store_with_data(tmp_path)
+        captured = {}
+
+        class _FakeProvider:
+            def embed(self, _text):
+                return [0.1, 0.2, 0.3]
+
+        def _fake_vec(*, scope_ids=None, **_kwargs):
+            captured["scope_ids"] = scope_ids
+            return []
+
+        monkeypatch.setattr(store, "_get_embedding_provider", lambda: _FakeProvider())
+        monkeypatch.setattr(store, "_search_vec", _fake_vec)
+        monkeypatch.setattr(store, "_search_fts5", lambda **_kwargs: [])
+
+        store.search_memories_batch(
+            user_id="u1",
+            query="transformer",
+            scope_ids=["t1", "t2"],
+        )
+
+        assert captured["scope_ids"] == ["t1", "t2"]

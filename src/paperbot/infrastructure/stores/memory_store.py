@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 from math import exp, log
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-from sqlalchemy import select, desc, or_, text
+from sqlalchemy import bindparam, select, desc, or_, text
 from sqlalchemy.exc import IntegrityError
 
 from paperbot.infrastructure.stores.models import Base, MemoryAuditLogModel, MemoryItemModel, MemorySourceModel
@@ -878,11 +878,15 @@ class SqlAlchemyMemoryStore:
             try:
                 query_vec = provider.embed(query[:500])
                 if query_vec is not None:
-                    vec_results = self._search_vec(query_vec=query_vec, **_scope)
+                    vec_results = self._search_vec(
+                        query_vec=query_vec,
+                        scope_ids=normalized_scope_ids,
+                        **_scope,
+                    )
             except Exception:  # noqa: BLE001
                 pass
 
-        fts_results = self._search_fts5(tokens=tokens, **_scope)
+        fts_results = self._search_fts5(tokens=tokens, scope_ids=normalized_scope_ids, **_scope)
 
         if vec_results is not None and fts_results is not None:
             results = _hybrid_merge(vec_results, fts_results, limit=max(1, global_limit))
@@ -955,6 +959,7 @@ class SqlAlchemyMemoryStore:
         workspace_id: Optional[str],
         scope_type: Optional[str],
         scope_id: Optional[str],
+        scope_ids: Optional[List[str]] = None,
     ) -> Optional[List[Dict[str, Any]]]:
         """
         FTS5 BM25 search. Returns a list on success, None if FTS5 is unavailable.
@@ -980,18 +985,33 @@ class SqlAlchemyMemoryStore:
 
         try:
             with self._provider.engine.connect() as conn:
+                where_parts = [
+                    "f MATCH :q",
+                    "m.user_id = :uid",
+                ]
+                params: Dict[str, Any] = {"q": fts_query, "uid": user_id}
+                use_scope_ids = [sid for sid in (scope_ids or []) if sid]
+                use_scope_ids = list(dict.fromkeys([str(sid) for sid in use_scope_ids]))
+                if use_scope_ids:
+                    where_parts.append("m.scope_id IN :scope_ids")
+                if scope_type is not None and scope_type != "global":
+                    where_parts.append("m.scope_type = :scope_type")
+                    params["scope_type"] = scope_type
+
+                sql = (
+                    "SELECT f.rowid FROM memory_items_fts f"
+                    " JOIN memory_items m ON m.id = f.rowid"
+                    " WHERE " + " AND ".join(where_parts) +
+                    " ORDER BY rank LIMIT 250"
+                )
+                stmt = text(sql)
+                if use_scope_ids:
+                    stmt = stmt.bindparams(bindparam("scope_ids", expanding=True))
+                    params["scope_ids"] = use_scope_ids
+
                 # Join with memory_items so user_id filtering and LIMIT both
                 # apply only to the current user's data (multi-tenant isolation).
-                fts_rows = conn.execute(
-                    text(
-                        "SELECT f.rowid FROM memory_items_fts f"
-                        " JOIN memory_items m ON m.id = f.rowid"
-                        " WHERE f MATCH :q"
-                        " AND m.user_id = :uid"
-                        " ORDER BY rank LIMIT 250"
-                    ),
-                    {"q": fts_query, "uid": user_id},
-                ).fetchall()
+                fts_rows = conn.execute(stmt, params).fetchall()
         except Exception:
             return None  # FTS5 table not available yet
 
@@ -1031,6 +1051,10 @@ class SqlAlchemyMemoryStore:
                     stmt = stmt.where(MemoryItemModel.scope_type == scope_type)
             if scope_id is not None:
                 stmt = stmt.where(MemoryItemModel.scope_id == scope_id)
+            if scope_ids:
+                use_scope_ids = [str(sid) for sid in scope_ids if sid]
+                if use_scope_ids:
+                    stmt = stmt.where(MemoryItemModel.scope_id.in_(use_scope_ids))
 
             rows = session.execute(stmt).scalars().all()
 
@@ -1110,6 +1134,7 @@ class SqlAlchemyMemoryStore:
         workspace_id: Optional[str],
         scope_type: Optional[str],
         scope_id: Optional[str],
+        scope_ids: Optional[List[str]] = None,
     ) -> Optional[List[Dict[str, Any]]]:
         """sqlite-vec ANN search. Returns None if vec is unavailable or errors."""
         if not self._vec_available:
@@ -1117,18 +1142,37 @@ class SqlAlchemyMemoryStore:
         query_blob = _pack_embedding(query_vec)
         try:
             with self._provider.engine.connect() as conn:
+                where_parts = [
+                    "v.embedding MATCH :blob",
+                    "m.user_id = :uid",
+                ]
+                params: Dict[str, Any] = {
+                    "blob": query_blob,
+                    "k": limit * 5,
+                    "uid": user_id,
+                }
+                use_scope_ids = [sid for sid in (scope_ids or []) if sid]
+                use_scope_ids = list(dict.fromkeys([str(sid) for sid in use_scope_ids]))
+                if use_scope_ids:
+                    where_parts.append("m.scope_id IN :scope_ids")
+                if scope_type is not None and scope_type != "global":
+                    where_parts.append("m.scope_type = :scope_type")
+                    params["scope_type"] = scope_type
+
+                sql = (
+                    "SELECT v.rowid, v.distance FROM vec_items v"
+                    " JOIN memory_items m ON m.id = v.rowid"
+                    " WHERE " + " AND ".join(where_parts) +
+                    " ORDER BY v.distance LIMIT :k"
+                )
+                stmt = text(sql)
+                if use_scope_ids:
+                    stmt = stmt.bindparams(bindparam("scope_ids", expanding=True))
+                    params["scope_ids"] = use_scope_ids
+
                 # Join with memory_items so user_id filtering and LIMIT both
                 # apply only to the current user's data (multi-tenant isolation).
-                rows = conn.execute(
-                    text(
-                        "SELECT v.rowid, v.distance FROM vec_items v"
-                        " JOIN memory_items m ON m.id = v.rowid"
-                        " WHERE v.embedding MATCH :blob"
-                        " AND m.user_id = :uid"
-                        " ORDER BY v.distance LIMIT :k"
-                    ),
-                    {"blob": query_blob, "k": limit * 5, "uid": user_id},
-                ).fetchall()
+                rows = conn.execute(stmt, params).fetchall()
         except Exception:  # noqa: BLE001 — vec table may not exist yet
             return None
 
@@ -1167,6 +1211,10 @@ class SqlAlchemyMemoryStore:
                     stmt = stmt.where(MemoryItemModel.scope_type == scope_type)
             if scope_id is not None:
                 stmt = stmt.where(MemoryItemModel.scope_id == scope_id)
+            if scope_ids:
+                use_scope_ids = [str(sid) for sid in scope_ids if sid]
+                if use_scope_ids:
+                    stmt = stmt.where(MemoryItemModel.scope_id.in_(use_scope_ids))
             db_rows = session.execute(stmt).scalars().all()
 
         results = []
