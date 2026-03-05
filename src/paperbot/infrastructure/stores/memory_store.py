@@ -705,6 +705,72 @@ class SqlAlchemyMemoryStore:
 
         return results
 
+    def search_memories_batch(
+        self,
+        *,
+        user_id: str,
+        query: str,
+        scope_ids: List[str],
+        scope_type: str = "track",
+        limit_per_scope: int = 4,
+        workspace_id: Optional[str] = None,
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        """Search memories across multiple scopes in a single query.
+
+        Returns a dict keyed by scope_id, each value a list of matching memories.
+        """
+        if not scope_ids:
+            return {}
+
+        tokens = [t.strip() for t in (query or "").split() if t.strip()]
+        if not tokens:
+            return {sid: [] for sid in scope_ids}
+
+        now = datetime.now(timezone.utc)
+        with self._provider.session() as session:
+            stmt = (
+                select(MemoryItemModel)
+                .where(MemoryItemModel.user_id == user_id)
+                .where(MemoryItemModel.scope_type == scope_type)
+                .where(MemoryItemModel.scope_id.in_(scope_ids))
+                .where(MemoryItemModel.deleted_at.is_(None))
+                .where(MemoryItemModel.status == "approved")
+                .where(
+                    or_(
+                        MemoryItemModel.expires_at.is_(None),
+                        MemoryItemModel.expires_at > now,
+                    )
+                )
+            )
+            if workspace_id is not None:
+                stmt = stmt.where(MemoryItemModel.workspace_id == workspace_id)
+
+            # Content filtering via LIKE (works across all backends).
+            ors = [MemoryItemModel.content.contains(t) for t in tokens[:8]]
+            if ors:
+                stmt = stmt.where(or_(*ors))
+
+            rows = session.execute(stmt.limit(250)).scalars().all()
+
+        # Group by scope_id and score.
+        grouped: Dict[str, List[Dict[str, Any]]] = {sid: [] for sid in scope_ids}
+        for r in rows:
+            d = self._row_to_dict(r)
+            sid = d.get("scope_id")
+            if sid in grouped:
+                # Token-overlap scoring.
+                content = (d.get("content") or "").lower()
+                score = sum(2 for t in tokens if t.lower() in content)
+                d["score"] = score
+                grouped[sid].append(d)
+
+        # Sort each group by score descending, apply decay, and limit.
+        for sid in grouped:
+            grouped[sid].sort(key=lambda x: x.get("score", 0), reverse=True)
+            grouped[sid] = _apply_decay_ranking(grouped[sid])[:limit_per_scope]
+
+        return grouped
+
     def _search_fts5(
         self,
         *,
