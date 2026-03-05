@@ -7,11 +7,24 @@ AI-powered research workflow: paper discovery → LLM analysis → scholar track
 </h3>
 
 <p align="center">
-  <a href="https://github.com/jerry609/PaperBot/actions"><img src="https://github.com/jerry609/PaperBot/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="https://github.com/jerry609/PaperBot/issues/232"><img src="https://img.shields.io/badge/roadmap-Q1%2FQ2%202026-blue" alt="Roadmap"></a>
-  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-green.svg" alt="License: MIT"></a>
+  <a href="https://github.com/jerry609/PaperBot/actions">
+    <img src="https://github.com/jerry609/PaperBot/actions/workflows/ci.yml/badge.svg" alt="CI">
+  </a>
+  <a href="https://github.com/jerry609/PaperBot/issues/232">
+    <img src="https://img.shields.io/badge/roadmap-Q1%2FQ2%202026-blue" alt="Roadmap">
+  </a>
+  <a href="https://opensource.org/licenses/MIT">
+    <img src="https://img.shields.io/badge/License-MIT-green.svg" alt="License: MIT">
+  </a>
+  <img src="https://img.shields.io/badge/Downloads-xx-grey" alt="Downloads">
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/version-0.1.0-007ec6" alt="Version 0.1.0">
   <img src="https://img.shields.io/badge/python-3.10%2B-blue" alt="Python 3.10+">
   <img src="https://img.shields.io/badge/Next.js-16-black" alt="Next.js 16">
+  <img src="https://img.shields.io/badge/built%20with-Tauri%202-e67e22" alt="Tauri 2">
+  <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey" alt="Platform Support">
 </p>
 
 <p align="center">
