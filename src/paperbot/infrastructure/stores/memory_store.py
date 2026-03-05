@@ -8,7 +8,7 @@ import logging
 import re
 import struct
 from datetime import datetime, timedelta, timezone
-from math import exp
+from math import exp, log
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from sqlalchemy import select, desc, or_, text
@@ -106,11 +106,35 @@ def _estimate_pii_risk(text_value: str) -> int:
     return 0
 
 
+def _to_decay_lambda(half_life_days: float) -> float:
+    """Convert half-life in days to exponential decay lambda.
+
+    Follows the standard formula: λ = ln(2) / halfLifeDays
+    such that the multiplier is exactly 0.5 at the half-life point.
+    (Aligned with OpenClaw's temporal-decay.ts:toDecayLambda)
+    """
+    if not (half_life_days > 0 and half_life_days == half_life_days):
+        return 0.0
+    return log(2) / half_life_days
+
+
+def _is_evergreen_memory(item: Dict[str, Any]) -> bool:
+    """Check if a memory is 'evergreen' and should not be decayed.
+
+    Global preferences and user-preference memories represent stable knowledge
+    that should not lose relevance over time.
+    (Inspired by OpenClaw's isEvergreenMemoryPath)
+    """
+    scope_type = str(item.get("scope_type", "")).lower()
+    kind = str(item.get("kind", "")).lower()
+    return scope_type == "global" or kind == "preference"
+
+
 def _decay_score(
     item: Dict[str, Any],
     *,
     now: Optional[datetime] = None,
-    half_life_days: float = 90.0,
+    half_life_days: float = 30.0,
     relevance_weight: float = 0.7,
     recency_weight: float = 0.2,
     usage_weight: float = 0.1,
@@ -118,32 +142,40 @@ def _decay_score(
     """Compute a combined decay-aware score for a memory item.
 
     Score = relevance × 0.7 + recency × 0.2 + usage × 0.1
-    where recency = exp(-age_days / half_life_days)
+    where recency = exp(-λ × age_days), λ = ln(2) / half_life_days
     and   usage   = min(use_count / 10, 1.0)
+
+    Evergreen memories (global scope, preference kind) skip recency decay
+    and receive a recency score of 1.0.
     """
     if now is None:
         now = datetime.now(timezone.utc)
 
     relevance = float(item.get("confidence", 0.5))
 
-    created_str = item.get("created_at")
-    if isinstance(created_str, str):
-        try:
-            created = datetime.fromisoformat(created_str)
-        except (ValueError, TypeError):
-            created = now
-    elif isinstance(created_str, datetime):
-        created = created_str
+    # Evergreen memories are immune to time-based decay.
+    if _is_evergreen_memory(item):
+        recency_score = 1.0
     else:
-        created = now
+        created_str = item.get("created_at")
+        if isinstance(created_str, str):
+            try:
+                created = datetime.fromisoformat(created_str)
+            except (ValueError, TypeError):
+                created = now
+        elif isinstance(created_str, datetime):
+            created = created_str
+        else:
+            created = now
 
-    if created.tzinfo is None:
-        created = created.replace(tzinfo=timezone.utc)
-    if now.tzinfo is None:
-        now = now.replace(tzinfo=timezone.utc)
+        if created.tzinfo is None:
+            created = created.replace(tzinfo=timezone.utc)
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=timezone.utc)
 
-    age_days = max(0.0, (now - created).total_seconds() / 86400.0)
-    recency_score = exp(-age_days / half_life_days)
+        age_days = max(0.0, (now - created).total_seconds() / 86400.0)
+        decay_lambda = _to_decay_lambda(half_life_days)
+        recency_score = exp(-decay_lambda * age_days) if decay_lambda > 0 else 1.0
 
     use_count = int(item.get("use_count", 0) or 0)
     usage_score = min(use_count / 10.0, 1.0)
