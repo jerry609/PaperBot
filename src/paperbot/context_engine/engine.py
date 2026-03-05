@@ -617,23 +617,31 @@ class ContextEngine:
             tracks = self.research_store.list_tracks(
                 user_id=user_id, include_archived=False, limit=50
             )
+            other_scope_ids = []
+            scope_id_to_track: Dict[str, Dict[str, Any]] = {}
             for t in tracks:
                 if routed_track and t.get("id") == routed_track.get("id"):
                     continue
                 sid = str(t.get("id") or "")
                 if not sid:
                     continue
-                hits = self.memory_store.search_memories(
+                other_scope_ids.append(sid)
+                scope_id_to_track[sid] = t
+
+            if other_scope_ids:
+                batch_results = self.memory_store.search_memories_batch(
                     user_id=user_id,
                     query=query,
-                    limit=max(2, self.config.memory_limit // 2),
+                    scope_ids=other_scope_ids,
                     scope_type="track",
-                    scope_id=sid,
+                    limit_per_scope=max(2, self.config.memory_limit // 2),
                 )
-                for h in hits:
-                    h["track_id"] = t.get("id")
-                    h["track_name"] = t.get("name")
-                cross_track_memories.extend(hits)
+                for sid, hits in batch_results.items():
+                    t = scope_id_to_track.get(sid)
+                    for h in hits:
+                        h["track_id"] = t.get("id") if t else None
+                        h["track_name"] = t.get("name") if t else None
+                    cross_track_memories.extend(hits)
 
         merged_query = _expand_short_query(query)
         if routed_track:
