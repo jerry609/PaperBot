@@ -84,6 +84,7 @@ PaperBot is an end-to-end research assistant that automates the paper discovery 
 ### Install
 
 ```bash
+# Use python3 for macOS/Linux
 python -m venv .venv && source .venv/bin/activate
 pip install -e .
 ```
@@ -136,6 +137,7 @@ PAPERBOT_NOTIFY_EMAIL_TO=recipient@example.com
 alembic upgrade head
 
 # API server
+# Use python3 for macOS/Linux
 python -m uvicorn src.paperbot.api.main:app --reload --port 8000
 
 # Web dashboard (separate terminal)
