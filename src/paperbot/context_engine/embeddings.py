@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import hashlib
+import math
 import os
+import re
 from dataclasses import dataclass
 from typing import List, Optional
 
@@ -53,15 +56,62 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
         return [float(x) for x in vec]
 
 
+class HashEmbeddingProvider(EmbeddingProvider):
+    """Deterministic local fallback provider based on token hashing."""
+
+    def __init__(self, dim: int = 1536):
+        self.dim = max(64, int(dim))
+        self._token_rx = re.compile(r"[A-Za-z0-9_+-]+")
+
+    def embed(self, text: str) -> Optional[List[float]]:
+        s = (text or "").strip()
+        if not s:
+            return None
+
+        vec = [0.0] * self.dim
+        tokens = self._token_rx.findall(s.lower())
+        if not tokens:
+            tokens = [s[:64].lower()]
+
+        for token in tokens:
+            digest = hashlib.sha256(token.encode("utf-8")).digest()
+            idx = int.from_bytes(digest[:4], "big") % self.dim
+            sign = 1.0 if (digest[4] % 2 == 0) else -1.0
+            vec[idx] += sign
+
+        norm = math.sqrt(sum(v * v for v in vec))
+        if norm <= 1e-12:
+            return vec
+        return [v / norm for v in vec]
+
+
+def _provider_chain_from_env() -> List[str]:
+    raw = os.getenv("PAPERBOT_EMBEDDING_PROVIDER_CHAIN", "openai,none")
+    chain = [p.strip().lower() for p in raw.split(",") if p.strip()]
+    return chain or ["openai", "none"]
+
+
 def try_build_default_embedding_provider(
     *, config: Optional[EmbeddingConfig] = None
 ) -> Optional[EmbeddingProvider]:
     """
     Best-effort embedding provider.
 
-    Returns None if openai is unavailable or no API key is configured.
+    Provider chain is configurable via PAPERBOT_EMBEDDING_PROVIDER_CHAIN,
+    e.g. "openai,hash,none".
     """
-    try:
-        return OpenAIEmbeddingProvider(config=config)
-    except Exception:
-        return None
+    chain = _provider_chain_from_env()
+    for provider in chain:
+        if provider == "none":
+            return None
+        if provider == "openai":
+            try:
+                return OpenAIEmbeddingProvider(config=config)
+            except Exception:
+                continue
+        if provider == "hash":
+            try:
+                return HashEmbeddingProvider()
+            except Exception:
+                continue
+    return None

@@ -9,7 +9,7 @@ import pytest
 from paperbot.context_engine.engine import ContextEngine, ContextEngineConfig
 
 
-def _make_engine(*, memory_store=None, research_store=None):
+def _make_engine(*, memory_store=None, research_store=None, config=None):
     """Create a ContextEngine with faked stores."""
     rs = research_store or MagicMock()
     ms = memory_store or MagicMock()
@@ -32,7 +32,7 @@ def _make_engine(*, memory_store=None, research_store=None):
     ms.search_memories_batch.return_value = {}
     ms.touch_usage.return_value = None
 
-    config = ContextEngineConfig(offline=True, paper_limit=0)
+    config = config or ContextEngineConfig(offline=True, paper_limit=0)
     engine = ContextEngine(
         research_store=rs,
         memory_store=ms,
@@ -189,3 +189,26 @@ class TestBuildContextPackLayers:
 
         touch_calls = [call.kwargs for call in ms.touch_usage.call_args_list]
         assert any(201 in kwargs.get("item_ids", []) for kwargs in touch_calls)
+
+    @pytest.mark.asyncio
+    async def test_context_token_guard_trims_when_budget_exceeded(self):
+        cfg = ContextEngineConfig(
+            offline=True,
+            paper_limit=0,
+            context_token_budget=100,
+        )
+        engine, rs, ms = _make_engine(config=cfg)
+        rs.get_active_track.return_value = {"id": 1, "name": "main"}
+        ms.search_memories.return_value = [
+            {"id": 101, "content": "hit1"},
+            {"id": 102, "content": "hit2"},
+        ]
+
+        result = await engine.build_context_pack(
+            user_id="u1",
+            query="transformers",
+        )
+
+        total_tokens = sum(result["context_layers"].values())
+        assert total_tokens <= 100
+        assert result["routing"].get("token_guard", {}).get("enabled") is True
