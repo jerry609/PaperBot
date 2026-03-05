@@ -517,8 +517,8 @@ class ContextEngine:
             memory_store=self.memory_store,
             config=self.config.track_router,
         )
-        self._layer0_cache: Optional[Dict[str, Any]] = None
-        self._layer0_cache_ts: float = 0.0
+        self._layer0_cache: Dict[str, Dict[str, Any]] = {}  # keyed by user_id
+        self._layer0_cache_ts: Dict[str, float] = {}      # keyed by user_id
         self._layer0_ttl: float = 300.0  # 5 minutes
 
     def _attach_latest_judge(self, papers: List[Dict[str, Any]]) -> None:
@@ -557,13 +557,16 @@ class ContextEngine:
     # ── Layered context loading (#165) ──
 
     def _load_layer0_profile(self, user_id: str) -> List[Dict[str, Any]]:
-        """Layer 0: user profile (~200 tokens). Cached with 5-minute TTL."""
+        """Layer 0: user profile (~200 tokens). Cached per user_id with 5-minute TTL."""
         now = time.monotonic()
-        cache = getattr(self, "_layer0_cache", None)
-        cache_ts = getattr(self, "_layer0_cache_ts", 0.0)
+        cache_map = getattr(self, "_layer0_cache", {})
+        ts_map = getattr(self, "_layer0_cache_ts", {})
         ttl = getattr(self, "_layer0_ttl", 300.0)
-        if cache is not None and (now - cache_ts) < ttl:
-            return cache.get("prefs", [])
+
+        cached = cache_map.get(user_id)
+        cached_ts = ts_map.get(user_id, 0.0)
+        if cached is not None and (now - cached_ts) < ttl:
+            return cached.get("prefs", [])
 
         prefs = self.memory_store.list_memories(
             user_id=user_id,
@@ -575,8 +578,11 @@ class ContextEngine:
             item_ids=[int(i["id"]) for i in prefs if i.get("id")],
             actor_id="context_engine",
         )
-        self._layer0_cache = {"prefs": prefs}
-        self._layer0_cache_ts = now
+        if not hasattr(self, "_layer0_cache"):
+            self._layer0_cache = {}
+            self._layer0_cache_ts = {}
+        self._layer0_cache[user_id] = {"prefs": prefs}
+        self._layer0_cache_ts[user_id] = now
         return prefs
 
     def _load_layer1_track(
@@ -648,12 +654,19 @@ class ContextEngine:
                     scope_type="track",
                     limit_per_scope=max(2, self.config.memory_limit // 2),
                 )
+                cross_hit_ids: List[int] = []
                 for sid, hits in batch_results.items():
                     t = scope_id_to_track.get(sid)
                     for h in hits:
                         h["track_id"] = t.get("id") if t else None
                         h["track_name"] = t.get("name") if t else None
+                        if h.get("id"):
+                            cross_hit_ids.append(int(h["id"]))
                     cross_track_memories.extend(hits)
+                if cross_hit_ids:
+                    self.memory_store.touch_usage(
+                        item_ids=cross_hit_ids, actor_id="context_engine"
+                    )
 
         return {
             "relevant_memories": relevant_memories,
