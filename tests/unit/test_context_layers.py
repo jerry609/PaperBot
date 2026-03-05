@@ -60,6 +60,29 @@ class TestLayer0Cache:
         # Should have been called twice (cache expired).
         assert ms.list_memories.call_count == 2
 
+    def test_layer0_cache_is_user_scoped(self):
+        """Cache must not leak data across different user_ids."""
+        engine, rs, ms = _make_engine()
+        u1_prefs = [{"id": 1, "content": "u1-pref"}]
+        u2_prefs = [{"id": 2, "content": "u2-pref"}]
+
+        ms.list_memories.side_effect = lambda **kw: (
+            u1_prefs if kw.get("user_id") == "u1" else u2_prefs
+        )
+
+        result_u1 = engine._load_layer0_profile("u1")
+        result_u2 = engine._load_layer0_profile("u2")
+
+        assert result_u1 == u1_prefs
+        assert result_u2 == u2_prefs
+        assert ms.list_memories.call_count == 2
+
+        # Subsequent cached calls must still return correct user data.
+        assert engine._load_layer0_profile("u1") == u1_prefs
+        assert engine._load_layer0_profile("u2") == u2_prefs
+        # No additional calls — both served from per-user cache.
+        assert ms.list_memories.call_count == 2
+
 
 class TestLayer1Track:
     def test_returns_tasks_and_milestones_when_track_present(self):
@@ -143,3 +166,26 @@ class TestBuildContextPackLayers:
             "context_layers",
         }
         assert expected_keys.issubset(set(result.keys()))
+
+    @pytest.mark.asyncio
+    async def test_cross_track_batch_hits_touch_usage(self):
+        engine, rs, ms = _make_engine()
+        rs.get_active_track.return_value = {"id": 1, "name": "main"}
+        rs.list_tracks.return_value = [
+            {"id": 1, "name": "main"},
+            {"id": 2, "name": "other"},
+        ]
+        ms.search_memories_batch.return_value = {
+            "2": [
+                {"id": 201, "content": "cross hit", "scope_id": "2"},
+            ]
+        }
+
+        await engine.build_context_pack(
+            user_id="u1",
+            query="transformers",
+            include_cross_track=True,
+        )
+
+        touch_calls = [call.kwargs for call in ms.touch_usage.call_args_list]
+        assert any(201 in kwargs.get("item_ids", []) for kwargs in touch_calls)
