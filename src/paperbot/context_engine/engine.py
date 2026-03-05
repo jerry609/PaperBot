@@ -5,6 +5,7 @@ import hashlib
 import math
 import random
 import re
+import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -516,6 +517,9 @@ class ContextEngine:
             memory_store=self.memory_store,
             config=self.config.track_router,
         )
+        self._layer0_cache: Optional[Dict[str, Any]] = None
+        self._layer0_cache_ts: float = 0.0
+        self._layer0_ttl: float = 300.0  # 5 minutes
 
     def _attach_latest_judge(self, papers: List[Dict[str, Any]]) -> None:
         ids: List[int] = []
@@ -550,56 +554,64 @@ class ContextEngine:
             if pid in liked_ids:
                 paper["is_liked"] = True
 
-    async def build_context_pack(
-        self,
-        *,
-        user_id: str,
-        query: str,
-        track_id: Optional[int] = None,
-        include_cross_track: bool = False,
-        paper_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
-        active_track = self.research_store.get_active_track(user_id=user_id)
-        routed_track = (
-            self.research_store.get_track(user_id=user_id, track_id=track_id)
-            if track_id is not None
-            else active_track
-        )
+    # ── Layered context loading (#165) ──
 
-        routing_suggestion: Optional[Dict[str, Any]] = None
-        if track_id is None and active_track is not None:
-            routing_suggestion = self.track_router.suggest_track(
-                user_id=user_id,
-                query=query,
-                active_track_id=int(active_track["id"]),
-                limit=50,
-            )
+    def _load_layer0_profile(self, user_id: str) -> List[Dict[str, Any]]:
+        """Layer 0: user profile (~200 tokens). Cached with 5-minute TTL."""
+        now = time.monotonic()
+        cache = getattr(self, "_layer0_cache", None)
+        cache_ts = getattr(self, "_layer0_cache_ts", 0.0)
+        ttl = getattr(self, "_layer0_ttl", 300.0)
+        if cache is not None and (now - cache_ts) < ttl:
+            return cache.get("prefs", [])
 
-        track_scope_id = str(routed_track["id"]) if routed_track else None
-
-        user_prefs = self.memory_store.list_memories(
+        prefs = self.memory_store.list_memories(
             user_id=user_id,
-            limit=self.config.memory_limit,
+            limit=3,
             scope_type="global",
             include_pending=False,
         )
         self.memory_store.touch_usage(
-            item_ids=[int(i["id"]) for i in user_prefs if i.get("id")],
+            item_ids=[int(i["id"]) for i in prefs if i.get("id")],
             actor_id="context_engine",
         )
+        self._layer0_cache = {"prefs": prefs}
+        self._layer0_cache_ts = now
+        return prefs
 
-        progress_tasks: List[Dict[str, Any]] = []
-        progress_milestones: List[Dict[str, Any]] = []
-        if routed_track:
-            progress_tasks = self.research_store.list_tasks(
-                user_id=user_id, track_id=int(routed_track["id"]), limit=self.config.task_limit
+    def _load_layer1_track(
+        self, user_id: str, track: Optional[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """Layer 1: track context — goals, keywords, tasks, milestones (~500 tokens)."""
+        tasks: List[Dict[str, Any]] = []
+        milestones: List[Dict[str, Any]] = []
+        if track:
+            tasks = self.research_store.list_tasks(
+                user_id=user_id,
+                track_id=int(track["id"]),
+                limit=self.config.task_limit,
             )
-            progress_milestones = self.research_store.list_milestones(
-                user_id=user_id, track_id=int(routed_track["id"]), limit=self.config.milestone_limit
+            milestones = self.research_store.list_milestones(
+                user_id=user_id,
+                track_id=int(track["id"]),
+                limit=self.config.milestone_limit,
             )
+        return {"tasks": tasks, "milestones": milestones}
 
+    def _load_layer2_query(
+        self,
+        user_id: str,
+        query: str,
+        track_scope_id: Optional[str],
+        *,
+        include_cross_track: bool = False,
+        track_id: Optional[int] = None,
+        routed_track: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Layer 2: query-relevant memories + cross-track search (~1000 tokens)."""
         relevant_memories: List[Dict[str, Any]] = []
         cross_track_memories: List[Dict[str, Any]] = []
+
         if track_scope_id:
             relevant_memories = self.memory_store.search_memories(
                 user_id=user_id,
@@ -642,6 +654,82 @@ class ContextEngine:
                         h["track_id"] = t.get("id") if t else None
                         h["track_name"] = t.get("name") if t else None
                     cross_track_memories.extend(hits)
+
+        return {
+            "relevant_memories": relevant_memories,
+            "cross_track_memories": cross_track_memories,
+        }
+
+    def _load_layer3_paper(
+        self, user_id: str, paper_id: Optional[str]
+    ) -> List[Dict[str, Any]]:
+        """Layer 3: paper-scoped memories (on-demand, only when paper_id given)."""
+        if not paper_id:
+            return []
+        try:
+            return self.memory_store.list_memories(
+                user_id=user_id,
+                limit=10,
+                scope_type="paper",
+                scope_id=paper_id,
+                include_pending=False,
+            )
+        except Exception as exc:  # noqa: BLE001 — non-critical
+            Logger.warning(
+                f"[engine] paper_memories_query_failed paper_id={paper_id} error={exc!r}",
+                file=LogFiles.API,
+            )
+            return []
+
+    async def build_context_pack(
+        self,
+        *,
+        user_id: str,
+        query: str,
+        track_id: Optional[int] = None,
+        include_cross_track: bool = False,
+        paper_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        active_track = self.research_store.get_active_track(user_id=user_id)
+        routed_track = (
+            self.research_store.get_track(user_id=user_id, track_id=track_id)
+            if track_id is not None
+            else active_track
+        )
+
+        routing_suggestion: Optional[Dict[str, Any]] = None
+        if track_id is None and active_track is not None:
+            routing_suggestion = self.track_router.suggest_track(
+                user_id=user_id,
+                query=query,
+                active_track_id=int(active_track["id"]),
+                limit=50,
+            )
+
+        track_scope_id = str(routed_track["id"]) if routed_track else None
+
+        # Layer 0: user profile (cached, ~200 tokens)
+        user_prefs = self._load_layer0_profile(user_id)
+
+        # Layer 1: track context (~500 tokens)
+        layer1 = self._load_layer1_track(user_id, routed_track)
+        progress_tasks = layer1["tasks"]
+        progress_milestones = layer1["milestones"]
+
+        # Layer 2: query-relevant + cross-track memories (~1000 tokens)
+        layer2 = self._load_layer2_query(
+            user_id,
+            query,
+            track_scope_id,
+            include_cross_track=include_cross_track,
+            track_id=track_id,
+            routed_track=routed_track,
+        )
+        relevant_memories = layer2["relevant_memories"]
+        cross_track_memories = layer2["cross_track_memories"]
+
+        # Layer 3: paper-scoped memories (on-demand)
+        paper_memories = self._load_layer3_paper(user_id, paper_id)
 
         merged_query = _expand_short_query(query)
         if routed_track:
@@ -940,21 +1028,13 @@ class ContextEngine:
         except Exception:
             context_run_id = None
 
-        paper_memories: List[Dict[str, Any]] = []
-        if paper_id:
-            try:
-                paper_memories = self.memory_store.list_memories(
-                    user_id=user_id,
-                    limit=10,
-                    scope_type="paper",
-                    scope_id=paper_id,
-                    include_pending=False,
-                )
-            except Exception as exc:  # noqa: BLE001 — non-critical, degrade gracefully
-                Logger.warning(
-                    f"[engine] paper_memories_query_failed paper_id={paper_id} error={exc!r}",
-                    file=LogFiles.API,
-                )
+        # Token estimates per layer.
+        context_layers = {
+            "layer0_profile_tokens": len(user_prefs) * 65,
+            "layer1_track_tokens": (len(progress_tasks) + len(progress_milestones)) * 50,
+            "layer2_query_tokens": (len(relevant_memories) + len(cross_track_memories)) * 100,
+            "layer3_paper_tokens": len(paper_memories) * 100,
+        }
 
         return {
             "user_id": user_id,
@@ -969,6 +1049,7 @@ class ContextEngine:
             "paper_recommendations": papers,
             "paper_recommendation_scores": paper_scores,
             "paper_recommendation_reasons": paper_reasons,
+            "context_layers": context_layers,
         }
 
     async def close(self) -> None:
