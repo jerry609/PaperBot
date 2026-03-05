@@ -191,6 +191,7 @@ def _apply_decay_ranking(
     results: List[Dict[str, Any]],
     *,
     now: Optional[datetime] = None,
+    half_life_days: float = 30.0,
 ) -> List[Dict[str, Any]]:
     """Re-rank search results by decay-aware score (descending)."""
     if not results:
@@ -198,9 +199,85 @@ def _apply_decay_ranking(
     if now is None:
         now = datetime.now(timezone.utc)
     for item in results:
-        item["decay_score"] = _decay_score(item, now=now)
+        item["decay_score"] = _decay_score(
+            item,
+            now=now,
+            half_life_days=half_life_days,
+        )
     results.sort(key=lambda x: x.get("decay_score", 0.0), reverse=True)
     return results
+
+
+def _tokenize_for_mmr(text_value: str) -> set[str]:
+    return {t.lower() for t in _FTS_TOKEN_RX.findall(text_value or "") if t.strip()}
+
+
+def _jaccard_similarity(left: set[str], right: set[str]) -> float:
+    if not left and not right:
+        return 1.0
+    if not left or not right:
+        return 0.0
+    inter = len(left & right)
+    union = len(left | right)
+    return inter / union if union else 0.0
+
+
+def _mmr_relevance_score(item: Dict[str, Any]) -> float:
+    for key in ("decay_score", "hybrid_score", "vec_score", "score", "confidence"):
+        raw = item.get(key)
+        if raw is None:
+            continue
+        try:
+            return float(raw)
+        except (TypeError, ValueError):
+            continue
+    return 0.0
+
+
+def _apply_mmr_rerank(
+    results: List[Dict[str, Any]],
+    *,
+    lambda_value: float = 0.7,
+) -> List[Dict[str, Any]]:
+    if len(results) <= 1:
+        return list(results)
+
+    lam = max(0.0, min(1.0, float(lambda_value)))
+    if lam >= 1.0:
+        return sorted(results, key=_mmr_relevance_score, reverse=True)
+
+    scored = sorted(results, key=_mmr_relevance_score, reverse=True)
+    token_cache = {
+        id(item): _tokenize_for_mmr(str(item.get("content") or item.get("snippet") or ""))
+        for item in scored
+    }
+
+    selected: List[Dict[str, Any]] = []
+    remaining = list(scored)
+    while remaining:
+        best_item = None
+        best_score = float("-inf")
+        for cand in remaining:
+            relevance = _mmr_relevance_score(cand)
+            cand_tokens = token_cache.get(id(cand), set())
+            max_sim = 0.0
+            for picked in selected:
+                sim = _jaccard_similarity(
+                    cand_tokens,
+                    token_cache.get(id(picked), set()),
+                )
+                if sim > max_sim:
+                    max_sim = sim
+            mmr_score = lam * relevance - (1.0 - lam) * max_sim
+            if mmr_score > best_score:
+                best_score = mmr_score
+                best_item = cand
+        if best_item is None:
+            break
+        selected.append(best_item)
+        remaining.remove(best_item)
+
+    return selected
 
 
 class SqlAlchemyMemoryStore:
@@ -679,7 +756,14 @@ class SqlAlchemyMemoryStore:
         workspace_id: Optional[str] = None,
         scope_type: Optional[str] = None,
         scope_id: Optional[str] = None,
+        min_score: float = 0.0,
+        candidate_multiplier: int = 4,
+        mmr_enabled: bool = False,
+        mmr_lambda: float = 0.7,
+        half_life_days: float = 30.0,
     ) -> List[Dict[str, Any]]:
+        candidate_multiplier = max(1, int(candidate_multiplier or 1))
+        candidate_limit = min(250, max(int(limit), int(limit) * candidate_multiplier))
         tokens = [t.strip() for t in (query or "").split() if t.strip()]
         if not tokens:
             return self.list_memories(
@@ -691,11 +775,11 @@ class SqlAlchemyMemoryStore:
             )
 
         _fallback = lambda: self.list_memories(  # noqa: E731
-            user_id=user_id, limit=limit, workspace_id=workspace_id,
+            user_id=user_id, limit=candidate_limit, workspace_id=workspace_id,
             scope_type=scope_type, scope_id=scope_id,
         )
         _scope = dict(
-            user_id=user_id, limit=limit,
+            user_id=user_id, limit=candidate_limit,
             workspace_id=workspace_id, scope_type=scope_type, scope_id=scope_id,
         )
 
@@ -725,7 +809,13 @@ class SqlAlchemyMemoryStore:
             results = self._search_like(tokens=tokens, **_scope)
 
         # Apply decay-aware re-ranking.
-        results = _apply_decay_ranking(results)[:limit]
+        results = _apply_decay_ranking(results, half_life_days=half_life_days)
+        if mmr_enabled:
+            results = _apply_mmr_rerank(results, lambda_value=mmr_lambda)
+        threshold = max(0.0, float(min_score or 0.0))
+        if threshold > 0:
+            results = [r for r in results if float(r.get("decay_score", 0.0)) >= threshold]
+        results = results[:limit]
 
         # Auto-touch usage for search hits.
         hit_ids = [int(r["id"]) for r in results if r.get("id")]
@@ -746,6 +836,11 @@ class SqlAlchemyMemoryStore:
         scope_type: str = "track",
         limit_per_scope: int = 4,
         workspace_id: Optional[str] = None,
+        min_score: float = 0.0,
+        candidate_multiplier: int = 4,
+        mmr_enabled: bool = False,
+        mmr_lambda: float = 0.7,
+        half_life_days: float = 30.0,
     ) -> Dict[str, List[Dict[str, Any]]]:
         """Search memories across multiple scopes in a single query.
 
@@ -758,48 +853,96 @@ class SqlAlchemyMemoryStore:
         if not tokens:
             return {sid: [] for sid in scope_ids}
 
-        now = datetime.now(timezone.utc)
-        with self._provider.session() as session:
-            stmt = (
-                select(MemoryItemModel)
-                .where(MemoryItemModel.user_id == user_id)
-                .where(MemoryItemModel.scope_type == scope_type)
-                .where(MemoryItemModel.scope_id.in_(scope_ids))
-                .where(MemoryItemModel.deleted_at.is_(None))
-                .where(MemoryItemModel.status == "approved")
-                .where(
-                    or_(
-                        MemoryItemModel.expires_at.is_(None),
-                        MemoryItemModel.expires_at > now,
+        normalized_scope_ids = list(dict.fromkeys([str(sid) for sid in scope_ids if str(sid)]))
+        allowed_scope_ids = set(normalized_scope_ids)
+        candidate_multiplier = max(1, int(candidate_multiplier or 1))
+        global_limit = min(
+            500,
+            max(
+                int(limit_per_scope) * len(allowed_scope_ids),
+                int(limit_per_scope) * candidate_multiplier * len(allowed_scope_ids),
+            ),
+        )
+
+        _scope = dict(
+            user_id=user_id,
+            limit=max(1, global_limit),
+            workspace_id=workspace_id,
+            scope_type=scope_type,
+            scope_id=None,
+        )
+
+        vec_results: Optional[List[Dict[str, Any]]] = None
+        provider = self._get_embedding_provider()
+        if provider is not None:
+            try:
+                query_vec = provider.embed(query[:500])
+                if query_vec is not None:
+                    vec_results = self._search_vec(query_vec=query_vec, **_scope)
+            except Exception:  # noqa: BLE001
+                pass
+
+        fts_results = self._search_fts5(tokens=tokens, **_scope)
+
+        if vec_results is not None and fts_results is not None:
+            results = _hybrid_merge(vec_results, fts_results, limit=max(1, global_limit))
+        elif vec_results is not None:
+            results = vec_results
+        elif fts_results is not None:
+            results = fts_results
+        else:
+            now = datetime.now(timezone.utc)
+            with self._provider.session() as session:
+                stmt = (
+                    select(MemoryItemModel)
+                    .where(MemoryItemModel.user_id == user_id)
+                    .where(MemoryItemModel.scope_type == scope_type)
+                    .where(MemoryItemModel.scope_id.in_(normalized_scope_ids))
+                    .where(MemoryItemModel.deleted_at.is_(None))
+                    .where(MemoryItemModel.status == "approved")
+                    .where(
+                        or_(
+                            MemoryItemModel.expires_at.is_(None),
+                            MemoryItemModel.expires_at > now,
+                        )
                     )
                 )
-            )
-            if workspace_id is not None:
-                stmt = stmt.where(MemoryItemModel.workspace_id == workspace_id)
+                if workspace_id is not None:
+                    stmt = stmt.where(MemoryItemModel.workspace_id == workspace_id)
+                ors = [MemoryItemModel.content.contains(t) for t in tokens[:8]]
+                if ors:
+                    stmt = stmt.where(or_(*ors))
+                rows = session.execute(stmt.limit(max(1, global_limit))).scalars().all()
 
-            # Content filtering via LIKE (works across all backends).
-            ors = [MemoryItemModel.content.contains(t) for t in tokens[:8]]
-            if ors:
-                stmt = stmt.where(or_(*ors))
+            results = []
+            for row in rows:
+                item = self._row_to_dict(row)
+                content = (item.get("content") or "").lower()
+                item["score"] = sum(2 for t in tokens if t.lower() in content)
+                results.append(item)
+            results.sort(key=lambda x: x.get("score", 0), reverse=True)
 
-            rows = session.execute(stmt.limit(250)).scalars().all()
+        filtered = []
+        for item in results:
+            sid = str(item.get("scope_id") or "")
+            if sid in allowed_scope_ids:
+                filtered.append(item)
 
-        # Group by scope_id and score.
-        grouped: Dict[str, List[Dict[str, Any]]] = {sid: [] for sid in scope_ids}
-        for r in rows:
-            d = self._row_to_dict(r)
-            sid = d.get("scope_id")
+        filtered = _apply_decay_ranking(filtered, half_life_days=half_life_days)
+        threshold = max(0.0, float(min_score or 0.0))
+        if threshold > 0:
+            filtered = [r for r in filtered if float(r.get("decay_score", 0.0)) >= threshold]
+
+        grouped: Dict[str, List[Dict[str, Any]]] = {sid: [] for sid in normalized_scope_ids}
+        for item in filtered:
+            sid = str(item.get("scope_id") or "")
             if sid in grouped:
-                # Token-overlap scoring.
-                content = (d.get("content") or "").lower()
-                score = sum(2 for t in tokens if t.lower() in content)
-                d["score"] = score
-                grouped[sid].append(d)
+                grouped[sid].append(item)
 
-        # Sort each group by score descending, apply decay, and limit.
         for sid in grouped:
-            grouped[sid].sort(key=lambda x: x.get("score", 0), reverse=True)
-            grouped[sid] = _apply_decay_ranking(grouped[sid])[:limit_per_scope]
+            if mmr_enabled:
+                grouped[sid] = _apply_mmr_rerank(grouped[sid], lambda_value=mmr_lambda)
+            grouped[sid] = grouped[sid][:limit_per_scope]
 
         return grouped
 
