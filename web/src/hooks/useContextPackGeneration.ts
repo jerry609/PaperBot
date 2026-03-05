@@ -65,6 +65,8 @@ export function useContextPackGeneration() {
     paperId: string
     userId?: string
     depth?: "fast" | "standard" | "deep"
+    title?: string
+    abstract?: string
   }) => {
     const startedAt = Date.now()
     console.info("[P2C:M3] generate:start", { paperId: params.paperId, depth: params.depth })
@@ -77,17 +79,21 @@ export function useContextPackGeneration() {
     setContextPackLoading(true)
 
     try {
+      const payload: Record<string, unknown> = {
+        paper_id: params.paperId,
+        user_id: params.userId ?? "default",
+        depth: params.depth ?? "standard",
+      }
+      if (params.title !== undefined) payload.title = params.title
+      if (params.abstract !== undefined) payload.abstract = params.abstract
+
       const response = await fetch("/api/research/repro/context", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Accept: "text/event-stream",
         },
-        body: JSON.stringify({
-          paper_id: params.paperId,
-          user_id: params.userId ?? "default",
-          depth: params.depth ?? "standard",
-        }),
+        body: JSON.stringify(payload),
       })
 
       if (!response.ok || !response.body) {
@@ -131,8 +137,8 @@ export function useContextPackGeneration() {
           setContextPackLoading(false)
           return
         } else if (evt.type === "error") {
-          const error = evt.data as GenerateErrorEvent
-          const message = error?.error || error?.message || evt.message || "Generation failed"
+          const error = (evt.data && typeof evt.data === "object" ? evt.data : {}) as GenerateErrorEvent
+          const message = evt.message || error?.message || error?.error || "Generation failed"
           console.error("[P2C:M3] generate:error", { message, data: evt.data })
           setContextPackError(message)
           setStatus("error")

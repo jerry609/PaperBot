@@ -101,10 +101,23 @@ function savePapersToStorage(papers: StudioPaper[]): void {
     }
 }
 
+// Per-paper cached state (preserved across paper switches)
+interface PerPaperCache {
+    contextPack: ReproContextPack | null
+    contextPackLoading: boolean
+    contextPackError: string | null
+    generationProgress: StageProgressEvent[]
+    liveObservations: StageObservationsEvent[]
+    activeTaskId: string | null
+}
+
 interface StudioState {
     // Paper management
     papers: StudioPaper[]
     selectedPaperId: string | null
+
+    // Per-paper state cache (not cleared on switch)
+    _paperCache: Record<string, PerPaperCache>
 
     // Task management (scoped to selected paper)
     tasks: Task[]
@@ -133,6 +146,7 @@ interface StudioState {
     addTask: (name: string) => string
     updateTaskStatus: (taskId: string, status: Task['status']) => void
     addAction: (taskId: string, action: Omit<AgentAction, 'id' | 'timestamp'>) => void
+    appendToLastAction: (taskId: string, text: string) => void
     setActiveTask: (taskId: string | null) => void
     setSelectedFileForDiff: (filename: string | null) => void
     setPaperDraft: (partial: Partial<PaperDraft>) => void
@@ -153,6 +167,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     // Paper state
     papers: [],
     selectedPaperId: null,
+    _paperCache: {},
 
     // Task state
     tasks: [],
@@ -223,13 +238,22 @@ export const useStudioStore = create<StudioState>((set, get) => ({
             savePapersToStorage(newPapers)
             // Clear selection if deleted paper was selected
             const newSelectedPaperId = state.selectedPaperId === paperId ? null : state.selectedPaperId
+            // Remove from cache
+            const newCache = { ...state._paperCache }
+            delete newCache[paperId]
             return {
                 papers: newPapers,
                 selectedPaperId: newSelectedPaperId,
+                _paperCache: newCache,
                 // Clear draft if deleted paper was selected
                 ...(state.selectedPaperId === paperId ? {
                     paperDraft: { title: '', abstract: '', methodSection: '' },
                     lastGenCodeResult: null,
+                    contextPack: null,
+                    contextPackLoading: false,
+                    contextPackError: null,
+                    generationProgress: [],
+                    liveObservations: [],
                 } : {}),
             }
         })
@@ -237,9 +261,26 @@ export const useStudioStore = create<StudioState>((set, get) => ({
 
     selectPaper: (paperId) => {
         const state = get()
+
+        // Save current paper's state to cache before switching
+        const prevCache = { ...state._paperCache }
+        if (state.selectedPaperId) {
+            prevCache[state.selectedPaperId] = {
+                contextPack: state.contextPack,
+                contextPackLoading: state.contextPackLoading,
+                contextPackError: state.contextPackError,
+                generationProgress: state.generationProgress,
+                liveObservations: state.liveObservations,
+                activeTaskId: state.activeTaskId,
+            }
+        }
+
         const paper = paperId ? state.papers.find(p => p.id === paperId) : null
+        const cached = paperId ? prevCache[paperId] : undefined
+
         set({
             selectedPaperId: paperId,
+            _paperCache: prevCache,
             // Sync paperDraft with selected paper
             paperDraft: paper
                 ? { title: paper.title, abstract: paper.abstract, methodSection: paper.methodSection || '' }
@@ -247,12 +288,13 @@ export const useStudioStore = create<StudioState>((set, get) => ({
             // Load paper's lastGenCodeResult if available
             lastGenCodeResult: paper?.lastGenCodeResult || null,
             workspaceSnapshotId: null,
-            // Clear active task when switching papers
-            activeTaskId: null,
-            contextPack: null,
-            contextPackLoading: false,
-            contextPackError: null,
-            generationProgress: [],
+            // Restore cached per-paper state, or defaults
+            activeTaskId: cached?.activeTaskId ?? null,
+            contextPack: cached?.contextPack ?? null,
+            contextPackLoading: cached?.contextPackLoading ?? false,
+            contextPackError: cached?.contextPackError ?? null,
+            generationProgress: cached?.generationProgress ?? [],
+            liveObservations: cached?.liveObservations ?? [],
         })
     },
 
@@ -323,6 +365,18 @@ export const useStudioStore = create<StudioState>((set, get) => ({
                     ? { ...t, actions: [...t.actions, newAction] }
                     : t
             )
+        }))
+    },
+
+    appendToLastAction: (taskId, text) => {
+        set(state => ({
+            tasks: state.tasks.map(t => {
+                if (t.id !== taskId || t.actions.length === 0) return t
+                const last = t.actions[t.actions.length - 1]
+                if (last.type !== 'text') return t
+                const updated = { ...last, content: last.content + text }
+                return { ...t, actions: [...t.actions.slice(0, -1), updated] }
+            })
         }))
     },
 

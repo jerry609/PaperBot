@@ -49,6 +49,9 @@ async def test_cron_daily_papers_enqueues_figure_flags(monkeypatch):
     monkeypatch.setattr(arq_worker, "_event_log", lambda: _NoopEventLog())
     monkeypatch.setenv("PAPERBOT_DAILYPAPER_ENABLE_FIGURES", "true")
     monkeypatch.setenv("PAPERBOT_DAILYPAPER_FIGURES_MAX_ITEMS", "7")
+    monkeypatch.setenv("MINERU_API_BASE_URL", "https://mineru.net/api/v4")
+    monkeypatch.setenv("MINERU_MODEL_VERSION", "vlm")
+    monkeypatch.setenv("MINERU_MAX_WAIT_SECONDS", "120")
 
     redis = _FakeRedis()
     result = await arq_worker.cron_daily_papers({"redis": redis})
@@ -58,6 +61,9 @@ async def test_cron_daily_papers_enqueues_figure_flags(monkeypatch):
     assert redis.kwargs["name"] == "daily_papers_job"
     assert redis.kwargs["enable_figures"] is True
     assert redis.kwargs["figures_max_items"] == 7
+    assert redis.kwargs["mineru_api_base_url"] == "https://mineru.net/api/v4"
+    assert redis.kwargs["mineru_model_version"] == "vlm"
+    assert redis.kwargs["mineru_max_wait_seconds"] == 120.0
 
 
 @pytest.mark.asyncio

@@ -26,6 +26,7 @@ from .routes import (
     studio_chat,
     repro_context,
     feed,
+    push_commands,
 )
 from paperbot.infrastructure.event_log.logging_event_log import LoggingEventLog
 from paperbot.infrastructure.event_log.composite_event_log import CompositeEventLog
@@ -75,6 +76,7 @@ app.include_router(model_endpoints.router, prefix="/api", tags=["Model Endpoints
 app.include_router(studio_chat.router, prefix="/api", tags=["Studio Chat"])
 app.include_router(repro_context.router, prefix="/api/research/repro/context", tags=["P2C"])
 app.include_router(feed.router, prefix="/api", tags=["Feed"])
+app.include_router(push_commands.router, prefix="/api", tags=["Push"])
 
 
 @app.on_event("startup")

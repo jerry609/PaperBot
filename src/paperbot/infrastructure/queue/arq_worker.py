@@ -70,6 +70,16 @@ def _parse_bool_env(name: str, default: bool = False) -> bool:
     return raw.strip().lower() in ("1", "true", "yes", "y", "on")
 
 
+def _parse_float_env(name: str, default: float) -> float:
+    raw = os.getenv(name)
+    if raw is None:
+        return float(default)
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return float(default)
+
+
 async def cron_track_subscriptions(ctx) -> Dict[str, Any]:
     """
     Cron entrypoint: enqueue tracking jobs for all subscribed scholars.
@@ -203,6 +213,9 @@ async def cron_daily_papers(ctx) -> Dict[str, Any]:
     judge_token_budget = int(os.getenv("PAPERBOT_DAILYPAPER_JUDGE_TOKEN_BUDGET", "0"))
     enable_figures = _parse_bool_env("PAPERBOT_DAILYPAPER_ENABLE_FIGURES", False)
     figures_max_items = int(os.getenv("PAPERBOT_DAILYPAPER_FIGURES_MAX_ITEMS", "5"))
+    mineru_api_base_url = os.getenv("MINERU_API_BASE_URL", "")
+    mineru_model_version = os.getenv("MINERU_MODEL_VERSION", "vlm")
+    mineru_max_wait_seconds = _parse_float_env("MINERU_MAX_WAIT_SECONDS", 180.0)
 
     job = await redis.enqueue_job(
         "daily_papers_job",
@@ -222,6 +235,9 @@ async def cron_daily_papers(ctx) -> Dict[str, Any]:
         judge_token_budget=judge_token_budget,
         enable_figures=enable_figures,
         figures_max_items=max(1, int(figures_max_items)),
+        mineru_api_base_url=mineru_api_base_url,
+        mineru_model_version=mineru_model_version,
+        mineru_max_wait_seconds=max(5.0, float(mineru_max_wait_seconds)),
         notify=notify_enabled,
         notify_channels=notify_channels,
         save=True,
@@ -234,6 +250,9 @@ async def cron_daily_papers(ctx) -> Dict[str, Any]:
         "branches": branches,
         "enable_figures": enable_figures,
         "figures_max_items": max(1, int(figures_max_items)),
+        "mineru_api_base_url": mineru_api_base_url,
+        "mineru_model_version": mineru_model_version,
+        "mineru_max_wait_seconds": max(5.0, float(mineru_max_wait_seconds)),
     }
     elog.append(
         make_event(
@@ -346,6 +365,9 @@ async def daily_papers_job(
     save: bool = True,
     enable_figures: bool = False,
     figures_max_items: int = 5,
+    mineru_api_base_url: str = "",
+    mineru_model_version: str = "vlm",
+    mineru_max_wait_seconds: float = 180.0,
 ) -> Dict[str, Any]:
     """ARQ job: generate DailyPaper report and bridge highlights into feed events."""
     run_id = new_run_id()
@@ -381,6 +403,11 @@ async def daily_papers_job(
                 "judge_token_budget": judge_token_budget,
                 "notify": notify,
                 "notify_channels": notify_channels or [],
+                "enable_figures": enable_figures,
+                "figures_max_items": max(1, int(figures_max_items)),
+                "mineru_api_base_url": mineru_api_base_url,
+                "mineru_model_version": mineru_model_version,
+                "mineru_max_wait_seconds": max(5.0, float(mineru_max_wait_seconds)),
             },
         )
     )
@@ -437,6 +464,9 @@ async def daily_papers_job(
                 report,
                 api_key=mineru_key,
                 max_items=max(1, int(figures_max_items)),
+                base_url=mineru_api_base_url,
+                model_version=mineru_model_version,
+                max_wait_seconds=max(5.0, float(mineru_max_wait_seconds)),
             )
 
     try:

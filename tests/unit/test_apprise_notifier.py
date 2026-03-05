@@ -131,3 +131,136 @@ def test_push_daily_digest_uses_channel_formatter(monkeypatch):
     assert result["ok"] is True
     assert sent_payloads, "expected at least one notify payload"
     assert "FlashKV" in str(sent_payloads[0]["body"])
+
+
+def test_push_daily_digest_retries_retryable_failures(monkeypatch):
+    attempts = {"count": 0}
+
+    class _RetryApprise:
+        def add(self, url, tag=None):
+            return None
+
+        def notify(self, **kwargs):
+            attempts["count"] += 1
+            if attempts["count"] == 1:
+                raise RuntimeError("429 Too Many Requests")
+            return True
+
+    fake_apprise = SimpleNamespace(
+        Apprise=lambda: _RetryApprise(),
+        NotifyType=SimpleNamespace(INFO="info"),
+        NotifyFormat=SimpleNamespace(TEXT="text", HTML="html", MARKDOWN="markdown"),
+        common=SimpleNamespace(MATCH_ALL_TAG="*"),
+    )
+
+    monkeypatch.setattr(notifier_mod, "_HAS_APPRISE", True)
+    monkeypatch.setattr(notifier_mod, "apprise", fake_apprise)
+    monkeypatch.setenv("PAPERBOT_PUSH_RETRY_ATTEMPTS", "3")
+    monkeypatch.setenv("PAPERBOT_PUSH_RETRY_BACKOFF_S", "0")
+
+    notifier = AppriseNotifier(
+        urls=["discord://webhook_id/webhook_token"],
+        tags={"discord://webhook_id/webhook_token": ["daily"]},
+    )
+    result = notifier.push_daily_digest(report={"title": "Digest", "date": "2026-03-03"}, tag="daily")
+
+    assert result["ok"] is True
+    assert attempts["count"] == 2
+    assert result["channels"][0]["attempts"] == 2
+
+
+def test_push_daily_digest_does_not_retry_non_retryable_failures(monkeypatch):
+    attempts = {"count": 0}
+
+    class _FailFastApprise:
+        def add(self, url, tag=None):
+            return None
+
+        def notify(self, **kwargs):
+            attempts["count"] += 1
+            raise RuntimeError("invalid webhook token")
+
+    fake_apprise = SimpleNamespace(
+        Apprise=lambda: _FailFastApprise(),
+        NotifyType=SimpleNamespace(INFO="info"),
+        NotifyFormat=SimpleNamespace(TEXT="text", HTML="html", MARKDOWN="markdown"),
+        common=SimpleNamespace(MATCH_ALL_TAG="*"),
+    )
+
+    monkeypatch.setattr(notifier_mod, "_HAS_APPRISE", True)
+    monkeypatch.setattr(notifier_mod, "apprise", fake_apprise)
+    monkeypatch.setenv("PAPERBOT_PUSH_RETRY_ATTEMPTS", "3")
+    monkeypatch.setenv("PAPERBOT_PUSH_RETRY_BACKOFF_S", "0")
+
+    notifier = AppriseNotifier(
+        urls=["discord://webhook_id/webhook_token"],
+        tags={"discord://webhook_id/webhook_token": ["daily"]},
+    )
+    result = notifier.push_daily_digest(report={"title": "Digest", "date": "2026-03-03"}, tag="daily")
+
+    assert result["ok"] is False
+    assert attempts["count"] == 1
+    assert result["channels"][0]["attempts"] == 1
+
+
+def test_push_daily_digest_adds_error_code_mapping(monkeypatch):
+    class _ErrorApprise:
+        def add(self, url, tag=None):
+            return None
+
+        def notify(self, **kwargs):
+            raise RuntimeError("503 Service Unavailable")
+
+    fake_apprise = SimpleNamespace(
+        Apprise=lambda: _ErrorApprise(),
+        NotifyType=SimpleNamespace(INFO="info"),
+        NotifyFormat=SimpleNamespace(TEXT="text", HTML="html", MARKDOWN="markdown"),
+        common=SimpleNamespace(MATCH_ALL_TAG="*"),
+    )
+
+    monkeypatch.setattr(notifier_mod, "_HAS_APPRISE", True)
+    monkeypatch.setattr(notifier_mod, "apprise", fake_apprise)
+    monkeypatch.setenv("PAPERBOT_PUSH_RETRY_ATTEMPTS", "1")
+    notifier = AppriseNotifier(urls=["wecom://corp/key"], tags={"wecom://corp/key": ["daily"]})
+
+    result = notifier.push_daily_digest(report={"title": "Digest", "date": "2026-03-03"}, tag="daily")
+
+    assert result["ok"] is False
+    assert result["channels"][0]["error_code"] == "downstream_unavailable"
+
+
+def test_push_daily_digest_idempotency_skips_duplicate(monkeypatch):
+    calls = {"count": 0}
+
+    class _FakeApprise:
+        def add(self, url, tag=None):
+            return None
+
+        def notify(self, **kwargs):
+            calls["count"] += 1
+            return True
+
+    fake_apprise = SimpleNamespace(
+        Apprise=lambda: _FakeApprise(),
+        NotifyType=SimpleNamespace(INFO="info"),
+        NotifyFormat=SimpleNamespace(TEXT="text", HTML="html", MARKDOWN="markdown"),
+        common=SimpleNamespace(MATCH_ALL_TAG="*"),
+    )
+
+    monkeypatch.setattr(notifier_mod, "_HAS_APPRISE", True)
+    monkeypatch.setattr(notifier_mod, "apprise", fake_apprise)
+    monkeypatch.setenv("PAPERBOT_PUSH_IDEMPOTENCY_TTL_S", "3600")
+
+    notifier = AppriseNotifier(
+        urls=["discord://webhook_id/webhook_token"],
+        tags={"discord://webhook_id/webhook_token": ["daily"]},
+    )
+    report = {"title": "Digest", "date": "2026-03-03", "queries": []}
+    first = notifier.push_daily_digest(report=report, tag="daily")
+    second = notifier.push_daily_digest(report=report, tag="daily")
+
+    assert first["ok"] is True
+    assert second["ok"] is True
+    assert calls["count"] == 1
+    assert second["channels"][0]["skipped"] is True
+    assert second["channels"][0]["error_code"] == "idempotent_replay"

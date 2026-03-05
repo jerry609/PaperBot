@@ -5,7 +5,7 @@ Modern React-based interface for PaperBot, built with Next.js 15, Shadcn UI, and
 ## Features
 
 - **Morning Paper Dashboard**: Research activity feed.
-- **DeepCode Studio**: Interactive Cloud IDE for reproduction.
+- **AgentSwarm Studio** (formerly DeepCode Studio): Interactive Cloud IDE for reproduction and agent orchestration.
 - **Scholar Profile**: Radar charts and impact metrics.
 - **Topic Workflows** (`/workflows`): Configure topic queries, run papers.cool search, inspect XYFlow read-only DAG status, generate DailyPaper preview, and optionally persist report files.
 

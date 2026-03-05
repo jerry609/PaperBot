@@ -2,16 +2,27 @@
 
 import { useEffect, Suspense, useRef } from "react"
 import { useSearchParams, useRouter } from "next/navigation"
-import { PanelsTopLeft } from "lucide-react"
-import { PapersPanel } from "@/components/studio/PapersPanel"
+import { ArrowLeft, PanelsTopLeft, Loader2 } from "lucide-react"
+import { PaperGallery } from "@/components/studio/PaperGallery"
 import { ReproductionLog } from "@/components/studio/ReproductionLog"
 import { FilesPanel } from "@/components/studio/FilesPanel"
 import { MCPProvider } from "@/lib/mcp"
-import { useStudioStore } from "@/lib/store/studio-store"
+import { useStudioStore, type StudioPaperStatus } from "@/lib/store/studio-store"
 import { useContextPackGeneration } from "@/hooks/useContextPackGeneration"
 import type { ReproContextPack } from "@/lib/types/p2c"
+import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable"
+import { cn } from "@/lib/utils"
+
+const statusConfig: Record<StudioPaperStatus, { label: string; className: string }> = {
+    draft: { label: "Draft", className: "bg-zinc-500/90 text-white" },
+    generating: { label: "Code", className: "bg-blue-500 text-white" },
+    ready: { label: "Ready", className: "bg-emerald-500 text-white" },
+    running: { label: "Run", className: "bg-violet-500 text-white" },
+    completed: { label: "Done", className: "bg-emerald-500 text-white" },
+    error: { label: "Error", className: "bg-red-500 text-white" },
+}
 
 function isReproContextPack(payload: unknown): payload is ReproContextPack {
     if (!payload || typeof payload !== "object") return false
@@ -39,6 +50,7 @@ function StudioContent() {
         selectPaper,
         loadPapers,
         papers,
+        selectedPaperId,
         setContextPack,
         setContextPackLoading,
         setContextPackError,
@@ -146,44 +158,65 @@ function StudioContent() {
         setContextPackLoading,
     ])
 
+    // Gallery view — no paper selected
+    if (!selectedPaperId) {
+        return <PaperGallery />
+    }
+
+    // Workspace view — paper selected
+    const selectedPaper = papers.find(p => p.id === selectedPaperId)
+    const paperTitle = selectedPaper?.title || "Untitled"
+    const paperStatus = selectedPaper?.status || "draft"
+    const config = statusConfig[paperStatus]
+    const isLoading = paperStatus === "generating" || paperStatus === "running"
+
     return (
         <div className="flex h-screen min-h-0 flex-col">
-            {/* Top Bar - minimal */}
-            <div className="border-b bg-background h-11 px-4 flex items-center gap-2 shrink-0">
-                <PanelsTopLeft className="h-4 w-4 text-primary" />
-                <span className="text-sm font-medium">DeepCode Studio</span>
+            {/* Top Bar */}
+            <div className="border-b bg-background h-11 px-3 flex items-center gap-2 shrink-0">
+                <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 shrink-0"
+                    onClick={() => selectPaper(null)}
+                    title="Back to gallery"
+                >
+                    <ArrowLeft className="h-4 w-4" />
+                </Button>
+                <PanelsTopLeft className="h-4 w-4 text-primary shrink-0" />
+                <span className="text-sm font-medium truncate">{paperTitle}</span>
+                <span
+                    className={cn(
+                        "inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium shrink-0",
+                        config.className,
+                    )}
+                >
+                    {isLoading && <Loader2 className="mr-1 h-2.5 w-2.5 animate-spin" />}
+                    {config.label}
+                </span>
             </div>
 
-            {/* Desktop: 3-panel CodePilot-style layout */}
+            {/* Desktop: 2-panel workspace (FilesPanel left, ReproductionLog right) */}
             <div className="hidden md:flex flex-1 min-h-0">
-                {/* Left: Papers Panel - fixed width */}
-                <div className="w-64 shrink-0 border-r">
-                    <PapersPanel />
-                </div>
-
-                {/* Middle + Right: Resizable */}
                 <ResizablePanelGroup orientation="horizontal" className="flex-1">
-                    {/* Middle: Reproduction Log */}
-                    <ResizablePanel defaultSize={75} minSize={40}>
-                        <ReproductionLog />
+                    {/* Left: Files Panel */}
+                    <ResizablePanel defaultSize={18} minSize={12}>
+                        <FilesPanel />
                     </ResizablePanel>
 
                     <ResizableHandle withHandle />
 
-                    {/* Right: Files Panel */}
-                    <ResizablePanel defaultSize={25} minSize={15}>
-                        <FilesPanel />
+                    {/* Right: Reproduction Log */}
+                    <ResizablePanel defaultSize={82} minSize={40}>
+                        <ReproductionLog />
                     </ResizablePanel>
                 </ResizablePanelGroup>
             </div>
 
-            {/* Mobile: Tab navigation */}
+            {/* Mobile: 2-tab workspace */}
             <div className="flex md:hidden flex-1 min-h-0">
-                <Tabs defaultValue="papers" className="h-full w-full flex flex-col">
+                <Tabs defaultValue="log" className="h-full w-full flex flex-col">
                     <TabsList className="w-full justify-start rounded-none border-b bg-transparent p-0 h-10 shrink-0">
-                        <TabsTrigger value="papers" className="rounded-none text-xs h-10 px-4">
-                            Papers
-                        </TabsTrigger>
                         <TabsTrigger value="log" className="rounded-none text-xs h-10 px-4">
                             Reproduction
                         </TabsTrigger>
@@ -191,9 +224,6 @@ function StudioContent() {
                             Files
                         </TabsTrigger>
                     </TabsList>
-                    <TabsContent value="papers" className="flex-1 min-h-0 m-0">
-                        <PapersPanel />
-                    </TabsContent>
                     <TabsContent value="log" className="flex-1 min-h-0 m-0">
                         <ReproductionLog />
                     </TabsContent>
