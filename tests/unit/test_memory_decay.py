@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from math import exp, log
 
 import pytest
 
@@ -9,6 +10,8 @@ from paperbot.infrastructure.stores.memory_store import (
     SqlAlchemyMemoryStore,
     _apply_decay_ranking,
     _decay_score,
+    _is_evergreen_memory,
+    _to_decay_lambda,
 )
 from paperbot.memory.schema import MemoryCandidate
 
@@ -18,6 +21,8 @@ def _make_item(
     confidence: float = 0.8,
     created_at: str | None = None,
     use_count: int = 0,
+    scope_type: str = "track",
+    kind: str = "fact",
 ) -> dict:
     now = datetime.now(timezone.utc)
     if created_at is None:
@@ -27,7 +32,39 @@ def _make_item(
         "confidence": confidence,
         "created_at": created_at,
         "use_count": use_count,
+        "scope_type": scope_type,
+        "kind": kind,
     }
+
+
+class TestToDecayLambda:
+    """Verify decay lambda follows ln(2)/halfLifeDays (aligned with OpenClaw)."""
+
+    def test_lambda_formula(self):
+        assert abs(_to_decay_lambda(30) - log(2) / 30) < 1e-12
+
+    def test_half_life_produces_exact_half(self):
+        lam = _to_decay_lambda(30)
+        assert abs(exp(-lam * 30) - 0.5) < 1e-12
+
+    def test_zero_half_life_returns_zero(self):
+        assert _to_decay_lambda(0) == 0.0
+
+    def test_negative_half_life_returns_zero(self):
+        assert _to_decay_lambda(-10) == 0.0
+
+
+class TestEvergreenMemory:
+    """Evergreen memories (global scope, preference kind) skip recency decay."""
+
+    def test_global_scope_is_evergreen(self):
+        assert _is_evergreen_memory({"scope_type": "global", "kind": "fact"})
+
+    def test_preference_kind_is_evergreen(self):
+        assert _is_evergreen_memory({"scope_type": "track", "kind": "preference"})
+
+    def test_track_fact_is_not_evergreen(self):
+        assert not _is_evergreen_memory({"scope_type": "track", "kind": "fact"})
 
 
 class TestDecayScore:
@@ -40,16 +77,28 @@ class TestDecayScore:
 
     def test_old_item_has_lower_recency(self):
         now = datetime.now(timezone.utc)
-        old = now - timedelta(days=180)
+        old = now - timedelta(days=60)
         item = _make_item(confidence=0.9, created_at=old.isoformat(), use_count=0)
         score = _decay_score(item, now=now)
-        # recency = exp(-180/90) = exp(-2) ≈ 0.135
-        # total ≈ 0.63 + 0.135*0.2 + 0 ≈ 0.657
+        # λ = ln2/30, recency = exp(-λ*60) = exp(-2*ln2) = 0.25
+        # total = 0.63 + 0.25*0.2 + 0 = 0.68
         assert score < 0.70
+
+    def test_at_half_life_recency_is_half(self):
+        """At exactly half_life_days, recency multiplier should be ~0.5."""
+        now = datetime.now(timezone.utc)
+        item = _make_item(
+            confidence=0.0,
+            created_at=(now - timedelta(days=30)).isoformat(),
+            use_count=0,
+        )
+        score = _decay_score(item, now=now, half_life_days=30)
+        # relevance=0, recency=0.5*0.2=0.1, usage=0
+        assert abs(score - 0.1) < 0.01
 
     def test_high_usage_boosts_score(self):
         now = datetime.now(timezone.utc)
-        old = now - timedelta(days=180)
+        old = now - timedelta(days=60)
         low_use = _make_item(confidence=0.5, created_at=old.isoformat(), use_count=0)
         high_use = _make_item(confidence=0.5, created_at=old.isoformat(), use_count=10)
         score_low = _decay_score(low_use, now=now)
@@ -63,6 +112,29 @@ class TestDecayScore:
         s10 = _decay_score(item10, now=now)
         s20 = _decay_score(item20, now=now)
         assert abs(s10 - s20) < 0.001  # both capped at 1.0
+
+    def test_evergreen_memory_ignores_age(self):
+        """Global/preference memories should get recency=1.0 regardless of age."""
+        now = datetime.now(timezone.utc)
+        very_old = now - timedelta(days=3650)
+        global_item = _make_item(
+            confidence=0.8,
+            created_at=very_old.isoformat(),
+            use_count=0,
+            scope_type="global",
+        )
+        track_item = _make_item(
+            confidence=0.8,
+            created_at=very_old.isoformat(),
+            use_count=0,
+            scope_type="track",
+        )
+        global_score = _decay_score(global_item, now=now)
+        track_score = _decay_score(track_item, now=now)
+        # Global should score higher because it's immune to decay.
+        assert global_score > track_score
+        # Global recency component is full 0.2.
+        assert abs(global_score - (0.8 * 0.7 + 1.0 * 0.2 + 0.0)) < 0.01
 
 
 class TestApplyDecayRanking:
