@@ -485,6 +485,12 @@ class ContextEngineConfig:
     task_limit: int = 8
     milestone_limit: int = 6
     paper_limit: int = 8
+    memory_search_min_score: float = 0.0
+    memory_search_candidate_multiplier: int = 4
+    memory_search_mmr_enabled: bool = False
+    memory_search_mmr_lambda: float = 0.7
+    memory_search_half_life_days: float = 30.0
+    context_token_budget: Optional[int] = None
     offline: bool = False
     stage: str = "auto"
     search_sources: Optional[List[str]] = None
@@ -625,6 +631,11 @@ class ContextEngine:
                 limit=self.config.memory_limit,
                 scope_type="track",
                 scope_id=track_scope_id,
+                min_score=self.config.memory_search_min_score,
+                candidate_multiplier=self.config.memory_search_candidate_multiplier,
+                mmr_enabled=self.config.memory_search_mmr_enabled,
+                mmr_lambda=self.config.memory_search_mmr_lambda,
+                half_life_days=self.config.memory_search_half_life_days,
             )
             self.memory_store.touch_usage(
                 item_ids=[int(i["id"]) for i in relevant_memories if i.get("id")],
@@ -653,6 +664,11 @@ class ContextEngine:
                     scope_ids=other_scope_ids,
                     scope_type="track",
                     limit_per_scope=max(2, self.config.memory_limit // 2),
+                    min_score=self.config.memory_search_min_score,
+                    candidate_multiplier=self.config.memory_search_candidate_multiplier,
+                    mmr_enabled=self.config.memory_search_mmr_enabled,
+                    mmr_lambda=self.config.memory_search_mmr_lambda,
+                    half_life_days=self.config.memory_search_half_life_days,
                 )
                 cross_hit_ids: List[int] = []
                 for sid, hits in batch_results.items():
@@ -672,6 +688,88 @@ class ContextEngine:
             "relevant_memories": relevant_memories,
             "cross_track_memories": cross_track_memories,
         }
+
+    @staticmethod
+    def _estimate_context_layers(
+        *,
+        user_prefs: List[Dict[str, Any]],
+        tasks: List[Dict[str, Any]],
+        milestones: List[Dict[str, Any]],
+        relevant_memories: List[Dict[str, Any]],
+        cross_track_memories: List[Dict[str, Any]],
+        paper_memories: List[Dict[str, Any]],
+    ) -> Dict[str, int]:
+        return {
+            "layer0_profile_tokens": len(user_prefs) * 65,
+            "layer1_track_tokens": (len(tasks) + len(milestones)) * 50,
+            "layer2_query_tokens": (len(relevant_memories) + len(cross_track_memories)) * 100,
+            "layer3_paper_tokens": len(paper_memories) * 100,
+        }
+
+    def _apply_context_token_guard(
+        self,
+        *,
+        user_prefs: List[Dict[str, Any]],
+        tasks: List[Dict[str, Any]],
+        milestones: List[Dict[str, Any]],
+        relevant_memories: List[Dict[str, Any]],
+        cross_track_memories: List[Dict[str, Any]],
+        paper_memories: List[Dict[str, Any]],
+    ) -> Tuple[
+        List[Dict[str, Any]],
+        List[Dict[str, Any]],
+        List[Dict[str, Any]],
+        List[Dict[str, Any]],
+        List[Dict[str, Any]],
+        List[Dict[str, Any]],
+        Dict[str, int],
+        bool,
+    ]:
+        budget = self.config.context_token_budget
+        prefs = list(user_prefs)
+        task_list = list(tasks)
+        milestone_list = list(milestones)
+        relevant = list(relevant_memories)
+        cross_track = list(cross_track_memories)
+        paper = list(paper_memories)
+
+        layers = self._estimate_context_layers(
+            user_prefs=prefs,
+            tasks=task_list,
+            milestones=milestone_list,
+            relevant_memories=relevant,
+            cross_track_memories=cross_track,
+            paper_memories=paper,
+        )
+        if budget is None or budget <= 0:
+            return prefs, task_list, milestone_list, relevant, cross_track, paper, layers, False
+
+        def _total_tokens() -> int:
+            return sum(layers.values())
+
+        if _total_tokens() <= budget:
+            return prefs, task_list, milestone_list, relevant, cross_track, paper, layers, False
+
+        trimmed = False
+        while _total_tokens() > budget:
+            trimmed_this_round = False
+            for collection in (cross_track, relevant, paper, task_list, milestone_list, prefs):
+                if collection and _total_tokens() > budget:
+                    collection.pop()
+                    trimmed = True
+                    trimmed_this_round = True
+                    layers = self._estimate_context_layers(
+                        user_prefs=prefs,
+                        tasks=task_list,
+                        milestones=milestone_list,
+                        relevant_memories=relevant,
+                        cross_track_memories=cross_track,
+                        paper_memories=paper,
+                    )
+            if not trimmed_this_round:
+                break
+
+        return prefs, task_list, milestone_list, relevant, cross_track, paper, layers, trimmed
 
     def _load_layer3_paper(
         self, user_id: str, paper_id: Optional[str]
@@ -1041,13 +1139,29 @@ class ContextEngine:
         except Exception:
             context_run_id = None
 
-        # Token estimates per layer.
-        context_layers = {
-            "layer0_profile_tokens": len(user_prefs) * 65,
-            "layer1_track_tokens": (len(progress_tasks) + len(progress_milestones)) * 50,
-            "layer2_query_tokens": (len(relevant_memories) + len(cross_track_memories)) * 100,
-            "layer3_paper_tokens": len(paper_memories) * 100,
-        }
+        (
+            user_prefs,
+            progress_tasks,
+            progress_milestones,
+            relevant_memories,
+            cross_track_memories,
+            paper_memories,
+            context_layers,
+            guard_trimmed,
+        ) = self._apply_context_token_guard(
+            user_prefs=user_prefs,
+            tasks=progress_tasks,
+            milestones=progress_milestones,
+            relevant_memories=relevant_memories,
+            cross_track_memories=cross_track_memories,
+            paper_memories=paper_memories,
+        )
+        if guard_trimmed:
+            routing["token_guard"] = {
+                "enabled": True,
+                "budget": self.config.context_token_budget,
+                "post_guard_total_tokens": sum(context_layers.values()),
+            }
 
         return {
             "user_id": user_id,
