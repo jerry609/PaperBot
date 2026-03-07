@@ -1,0 +1,37 @@
+[
+  {
+    "case_id": "transformer_seq2seq",
+    "paper_id": "roi:transformer_seq2seq",
+    "title": "Transformer Seq2Seq Reproduction",
+    "abstract": "We replace recurrence with self-attention for sequence transduction.",
+    "method_section": "Model uses multi-head self-attention, positional encoding, label smoothing, Adam with warmup, and a standard train/eval split."
+  },
+  {
+    "case_id": "gnn_link_prediction",
+    "paper_id": "roi:gnn_link_prediction",
+    "title": "Graph Neural Link Prediction",
+    "abstract": "We train a message-passing GNN for ranking candidate links.",
+    "method_section": "Implementation includes graph encoder, negative sampling, AUC evaluation, and batched neighborhood aggregation."
+  },
+  {
+    "case_id": "cnn_retrieval",
+    "paper_id": "roi:cnn_retrieval",
+    "title": "CNN Retrieval Baseline",
+    "abstract": "A convolutional encoder improves retrieval quality on document matching.",
+    "method_section": "Pipeline contains text preprocessing, convolution blocks, max pooling, margin ranking loss, and Recall@10 evaluation."
+  },
+  {
+    "case_id": "diffusion_denoiser",
+    "paper_id": "roi:diffusion_denoiser",
+    "title": "Diffusion Denoiser Toy Benchmark",
+    "abstract": "We denoise image patches with a lightweight diffusion model.",
+    "method_section": "Training loop uses cosine noise schedule, UNet blocks, MSE loss, and checkpointed validation samples."
+  },
+  {
+    "case_id": "rl_policy_gradient",
+    "paper_id": "roi:rl_policy_gradient",
+    "title": "Policy Gradient Control",
+    "abstract": "We optimize a lightweight actor-critic for sparse-reward control.",
+    "method_section": "Implementation requires rollout buffer, discounted returns, entropy bonus, gradient clipping, and episode-level reward logging."
+  }
+]

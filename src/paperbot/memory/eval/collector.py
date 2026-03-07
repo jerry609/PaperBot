@@ -7,6 +7,8 @@ Collects and stores evaluation metrics defined in docs/memory_types.md:
 - retrieval_hit_rate: >= 80%
 - injection_pollution_rate: <= 2%
 - deletion_compliance: 100%
+- cross_user_leak_rate: 0%
+- cross_scope_leak_rate: 0%
 """
 
 from __future__ import annotations
@@ -47,6 +49,8 @@ class MemoryMetricCollector:
         "retrieval_hit_rate": 0.80,
         "injection_pollution_rate": 0.02,
         "deletion_compliance": 1.00,
+        "cross_user_leak_rate": 0.00,
+        "cross_scope_leak_rate": 0.00,
     }
 
     def __init__(self, db_url: Optional[str] = None):
@@ -154,6 +158,34 @@ class MemoryMetricCollector:
             detail=detail,
         )
 
+    def record_scope_isolation(
+        self,
+        *,
+        cross_user_leak_count: int,
+        cross_user_total_checks: int,
+        cross_scope_leak_count: int,
+        cross_scope_total_checks: int,
+        evaluator_id: str = "system",
+        detail: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Record scope isolation leakage rates for user and scope boundaries."""
+        if cross_user_total_checks > 0:
+            self._record_metric(
+                metric_name="cross_user_leak_rate",
+                metric_value=cross_user_leak_count / cross_user_total_checks,
+                sample_size=cross_user_total_checks,
+                evaluator_id=evaluator_id,
+                detail=detail,
+            )
+        if cross_scope_total_checks > 0:
+            self._record_metric(
+                metric_name="cross_scope_leak_rate",
+                metric_value=cross_scope_leak_count / cross_scope_total_checks,
+                sample_size=cross_scope_total_checks,
+                evaluator_id=evaluator_id,
+                detail=detail,
+            )
+
     def _record_metric(
         self,
         metric_name: str,
@@ -215,14 +247,17 @@ class MemoryMetricCollector:
         if target is None:
             return True
         # For rates that should be LOW (false_positive, pollution), lower is better
-        if metric_name in ("false_positive_rate", "injection_pollution_rate"):
+        if metric_name in (
+            "false_positive_rate",
+            "injection_pollution_rate",
+            "cross_user_leak_rate",
+            "cross_scope_leak_rate",
+        ):
             return value <= target
         # For rates that should be HIGH (precision, hit_rate, compliance), higher is better
         return value >= target
 
-    def get_metric_history(
-        self, metric_name: str, limit: int = 30
-    ) -> List[Dict[str, Any]]:
+    def get_metric_history(self, metric_name: str, limit: int = 30) -> List[Dict[str, Any]]:
         """Get historical values for a specific metric."""
         result = []
         with self._provider.session() as session:
@@ -234,10 +269,12 @@ class MemoryMetricCollector:
             )
             rows = session.execute(stmt).scalars().all()
             for row in rows:
-                result.append({
-                    "value": row.metric_value,
-                    "sample_size": row.sample_size,
-                    "evaluated_at": row.evaluated_at.isoformat() if row.evaluated_at else None,
-                    "evaluator_id": row.evaluator_id,
-                })
+                result.append(
+                    {
+                        "value": row.metric_value,
+                        "sample_size": row.sample_size,
+                        "evaluated_at": row.evaluated_at.isoformat() if row.evaluated_at else None,
+                        "evaluator_id": row.evaluator_id,
+                    }
+                )
         return result
