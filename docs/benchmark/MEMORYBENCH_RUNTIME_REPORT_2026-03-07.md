@@ -169,3 +169,63 @@ The highest-value next additions would be:
 1. A LoCoMo / LongMemEval-style multi-session benchmark for remembered facts and temporal updates
 2. A write/update benchmark for stale-memory overwrite and contradiction resolution
 3. A fixed ROI harness with dependency-aware verification so memory lift is not hidden by missing runtime packages
+
+
+## Follow-up Update — March 7, 2026
+
+### Dependency-ready ROI smoke
+
+Artifact:
+
+- `output/reports/memory_roi_benchmark_smoke.json`
+
+What changed since the earlier ROI section in this report:
+
+- ROI now prepares a cached verification runtime from generated `requirements.txt`
+- runtime install failures are recorded with `pip` stdout/stderr and a persisted failure-log path
+- failed partial runtime caches are rebuilt automatically
+- torch-family installs prefer the CPU wheel index during verification runtime prep
+- invalid repair output such as `Unknown module` is no longer written into `requirements.txt`
+
+Current smoke result on **March 7, 2026**:
+
+- runtime preparation succeeded and reused a cached env (`req_ef8ee04c13655c4b`)
+- the dominant failure moved from missing runtime dependencies to a real code defect:
+  - `ImportError: cannot import name 'DataLoader' from 'data'`
+- `token_cost_usd` still remained `0.0` in this environment because the configured OpenAI-compatible relay returned repeated `500` overload errors for both `reasoning` and `code` routes
+
+Interpretation:
+
+- this is a meaningful improvement over the earlier invalid ROI state because the benchmark is now blocked by generated-code correctness rather than dependency bootstrap
+- a trustable LLM-backed ROI number still requires a healthy provider endpoint so the generation path can actually use `LLMService` and emit usage accounting
+
+### Multi-session effectiveness prototype
+
+Artifacts:
+
+- heuristic: `output/reports/memory_effectiveness_benchmark_heuristic.json`
+- LLM path prototype: `output/reports/memory_effectiveness_benchmark_llm.json`
+
+Implementation:
+
+- core benchmark: `src/paperbot/memory/eval/effectiveness_benchmark.py`
+- CLI: `evals/memory/bench_effectiveness.py`
+- fixture: `evals/memory/fixtures/multi_session_effectiveness.json`
+
+Current heuristic summary on **March 7, 2026**:
+
+- `question_count = 4`
+- `retrieval_hit_rate = 0.75`
+- `answer_accuracy = 1.0`
+- `temporal_accuracy = 1.0`
+- `update_accuracy = 1.0`
+- `abstention_accuracy = 1.0`
+
+What this prototype covers:
+
+- stale-memory overwrite / update quality
+- temporal state tracking across sessions
+- scope-aware retrieval
+- abstention when memory is missing
+
+That makes it a better fit for “is the memory module effective?” than pure SQL pressure testing alone.

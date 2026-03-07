@@ -81,7 +81,7 @@ AI-powered research workflow: paper discovery → LLM analysis → scholar track
 - **Structured Cards** — LLM-extracted method / dataset / conclusion / limitations with DB caching
 - **Related Work** — Draft generation from saved papers with [AuthorYear] citation format
 - **Memory System** — Research memory with FTS5 + BM25 search, context engine for personalized recommendations
-- **MemoryBench Suite** — Retrieval / context / isolation / injection / performance / ROI benchmarks for the memory and Paper2Code stack
+- **MemoryBench Suite** — Retrieval / context / isolation / injection / performance / ROI / effectiveness benchmarks for the memory and Paper2Code stack
 
 ### Reproduction & Studio
 
@@ -241,6 +241,7 @@ python -m black . && python -m isort .
 | [`docs/context_engine_eval.md`](docs/context_engine_eval.md) | Context extraction benchmark guide |
 | [`docs/memory_performance_eval.md`](docs/memory_performance_eval.md) | Memory performance benchmark guide |
 | [`docs/p2c/P2C_ROI_BENCHMARK.md`](docs/p2c/P2C_ROI_BENCHMARK.md) | ROI benchmark guide |
+| [`docs/memory_effectiveness_eval.md`](docs/memory_effectiveness_eval.md) | Multi-session memory effectiveness benchmark guide |
 | [`docs/memory_system.md`](docs/memory_system.md) | Memory system design |
 | [`docs/anchor_system.md`](docs/anchor_system.md) | Anchor author system |
 | [`docs/AGENTIC_RESEARCH_EVOLUTION.md`](docs/AGENTIC_RESEARCH_EVOLUTION.md) | Agentic Research evolution plan |

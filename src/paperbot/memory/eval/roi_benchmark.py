@@ -115,10 +115,22 @@ class ReproAgentROIBenchmarkRunner:
         use_orchestrator: bool = True,
         use_rag: bool = True,
         max_repair_attempts: int = 3,
+        use_project_llm_service: bool = True,
+        prepare_requirements: bool = True,
+        runtime_cache_dir: str | Path | None = None,
+        verification_install_timeout: int = 900,
+        prefer_cpu_torch: bool = True,
     ) -> None:
         self.use_orchestrator = use_orchestrator
         self.use_rag = use_rag
         self.max_repair_attempts = max_repair_attempts
+        self.use_project_llm_service = use_project_llm_service
+        self.prepare_requirements = prepare_requirements
+        self.runtime_cache_dir = (
+            Path(runtime_cache_dir) if runtime_cache_dir else Path("output/runtime_envs/roi_bench")
+        )
+        self.verification_install_timeout = verification_install_timeout
+        self.prefer_cpu_torch = prefer_cpu_torch
 
     async def run_case(
         self,
@@ -143,6 +155,11 @@ class ReproAgentROIBenchmarkRunner:
                         "use_orchestrator": self.use_orchestrator,
                         "use_rag": self.use_rag,
                         "max_repair_attempts": self.max_repair_attempts,
+                        "use_project_llm_service": self.use_project_llm_service,
+                        "verification_prepare_requirements": self.prepare_requirements,
+                        "verification_runtime_cache_dir": str(self.runtime_cache_dir),
+                        "verification_install_timeout": self.verification_install_timeout,
+                        "verification_prefer_cpu_torch": self.prefer_cpu_torch,
                     }
                 )
                 if not arm.enable_seeded_memory:
@@ -182,7 +199,24 @@ class ReproAgentROIBenchmarkRunner:
                         "status": status_text,
                         "overall_score": int(result.overall_score or 0),
                         "generated_files": len(result.generated_files or {}),
+                        "error": result.error,
                         "verification": result.verification or {},
+                        "verification_runtime": (
+                            getattr(agent, "_orchestrator", None).context.get(
+                                "verification_runtime"
+                            )
+                            if getattr(agent, "_orchestrator", None)
+                            and getattr(agent._orchestrator, "context", None)
+                            else None
+                        ),
+                        "verification_runtime_error": (
+                            getattr(agent, "_orchestrator", None).context.get(
+                                "verification_runtime_error"
+                            )
+                            if getattr(agent, "_orchestrator", None)
+                            and getattr(agent._orchestrator, "context", None)
+                            else None
+                        ),
                     },
                 )
 

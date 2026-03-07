@@ -10,6 +10,7 @@ Enhanced with:
 """
 
 import logging
+import time
 from typing import Dict, Any, Optional, List, Tuple, Union
 from .base_node import BaseNode
 from ..models import PaperContext, ReproductionPlan, ImplementationSpec, Blueprint
@@ -47,10 +48,17 @@ Purpose: {purpose}
 Components: {components}
 Specs: {specs}
 
+Relevant Code Patterns:
+{patterns}
+
+Already Generated Code (for reference):
+{memory_context}
+
 Generate clean, well-documented Python code. Include:
 - Docstrings
 - Type hints
 - Basic error handling
+- Correct imports for local modules
 
 Output ONLY the Python code, no markdown.
 """
@@ -86,7 +94,7 @@ Output ONLY the Python code, no markdown or explanations.
         max_context_tokens: int = 8000,
         use_rag: bool = True,
         experience_store=None,
-        **kwargs
+        **kwargs,
     ):
         super().__init__(node_name="GenerationNode", **kwargs)
         self.llm_client = llm_client
@@ -101,6 +109,40 @@ Output ONLY the Python code, no markdown or explanations.
 
         # Initialize Knowledge Base
         self.knowledge_base = CodeKnowledgeBase.from_builtin() if use_rag else None
+
+    def _complete_prompt(self, prompt: str, *, max_tokens: int = 3000) -> str:
+        if self.llm_client is not None:
+            last_error = None
+            for attempt in range(3):
+                try:
+                    return (
+                        self.llm_client.complete(
+                            task_type="code",
+                            system=(
+                                "You generate Python project files for research reproductions. "
+                                "Return only the Python file content with no markdown fences."
+                            ),
+                            user=prompt,
+                            use_cache=False,
+                            max_tokens=max_tokens,
+                        )
+                        or ""
+                    ).strip()
+                except Exception as exc:  # noqa: BLE001
+                    last_error = exc
+                    if attempt < 2:
+                        time.sleep(1 + attempt)
+            if last_error is not None:
+                raise last_error
+
+        if query and ClaudeAgentOptions:
+            result = query(
+                prompt=prompt,
+                options=ClaudeAgentOptions(max_tokens=max_tokens),
+            )
+            return str(result.response or "").strip()
+
+        return ""
 
     def _validate_input(self, input_data: Any, **kwargs) -> Optional[str]:
         """Validate input tuple."""
@@ -120,7 +162,9 @@ Output ONLY the Python code, no markdown or explanations.
         self.memory.clear()
 
         # Pre-load prior experiences for the same paper (issue #162)
-        paper_id = getattr(paper_context, "paper_id", None) or getattr(paper_context, "arxiv_id", None)
+        paper_id = getattr(paper_context, "paper_id", None) or getattr(
+            paper_context, "arxiv_id", None
+        )
         user_id = (kwargs.get("user_id", "default") or "default").strip() or "default"
         pack_id = kwargs.get("pack_id")
         if paper_id:
@@ -145,7 +189,7 @@ Output ONLY the Python code, no markdown or explanations.
                 paper_context=paper_context,
                 plan=plan,
                 spec=spec,
-                blueprint=blueprint
+                blueprint=blueprint,
             )
 
             files[filepath] = code
@@ -175,14 +219,12 @@ Output ONLY the Python code, no markdown or explanations.
         paper_context: PaperContext,
         plan: ReproductionPlan,
         spec: ImplementationSpec,
-        blueprint: Optional[Blueprint] = None
+        blueprint: Optional[Blueprint] = None,
     ) -> str:
         """Generate a single code file with memory and RAG context."""
         # Build context from memory
         memory_context = self.memory.get_relevant_context(
-            current_file=filepath,
-            query=purpose,
-            include_interfaces=True
+            current_file=filepath, query=purpose, include_interfaces=True
         )
 
         # Retrieve relevant patterns from RAG
@@ -192,45 +234,37 @@ Output ONLY the Python code, no markdown or explanations.
             if patterns:
                 patterns_context = "\n\n".join(p.to_context() for p in patterns)
 
-        # Try LLM generation with enhanced context
-        if query and ClaudeAgentOptions:
-            try:
-                if blueprint:
-                    # Use enhanced prompt with Blueprint
-                    prompt = self.ENHANCED_CODE_GEN_PROMPT.format(
-                        blueprint_context=blueprint.to_compressed_context(max_tokens=1500),
-                        filepath=filepath,
-                        purpose=purpose,
-                        patterns=patterns_context or "No specific patterns available.",
-                        memory_context=memory_context or "This is the first file being generated."
-                    )
-                else:
-                    # Fallback to basic prompt
-                    prompt = self.CODE_GEN_PROMPT.format(
-                        title=paper_context.title,
-                        filepath=filepath,
-                        purpose=purpose,
-                        components=", ".join(plan.key_components),
-                        specs=str(spec.layers)[:500]
-                    )
-
-                result = query(
-                    prompt=prompt,
-                    options=ClaudeAgentOptions(max_tokens=3000)
+        try:
+            if blueprint:
+                prompt = self.ENHANCED_CODE_GEN_PROMPT.format(
+                    blueprint_context=blueprint.to_compressed_context(max_tokens=1500),
+                    filepath=filepath,
+                    purpose=purpose,
+                    patterns=patterns_context or "No specific patterns available.",
+                    memory_context=memory_context or "This is the first file being generated.",
+                )
+            else:
+                prompt = self.CODE_GEN_PROMPT.format(
+                    title=paper_context.title,
+                    filepath=filepath,
+                    purpose=purpose,
+                    components=", ".join(plan.key_components),
+                    specs=str(spec.layers)[:500],
+                    patterns=patterns_context or "No specific patterns available.",
+                    memory_context=memory_context or "This is the first file being generated.",
                 )
 
-                return self._clean_code(result.response)
-            except Exception as e:
-                logger.warning(f"LLM generation failed for {filepath}: {e}")
+            response = self._complete_prompt(prompt, max_tokens=3000)
+            if response:
+                return self._clean_code(response)
+        except Exception as e:
+            logger.warning(f"LLM generation failed for {filepath}: {e}")
 
         # Fallback template
         return self._fallback_template(filepath, purpose, plan, spec, blueprint)
 
     def _retrieve_patterns(
-        self,
-        filepath: str,
-        purpose: str,
-        blueprint: Optional[Blueprint] = None
+        self, filepath: str, purpose: str, blueprint: Optional[Blueprint] = None
     ) -> List:
         """Retrieve relevant code patterns for the file being generated."""
         if not self.knowledge_base:
@@ -281,7 +315,7 @@ Output ONLY the Python code, no markdown or explanations.
         purpose: str,
         plan: ReproductionPlan,
         spec: ImplementationSpec,
-        blueprint: Optional[Blueprint] = None
+        blueprint: Optional[Blueprint] = None,
     ) -> str:
         """Generate fallback template code with blueprint awareness."""
         basename = filepath.replace(".py", "").replace("/", "_")
@@ -305,7 +339,7 @@ Output ONLY the Python code, no markdown or explanations.
         self,
         plan: ReproductionPlan,
         spec: ImplementationSpec,
-        blueprint: Optional[Blueprint] = None
+        blueprint: Optional[Blueprint] = None,
     ) -> str:
         return f'''"""
 {plan.project_name} - Main Entry Point
@@ -314,6 +348,7 @@ Auto-generated by PaperBot ReproAgent
 
 import argparse
 import logging
+import time
 from pathlib import Path
 
 from config import Config
@@ -371,9 +406,7 @@ if __name__ == "__main__":
 '''
 
     def _template_model(
-        self,
-        spec: ImplementationSpec,
-        blueprint: Optional[Blueprint] = None
+        self, spec: ImplementationSpec, blueprint: Optional[Blueprint] = None
     ) -> str:
         """Generate model template based on architecture."""
         arch = blueprint.architecture_type if blueprint else "unknown"
@@ -386,9 +419,7 @@ if __name__ == "__main__":
             return self._template_generic_model(spec, blueprint)
 
     def _template_transformer_model(
-        self,
-        spec: ImplementationSpec,
-        blueprint: Optional[Blueprint] = None
+        self, spec: ImplementationSpec, blueprint: Optional[Blueprint] = None
     ) -> str:
         hyperparams = blueprint.key_hyperparameters if blueprint else {}
         hidden_size = hyperparams.get("hidden_size", 768)
@@ -514,9 +545,7 @@ class Model(nn.Module):
 '''
 
     def _template_cnn_model(
-        self,
-        spec: ImplementationSpec,
-        blueprint: Optional[Blueprint] = None
+        self, spec: ImplementationSpec, blueprint: Optional[Blueprint] = None
     ) -> str:
         return '''"""CNN Model Implementation."""
 
@@ -568,9 +597,7 @@ class Model(nn.Module):
 '''
 
     def _template_generic_model(
-        self,
-        spec: ImplementationSpec,
-        blueprint: Optional[Blueprint] = None
+        self, spec: ImplementationSpec, blueprint: Optional[Blueprint] = None
     ) -> str:
         return '''"""Model implementation."""
 
@@ -599,9 +626,7 @@ class Model(nn.Module):
 '''
 
     def _template_data(
-        self,
-        spec: ImplementationSpec,
-        blueprint: Optional[Blueprint] = None
+        self, spec: ImplementationSpec, blueprint: Optional[Blueprint] = None
     ) -> str:
         return f'''"""Data loading utilities."""
 
@@ -669,9 +694,7 @@ class DataLoader:
 '''
 
     def _template_config(
-        self,
-        spec: ImplementationSpec,
-        blueprint: Optional[Blueprint] = None
+        self, spec: ImplementationSpec, blueprint: Optional[Blueprint] = None
     ) -> str:
         hyperparams = blueprint.key_hyperparameters if blueprint else {}
 
@@ -739,9 +762,7 @@ class Config:
 '''
 
     def _template_trainer(
-        self,
-        spec: ImplementationSpec,
-        blueprint: Optional[Blueprint] = None
+        self, spec: ImplementationSpec, blueprint: Optional[Blueprint] = None
     ) -> str:
         optimizer = "AdamW"
         if blueprint and blueprint.optimization_strategy:
@@ -758,6 +779,7 @@ from torch.optim import {optimizer}
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from tqdm import tqdm
 import logging
+import time
 from pathlib import Path
 from typing import Optional, Dict, Any
 

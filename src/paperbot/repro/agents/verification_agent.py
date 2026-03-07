@@ -15,6 +15,11 @@ from typing import Any, Dict, Optional, List
 from pathlib import Path
 from dataclasses import dataclass, field
 
+from paperbot.repro.verification_runtime import (
+    VerificationRuntimePreparationError,
+    prepare_verification_runtime,
+)
+
 from .base_agent import BaseAgent, AgentResult, AgentStatus
 
 logger = logging.getLogger(__name__)
@@ -23,6 +28,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class VerificationReport:
     """Report of verification results."""
+
     syntax_ok: bool = False
     imports_ok: bool = False
     tests_ok: bool = False
@@ -74,12 +80,22 @@ class VerificationAgent(BaseAgent):
         timeout: int = 30,
         run_tests: bool = True,
         run_smoke: bool = True,
-        **kwargs
+        python_executable: str = "python3",
+        prepare_requirements: bool = False,
+        runtime_cache_dir: Optional[Path] = None,
+        install_timeout: int = 600,
+        prefer_cpu_torch: bool = False,
+        **kwargs,
     ):
         super().__init__(name="VerificationAgent", **kwargs)
         self.timeout = timeout
         self.run_tests = run_tests
         self.run_smoke = run_smoke
+        self.python_executable = python_executable
+        self.prepare_requirements = prepare_requirements
+        self.runtime_cache_dir = Path(runtime_cache_dir) if runtime_cache_dir else None
+        self.install_timeout = install_timeout
+        self.prefer_cpu_torch = prefer_cpu_torch
 
     async def execute(self, context: Dict[str, Any]) -> AgentResult:
         """Execute verification pipeline."""
@@ -108,15 +124,22 @@ class VerificationAgent(BaseAgent):
                 context["verification_report"] = report
 
                 return AgentResult.success(
-                    data={"report": report},
-                    metadata={"stage": "syntax", "passed": False}
+                    data={"report": report}, metadata={"stage": "syntax", "passed": False}
                 )
             else:
                 self.log("Syntax check passed")
 
+            runtime = self._prepare_runtime(output_dir)
+            context["verification_runtime"] = runtime.to_dict()
+            if runtime.prepared:
+                reuse_note = "cache hit" if runtime.reused_cache else "fresh install"
+                self.log(f"Prepared verification runtime ({reuse_note})")
+
             # Step 2: Import check
             self.log("Checking imports...")
-            import_result = self._check_imports(output_dir)
+            import_result = self._check_imports(
+                output_dir, python_executable=runtime.python_executable
+            )
             report.imports_ok = import_result["passed"]
             if not import_result["passed"]:
                 error_msg = import_result.get("error", "Unknown import error")
@@ -127,8 +150,7 @@ class VerificationAgent(BaseAgent):
                 context["verification_report"] = report
 
                 return AgentResult.success(
-                    data={"report": report},
-                    metadata={"stage": "imports", "passed": False}
+                    data={"report": report}, metadata={"stage": "imports", "passed": False}
                 )
             else:
                 self.log("Import check passed")
@@ -136,7 +158,9 @@ class VerificationAgent(BaseAgent):
             # Step 3: Run tests (optional)
             if self.run_tests:
                 self.log("Running tests...")
-                test_result = self._run_tests(output_dir)
+                test_result = self._run_tests(
+                    output_dir, python_executable=runtime.python_executable
+                )
                 report.tests_ok = test_result["passed"]
                 if not test_result["passed"]:
                     if test_result.get("skipped"):
@@ -152,7 +176,9 @@ class VerificationAgent(BaseAgent):
             # Step 4: Smoke test (optional)
             if self.run_smoke:
                 self.log("Running smoke test...")
-                smoke_result = self._smoke_run(output_dir)
+                smoke_result = self._smoke_run(
+                    output_dir, python_executable=runtime.python_executable
+                )
                 report.smoke_ok = smoke_result["passed"]
                 if not smoke_result["passed"]:
                     if smoke_result.get("skipped"):
@@ -169,7 +195,11 @@ class VerificationAgent(BaseAgent):
             context["verification_report"] = report
             context["error"] = None  # Clear any previous error
 
-            status = "fully_passed" if report.fully_passed else ("passed" if report.all_passed else "partial")
+            status = (
+                "fully_passed"
+                if report.fully_passed
+                else ("passed" if report.all_passed else "partial")
+            )
             self.log(f"Verification complete: {status}")
 
             return AgentResult.success(
@@ -178,12 +208,36 @@ class VerificationAgent(BaseAgent):
                     "stage": "complete",
                     "passed": report.all_passed,
                     "fully_passed": report.fully_passed,
-                }
+                },
             )
 
+        except VerificationRuntimePreparationError as e:
+            runtime_error = e.to_dict()
+            report.errors.append(f"Runtime: {e}")
+            context["verification_runtime"] = runtime_error
+            context["verification_runtime_error"] = runtime_error
+            context["verification_report"] = report
+            context["error"] = str(e)
+            logger.error(f"Verification runtime preparation failed: {e}")
+            return AgentResult.success(
+                data={"report": report},
+                metadata={"stage": "runtime", "passed": False, "runtime_error": runtime_error},
+            )
         except Exception as e:
             logger.error(f"Verification failed: {e}")
             return AgentResult.failure(str(e))
+
+    def _prepare_runtime(self, output_dir: Path):
+        extra_packages = ["pytest"] if self.run_tests and (output_dir / "tests").exists() else []
+        return prepare_verification_runtime(
+            output_dir,
+            base_python=self.python_executable,
+            prepare_requirements=self.prepare_requirements,
+            cache_dir=self.runtime_cache_dir,
+            install_timeout=self.install_timeout,
+            extra_packages=extra_packages,
+            prefer_cpu_torch=self.prefer_cpu_torch,
+        )
 
     def _check_syntax(self, output_dir: Path) -> Dict[str, Any]:
         """Check Python syntax of all files."""
@@ -191,9 +245,9 @@ class VerificationAgent(BaseAgent):
 
         for py_file in py_files:
             try:
-                with open(py_file, 'r') as f:
+                with open(py_file, "r") as f:
                     code = f.read()
-                compile(code, str(py_file), 'exec')
+                compile(code, str(py_file), "exec")
             except SyntaxError as e:
                 return {
                     "passed": False,
@@ -204,7 +258,9 @@ class VerificationAgent(BaseAgent):
 
         return {"passed": True}
 
-    def _check_imports(self, output_dir: Path) -> Dict[str, Any]:
+    def _check_imports(
+        self, output_dir: Path, *, python_executable: str = "python3"
+    ) -> Dict[str, Any]:
         """Check if imports work."""
         main_file = output_dir / "main.py"
         if not main_file.exists():
@@ -216,10 +272,14 @@ class VerificationAgent(BaseAgent):
 
         try:
             result = subprocess.run(
-                ["python3", "-c", f"import sys; sys.path.insert(0, '{output_dir}'); import {main_file.stem}"],
+                [
+                    python_executable,
+                    "-c",
+                    f"import sys; sys.path.insert(0, '{output_dir}'); import {main_file.stem}",
+                ],
                 capture_output=True,
                 text=True,
-                timeout=self.timeout
+                timeout=self.timeout,
             )
             if result.returncode != 0:
                 return {"passed": False, "error": result.stderr[:500]}
@@ -229,7 +289,7 @@ class VerificationAgent(BaseAgent):
         except Exception as e:
             return {"passed": False, "error": str(e)}
 
-    def _run_tests(self, output_dir: Path) -> Dict[str, Any]:
+    def _run_tests(self, output_dir: Path, *, python_executable: str = "python3") -> Dict[str, Any]:
         """Run pytest if tests exist."""
         tests_dir = output_dir / "tests"
         if not tests_dir.exists():
@@ -237,11 +297,11 @@ class VerificationAgent(BaseAgent):
 
         try:
             result = subprocess.run(
-                ["python3", "-m", "pytest", "-q", str(tests_dir)],
+                [python_executable, "-m", "pytest", "-q", str(tests_dir)],
                 capture_output=True,
                 text=True,
                 timeout=60,
-                cwd=output_dir
+                cwd=output_dir,
             )
             return {"passed": result.returncode == 0}
         except subprocess.TimeoutExpired:
@@ -249,7 +309,7 @@ class VerificationAgent(BaseAgent):
         except Exception as e:
             return {"passed": False, "error": str(e)}
 
-    def _smoke_run(self, output_dir: Path) -> Dict[str, Any]:
+    def _smoke_run(self, output_dir: Path, *, python_executable: str = "python3") -> Dict[str, Any]:
         """Try to run main.py with --help."""
         main_file = output_dir / "main.py"
         if not main_file.exists():
@@ -257,11 +317,11 @@ class VerificationAgent(BaseAgent):
 
         try:
             result = subprocess.run(
-                ["python3", str(main_file), "--help"],
+                [python_executable, str(main_file), "--help"],
                 capture_output=True,
                 text=True,
                 timeout=self.timeout,
-                cwd=output_dir
+                cwd=output_dir,
             )
             return {"passed": result.returncode == 0}
         except subprocess.TimeoutExpired:

@@ -26,17 +26,25 @@ from pathlib import Path
 from typing import Dict, Any, Optional, Literal, TYPE_CHECKING
 
 from .models import (
-    PaperContext, ReproductionPlan, ImplementationSpec,
-    ReproductionResult, ReproPhase, EnvironmentSpec
+    PaperContext,
+    ReproductionPlan,
+    ImplementationSpec,
+    ReproductionResult,
+    ReproPhase,
+    EnvironmentSpec,
 )
 from .nodes import (
-    PlanningNode, AnalysisNode, GenerationNode, VerificationNode,
-    EnvironmentInferenceNode
+    PlanningNode,
+    AnalysisNode,
+    GenerationNode,
+    VerificationNode,
+    EnvironmentInferenceNode,
 )
 from .base_executor import BaseExecutor
 from .docker_executor import DockerExecutor
 from .e2b_executor import E2BExecutor
 from .orchestrator import Orchestrator, OrchestratorConfig
+from paperbot.application.services.llm_service import LLMService
 from paperbot.infrastructure.stores.repro_experience_store import ReproExperienceStore
 
 logger = logging.getLogger(__name__)
@@ -83,23 +91,40 @@ class ReproAgent:
 
         # Multi-agent mode flag
         self.use_orchestrator = self.config.get("use_orchestrator", False)
+        self.use_project_llm_service = bool(self.config.get("use_project_llm_service", False))
         self.experience_store = None
         try:
             self.experience_store = ReproExperienceStore()
         except Exception as exc:  # noqa: BLE001
             self.logger.warning("ReproExperienceStore unavailable, persistence disabled: %s", exc)
 
+        self.llm_client = None
+        if self.use_project_llm_service:
+            try:
+                self.llm_client = LLMService(enable_cache=False, raise_errors=True)
+            except Exception as exc:  # noqa: BLE001
+                self.logger.warning("Project LLM service unavailable, falling back: %s", exc)
+
         # Initialize nodes (for legacy mode)
-        self.planning_node = PlanningNode()
+        self.planning_node = PlanningNode(llm_client=self.llm_client)
         self.environment_node = EnvironmentInferenceNode(
             prefer_conda=self.config.get("prefer_conda", False)
         )
-        self.analysis_node = AnalysisNode()
-        self.generation_node = GenerationNode(experience_store=self.experience_store)
+        self.analysis_node = AnalysisNode(llm_client=self.llm_client)
+        self.generation_node = GenerationNode(
+            llm_client=self.llm_client,
+            experience_store=self.experience_store,
+        )
         self.verification_node = VerificationNode(
+            timeout=self.config.get("verification_timeout", 30),
             max_repair_attempts=self.config.get("max_repair_attempts", 3),
             enable_self_healing=self.config.get("enable_self_healing", True),
             experience_store=self.experience_store,
+            python_executable=self.config.get("verification_python_executable", "python3"),
+            prepare_requirements=self.config.get("verification_prepare_requirements", False),
+            runtime_cache_dir=self.config.get("verification_runtime_cache_dir"),
+            install_timeout=self.config.get("verification_install_timeout", 600),
+            prefer_cpu_torch=self.config.get("verification_prefer_cpu_torch", False),
         )
 
         # Initialize executor based on config
@@ -190,16 +215,30 @@ class ReproAgent:
         Returns:
             Configured Orchestrator instance
         """
-        if self._orchestrator is None or (output_dir and self._orchestrator.config.output_dir != output_dir):
+        if self._orchestrator is None or (
+            output_dir and self._orchestrator.config.output_dir != output_dir
+        ):
             config = OrchestratorConfig(
                 max_repair_loops=self.config.get("max_repair_attempts", 3),
                 output_dir=output_dir,
                 use_rag=self.config.get("use_rag", True),
                 max_context_tokens=self.config.get("max_context_tokens", 8000),
+                verification_prepare_requirements=self.config.get(
+                    "verification_prepare_requirements", False
+                ),
+                verification_runtime_cache_dir=self.config.get("verification_runtime_cache_dir"),
+                verification_install_timeout=self.config.get("verification_install_timeout", 600),
+                verification_prefer_cpu_torch=self.config.get(
+                    "verification_prefer_cpu_torch", False
+                ),
+                verification_python_executable=self.config.get(
+                    "verification_python_executable", "python3"
+                ),
             )
             self._orchestrator = Orchestrator(
                 config=config,
                 experience_store=self.experience_store,
+                llm_client=self.llm_client,
                 event_log=event_log,
                 workflow=workflow,
             )
@@ -324,7 +363,7 @@ class ReproAgent:
             status=ReproPhase.PLANNING,
             paper_title=paper_context.title,
         )
-        
+
         try:
             # Phase 1: Planning
             self.logger.info(f"Phase 1: Planning for '{paper_context.title}'")
@@ -334,22 +373,24 @@ class ReproAgent:
             plan: ReproductionPlan = plan_result.data
             result.plan = plan
             result.phases_completed.append("planning")
-            
+
             # Phase 1.5: Environment Inference (NEW)
             self.logger.info("Phase 1.5: Environment Inference")
             result.status = ReproPhase.ENVIRONMENT
             env_result = await self.environment_node.run(paper_context)
             if not env_result.success:
-                self.logger.warning(f"Environment inference failed: {env_result.error}, using defaults")
+                self.logger.warning(
+                    f"Environment inference failed: {env_result.error}, using defaults"
+                )
                 env_spec = EnvironmentSpec()  # Use defaults
             else:
                 env_spec: EnvironmentSpec = env_result.data
                 result.phases_completed.append("environment")
-            
+
             # Update Docker executor with inferred image
             if env_spec.base_image:
                 self.executor = DockerExecutor(image=env_spec.base_image)
-            
+
             # Phase 2: Analysis (enhanced with environment spec)
             self.logger.info("Phase 2: Analysis with hyperparameter extraction")
             result.status = ReproPhase.ANALYSIS
@@ -359,7 +400,7 @@ class ReproAgent:
             spec: ImplementationSpec = analysis_result.data
             result.spec = spec
             result.phases_completed.append("analysis")
-            
+
             # Phase 3: Generation
             self.logger.info("Phase 3: Generation")
             result.status = ReproPhase.GENERATION
@@ -371,19 +412,19 @@ class ReproAgent:
             if not gen_result.success:
                 return self._fail_result(result, ReproPhase.GENERATION, gen_result.error or "")
             files: Dict[str, str] = gen_result.data
-            
+
             # Write generated code files to disk
             for filepath, content in files.items():
                 file_path = output_dir / filepath
                 file_path.parent.mkdir(parents=True, exist_ok=True)
                 file_path.write_text(content)
             result.generated_files = files
-            
+
             # Write environment files
             self._write_environment_files(output_dir, env_spec, spec)
-            
+
             result.phases_completed.append("generation")
-            
+
             # Phase 4: Verification with self-healing
             self.logger.info("Phase 4: Verification with self-healing")
             result.status = ReproPhase.VERIFICATION
@@ -393,18 +434,18 @@ class ReproAgent:
                 result,
                 user_id=user_id,
             )
-            
+
             # Compute final score
             result.compute_score()
-            
+
             return result
-            
+
         except Exception as e:
             self.logger.error(f"Reproduction failed: {e}")
             result.status = ReproPhase.FAILED
             result.errors.append(str(e))
             return result
-    
+
     def _write_environment_files(
         self, output_dir: Path, env_spec: EnvironmentSpec, impl_spec: ImplementationSpec
     ) -> None:
@@ -418,7 +459,7 @@ class ReproAgent:
             # Generate on the fly
             dockerfile_content = env_spec.generate_dockerfile()
             (output_dir / "Dockerfile").write_text(dockerfile_content)
-        
+
         # Write requirements.txt
         if env_spec.pip_requirements:
             requirements_path = output_dir / "requirements.txt"
@@ -427,18 +468,18 @@ class ReproAgent:
                 existing = requirements_path.read_text().splitlines()
             all_reqs = list(dict.fromkeys(existing + env_spec.pip_requirements))
             requirements_path.write_text("\n".join(all_reqs) + "\n")
-        
+
         # Write config.yaml if available
         if "config_yaml" in impl_spec.extra_params:
             config_path = output_dir / "config.yaml"
             config_path.write_text(impl_spec.extra_params["config_yaml"])
             self.logger.info("Generated config.yaml with extracted hyperparameters")
-        
+
         # Write environment.yaml for conda
         if env_spec.conda_yaml_content:
             conda_path = output_dir / "environment.yaml"
             conda_path.write_text(env_spec.conda_yaml_content)
-    
+
     async def _verify_with_self_healing(
         self,
         output_dir: Path,
@@ -453,74 +494,73 @@ class ReproAgent:
             (output_dir, paper_context),
             user_id=user_id,
         )
-        
+
         if verify_result.success and verify_result.data.all_passed:
             result.status = ReproPhase.COMPLETED
             result.verification = verify_result.data.to_dict()
             result.phases_completed.append("verification")
             return
-        
+
         # Collect verification data even if failed
         if verify_result.data:
             result.verification = verify_result.data.to_dict()
             result.errors.extend(verify_result.data.errors)
             result.retry_count = verify_result.data.repairs_attempted
-            
+
             # Log repair statistics
             repairs = verify_result.data
             if repairs.repairs_attempted > 0:
                 self.logger.info(
                     f"Self-healing: {repairs.repairs_successful}/{repairs.repairs_attempted} repairs successful"
                 )
-        
+
         # Check if at least basic checks passed
         if verify_result.data and verify_result.data.syntax_ok and verify_result.data.imports_ok:
             result.status = ReproPhase.COMPLETED
             result.phases_completed.append("verification")
         else:
             result.status = ReproPhase.FAILED
-    
+
     def _fail_result(
-        self,
-        result: ReproductionResult,
-        phase: ReproPhase,
-        error: str
+        self, result: ReproductionResult, phase: ReproPhase, error: str
     ) -> ReproductionResult:
         """Mark result as failed."""
         result.status = ReproPhase.FAILED
         result.errors.append(f"{phase.value}: {error}")
         return result
-    
+
     # ==================== Legacy Mode ====================
-    
+
     async def generate_plan(self, repo_path: Path) -> Dict[str, Any]:
         """Legacy: Generate execution plan for existing repo."""
         return {
             "commands": DEFAULT_PLAN,
             "repo_path": str(repo_path),
         }
-    
+
     async def run(self, repo_path: Path) -> Dict[str, Any]:
         """Legacy: Run verification on existing repo."""
         plan = await self.generate_plan(repo_path)
-        
+
         commands = plan["commands"]
         exec_result = self.executor.run(workdir=repo_path, commands=commands)
-        
-        results = [{
-            "commands": commands,
-            "exit_code": exec_result.exit_code,
-            "logs": exec_result.logs[:500] if exec_result.logs else "",
-            "runtime_meta": exec_result.runtime_meta,
-        }]
-        
+
+        results = [
+            {
+                "commands": commands,
+                "exit_code": exec_result.exit_code,
+                "logs": exec_result.logs[:500] if exec_result.logs else "",
+                "runtime_meta": exec_result.runtime_meta,
+            }
+        ]
+
         passed = exec_result.exit_code == 0
         return {
             "passed": passed,
             "results": results,
             "score": self._score({"passed": passed, "results": results}),
         }
-    
+
     def _score(self, result: Dict[str, Any]) -> float:
         """Legacy scoring."""
         if result.get("passed"):

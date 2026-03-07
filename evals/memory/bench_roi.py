@@ -55,6 +55,32 @@ def build_parser() -> argparse.ArgumentParser:
         default=3,
         help="Maximum repair loops for each Paper2Code run.",
     )
+    parser.add_argument(
+        "--no-project-llm",
+        action="store_true",
+        help="Disable the project LLMService path and fall back to legacy node heuristics/SDKs.",
+    )
+    parser.add_argument(
+        "--no-prepare-requirements",
+        action="store_true",
+        help="Skip cached venv preparation from generated requirements.txt before verification.",
+    )
+    parser.add_argument(
+        "--runtime-cache-dir",
+        default="output/runtime_envs/roi_bench",
+        help="Cache directory for prepared verification runtimes.",
+    )
+    parser.add_argument(
+        "--verification-install-timeout",
+        type=int,
+        default=900,
+        help="Timeout in seconds for cached dependency installation steps.",
+    )
+    parser.add_argument(
+        "--no-prefer-cpu-torch",
+        action="store_true",
+        help="Do not redirect torch-family installs to the PyTorch CPU wheel index.",
+    )
     return parser
 
 
@@ -76,6 +102,11 @@ def main() -> int:
     runner = ReproAgentROIBenchmarkRunner(
         use_orchestrator=not args.use_legacy,
         max_repair_attempts=max(0, int(args.max_repair_attempts)),
+        use_project_llm_service=not args.no_project_llm,
+        prepare_requirements=not args.no_prepare_requirements,
+        runtime_cache_dir=args.runtime_cache_dir,
+        verification_install_timeout=max(60, int(args.verification_install_timeout)),
+        prefer_cpu_torch=not args.no_prefer_cpu_torch,
     )
     report = run_roi_benchmark_sync(
         cases,

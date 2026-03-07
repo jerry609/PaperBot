@@ -1,0 +1,95 @@
+[
+  {
+    "case_id": "optimizer_updates",
+    "user_id": "effectiveness_bench",
+    "sessions": [
+      {
+        "session_id": "s1",
+        "writes": [
+          {"kind": "preference", "content": "preferred optimizer: Adam", "scope_type": "global"}
+        ]
+      },
+      {
+        "session_id": "s2",
+        "writes": [
+          {"kind": "decision", "content": "preferred optimizer: AdamW", "scope_type": "global"}
+        ]
+      }
+    ],
+    "questions": [
+      {
+        "question_id": "q1",
+        "query": "Which optimizer should be used now?",
+        "expected_answer": "AdamW",
+        "acceptable_answers": ["adamw"],
+        "expected_memory_substrings": ["preferred optimizer: AdamW"],
+        "category": "update",
+        "scope_type": "global"
+      }
+    ]
+  },
+  {
+    "case_id": "temporal_focus_shift",
+    "user_id": "effectiveness_bench",
+    "sessions": [
+      {
+        "session_id": "s1",
+        "writes": [
+          {"kind": "goal", "content": "current focus: retrieval models", "scope_type": "track", "scope_id": "track-alpha"}
+        ]
+      },
+      {
+        "session_id": "s2",
+        "writes": [
+          {"kind": "goal", "content": "current focus: multimodal agents", "scope_type": "track", "scope_id": "track-alpha"}
+        ]
+      }
+    ],
+    "questions": [
+      {
+        "question_id": "q1",
+        "query": "What is the current focus of track alpha?",
+        "expected_answer": "multimodal agents",
+        "acceptable_answers": ["current focus: multimodal agents"],
+        "expected_memory_substrings": ["current focus: multimodal agents"],
+        "category": "temporal",
+        "scope_type": "track",
+        "scope_id": "track-alpha"
+      }
+    ]
+  },
+  {
+    "case_id": "scope_and_abstain",
+    "user_id": "effectiveness_bench",
+    "sessions": [
+      {
+        "session_id": "s1",
+        "writes": [
+          {"kind": "fact", "content": "dataset choice: CIFAR-10", "scope_type": "paper", "scope_id": "paper-vision"},
+          {"kind": "fact", "content": "dataset choice: MIMIC-CXR", "scope_type": "paper", "scope_id": "paper-medical"}
+        ]
+      }
+    ],
+    "questions": [
+      {
+        "question_id": "q1",
+        "query": "Which dataset is selected for the vision paper?",
+        "expected_answer": "CIFAR-10",
+        "acceptable_answers": ["dataset choice: CIFAR-10"],
+        "expected_memory_substrings": ["dataset choice: CIFAR-10"],
+        "category": "fact",
+        "scope_type": "paper",
+        "scope_id": "paper-vision"
+      },
+      {
+        "question_id": "q2",
+        "query": "What GPU type was used for this paper?",
+        "expected_answer": "INSUFFICIENT_MEMORY",
+        "expected_memory_substrings": [],
+        "category": "abstain",
+        "scope_type": "paper",
+        "scope_id": "paper-vision"
+      }
+    ]
+  }
+]

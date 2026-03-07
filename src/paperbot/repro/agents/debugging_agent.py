@@ -29,6 +29,7 @@ except Exception:
 @dataclass
 class RepairAttempt:
     """Record of a repair attempt."""
+
     error_type: ErrorType
     original_error: str
     fix_applied: str
@@ -102,19 +103,25 @@ Provide ONLY the corrected full file content. No explanations.
         "bs4": "beautifulsoup4",
     }
 
-    def __init__(self, output_dir: Optional[Path] = None, experience_store=None, **kwargs):
+    def __init__(
+        self,
+        output_dir: Optional[Path] = None,
+        experience_store=None,
+        llm_client=None,
+        **kwargs,
+    ):
         super().__init__(name="DebuggingAgent", **kwargs)
         self.output_dir = output_dir
         self.repair_history: List[RepairAttempt] = []
         self._experience_store = experience_store
+        self.llm_client = llm_client
 
     async def execute(self, context: Dict[str, Any]) -> AgentResult:
         """Execute debugging pipeline."""
         error = context.get("error")
         if not error:
             return AgentResult.success(
-                data={"message": "No error to debug"},
-                metadata={"skipped": True}
+                data={"message": "No error to debug"}, metadata={"skipped": True}
             )
 
         output_dir = context.get("output_dir") or self.output_dir
@@ -136,7 +143,7 @@ Provide ONLY the corrected full file content. No explanations.
                 traceback=error,
                 output_dir=output_dir,
                 paper_context=paper_context,
-                generated_files=generated_files
+                generated_files=generated_files,
             )
 
             self.repair_history.append(repair_result)
@@ -151,10 +158,13 @@ Provide ONLY the corrected full file content. No explanations.
                     paper_id = (
                         getattr(paper_context, "paper_id", None)
                         or getattr(paper_context, "arxiv_id", None)
-                        if paper_context else None
+                        if paper_context
+                        else None
                     )
                     try:
-                        user_id = (context.get("user_id", "default") or "default").strip() or "default"
+                        user_id = (
+                            context.get("user_id", "default") or "default"
+                        ).strip() or "default"
                         self._experience_store.add(
                             user_id=user_id,
                             pattern_type="failure_reason",
@@ -176,7 +186,7 @@ Provide ONLY the corrected full file content. No explanations.
                     metadata={
                         "error_type": error_type.value,
                         "fix_applied": repair_result.fix_applied,
-                    }
+                    },
                 )
             else:
                 self.log(f"Repair failed: {repair_result.fix_applied}")
@@ -192,30 +202,39 @@ Provide ONLY the corrected full file content. No explanations.
         """Classify error type from traceback."""
         # Syntax errors
         syntax_patterns = [
-            r'SyntaxError:',
-            r'IndentationError:',
-            r'TabError:',
+            r"SyntaxError:",
+            r"IndentationError:",
+            r"TabError:",
         ]
         for pattern in syntax_patterns:
             if re.search(pattern, traceback):
-                match = re.search(r'(?:SyntaxError|IndentationError|TabError): (.+)', traceback)
+                match = re.search(r"(?:SyntaxError|IndentationError|TabError): (.+)", traceback)
                 return ErrorType.SYNTAX, match.group(1) if match else "Unknown syntax error"
 
-        # Dependency errors
-        if re.search(r'ModuleNotFoundError:|ImportError:', traceback):
+        # Missing third-party dependency errors
+        if re.search(r"ModuleNotFoundError:|No module named", traceback):
             module_match = re.search(r"No module named '([^']+)'", traceback)
             if module_match:
                 return ErrorType.DEPENDENCY, module_match.group(1)
-            return ErrorType.DEPENDENCY, "Unknown module"
+            return ErrorType.DEPENDENCY, "Unknown dependency"
+
+        if re.search(r"cannot import name '([^']+)'", traceback):
+            import_match = re.search(r"cannot import name '([^']+)'", traceback)
+            detail = import_match.group(1) if import_match else "Import binding error"
+            return ErrorType.LOGIC, detail
 
         # Logic/runtime errors
         logic_patterns = [
-            r'TypeError:', r'ValueError:', r'AttributeError:',
-            r'KeyError:', r'IndexError:', r'RuntimeError:',
+            r"TypeError:",
+            r"ValueError:",
+            r"AttributeError:",
+            r"KeyError:",
+            r"IndexError:",
+            r"RuntimeError:",
         ]
         for pattern in logic_patterns:
             if re.search(pattern, traceback):
-                match = re.search(rf'{pattern}\s*(.+)', traceback)
+                match = re.search(rf"{pattern}\s*(.+)", traceback)
                 return ErrorType.LOGIC, match.group(1) if match else "Unknown logic error"
 
         return ErrorType.UNKNOWN, traceback[:200]
@@ -226,7 +245,7 @@ Provide ONLY the corrected full file content. No explanations.
         traceback: str,
         output_dir: Path,
         paper_context: Optional[PaperContext],
-        generated_files: Dict[str, str]
+        generated_files: Dict[str, str],
     ) -> RepairAttempt:
         """Apply repair based on error type."""
         if error_type == ErrorType.SYNTAX:
@@ -241,14 +260,11 @@ Provide ONLY the corrected full file content. No explanations.
                 original_error=traceback[:500],
                 fix_applied="Unknown error type - cannot auto-repair",
                 success=False,
-                modified_files=[]
+                modified_files=[],
             )
 
     async def _repair_syntax(
-        self,
-        traceback: str,
-        output_dir: Path,
-        generated_files: Dict[str, str]
+        self, traceback: str, output_dir: Path, generated_files: Dict[str, str]
     ) -> RepairAttempt:
         """Repair syntax errors using LLM."""
         file_info = self._extract_file_and_line(traceback)
@@ -258,7 +274,7 @@ Provide ONLY the corrected full file content. No explanations.
                 original_error=traceback[:500],
                 fix_applied="Could not locate syntax error",
                 success=False,
-                modified_files=[]
+                modified_files=[],
             )
 
         filename, line_number = file_info
@@ -270,7 +286,7 @@ Provide ONLY the corrected full file content. No explanations.
                 original_error=traceback[:500],
                 fix_applied=f"File not found: {filepath}",
                 success=False,
-                modified_files=[]
+                modified_files=[],
             )
 
         source_lines = filepath.read_text().splitlines()
@@ -289,10 +305,7 @@ Provide ONLY the corrected full file content. No explanations.
                     code_context=code_context,
                 )
 
-                result = query(
-                    prompt=prompt,
-                    options=ClaudeAgentOptions(max_tokens=2000)
-                )
+                result = query(prompt=prompt, options=ClaudeAgentOptions(max_tokens=2000))
 
                 fixed_code = self._extract_code(result.response)
                 if fixed_code:
@@ -304,7 +317,7 @@ Provide ONLY the corrected full file content. No explanations.
                         original_error=traceback[:500],
                         fix_applied=f"Fixed syntax error at line {line_number}",
                         success=True,
-                        modified_files=[str(filepath)]
+                        modified_files=[str(filepath)],
                     )
             except Exception as e:
                 logger.warning(f"LLM syntax repair failed: {e}")
@@ -314,20 +327,33 @@ Provide ONLY the corrected full file content. No explanations.
             original_error=traceback[:500],
             fix_applied="Could not auto-fix syntax error",
             success=False,
-            modified_files=[]
+            modified_files=[],
         )
 
-    async def _repair_dependency(
-        self,
-        traceback: str,
-        output_dir: Path
-    ) -> RepairAttempt:
+    async def _repair_dependency(self, traceback: str, output_dir: Path) -> RepairAttempt:
         """Repair missing dependencies."""
         _, missing_module = self._classify_error(traceback)
         package_name = self.PACKAGE_MAPPINGS.get(missing_module, missing_module)
 
         if "." in package_name:
             package_name = package_name.split(".")[0]
+
+        if not package_name or package_name.lower() in {"unknown module", "unknown dependency"}:
+            return RepairAttempt(
+                error_type=ErrorType.DEPENDENCY,
+                original_error=traceback[:500],
+                fix_applied="Dependency name was not specific enough to update requirements",
+                success=False,
+                modified_files=[],
+            )
+        if not re.fullmatch(r"[A-Za-z0-9_.-]+", package_name):
+            return RepairAttempt(
+                error_type=ErrorType.DEPENDENCY,
+                original_error=traceback[:500],
+                fix_applied=f"Refused to add invalid package name: {package_name}",
+                success=False,
+                modified_files=[],
+            )
 
         requirements_file = output_dir / "requirements.txt"
         existing = []
@@ -340,7 +366,7 @@ Provide ONLY the corrected full file content. No explanations.
                 original_error=traceback[:500],
                 fix_applied=f"Package {package_name} already in requirements",
                 success=False,
-                modified_files=[]
+                modified_files=[],
             )
 
         existing.append(package_name)
@@ -351,7 +377,7 @@ Provide ONLY the corrected full file content. No explanations.
             original_error=traceback[:500],
             fix_applied=f"Added {package_name} to requirements.txt",
             success=True,
-            modified_files=[str(requirements_file)]
+            modified_files=[str(requirements_file)],
         )
 
     async def _repair_logic(
@@ -359,7 +385,7 @@ Provide ONLY the corrected full file content. No explanations.
         traceback: str,
         output_dir: Path,
         paper_context: Optional[PaperContext],
-        generated_files: Dict[str, str]
+        generated_files: Dict[str, str],
     ) -> RepairAttempt:
         """Repair logic errors using LLM."""
         file_info = self._extract_file_and_line(traceback)
@@ -369,7 +395,7 @@ Provide ONLY the corrected full file content. No explanations.
                 original_error=traceback[:500],
                 fix_applied="Could not locate error in file",
                 success=False,
-                modified_files=[]
+                modified_files=[],
             )
 
         filename, _ = file_info
@@ -381,7 +407,7 @@ Provide ONLY the corrected full file content. No explanations.
                 original_error=traceback[:500],
                 fix_applied=f"File not found: {filepath}",
                 success=False,
-                modified_files=[]
+                modified_files=[],
             )
 
         source_code = filepath.read_text()
@@ -389,7 +415,9 @@ Provide ONLY the corrected full file content. No explanations.
         if query and ClaudeAgentOptions:
             try:
                 error_type, error_msg = self._classify_error(traceback)
-                paper_ctx = paper_context.to_prompt_context()[:1000] if paper_context else "Not available"
+                paper_ctx = (
+                    paper_context.to_prompt_context()[:1000] if paper_context else "Not available"
+                )
 
                 prompt = self.LOGIC_REPAIR_PROMPT.format(
                     error_type=error_type.value,
@@ -397,13 +425,10 @@ Provide ONLY the corrected full file content. No explanations.
                     traceback=traceback[:1000],
                     filename=filepath.name,
                     source_code=source_code[:3000],
-                    paper_context=f"Paper context: {paper_ctx}" if paper_context else ""
+                    paper_context=f"Paper context: {paper_ctx}" if paper_context else "",
                 )
 
-                result = query(
-                    prompt=prompt,
-                    options=ClaudeAgentOptions(max_tokens=3000)
-                )
+                result = query(prompt=prompt, options=ClaudeAgentOptions(max_tokens=3000))
 
                 fixed_code = self._extract_code(result.response)
                 if fixed_code:
@@ -413,7 +438,7 @@ Provide ONLY the corrected full file content. No explanations.
                         original_error=traceback[:500],
                         fix_applied=f"Fixed logic error in {filepath.name}",
                         success=True,
-                        modified_files=[str(filepath)]
+                        modified_files=[str(filepath)],
                     )
             except Exception as e:
                 logger.warning(f"LLM logic repair failed: {e}")
@@ -423,7 +448,7 @@ Provide ONLY the corrected full file content. No explanations.
             original_error=traceback[:500],
             fix_applied="Could not auto-fix logic error",
             success=False,
-            modified_files=[]
+            modified_files=[],
         )
 
     def _extract_file_and_line(self, traceback: str) -> Optional[Tuple[str, int]]:
@@ -435,11 +460,11 @@ Provide ONLY the corrected full file content. No explanations.
 
     def _extract_code(self, response: str) -> Optional[str]:
         """Extract Python code from LLM response."""
-        code_match = re.search(r'```python\n(.*?)```', response, re.DOTALL)
+        code_match = re.search(r"```python\n(.*?)```", response, re.DOTALL)
         if code_match:
             return code_match.group(1).strip()
 
-        code_match = re.search(r'```\n(.*?)```', response, re.DOTALL)
+        code_match = re.search(r"```\n(.*?)```", response, re.DOTALL)
         if code_match:
             return code_match.group(1).strip()
 

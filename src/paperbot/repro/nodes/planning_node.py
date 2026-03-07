@@ -83,6 +83,31 @@ Include files for each major component identified.
         super().__init__(node_name="PlanningNode", **kwargs)
         self.llm_client = llm_client
 
+    def _complete_prompt(self, prompt: str, *, max_tokens: int = 1000) -> str:
+        if self.llm_client is not None:
+            return (
+                self.llm_client.complete(
+                    task_type="reasoning",
+                    system=(
+                        "You are an expert software engineer helping to reproduce a research "
+                        "paper. Return only valid JSON that matches the requested schema."
+                    ),
+                    user=prompt,
+                    use_cache=False,
+                    max_tokens=max_tokens,
+                )
+                or ""
+            ).strip()
+
+        if query and ClaudeAgentOptions:
+            result = query(
+                prompt=prompt,
+                options=ClaudeAgentOptions(max_tokens=max_tokens),
+            )
+            return str(result.response or "").strip()
+
+        return ""
+
     def _validate_input(self, input_data: Any, **kwargs) -> Optional[str]:
         """Validate input is a PaperContext or (PaperContext, Blueprint) tuple."""
         if isinstance(input_data, tuple):
@@ -110,51 +135,40 @@ Include files for each major component identified.
             paper_context = input_data
             blueprint = None
 
-        # Try LLM-based planning with Blueprint if available
-        if query and ClaudeAgentOptions:
-            try:
-                if blueprint:
-                    # Use compressed blueprint context
-                    prompt = self.BLUEPRINT_PLANNING_PROMPT.format(
-                        blueprint_context=blueprint.to_compressed_context(max_tokens=2000)
-                    )
-                else:
-                    # Fallback to raw paper context
-                    prompt = self.PLANNING_PROMPT.format(
-                        title=paper_context.title,
-                        abstract=paper_context.abstract or "",
-                        method=paper_context.method_section or ""
-                    )
+        if blueprint:
+            prompt = self.BLUEPRINT_PLANNING_PROMPT.format(
+                blueprint_context=blueprint.to_compressed_context(max_tokens=2000)
+            )
+        else:
+            prompt = self.PLANNING_PROMPT.format(
+                title=paper_context.title,
+                abstract=paper_context.abstract or "",
+                method=paper_context.method_section or "",
+            )
 
-                result = query(
-                    prompt=prompt,
-                    options=ClaudeAgentOptions(max_tokens=1000)
-                )
-
-                return self._parse_plan(result.response, paper_context, blueprint)
-            except Exception as e:
-                logger.warning(f"LLM planning failed, using fallback: {e}")
+        try:
+            response = self._complete_prompt(prompt, max_tokens=1000)
+            if response:
+                return self._parse_plan(response, paper_context, blueprint)
+        except Exception as e:
+            logger.warning(f"LLM planning failed, using fallback: {e}")
 
         # Fallback plan
         return self._fallback_plan(paper_context, blueprint)
-    
+
     def _parse_plan(
-        self,
-        response: str,
-        paper_context: PaperContext,
-        blueprint: Optional[Blueprint] = None
+        self, response: str, paper_context: PaperContext, blueprint: Optional[Blueprint] = None
     ) -> ReproductionPlan:
         """Parse LLM response into ReproductionPlan."""
         try:
             # Extract JSON from response
-            start = response.find('{')
-            end = response.rfind('}') + 1
+            start = response.find("{")
+            end = response.rfind("}") + 1
             if start != -1 and end > start:
                 data = json.loads(response[start:end])
                 # Convert files list to file_structure dict
                 file_structure = {
-                    f.get("path", ""): f.get("purpose", "")
-                    for f in data.get("files", [])
+                    f.get("path", ""): f.get("purpose", "") for f in data.get("files", [])
                 }
 
                 # Enhance dependencies with framework hints from blueprint
@@ -181,9 +195,7 @@ Include files for each major component identified.
         return self._fallback_plan(paper_context, blueprint)
 
     def _fallback_plan(
-        self,
-        paper_context: PaperContext,
-        blueprint: Optional[Blueprint] = None
+        self, paper_context: PaperContext, blueprint: Optional[Blueprint] = None
     ) -> ReproductionPlan:
         """Generate fallback plan when LLM is unavailable."""
         # Build file structure from blueprint if available
@@ -230,7 +242,9 @@ Include files for each major component identified.
                 # These go into model.py as components
                 pass
             else:
-                file_structure[f"{parent}.py"] = f"{parent.replace('_', ' ').title()} implementation"
+                file_structure[f"{parent}.py"] = (
+                    f"{parent.replace('_', ' ').title()} implementation"
+                )
 
         # Add training-related files based on optimization strategy
         if blueprint.optimization_strategy:
@@ -302,4 +316,3 @@ Include files for each major component identified.
         dependencies.extend(["tqdm", "pyyaml", "tensorboard"])
 
         return list(set(dependencies))
-
