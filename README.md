@@ -1,17 +1,27 @@
 <!-- markdownlint-disable MD001 MD041 -->
 
-<h1 align="center">PaperBot</h1>
+<h1 align="center">Oh, God! My idea comes true.</h1>
 
 <h3 align="center">
 AI-powered research workflow: paper discovery → LLM analysis → scholar tracking → Paper2Code → multi-agent studio
 </h3>
 
 <p align="center">
-  <a href="https://github.com/jerry609/PaperBot/actions"><img src="https://github.com/jerry609/PaperBot/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="https://github.com/jerry609/PaperBot/issues/232"><img src="https://img.shields.io/badge/roadmap-Q1%2FQ2%202026-blue" alt="Roadmap"></a>
-  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-green.svg" alt="License: MIT"></a>
-  <img src="https://img.shields.io/badge/python-3.10%2B-blue" alt="Python 3.10+">
-  <img src="https://img.shields.io/badge/Next.js-16-black" alt="Next.js 16">
+  <a href="https://github.com/jerry609/PaperBot/actions">
+    <img src="https://img.shields.io/github/actions/workflow/status/jerry609/PaperBot/ci.yml?branch=dev&label=CI&logo=github" alt="CI">
+  </a>
+  <a href="https://github.com/jerry609/PaperBot/issues/232">
+    <img src="https://img.shields.io/badge/roadmap-2026-blue?logo=roadmap" alt="Roadmap">
+  </a>
+  <img src="https://img.shields.io/badge/version-0.1.0-007ec6?logo=github" alt="Version 0.1.0">
+  <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/Python-3.10+-blue?logo=python&logoColor=white" alt="Python">
+  <img src="https://img.shields.io/badge/Next.js-16-black?logo=nextdotjs" alt="Next.js">
+  <img src="https://img.shields.io/badge/Platform-Win%20|%20Mac%20|%20Linux-lightgrey" alt="Platform">
+  <img src="https://img.shields.io/badge/Downloads-xx-lightgrey?style=social&logo=icloud" alt="Downloads">
 </p>
 
 <p align="center">
@@ -26,7 +36,7 @@ AI-powered research workflow: paper discovery → LLM analysis → scholar track
 
 ## About
 
-PaperBot is an end-to-end research assistant that automates the paper discovery → analysis → reproduction pipeline. It combines multi-source search, LLM-powered evaluation, scholar tracking, and code generation into a unified workflow with Web, CLI, and API interfaces.
+"Oh, God! My idea comes true." is an end-to-end research assistant that automates the paper discovery → analysis → reproduction pipeline. It combines multi-source search, LLM-powered evaluation, scholar tracking, and code generation into a unified workflow with Web, CLI, and API interfaces.
 
 **Backend** Python + FastAPI (SSE streaming) · **Frontend** Next.js + Ink CLI · **Sources** arXiv / Semantic Scholar / OpenAlex / HuggingFace Daily Papers / papers.cool
 
@@ -71,6 +81,7 @@ PaperBot is an end-to-end research assistant that automates the paper discovery 
 - **Structured Cards** — LLM-extracted method / dataset / conclusion / limitations with DB caching
 - **Related Work** — Draft generation from saved papers with [AuthorYear] citation format
 - **Memory System** — Research memory with FTS5 + BM25 search, context engine for personalized recommendations
+- **MemoryBench Suite** — Retrieval / context / isolation / injection / performance / ROI / effectiveness benchmarks for the memory and Paper2Code stack
 
 ### Reproduction & Studio
 
@@ -84,6 +95,7 @@ PaperBot is an end-to-end research assistant that automates the paper discovery 
 ### Install
 
 ```bash
+# Use python3 for macOS/Linux
 python -m venv .venv && source .venv/bin/activate
 pip install -e .
 ```
@@ -136,6 +148,7 @@ PAPERBOT_NOTIFY_EMAIL_TO=recipient@example.com
 alembic upgrade head
 
 # API server
+# Use python3 for macOS/Linux
 python -m uvicorn src.paperbot.api.main:app --reload --port 8000
 
 # Web dashboard (separate terminal)
@@ -197,6 +210,7 @@ Active Epics:
 | [#153](https://github.com/jerry609/PaperBot/issues/153) | Memory & Context | P0-P1 done |
 | [#154](https://github.com/jerry609/PaperBot/issues/154) | Agentic Research | Design done |
 | [#179](https://github.com/jerry609/PaperBot/issues/179) | Daily Push | Complete |
+| [#283](https://github.com/jerry609/PaperBot/issues/283) | MemoryBench | Complete |
 | [#159](https://github.com/jerry609/PaperBot/issues/159) | Obsidian CLI | Not started |
 
 ## Contributing
@@ -222,6 +236,13 @@ python -m black . && python -m isort .
 | [`docs/PLAN.md`](docs/PLAN.md) | Architecture assessment |
 | [`docs/PAPERSCOOL_WORKFLOW.md`](docs/PAPERSCOOL_WORKFLOW.md) | Topic Workflow guide |
 | [`docs/p2c/`](docs/p2c/) | Paper2Context design docs |
+| [`docs/benchmark/MEMORYBENCH_EPIC_283_COMPLETION.md`](docs/benchmark/MEMORYBENCH_EPIC_283_COMPLETION.md) | MemoryBench Epic completion report |
+| [`docs/benchmark/MEMORYBENCH_RUNTIME_REPORT_2026-03-07.md`](docs/benchmark/MEMORYBENCH_RUNTIME_REPORT_2026-03-07.md) | Live ROI + 1M memory runtime report |
+| [`docs/search_eval.md`](docs/search_eval.md) | Retrieval benchmark guide |
+| [`docs/context_engine_eval.md`](docs/context_engine_eval.md) | Context extraction benchmark guide |
+| [`docs/memory_performance_eval.md`](docs/memory_performance_eval.md) | Memory performance benchmark guide |
+| [`docs/p2c/P2C_ROI_BENCHMARK.md`](docs/p2c/P2C_ROI_BENCHMARK.md) | ROI benchmark guide |
+| [`docs/memory_effectiveness_eval.md`](docs/memory_effectiveness_eval.md) | Multi-session memory effectiveness benchmark guide |
 | [`docs/memory_system.md`](docs/memory_system.md) | Memory system design |
 | [`docs/anchor_system.md`](docs/anchor_system.md) | Anchor author system |
 | [`docs/AGENTIC_RESEARCH_EVOLUTION.md`](docs/AGENTIC_RESEARCH_EVOLUTION.md) | Agentic Research evolution plan |

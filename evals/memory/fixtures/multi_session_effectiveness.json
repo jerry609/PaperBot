@@ -1,0 +1,922 @@
+[
+  {
+    "case_id": "track_alpha_longitudinal",
+    "user_id": "effectiveness_bench",
+    "sessions": [
+      {
+        "session_id": "s1",
+        "writes": [
+          {
+            "kind": "owner",
+            "content": "track lead: Maya",
+            "scope_type": "track",
+            "scope_id": "track-alpha"
+          },
+          {
+            "kind": "goal",
+            "content": "current focus: retrieval models",
+            "scope_type": "track",
+            "scope_id": "track-alpha"
+          },
+          {
+            "kind": "metric",
+            "content": "evaluation gate: Recall@20 >= 0.42",
+            "scope_type": "track",
+            "scope_id": "track-alpha"
+          },
+          {
+            "kind": "cadence",
+            "content": "meeting cadence: weekly sync",
+            "scope_type": "track",
+            "scope_id": "track-alpha"
+          },
+          {
+            "kind": "recap",
+            "content": "initial focus: retrieval models",
+            "scope_type": "track",
+            "scope_id": "track-alpha"
+          }
+        ]
+      },
+      {
+        "session_id": "s2",
+        "writes": [
+          {
+            "kind": "blocker",
+            "content": "blocker: OCR drift",
+            "scope_type": "track",
+            "scope_id": "track-alpha"
+          },
+          {
+            "kind": "goal",
+            "content": "current focus: multimodal agents",
+            "scope_type": "track",
+            "scope_id": "track-alpha"
+          },
+          {
+            "kind": "tool",
+            "content": "tool choice: PaddleOCR",
+            "scope_type": "track",
+            "scope_id": "track-alpha"
+          }
+        ]
+      },
+      {
+        "session_id": "s3",
+        "writes": [
+          {
+            "kind": "owner",
+            "content": "track lead: Nina",
+            "scope_type": "track",
+            "scope_id": "track-alpha"
+          },
+          {
+            "kind": "metric",
+            "content": "evaluation gate: nDCG@10 >= 0.48",
+            "scope_type": "track",
+            "scope_id": "track-alpha"
+          },
+          {
+            "kind": "goal",
+            "content": "current focus: multimodal agents",
+            "scope_type": "track",
+            "scope_id": "track-alpha"
+          }
+        ]
+      },
+      {
+        "session_id": "s4",
+        "writes": [
+          {
+            "kind": "region",
+            "content": "deployment region: Singapore",
+            "scope_type": "track",
+            "scope_id": "track-alpha"
+          },
+          {
+            "kind": "goal",
+            "content": "current focus: memory-grounded agents",
+            "scope_type": "track",
+            "scope_id": "track-alpha"
+          },
+          {
+            "kind": "recap",
+            "content": "session recap: after OCR drift, standardize on PaddleOCR",
+            "scope_type": "track",
+            "scope_id": "track-alpha"
+          }
+        ]
+      },
+      {
+        "session_id": "s5",
+        "writes": [
+          {
+            "kind": "metric",
+            "content": "evaluation gate: Macro-F1 >= 0.87",
+            "scope_type": "track",
+            "scope_id": "track-alpha"
+          },
+          {
+            "kind": "recap",
+            "content": "session recap: Nina owns track alpha and Macro-F1 is the current gate",
+            "scope_type": "track",
+            "scope_id": "track-alpha"
+          }
+        ]
+      }
+    ],
+    "questions": [
+      {
+        "question_id": "q1",
+        "query": "What is the current focus of track alpha now?",
+        "expected_answer": "memory-grounded agents",
+        "acceptable_answers": [
+          "current focus: memory-grounded agents"
+        ],
+        "expected_memory_substrings": [
+          "current focus: memory-grounded agents"
+        ],
+        "category": "temporal",
+        "scope_type": "track",
+        "scope_id": "track-alpha"
+      },
+      {
+        "question_id": "q2",
+        "query": "Who is the track lead now?",
+        "expected_answer": "Nina",
+        "acceptable_answers": [
+          "track lead: Nina"
+        ],
+        "expected_memory_substrings": [
+          "track lead: Nina"
+        ],
+        "category": "update",
+        "scope_type": "track",
+        "scope_id": "track-alpha"
+      },
+      {
+        "question_id": "q3",
+        "query": "What is the evaluation gate now?",
+        "expected_answer": "Macro-F1 >= 0.87",
+        "acceptable_answers": [
+          "evaluation gate: Macro-F1 >= 0.87",
+          "macro-f1 >= 0.87"
+        ],
+        "expected_memory_substrings": [
+          "evaluation gate: Macro-F1 >= 0.87"
+        ],
+        "category": "update",
+        "scope_type": "track",
+        "scope_id": "track-alpha"
+      },
+      {
+        "question_id": "q4",
+        "query": "What was the initial focus?",
+        "expected_answer": "retrieval models",
+        "acceptable_answers": [
+          "current focus: retrieval models",
+          "initial focus: retrieval models"
+        ],
+        "expected_memory_substrings": [
+          "current focus: retrieval models",
+          "initial focus: retrieval models"
+        ],
+        "category": "temporal_previous",
+        "scope_type": "track",
+        "scope_id": "track-alpha"
+      },
+      {
+        "question_id": "q5",
+        "query": "Which region is track alpha deployed in?",
+        "expected_answer": "Singapore",
+        "acceptable_answers": [
+          "deployment region: Singapore"
+        ],
+        "expected_memory_substrings": [
+          "deployment region: Singapore"
+        ],
+        "category": "fact",
+        "scope_type": "track",
+        "scope_id": "track-alpha"
+      },
+      {
+        "question_id": "q6",
+        "query": "After OCR drift, which tool was standardized?",
+        "expected_answer": "PaddleOCR",
+        "acceptable_answers": [
+          "tool choice: PaddleOCR",
+          "session recap: after OCR drift, standardize on PaddleOCR"
+        ],
+        "expected_memory_substrings": [
+          "PaddleOCR"
+        ],
+        "category": "multi_session",
+        "scope_type": "track",
+        "scope_id": "track-alpha"
+      },
+      {
+        "question_id": "q7",
+        "query": "What GPU type is assigned?",
+        "expected_answer": "INSUFFICIENT_MEMORY",
+        "expected_memory_substrings": [],
+        "category": "abstain",
+        "scope_type": "track",
+        "scope_id": "track-alpha"
+      }
+    ]
+  },
+  {
+    "case_id": "paper_graph_pipeline",
+    "user_id": "effectiveness_bench",
+    "sessions": [
+      {
+        "session_id": "s1",
+        "writes": [
+          {
+            "kind": "dataset",
+            "content": "dataset choice: Cora",
+            "scope_type": "paper",
+            "scope_id": "paper-graph-memory"
+          },
+          {
+            "kind": "encoder",
+            "content": "encoder choice: GCN",
+            "scope_type": "paper",
+            "scope_id": "paper-graph-memory"
+          },
+          {
+            "kind": "baseline",
+            "content": "baseline model: node2vec",
+            "scope_type": "paper",
+            "scope_id": "paper-graph-memory"
+          },
+          {
+            "kind": "optimizer",
+            "content": "optimizer choice: Adam",
+            "scope_type": "paper",
+            "scope_id": "paper-graph-memory"
+          }
+        ]
+      },
+      {
+        "session_id": "s2",
+        "writes": [
+          {
+            "kind": "dataset",
+            "content": "dataset choice: PubMed",
+            "scope_type": "paper",
+            "scope_id": "paper-graph-memory"
+          },
+          {
+            "kind": "optimizer",
+            "content": "optimizer choice: AdamW",
+            "scope_type": "paper",
+            "scope_id": "paper-graph-memory"
+          },
+          {
+            "kind": "lr",
+            "content": "learning rate: 3e-4",
+            "scope_type": "paper",
+            "scope_id": "paper-graph-memory"
+          }
+        ]
+      },
+      {
+        "session_id": "s3",
+        "writes": [
+          {
+            "kind": "encoder",
+            "content": "encoder choice: GraphSAGE",
+            "scope_type": "paper",
+            "scope_id": "paper-graph-memory"
+          },
+          {
+            "kind": "checkpoint",
+            "content": "checkpoint rule: keep best macro-f1",
+            "scope_type": "paper",
+            "scope_id": "paper-graph-memory"
+          }
+        ]
+      },
+      {
+        "session_id": "s4",
+        "writes": [
+          {
+            "kind": "recap",
+            "content": "current graph setup: GraphSAGE on PubMed with AdamW",
+            "scope_type": "paper",
+            "scope_id": "paper-graph-memory"
+          },
+          {
+            "kind": "metric",
+            "content": "report metric: macro-f1",
+            "scope_type": "paper",
+            "scope_id": "paper-graph-memory"
+          }
+        ]
+      },
+      {
+        "session_id": "s5",
+        "writes": [
+          {
+            "kind": "stopping",
+            "content": "early stopping patience: 20",
+            "scope_type": "paper",
+            "scope_id": "paper-graph-memory"
+          }
+        ]
+      }
+    ],
+    "questions": [
+      {
+        "question_id": "q1",
+        "query": "Which dataset should be used now?",
+        "expected_answer": "PubMed",
+        "acceptable_answers": [
+          "dataset choice: PubMed"
+        ],
+        "expected_memory_substrings": [
+          "dataset choice: PubMed"
+        ],
+        "category": "update",
+        "scope_type": "paper",
+        "scope_id": "paper-graph-memory"
+      },
+      {
+        "question_id": "q2",
+        "query": "Which encoder should be used now?",
+        "expected_answer": "GraphSAGE",
+        "acceptable_answers": [
+          "encoder choice: GraphSAGE"
+        ],
+        "expected_memory_substrings": [
+          "encoder choice: GraphSAGE"
+        ],
+        "category": "update",
+        "scope_type": "paper",
+        "scope_id": "paper-graph-memory"
+      },
+      {
+        "question_id": "q3",
+        "query": "What is the current graph setup?",
+        "expected_answer": "GraphSAGE on PubMed with AdamW",
+        "acceptable_answers": [
+          "current graph setup: GraphSAGE on PubMed with AdamW"
+        ],
+        "expected_memory_substrings": [
+          "current graph setup: GraphSAGE on PubMed with AdamW"
+        ],
+        "category": "multi_session",
+        "scope_type": "paper",
+        "scope_id": "paper-graph-memory"
+      },
+      {
+        "question_id": "q4",
+        "query": "What was the first dataset choice for the graph paper?",
+        "expected_answer": "Cora",
+        "acceptable_answers": [
+          "dataset choice: Cora"
+        ],
+        "expected_memory_substrings": [
+          "dataset choice: Cora"
+        ],
+        "category": "temporal_previous",
+        "scope_type": "paper",
+        "scope_id": "paper-graph-memory"
+      },
+      {
+        "question_id": "q5",
+        "query": "Which baseline model was compared originally?",
+        "expected_answer": "node2vec",
+        "acceptable_answers": [
+          "baseline model: node2vec"
+        ],
+        "expected_memory_substrings": [
+          "baseline model: node2vec"
+        ],
+        "category": "fact",
+        "scope_type": "paper",
+        "scope_id": "paper-graph-memory"
+      },
+      {
+        "question_id": "q6",
+        "query": "What metric should be reported?",
+        "expected_answer": "macro-f1",
+        "acceptable_answers": [
+          "report metric: macro-f1"
+        ],
+        "expected_memory_substrings": [
+          "report metric: macro-f1"
+        ],
+        "category": "fact",
+        "scope_type": "paper",
+        "scope_id": "paper-graph-memory"
+      },
+      {
+        "question_id": "q7",
+        "query": "Which tokenizer library was used?",
+        "expected_answer": "INSUFFICIENT_MEMORY",
+        "expected_memory_substrings": [],
+        "category": "abstain",
+        "scope_type": "paper",
+        "scope_id": "paper-graph-memory"
+      }
+    ]
+  },
+  {
+    "case_id": "paper_scope_isolation_bundle",
+    "user_id": "effectiveness_bench",
+    "sessions": [
+      {
+        "session_id": "s1",
+        "writes": [
+          {
+            "kind": "dataset",
+            "content": "dataset choice: CIFAR-10",
+            "scope_type": "paper",
+            "scope_id": "paper-vision"
+          },
+          {
+            "kind": "backbone",
+            "content": "backbone choice: ViT-B/16",
+            "scope_type": "paper",
+            "scope_id": "paper-vision"
+          },
+          {
+            "kind": "dataset",
+            "content": "dataset choice: MIMIC-CXR",
+            "scope_type": "paper",
+            "scope_id": "paper-medical"
+          },
+          {
+            "kind": "backbone",
+            "content": "backbone choice: DenseNet121",
+            "scope_type": "paper",
+            "scope_id": "paper-medical"
+          }
+        ]
+      },
+      {
+        "session_id": "s2",
+        "writes": [
+          {
+            "kind": "dataset",
+            "content": "dataset choice: CIFAR-100",
+            "scope_type": "paper",
+            "scope_id": "paper-vision"
+          },
+          {
+            "kind": "backbone",
+            "content": "backbone choice: Swin-T",
+            "scope_type": "paper",
+            "scope_id": "paper-medical"
+          },
+          {
+            "kind": "goal",
+            "content": "current focus: radiology agents",
+            "scope_type": "track",
+            "scope_id": "track-gamma"
+          }
+        ]
+      },
+      {
+        "session_id": "s3",
+        "writes": [
+          {
+            "kind": "recap",
+            "content": "vision stack: ViT-B/16 on CIFAR-100",
+            "scope_type": "paper",
+            "scope_id": "paper-vision"
+          },
+          {
+            "kind": "recap",
+            "content": "medical stack: Swin-T on MIMIC-CXR",
+            "scope_type": "paper",
+            "scope_id": "paper-medical"
+          }
+        ]
+      }
+    ],
+    "questions": [
+      {
+        "question_id": "q1",
+        "query": "Which dataset is selected now?",
+        "expected_answer": "CIFAR-100",
+        "acceptable_answers": [
+          "dataset choice: CIFAR-100",
+          "vision stack: ViT-B/16 on CIFAR-100"
+        ],
+        "expected_memory_substrings": [
+          "CIFAR-100"
+        ],
+        "category": "scope",
+        "scope_type": "paper",
+        "scope_id": "paper-vision"
+      },
+      {
+        "question_id": "q2",
+        "query": "Which backbone is used now?",
+        "expected_answer": "ViT-B/16",
+        "acceptable_answers": [
+          "backbone choice: ViT-B/16",
+          "vision stack: ViT-B/16 on CIFAR-100"
+        ],
+        "expected_memory_substrings": [
+          "ViT-B/16"
+        ],
+        "category": "scope",
+        "scope_type": "paper",
+        "scope_id": "paper-vision"
+      },
+      {
+        "question_id": "q3",
+        "query": "Which dataset is used?",
+        "expected_answer": "MIMIC-CXR",
+        "acceptable_answers": [
+          "dataset choice: MIMIC-CXR",
+          "medical stack: Swin-T on MIMIC-CXR"
+        ],
+        "expected_memory_substrings": [
+          "MIMIC-CXR"
+        ],
+        "category": "scope",
+        "scope_type": "paper",
+        "scope_id": "paper-medical"
+      },
+      {
+        "question_id": "q4",
+        "query": "Which backbone is used now?",
+        "expected_answer": "Swin-T",
+        "acceptable_answers": [
+          "backbone choice: Swin-T",
+          "medical stack: Swin-T on MIMIC-CXR"
+        ],
+        "expected_memory_substrings": [
+          "Swin-T"
+        ],
+        "category": "scope",
+        "scope_type": "paper",
+        "scope_id": "paper-medical"
+      },
+      {
+        "question_id": "q5",
+        "query": "What is the current focus of track gamma?",
+        "expected_answer": "radiology agents",
+        "acceptable_answers": [
+          "current focus: radiology agents"
+        ],
+        "expected_memory_substrings": [
+          "current focus: radiology agents"
+        ],
+        "category": "fact",
+        "scope_type": "track",
+        "scope_id": "track-gamma"
+      },
+      {
+        "question_id": "q6",
+        "query": "What GPU memory cap was set?",
+        "expected_answer": "INSUFFICIENT_MEMORY",
+        "expected_memory_substrings": [],
+        "category": "abstain",
+        "scope_type": "paper",
+        "scope_id": "paper-vision"
+      }
+    ]
+  },
+  {
+    "case_id": "global_preferences_longitudinal",
+    "user_id": "effectiveness_bench",
+    "sessions": [
+      {
+        "session_id": "s1",
+        "writes": [
+          {
+            "kind": "preference",
+            "content": "preferred response length: 3 bullets",
+            "scope_type": "global"
+          },
+          {
+            "kind": "preference",
+            "content": "preferred conference region: US",
+            "scope_type": "global"
+          },
+          {
+            "kind": "preference",
+            "content": "avoid jargon: yes",
+            "scope_type": "global"
+          },
+          {
+            "kind": "preference",
+            "content": "delivery mode: terse",
+            "scope_type": "global"
+          }
+        ]
+      },
+      {
+        "session_id": "s2",
+        "writes": [
+          {
+            "kind": "preference",
+            "content": "preferred response length: 5 bullets",
+            "scope_type": "global"
+          },
+          {
+            "kind": "preference",
+            "content": "citation style: author-year",
+            "scope_type": "global"
+          }
+        ]
+      },
+      {
+        "session_id": "s3",
+        "writes": [
+          {
+            "kind": "preference",
+            "content": "avoid jargon: no",
+            "scope_type": "global"
+          },
+          {
+            "kind": "preference",
+            "content": "delivery mode: analytical",
+            "scope_type": "global"
+          },
+          {
+            "kind": "recap",
+            "content": "session recap: user now wants 5 bullets with author-year citations",
+            "scope_type": "global"
+          }
+        ]
+      },
+      {
+        "session_id": "s4",
+        "writes": [
+          {
+            "kind": "preference",
+            "content": "preferred response length: 4 bullets",
+            "scope_type": "global"
+          },
+          {
+            "kind": "preference",
+            "content": "citation style: numeric",
+            "scope_type": "global"
+          },
+          {
+            "kind": "recap",
+            "content": "current response style: 4 bullets with numeric citations",
+            "scope_type": "global"
+          }
+        ]
+      }
+    ],
+    "questions": [
+      {
+        "question_id": "q1",
+        "query": "How many bullets now?",
+        "expected_answer": "4 bullets",
+        "acceptable_answers": [
+          "preferred response length: 4 bullets",
+          "current response style: 4 bullets with numeric citations"
+        ],
+        "expected_memory_substrings": [
+          "4 bullets"
+        ],
+        "category": "update",
+        "scope_type": "global"
+      },
+      {
+        "question_id": "q2",
+        "query": "Which citation style now?",
+        "expected_answer": "numeric",
+        "acceptable_answers": [
+          "citation style: numeric",
+          "current response style: 4 bullets with numeric citations"
+        ],
+        "expected_memory_substrings": [
+          "citation style: numeric"
+        ],
+        "category": "update",
+        "scope_type": "global"
+      },
+      {
+        "question_id": "q3",
+        "query": "Should jargon be avoided now?",
+        "expected_answer": "no",
+        "acceptable_answers": [
+          "avoid jargon: no"
+        ],
+        "expected_memory_substrings": [
+          "avoid jargon: no"
+        ],
+        "category": "temporal",
+        "scope_type": "global"
+      },
+      {
+        "question_id": "q4",
+        "query": "What region did the user originally care about?",
+        "expected_answer": "US",
+        "acceptable_answers": [
+          "preferred conference region: US"
+        ],
+        "expected_memory_substrings": [
+          "preferred conference region: US"
+        ],
+        "category": "temporal_previous",
+        "scope_type": "global"
+      },
+      {
+        "question_id": "q5",
+        "query": "What is the current response style?",
+        "expected_answer": "4 bullets with numeric citations",
+        "acceptable_answers": [
+          "current response style: 4 bullets with numeric citations"
+        ],
+        "expected_memory_substrings": [
+          "current response style: 4 bullets with numeric citations"
+        ],
+        "category": "multi_session",
+        "scope_type": "global"
+      },
+      {
+        "question_id": "q6",
+        "query": "What notification time?",
+        "expected_answer": "INSUFFICIENT_MEMORY",
+        "expected_memory_substrings": [],
+        "category": "abstain",
+        "scope_type": "global"
+      }
+    ]
+  },
+  {
+    "case_id": "incident_response_memory",
+    "user_id": "effectiveness_bench",
+    "sessions": [
+      {
+        "session_id": "s1",
+        "writes": [
+          {
+            "kind": "incident",
+            "content": "incident cause: tokenizer mismatch",
+            "scope_type": "paper",
+            "scope_id": "paper-runtime-debug"
+          },
+          {
+            "kind": "rollback",
+            "content": "rollback commit: 9f2a1",
+            "scope_type": "paper",
+            "scope_id": "paper-runtime-debug"
+          },
+          {
+            "kind": "fix",
+            "content": "crash fix: pin sentencepiece 0.1.99",
+            "scope_type": "paper",
+            "scope_id": "paper-runtime-debug"
+          }
+        ]
+      },
+      {
+        "session_id": "s2",
+        "writes": [
+          {
+            "kind": "outcome",
+            "content": "incident outcome: crash resolved after pinning sentencepiece 0.1.99",
+            "scope_type": "paper",
+            "scope_id": "paper-runtime-debug"
+          },
+          {
+            "kind": "blocker",
+            "content": "current blocker: validation leakage",
+            "scope_type": "paper",
+            "scope_id": "paper-runtime-debug"
+          }
+        ]
+      },
+      {
+        "session_id": "s3",
+        "writes": [
+          {
+            "kind": "fix",
+            "content": "leakage fix: isolate validation loader",
+            "scope_type": "paper",
+            "scope_id": "paper-runtime-debug"
+          },
+          {
+            "kind": "outcome",
+            "content": "incident outcome: validation leakage resolved",
+            "scope_type": "paper",
+            "scope_id": "paper-runtime-debug"
+          }
+        ]
+      },
+      {
+        "session_id": "s4",
+        "writes": [
+          {
+            "kind": "recap",
+            "content": "stable recipe: sentencepiece 0.1.99 plus isolated validation loader",
+            "scope_type": "paper",
+            "scope_id": "paper-runtime-debug"
+          },
+          {
+            "kind": "note",
+            "content": "confidence note: do not mix dev split into validation",
+            "scope_type": "paper",
+            "scope_id": "paper-runtime-debug"
+          }
+        ]
+      },
+      {
+        "session_id": "s5",
+        "writes": [
+          {
+            "kind": "blocker",
+            "content": "current blocker: none",
+            "scope_type": "paper",
+            "scope_id": "paper-runtime-debug"
+          }
+        ]
+      }
+    ],
+    "questions": [
+      {
+        "question_id": "q1",
+        "query": "What fixed the crash in the runtime debug paper?",
+        "expected_answer": "pin sentencepiece 0.1.99",
+        "acceptable_answers": [
+          "crash fix: pin sentencepiece 0.1.99",
+          "incident outcome: crash resolved after pinning sentencepiece 0.1.99"
+        ],
+        "expected_memory_substrings": [
+          "sentencepiece 0.1.99"
+        ],
+        "category": "fact",
+        "scope_type": "paper",
+        "scope_id": "paper-runtime-debug"
+      },
+      {
+        "question_id": "q2",
+        "query": "Which commit was rolled back during the first incident?",
+        "expected_answer": "9f2a1",
+        "acceptable_answers": [
+          "rollback commit: 9f2a1"
+        ],
+        "expected_memory_substrings": [
+          "rollback commit: 9f2a1"
+        ],
+        "category": "temporal_previous",
+        "scope_type": "paper",
+        "scope_id": "paper-runtime-debug"
+      },
+      {
+        "question_id": "q3",
+        "query": "What fixed the validation leakage?",
+        "expected_answer": "isolate validation loader",
+        "acceptable_answers": [
+          "leakage fix: isolate validation loader"
+        ],
+        "expected_memory_substrings": [
+          "leakage fix: isolate validation loader"
+        ],
+        "category": "update",
+        "scope_type": "paper",
+        "scope_id": "paper-runtime-debug"
+      },
+      {
+        "question_id": "q4",
+        "query": "What is the stable recipe now for the runtime debug paper?",
+        "expected_answer": "sentencepiece 0.1.99 plus isolated validation loader",
+        "acceptable_answers": [
+          "stable recipe: sentencepiece 0.1.99 plus isolated validation loader"
+        ],
+        "expected_memory_substrings": [
+          "stable recipe: sentencepiece 0.1.99 plus isolated validation loader"
+        ],
+        "category": "multi_session",
+        "scope_type": "paper",
+        "scope_id": "paper-runtime-debug"
+      },
+      {
+        "question_id": "q5",
+        "query": "What is the current blocker now?",
+        "expected_answer": "none",
+        "acceptable_answers": [
+          "current blocker: none"
+        ],
+        "expected_memory_substrings": [
+          "current blocker: none"
+        ],
+        "category": "temporal",
+        "scope_type": "paper",
+        "scope_id": "paper-runtime-debug"
+      },
+      {
+        "question_id": "q6",
+        "query": "Which dataset was involved?",
+        "expected_answer": "INSUFFICIENT_MEMORY",
+        "expected_memory_substrings": [],
+        "category": "abstain",
+        "scope_type": "paper",
+        "scope_id": "paper-runtime-debug"
+      }
+    ]
+  }
+]

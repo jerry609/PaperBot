@@ -35,10 +35,10 @@ class PlanningAgent(BaseAgent):
         - plan: ReproductionPlan
     """
 
-    def __init__(self, **kwargs):
+    def __init__(self, llm_client=None, **kwargs):
         super().__init__(name="PlanningAgent", **kwargs)
         self.blueprint_node = BlueprintDistillationNode()
-        self.planning_node = PlanningNode()
+        self.planning_node = PlanningNode(llm_client=llm_client)
 
     async def execute(self, context: Dict[str, Any]) -> AgentResult:
         """Execute planning pipeline."""
@@ -57,19 +57,21 @@ class PlanningAgent(BaseAgent):
                 )
 
             blueprint = blueprint_result.data
-            self.log(f"Blueprint created: {blueprint.architecture_type} architecture, {blueprint.domain} domain")
+            self.log(
+                f"Blueprint created: {blueprint.architecture_type} architecture, {blueprint.domain} domain"
+            )
 
             # Step 2: Generate Plan
             self.log("Generating reproduction plan...")
             plan_result = await self.planning_node.run((paper_context, blueprint))
 
             if not plan_result.success:
-                return AgentResult.failure(
-                    f"Plan generation failed: {plan_result.error}"
-                )
+                return AgentResult.failure(f"Plan generation failed: {plan_result.error}")
 
             plan = plan_result.data
-            self.log(f"Plan created: {len(plan.file_structure)} files, {len(plan.dependencies)} dependencies")
+            self.log(
+                f"Plan created: {len(plan.file_structure)} files, {len(plan.dependencies)} dependencies"
+            )
 
             # Store in context for other agents
             context["blueprint"] = blueprint
@@ -85,7 +87,7 @@ class PlanningAgent(BaseAgent):
                     "domain": blueprint.domain,
                     "num_files": len(plan.file_structure),
                     "num_dependencies": len(plan.dependencies),
-                }
+                },
             )
 
         except Exception as e:

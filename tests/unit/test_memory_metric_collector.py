@@ -1,6 +1,7 @@
 """
 Unit tests for MemoryMetricCollector (P0 Acceptance Criteria).
 """
+
 from __future__ import annotations
 
 import pytest
@@ -187,3 +188,43 @@ def test_collector_skips_zero_totals(tmp_path):
 
     latest = collector.get_latest_metrics()
     assert len(latest) == 0  # No metrics recorded
+
+
+def test_collector_record_scope_isolation_passes_target(tmp_path):
+    """Test recording zero-leak scope isolation metrics."""
+    db_url = f"sqlite:///{tmp_path / 'metrics.db'}"
+    collector = MemoryMetricCollector(db_url=db_url)
+
+    collector.record_scope_isolation(
+        cross_user_leak_count=0,
+        cross_user_total_checks=12,
+        cross_scope_leak_count=0,
+        cross_scope_total_checks=12,
+        evaluator_id="test:unit",
+    )
+
+    latest = collector.get_latest_metrics()
+    assert latest["cross_user_leak_rate"]["value"] == 0.0
+    assert latest["cross_user_leak_rate"]["meets_target"] is True
+    assert latest["cross_scope_leak_rate"]["value"] == 0.0
+    assert latest["cross_scope_leak_rate"]["meets_target"] is True
+
+
+def test_collector_record_scope_isolation_fails_target(tmp_path):
+    """Test recording scope isolation metrics when leaks exist."""
+    db_url = f"sqlite:///{tmp_path / 'metrics.db'}"
+    collector = MemoryMetricCollector(db_url=db_url)
+
+    collector.record_scope_isolation(
+        cross_user_leak_count=1,
+        cross_user_total_checks=12,
+        cross_scope_leak_count=2,
+        cross_scope_total_checks=12,
+        evaluator_id="test:unit",
+    )
+
+    latest = collector.get_latest_metrics()
+    assert latest["cross_user_leak_rate"]["value"] == 1 / 12
+    assert latest["cross_user_leak_rate"]["meets_target"] is False
+    assert latest["cross_scope_leak_rate"]["value"] == 2 / 12
+    assert latest["cross_scope_leak_rate"]["meets_target"] is False

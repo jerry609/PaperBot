@@ -38,6 +38,7 @@ if TYPE_CHECKING:
 
 class PipelineStage(Enum):
     """Pipeline execution stages."""
+
     PLANNING = "planning"
     CODING = "coding"
     VERIFICATION = "verification"
@@ -49,17 +50,24 @@ class PipelineStage(Enum):
 @dataclass
 class OrchestratorConfig:
     """Configuration for the orchestrator."""
+
     max_repair_loops: int = 3
     parallel_agents: bool = True
     timeout_seconds: int = 300
     output_dir: Optional[Path] = None
     use_rag: bool = True
     max_context_tokens: int = 8000
+    verification_prepare_requirements: bool = False
+    verification_runtime_cache_dir: Optional[Path] = None
+    verification_install_timeout: int = 600
+    verification_prefer_cpu_torch: bool = False
+    verification_python_executable: str = "python3"
 
 
 @dataclass
 class PipelineProgress:
     """Track pipeline progress."""
+
     current_stage: PipelineStage = PipelineStage.PLANNING
     stages_completed: List[str] = field(default_factory=list)
     repair_loop_count: int = 0
@@ -104,6 +112,8 @@ class Orchestrator:
         self,
         config: Optional[OrchestratorConfig] = None,
         on_progress: Optional[Callable[[PipelineProgress], None]] = None,
+        experience_store=None,
+        llm_client=None,
         *,
         event_log: "Optional[EventLogPort]" = None,
         run_id: Optional[str] = None,
@@ -113,16 +123,30 @@ class Orchestrator:
         self.config = config or OrchestratorConfig()
         self.on_progress = on_progress
         self.progress = PipelineProgress()
+        self.llm_client = llm_client
 
         # Initialize agents
-        self.planning_agent = PlanningAgent()
+        self.planning_agent = PlanningAgent(llm_client=self.llm_client)
         self.coding_agent = CodingAgent(
             output_dir=self.config.output_dir,
             max_context_tokens=self.config.max_context_tokens,
             use_rag=self.config.use_rag,
+            experience_store=experience_store,
+            llm_client=self.llm_client,
         )
-        self.verification_agent = VerificationAgent()
-        self.debugging_agent = DebuggingAgent(output_dir=self.config.output_dir)
+        self.verification_agent = VerificationAgent(
+            timeout=min(max(5, int(self.config.timeout_seconds)), 300),
+            python_executable=self.config.verification_python_executable,
+            prepare_requirements=self.config.verification_prepare_requirements,
+            runtime_cache_dir=self.config.verification_runtime_cache_dir,
+            install_timeout=self.config.verification_install_timeout,
+            prefer_cpu_torch=self.config.verification_prefer_cpu_torch,
+        )
+        self.debugging_agent = DebuggingAgent(
+            output_dir=self.config.output_dir,
+            experience_store=experience_store,
+            llm_client=self.llm_client,
+        )
 
         # Shared context
         self.context: Dict[str, Any] = {}
@@ -137,6 +161,8 @@ class Orchestrator:
         self,
         paper_context: PaperContext,
         *,
+        user_id: str = "default",
+        pack_id: Optional[str] = None,
         run_id: Optional[str] = None,
         trace_id: Optional[str] = None,
     ) -> ReproductionResult:
@@ -160,6 +186,8 @@ class Orchestrator:
 
         self.context = {
             "paper_context": paper_context,
+            "user_id": (user_id or "default").strip() or "default",
+            "pack_id": pack_id,
             "run_id": self._run_id,
             "trace_id": self._trace_id,
         }

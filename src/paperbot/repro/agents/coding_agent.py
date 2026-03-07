@@ -46,14 +46,18 @@ class CodingAgent(BaseAgent):
         output_dir: Optional[Path] = None,
         max_context_tokens: int = 8000,
         use_rag: bool = True,
-        **kwargs
+        experience_store=None,
+        llm_client=None,
+        **kwargs,
     ):
         super().__init__(name="CodingAgent", **kwargs)
         self.output_dir = output_dir
-        self.analysis_node = AnalysisNode()
+        self.analysis_node = AnalysisNode(llm_client=llm_client)
         self.generation_node = GenerationNode(
+            llm_client=llm_client,
             max_context_tokens=max_context_tokens,
-            use_rag=use_rag
+            use_rag=use_rag,
+            experience_store=experience_store,
         )
 
     async def execute(self, context: Dict[str, Any]) -> AgentResult:
@@ -78,7 +82,9 @@ class CodingAgent(BaseAgent):
             else:
                 spec = analysis_result.data
 
-            self.log(f"Spec: {spec.model_type} model, lr={spec.learning_rate}, batch_size={spec.batch_size}")
+            self.log(
+                f"Spec: {spec.model_type} model, lr={spec.learning_rate}, batch_size={spec.batch_size}"
+            )
 
             # Step 2: Generate code files
             self.log(f"Generating {len(plan.file_structure)} code files...")
@@ -88,12 +94,14 @@ class CodingAgent(BaseAgent):
             else:
                 gen_input = (paper_context, plan, spec)
 
-            gen_result = await self.generation_node.run(gen_input)
+            gen_result = await self.generation_node.run(
+                gen_input,
+                user_id=context.get("user_id", "default"),
+                pack_id=context.get("pack_id"),
+            )
 
             if not gen_result.success:
-                return AgentResult.failure(
-                    f"Code generation failed: {gen_result.error}"
-                )
+                return AgentResult.failure(f"Code generation failed: {gen_result.error}")
 
             generated_files = gen_result.data
             self.log(f"Generated {len(generated_files)} files")
@@ -121,7 +129,7 @@ class CodingAgent(BaseAgent):
                     "num_files": len(generated_files),
                     "total_chars": sum(len(c) for c in generated_files.values()),
                     "files": list(generated_files.keys()),
-                }
+                },
             )
 
         except Exception as e:

@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 import logging
 import re
+import time
 from typing import Any, Dict, Generator, List, Optional
 
 from .base import LLMProvider, ProviderInfo
@@ -26,18 +27,22 @@ except ImportError:
 class OpenAIProvider(LLMProvider):
     """
     OpenAI 兼容的 LLM Provider
-    
+
     支持:
     - OpenAI (gpt-4o, gpt-4o-mini)
     - DeepSeek (deepseek-chat, deepseek-coder)
     - OpenRouter (多模型路由)
     """
-    
+
     ALLOWED_PARAMS = {
-        "temperature", "top_p", "presence_penalty", 
-        "frequency_penalty", "max_tokens", "timeout"
+        "temperature",
+        "top_p",
+        "presence_penalty",
+        "frequency_penalty",
+        "max_tokens",
+        "timeout",
     }
-    
+
     def __init__(
         self,
         api_key: str,
@@ -48,7 +53,7 @@ class OpenAIProvider(LLMProvider):
     ):
         """
         初始化 OpenAI Provider
-        
+
         Args:
             api_key: API 密钥
             model_name: 模型名称
@@ -58,15 +63,15 @@ class OpenAIProvider(LLMProvider):
         """
         if OpenAI is None:
             raise RuntimeError("需要安装 openai 库: pip install openai")
-        
+
         if not api_key:
             raise ValueError("API key 不能为空")
-        
+
         self.api_key = api_key
         self.model_name = model_name
         self.base_url = base_url
         self.cost_tier = cost_tier
-        
+
         # 解析超时
         if timeout is not None:
             self.timeout = timeout
@@ -76,10 +81,15 @@ class OpenAIProvider(LLMProvider):
                 self.timeout = float(timeout_env)
             except ValueError:
                 self.timeout = 1800.0
-        
+
         # 检测提供商
         self._provider_name = self._detect_provider()
-        
+        self.max_transient_retries = max(0, int(os.getenv("LLM_TRANSIENT_RETRIES", "2") or 0))
+        try:
+            self.retry_backoff_sec = max(0.0, float(os.getenv("LLM_RETRY_BACKOFF_SEC", "2") or 0.0))
+        except ValueError:
+            self.retry_backoff_sec = 2.0
+
         # 初始化客户端
         client_kwargs: Dict[str, Any] = {
             "api_key": api_key,
@@ -87,10 +97,115 @@ class OpenAIProvider(LLMProvider):
         }
         if base_url:
             client_kwargs["base_url"] = base_url
-        
+
         self.client = OpenAI(**client_kwargs)
         logger.info(f"OpenAIProvider 初始化: {self}")
-    
+
+    def _create_completion_with_fallback(
+        self,
+        *,
+        messages: List[Dict[str, str]],
+        timeout: float,
+        extra_params: Dict[str, Any],
+        stream: bool,
+    ):
+        request_kwargs: Dict[str, Any] = dict(
+            model=self.model_name,
+            messages=messages,
+            timeout=timeout,
+            **extra_params,
+        )
+        if stream:
+            request_kwargs["stream"] = True
+
+        attempt = 0
+        system_fallback_applied = False
+        current_kwargs = dict(request_kwargs)
+
+        while True:
+            try:
+                return self.client.chat.completions.create(**current_kwargs)
+            except Exception as exc:
+                current_messages = current_kwargs.get("messages") or []
+                if (
+                    not system_fallback_applied
+                    and self._should_retry_without_system(exc, current_messages)
+                ):
+                    retry_kwargs = dict(current_kwargs)
+                    retry_kwargs["messages"] = self._merge_system_into_user(current_messages)
+                    current_kwargs = retry_kwargs
+                    system_fallback_applied = True
+                    continue
+                if self._should_retry_transient(exc) and attempt < self.max_transient_retries:
+                    delay = self.retry_backoff_sec * (2 ** attempt)
+                    logger.warning(
+                        "Transient LLM request failed provider=%s model=%s attempt=%s error=%s",
+                        self._provider_name,
+                        self.model_name,
+                        attempt + 1,
+                        exc,
+                    )
+                    if delay > 0:
+                        time.sleep(delay)
+                    attempt += 1
+                    continue
+                raise
+
+    @staticmethod
+    def _should_retry_without_system(exc: Exception, messages: List[Dict[str, str]]) -> bool:
+        if not messages or messages[0].get("role") != "system":
+            return False
+        text = str(exc)
+        lowered = text.lower()
+        markers = (
+            "developer instruction is not enabled",
+            "system message is not supported",
+            "system role is not supported",
+        )
+        return any(marker in lowered for marker in markers)
+
+    @staticmethod
+    def _should_retry_transient(exc: Exception) -> bool:
+        lowered = str(exc).lower()
+        markers = (
+            "error code: 429",
+            "rate limit",
+            "rate-limit",
+            "temporarily rate-limited",
+            "timeout",
+            "connection reset",
+            "bad gateway",
+            "service unavailable",
+            "gateway timeout",
+            "error code: 500",
+            "error code: 502",
+            "error code: 503",
+            "error code: 504",
+        )
+        return any(marker in lowered for marker in markers)
+
+    @staticmethod
+    def _merge_system_into_user(messages: List[Dict[str, str]]) -> List[Dict[str, str]]:
+        if not messages:
+            return []
+        system_chunks = [msg.get("content", "") for msg in messages if msg.get("role") == "system"]
+        non_system = [dict(msg) for msg in messages if msg.get("role") != "system"]
+        if not system_chunks:
+            return [dict(msg) for msg in messages]
+        merged_prefix = "\n\n".join(
+            chunk.strip() for chunk in system_chunks if chunk and chunk.strip()
+        )
+        if not non_system:
+            return [{"role": "user", "content": merged_prefix}]
+        first = dict(non_system[0])
+        first_content = str(first.get("content") or "").strip()
+        first["content"] = (
+            f"System instruction:\n{merged_prefix}\n\nUser request:\n{first_content}"
+            if merged_prefix
+            else first_content
+        )
+        return [first] + non_system[1:]
+
     def _detect_provider(self) -> str:
         """检测实际提供商"""
         if self.base_url:
@@ -101,7 +216,7 @@ class OpenAIProvider(LLMProvider):
                 return "anthropic-proxy"
             elif "openrouter" in url_lower:
                 return "openrouter"
-        
+
         model_lower = self.model_name.lower()
         if "gpt" in model_lower:
             return "openai"
@@ -109,27 +224,22 @@ class OpenAIProvider(LLMProvider):
             return "deepseek"
         elif "claude" in model_lower:
             return "anthropic-proxy"
-        
+
         return "openai-compatible"
-    
-    def invoke(
-        self,
-        messages: List[Dict[str, str]],
-        **kwargs
-    ) -> str:
+
+    def invoke(self, messages: List[Dict[str, str]], **kwargs) -> str:
         """非流式调用"""
         extra_params = {
-            k: v for k, v in kwargs.items()
-            if k in self.ALLOWED_PARAMS and v is not None
+            k: v for k, v in kwargs.items() if k in self.ALLOWED_PARAMS and v is not None
         }
 
         timeout = extra_params.pop("timeout", self.timeout)
 
-        response = self.client.chat.completions.create(
-            model=self.model_name,
+        response = self._create_completion_with_fallback(
             messages=messages,
             timeout=timeout,
-            **extra_params,
+            extra_params=extra_params,
+            stream=False,
         )
 
         if response.choices and response.choices[0].message:
@@ -144,27 +254,22 @@ class OpenAIProvider(LLMProvider):
             content = self._strip_thinking_tags(content)
             return content.strip() if content else ""
         return ""
-    
-    def stream_invoke(
-        self,
-        messages: List[Dict[str, str]],
-        **kwargs
-    ) -> Generator[str, None, None]:
+
+    def stream_invoke(self, messages: List[Dict[str, str]], **kwargs) -> Generator[str, None, None]:
         """流式调用"""
         extra_params = {
-            k: v for k, v in kwargs.items()
-            if k in self.ALLOWED_PARAMS and v is not None
+            k: v for k, v in kwargs.items() if k in self.ALLOWED_PARAMS and v is not None
         }
         extra_params["stream"] = True
 
         timeout = extra_params.pop("timeout", self.timeout)
 
         try:
-            stream = self.client.chat.completions.create(
-                model=self.model_name,
+            stream = self._create_completion_with_fallback(
                 messages=messages,
                 timeout=timeout,
-                **extra_params,
+                extra_params=extra_params,
+                stream=True,
             )
 
             in_think = False
@@ -193,7 +298,7 @@ class OpenAIProvider(LLMProvider):
         except Exception as e:
             logger.error(f"流式请求失败: {e}")
             raise
-    
+
     @property
     def info(self) -> ProviderInfo:
         return ProviderInfo(

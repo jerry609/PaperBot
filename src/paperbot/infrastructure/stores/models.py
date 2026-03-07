@@ -4,7 +4,7 @@ import json
 from datetime import datetime
 from typing import Any, Dict, Optional
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, LargeBinary, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -283,6 +283,9 @@ class MemoryItemModel(Base):
         DateTime(timezone=True), nullable=True, index=True
     )
     deleted_reason: Mapped[str] = mapped_column(Text, default="")
+
+    # Float32 vector blob for semantic search (sqlite-vec); None = not yet embedded.
+    embedding: Mapped[Optional[bytes]] = mapped_column(LargeBinary, nullable=True)
 
     source_id: Mapped[Optional[int]] = mapped_column(
         Integer, ForeignKey("memory_sources.id"), nullable=True, index=True
@@ -1255,3 +1258,38 @@ class ReproContextFeedbackModel(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
 
     pack = relationship("ReproContextPackModel", back_populates="feedback_rows")
+
+
+# ============================================================================
+# Issue #162: CodeMemory Persistence
+# ============================================================================
+
+
+class ReproCodeExperienceModel(Base):
+    """Persisted code generation experience from the Paper2Code pipeline.
+
+    Stores success patterns, failure reasons, and verified structures so that
+    CodeMemory can pre-load prior experience when regenerating for the same paper.
+    """
+
+    __tablename__ = "repro_code_experience"
+    __table_args__ = (
+        Index(
+            "uq_repro_exp_user_paper_type_content",
+            "user_id",
+            "paper_id",
+            "pattern_type",
+            "content",
+            unique=True,
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True, default="default")
+    pack_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
+    paper_id: Mapped[Optional[str]] = mapped_column(String(256), nullable=True, index=True)
+    # pattern_type: success_pattern | failure_reason | verified_structure
+    pattern_type: Mapped[str] = mapped_column(String(32), index=True)
+    content: Mapped[str] = mapped_column(Text, default="")
+    code_snippet: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)

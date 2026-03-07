@@ -5,6 +5,7 @@ import hashlib
 import math
 import random
 import re
+import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -484,6 +485,12 @@ class ContextEngineConfig:
     task_limit: int = 8
     milestone_limit: int = 6
     paper_limit: int = 8
+    memory_search_min_score: float = 0.0
+    memory_search_candidate_multiplier: int = 4
+    memory_search_mmr_enabled: bool = False
+    memory_search_mmr_lambda: float = 0.7
+    memory_search_half_life_days: float = 30.0
+    context_token_budget: Optional[int] = None
     offline: bool = False
     stage: str = "auto"
     search_sources: Optional[List[str]] = None
@@ -516,6 +523,9 @@ class ContextEngine:
             memory_store=self.memory_store,
             config=self.config.track_router,
         )
+        self._layer0_cache: Dict[str, Dict[str, Any]] = {}  # keyed by user_id
+        self._layer0_cache_ts: Dict[str, float] = {}      # keyed by user_id
+        self._layer0_ttl: float = 300.0  # 5 minutes
 
     def _attach_latest_judge(self, papers: List[Dict[str, Any]]) -> None:
         ids: List[int] = []
@@ -550,6 +560,238 @@ class ContextEngine:
             if pid in liked_ids:
                 paper["is_liked"] = True
 
+    # ── Layered context loading (#165) ──
+
+    def _load_layer0_profile(self, user_id: str) -> List[Dict[str, Any]]:
+        """Layer 0: user profile (~200 tokens). Cached per user_id with 5-minute TTL."""
+        now = time.monotonic()
+        cache_map = getattr(self, "_layer0_cache", {})
+        ts_map = getattr(self, "_layer0_cache_ts", {})
+        ttl = getattr(self, "_layer0_ttl", 300.0)
+
+        cached = cache_map.get(user_id)
+        cached_ts = ts_map.get(user_id, 0.0)
+        if cached is not None and (now - cached_ts) < ttl:
+            return cached.get("prefs", [])
+
+        prefs = self.memory_store.list_memories(
+            user_id=user_id,
+            limit=3,
+            scope_type="global",
+            include_pending=False,
+        )
+        self.memory_store.touch_usage(
+            item_ids=[int(i["id"]) for i in prefs if i.get("id")],
+            actor_id="context_engine",
+        )
+        if not hasattr(self, "_layer0_cache"):
+            self._layer0_cache = {}
+            self._layer0_cache_ts = {}
+        self._layer0_cache[user_id] = {"prefs": prefs}
+        self._layer0_cache_ts[user_id] = now
+        return prefs
+
+    def _load_layer1_track(
+        self, user_id: str, track: Optional[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """Layer 1: track context — goals, keywords, tasks, milestones (~500 tokens)."""
+        tasks: List[Dict[str, Any]] = []
+        milestones: List[Dict[str, Any]] = []
+        if track:
+            tasks = self.research_store.list_tasks(
+                user_id=user_id,
+                track_id=int(track["id"]),
+                limit=self.config.task_limit,
+            )
+            milestones = self.research_store.list_milestones(
+                user_id=user_id,
+                track_id=int(track["id"]),
+                limit=self.config.milestone_limit,
+            )
+        return {"tasks": tasks, "milestones": milestones}
+
+    def _load_layer2_query(
+        self,
+        user_id: str,
+        query: str,
+        track_scope_id: Optional[str],
+        *,
+        include_cross_track: bool = False,
+        track_id: Optional[int] = None,
+        routed_track: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Layer 2: query-relevant memories + cross-track search (~1000 tokens)."""
+        relevant_memories: List[Dict[str, Any]] = []
+        cross_track_memories: List[Dict[str, Any]] = []
+
+        if track_scope_id:
+            relevant_memories = self.memory_store.search_memories(
+                user_id=user_id,
+                query=query,
+                limit=self.config.memory_limit,
+                scope_type="track",
+                scope_id=track_scope_id,
+                min_score=self.config.memory_search_min_score,
+                candidate_multiplier=self.config.memory_search_candidate_multiplier,
+                mmr_enabled=self.config.memory_search_mmr_enabled,
+                mmr_lambda=self.config.memory_search_mmr_lambda,
+                half_life_days=self.config.memory_search_half_life_days,
+            )
+            self.memory_store.touch_usage(
+                item_ids=[int(i["id"]) for i in relevant_memories if i.get("id")],
+                actor_id="context_engine",
+            )
+
+        if include_cross_track and track_id is None:
+            tracks = self.research_store.list_tracks(
+                user_id=user_id, include_archived=False, limit=50
+            )
+            other_scope_ids = []
+            scope_id_to_track: Dict[str, Dict[str, Any]] = {}
+            for t in tracks:
+                if routed_track and t.get("id") == routed_track.get("id"):
+                    continue
+                sid = str(t.get("id") or "")
+                if not sid:
+                    continue
+                other_scope_ids.append(sid)
+                scope_id_to_track[sid] = t
+
+            if other_scope_ids:
+                batch_results = self.memory_store.search_memories_batch(
+                    user_id=user_id,
+                    query=query,
+                    scope_ids=other_scope_ids,
+                    scope_type="track",
+                    limit_per_scope=max(2, self.config.memory_limit // 2),
+                    min_score=self.config.memory_search_min_score,
+                    candidate_multiplier=self.config.memory_search_candidate_multiplier,
+                    mmr_enabled=self.config.memory_search_mmr_enabled,
+                    mmr_lambda=self.config.memory_search_mmr_lambda,
+                    half_life_days=self.config.memory_search_half_life_days,
+                )
+                cross_hit_ids: List[int] = []
+                for sid, hits in batch_results.items():
+                    t = scope_id_to_track.get(sid)
+                    for h in hits:
+                        h["track_id"] = t.get("id") if t else None
+                        h["track_name"] = t.get("name") if t else None
+                        if h.get("id"):
+                            cross_hit_ids.append(int(h["id"]))
+                    cross_track_memories.extend(hits)
+                if cross_hit_ids:
+                    self.memory_store.touch_usage(
+                        item_ids=cross_hit_ids, actor_id="context_engine"
+                    )
+
+        return {
+            "relevant_memories": relevant_memories,
+            "cross_track_memories": cross_track_memories,
+        }
+
+    @staticmethod
+    def _estimate_context_layers(
+        *,
+        user_prefs: List[Dict[str, Any]],
+        tasks: List[Dict[str, Any]],
+        milestones: List[Dict[str, Any]],
+        relevant_memories: List[Dict[str, Any]],
+        cross_track_memories: List[Dict[str, Any]],
+        paper_memories: List[Dict[str, Any]],
+    ) -> Dict[str, int]:
+        return {
+            "layer0_profile_tokens": len(user_prefs) * 65,
+            "layer1_track_tokens": (len(tasks) + len(milestones)) * 50,
+            "layer2_query_tokens": (len(relevant_memories) + len(cross_track_memories)) * 100,
+            "layer3_paper_tokens": len(paper_memories) * 100,
+        }
+
+    def _apply_context_token_guard(
+        self,
+        *,
+        user_prefs: List[Dict[str, Any]],
+        tasks: List[Dict[str, Any]],
+        milestones: List[Dict[str, Any]],
+        relevant_memories: List[Dict[str, Any]],
+        cross_track_memories: List[Dict[str, Any]],
+        paper_memories: List[Dict[str, Any]],
+    ) -> Tuple[
+        List[Dict[str, Any]],
+        List[Dict[str, Any]],
+        List[Dict[str, Any]],
+        List[Dict[str, Any]],
+        List[Dict[str, Any]],
+        List[Dict[str, Any]],
+        Dict[str, int],
+        bool,
+    ]:
+        budget = self.config.context_token_budget
+        prefs = list(user_prefs)
+        task_list = list(tasks)
+        milestone_list = list(milestones)
+        relevant = list(relevant_memories)
+        cross_track = list(cross_track_memories)
+        paper = list(paper_memories)
+
+        layers = self._estimate_context_layers(
+            user_prefs=prefs,
+            tasks=task_list,
+            milestones=milestone_list,
+            relevant_memories=relevant,
+            cross_track_memories=cross_track,
+            paper_memories=paper,
+        )
+        if budget is None or budget <= 0:
+            return prefs, task_list, milestone_list, relevant, cross_track, paper, layers, False
+
+        def _total_tokens() -> int:
+            return sum(layers.values())
+
+        if _total_tokens() <= budget:
+            return prefs, task_list, milestone_list, relevant, cross_track, paper, layers, False
+
+        trimmed = False
+        while _total_tokens() > budget:
+            trimmed_this_round = False
+            for collection in (cross_track, relevant, paper, task_list, milestone_list, prefs):
+                if collection and _total_tokens() > budget:
+                    collection.pop()
+                    trimmed = True
+                    trimmed_this_round = True
+                    layers = self._estimate_context_layers(
+                        user_prefs=prefs,
+                        tasks=task_list,
+                        milestones=milestone_list,
+                        relevant_memories=relevant,
+                        cross_track_memories=cross_track,
+                        paper_memories=paper,
+                    )
+            if not trimmed_this_round:
+                break
+
+        return prefs, task_list, milestone_list, relevant, cross_track, paper, layers, trimmed
+
+    def _load_layer3_paper(
+        self, user_id: str, paper_id: Optional[str]
+    ) -> List[Dict[str, Any]]:
+        """Layer 3: paper-scoped memories (on-demand, only when paper_id given)."""
+        if not paper_id:
+            return []
+        try:
+            return self.memory_store.list_memories(
+                user_id=user_id,
+                limit=10,
+                scope_type="paper",
+                scope_id=paper_id,
+                include_pending=False,
+            )
+        except Exception as exc:  # noqa: BLE001 — non-critical
+            Logger.warning(
+                f"[engine] paper_memories_query_failed paper_id={paper_id} error={exc!r}",
+                file=LogFiles.API,
+            )
+            return []
+
     async def build_context_pack(
         self,
         *,
@@ -557,6 +799,7 @@ class ContextEngine:
         query: str,
         track_id: Optional[int] = None,
         include_cross_track: bool = False,
+        paper_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         active_track = self.research_store.get_active_track(user_id=user_id)
         routed_track = (
@@ -576,63 +819,28 @@ class ContextEngine:
 
         track_scope_id = str(routed_track["id"]) if routed_track else None
 
-        user_prefs = self.memory_store.list_memories(
-            user_id=user_id,
-            limit=self.config.memory_limit,
-            scope_type="global",
-            include_pending=False,
+        # Layer 0: user profile (cached, ~200 tokens)
+        user_prefs = self._load_layer0_profile(user_id)
+
+        # Layer 1: track context (~500 tokens)
+        layer1 = self._load_layer1_track(user_id, routed_track)
+        progress_tasks = layer1["tasks"]
+        progress_milestones = layer1["milestones"]
+
+        # Layer 2: query-relevant + cross-track memories (~1000 tokens)
+        layer2 = self._load_layer2_query(
+            user_id,
+            query,
+            track_scope_id,
+            include_cross_track=include_cross_track,
+            track_id=track_id,
+            routed_track=routed_track,
         )
-        self.memory_store.touch_usage(
-            item_ids=[int(i["id"]) for i in user_prefs if i.get("id")],
-            actor_id="context_engine",
-        )
+        relevant_memories = layer2["relevant_memories"]
+        cross_track_memories = layer2["cross_track_memories"]
 
-        progress_tasks: List[Dict[str, Any]] = []
-        progress_milestones: List[Dict[str, Any]] = []
-        if routed_track:
-            progress_tasks = self.research_store.list_tasks(
-                user_id=user_id, track_id=int(routed_track["id"]), limit=self.config.task_limit
-            )
-            progress_milestones = self.research_store.list_milestones(
-                user_id=user_id, track_id=int(routed_track["id"]), limit=self.config.milestone_limit
-            )
-
-        relevant_memories: List[Dict[str, Any]] = []
-        cross_track_memories: List[Dict[str, Any]] = []
-        if track_scope_id:
-            relevant_memories = self.memory_store.search_memories(
-                user_id=user_id,
-                query=query,
-                limit=self.config.memory_limit,
-                scope_type="track",
-                scope_id=track_scope_id,
-            )
-            self.memory_store.touch_usage(
-                item_ids=[int(i["id"]) for i in relevant_memories if i.get("id")],
-                actor_id="context_engine",
-            )
-
-        if include_cross_track and track_id is None:
-            tracks = self.research_store.list_tracks(
-                user_id=user_id, include_archived=False, limit=50
-            )
-            for t in tracks:
-                if routed_track and t.get("id") == routed_track.get("id"):
-                    continue
-                sid = str(t.get("id") or "")
-                if not sid:
-                    continue
-                hits = self.memory_store.search_memories(
-                    user_id=user_id,
-                    query=query,
-                    limit=max(2, self.config.memory_limit // 2),
-                    scope_type="track",
-                    scope_id=sid,
-                )
-                for h in hits:
-                    h["track_id"] = t.get("id")
-                    h["track_name"] = t.get("name")
-                cross_track_memories.extend(hits)
+        # Layer 3: paper-scoped memories (on-demand)
+        paper_memories = self._load_layer3_paper(user_id, paper_id)
 
         merged_query = _expand_short_query(query)
         if routed_track:
@@ -931,6 +1139,30 @@ class ContextEngine:
         except Exception:
             context_run_id = None
 
+        (
+            user_prefs,
+            progress_tasks,
+            progress_milestones,
+            relevant_memories,
+            cross_track_memories,
+            paper_memories,
+            context_layers,
+            guard_trimmed,
+        ) = self._apply_context_token_guard(
+            user_prefs=user_prefs,
+            tasks=progress_tasks,
+            milestones=progress_milestones,
+            relevant_memories=relevant_memories,
+            cross_track_memories=cross_track_memories,
+            paper_memories=paper_memories,
+        )
+        if guard_trimmed:
+            routing["token_guard"] = {
+                "enabled": True,
+                "budget": self.config.context_token_budget,
+                "post_guard_total_tokens": sum(context_layers.values()),
+            }
+
         return {
             "user_id": user_id,
             "context_run_id": context_run_id,
@@ -940,9 +1172,11 @@ class ContextEngine:
             "progress_state": {"tasks": progress_tasks, "milestones": progress_milestones},
             "relevant_memories": relevant_memories,
             "cross_track_memories": cross_track_memories,
+            "paper_memories": paper_memories,
             "paper_recommendations": papers,
             "paper_recommendation_scores": paper_scores,
             "paper_recommendation_reasons": paper_reasons,
+            "context_layers": context_layers,
         }
 
     async def close(self) -> None:
