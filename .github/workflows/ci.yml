@@ -72,3 +72,4 @@ jobs:
         run: |
           python evals/memory/test_deletion_compliance.py
           python evals/memory/test_retrieval_hit_rate.py
+          python evals/memory/test_scope_isolation.py
