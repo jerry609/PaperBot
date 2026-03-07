@@ -41,12 +41,15 @@ PaperBot now includes a lightweight multi-session benchmark prototype:
 - Core logic: `src/paperbot/memory/eval/effectiveness_benchmark.py`
 - Fixture: `evals/memory/fixtures/multi_session_effectiveness.json`
 
-The prototype covers four useful memory behaviors:
+The expanded prototype now includes **5 cases / 32 questions** and covers seven practical memory behaviors:
 
 - **Update accuracy** — the latest memory should win over stale memory
 - **Temporal accuracy** — the current state should reflect later sessions
+- **Temporal-previous accuracy** — earliest / original facts should still be recoverable
 - **Scoped retrieval** — the correct paper/track scope should be used
+- **Multi-session synthesis** — recap-style answers should combine facts across sessions
 - **Abstention accuracy** — the system should return `INSUFFICIENT_MEMORY` when evidence is missing
+- **Per-case / per-category reporting** — the report now breaks down accuracy by question type and case
 
 ## Run it
 
@@ -71,24 +74,48 @@ PYTHONPATH=src python evals/memory/bench_effectiveness.py \
   --output output/reports/memory_effectiveness_benchmark_llm.json
 ```
 
+NVIDIA Integrate endpoint example for the answering model only:
+
+```bash
+bash -ic 'cd /home/master1/PaperBot && env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy \
+  PAPERBOT_EMBEDDING_PROVIDER_CHAIN=none \
+  LLM_REASONING_PROVIDER=openai \
+  LLM_REASONING_MODEL=minimaxai/minimax-m2.5 \
+  LLM_REASONING_API_KEY_ENV=NVIDIA_API_KEY \
+  LLM_REASONING_BASE_URL=https://integrate.api.nvidia.com/v1 \
+  PYTHONPATH=src python evals/memory/bench_effectiveness.py \
+    --use-llm \
+    --top-k 4 \
+    --output output/reports/memory_effectiveness_benchmark_nvidia.json'
+```
+
 ## Current results on March 7, 2026
 
-Heuristic prototype output from `output/reports/memory_effectiveness_benchmark_heuristic.json`:
+Expanded heuristic benchmark output from `output/reports/memory_effectiveness_benchmark_heuristic.json`:
 
-- `question_count = 4`
-- `retrieval_hit_rate = 0.75`
+- `question_count = 32`
+- `retrieval_hit_rate = 1.0`
 - `answer_accuracy = 1.0`
 - `temporal_accuracy = 1.0`
 - `update_accuracy = 1.0`
 - `abstention_accuracy = 1.0`
+- `scope_accuracy = 1.0`
+- `multi_session_accuracy = 1.0`
 
-LLM-backed execution path is implemented, but the current local provider environment is still unstable:
+This means the benchmark fixture itself is now broad enough to cover:
 
-- SOCKS proxy variables can break requests in this environment unless they are cleared
-- the configured relay returned repeated `500` overload responses during this session
-- the current OpenAI-compatible embedding endpoint also returned `404` for embeddings in this environment
+- longitudinal updates
+- original-vs-current temporal recall
+- paper/track scope isolation
+- recap-style multi-session synthesis
+- abstention under missing evidence
 
-So the implementation is ready, but the trustable score today is still the heuristic benchmark output above unless the provider configuration is stabilized.
+LLM-backed execution is also wired up, including NVIDIA's OpenAI-compatible endpoint for reasoning. In this environment, two caveats still apply:
+
+- the answering model can hit `429 Too Many Requests` under a full 32-question run
+- NVIDIA's chat endpoint is fine for answer generation, but it is **not** an embeddings endpoint, so `PAPERBOT_EMBEDDING_PROVIDER_CHAIN=none` is required for this benchmark path
+
+A previously completed LLM-backed run on the NVIDIA route produced `retrieval_hit_rate = 1.0` but only `answer_accuracy = 0.625`, which suggests the remaining bottleneck is now the answering model / prompting path rather than retrieval itself.
 
 ## How to use this with the rest of MemoryBench
 

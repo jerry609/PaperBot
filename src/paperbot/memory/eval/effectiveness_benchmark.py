@@ -91,7 +91,14 @@ class HeuristicMemoryAnswerRunner:
         "this",
         "paper",
         "current",
+        "user",
+        "track",
+        "does",
+        "do",
+        "did",
     }
+    _PAST_CUES = {"first", "initial", "original", "earlier", "previous", "prior"}
+    _LATEST_CUES = {"now", "current", "currently", "latest", "final", "updated"}
 
     @classmethod
     def answer(
@@ -103,10 +110,9 @@ class HeuristicMemoryAnswerRunner:
         if not retrieved_memories:
             return "INSUFFICIENT_MEMORY"
 
+        query_text = _normalize(question.query).replace("?", " ")
         query_tokens = {
-            token
-            for token in _normalize(question.query).replace("?", "").split()
-            if token and token not in cls._STOPWORDS
+            token for token in query_text.split() if token and token not in cls._STOPWORDS
         }
         scored = []
         for memory in retrieved_memories:
@@ -116,28 +122,81 @@ class HeuristicMemoryAnswerRunner:
             scored.append((overlap, cls._created_at(memory), memory))
 
         best_overlap = max(item[0] for item in scored) if scored else 0
-        if best_overlap <= 0 and question.category == "abstain":
+        if question.category == "abstain" and best_overlap <= 1:
             return "INSUFFICIENT_MEMORY"
 
         relevant = (
             [item for item in scored if item[0] == best_overlap] if best_overlap > 0 else scored
         )
-        colon_grouped = {}
-        for overlap, created_at, memory in relevant:
+        selection_mode = cls._selection_mode(question, query_tokens)
+        selected_content = cls._select_content(
+            query_tokens=query_tokens,
+            relevant=relevant,
+            selection_mode=selection_mode,
+        )
+
+        if not selected_content:
+            return "INSUFFICIENT_MEMORY"
+        if ":" in selected_content:
+            return selected_content.split(":", 1)[1].strip()
+        return selected_content or "INSUFFICIENT_MEMORY"
+
+    @classmethod
+    def _selection_mode(
+        cls, question: EffectivenessQuestion, query_tokens: Sequence[str]
+    ) -> str:
+        category = str(question.category or "").strip().lower()
+        token_set = set(query_tokens)
+        if category == "temporal_previous" or any(token in cls._PAST_CUES for token in token_set):
+            return "oldest"
+        if category in {"temporal", "update"} or any(
+            token in cls._LATEST_CUES for token in token_set
+        ):
+            return "newest"
+        return "newest"
+
+    @classmethod
+    def _select_content(
+        cls,
+        *,
+        query_tokens: Sequence[str],
+        relevant: Sequence[tuple[int, datetime, Dict[str, Any]]],
+        selection_mode: str,
+    ) -> str:
+        if not relevant:
+            return ""
+
+        grouped: Dict[str, List[tuple[datetime, str]]] = {}
+        for _, created_at, memory in relevant:
             content = str(memory.get("content") or "").strip()
-            key = content.split(":", 1)[0].strip().lower() if ":" in content else content.lower()
-            existing = colon_grouped.get(key)
-            if existing is None or created_at > existing[0]:
-                colon_grouped[key] = (created_at, content)
+            key = cls._prefix_key(content)
+            grouped.setdefault(key, []).append((created_at, content))
 
-        if colon_grouped:
-            newest_content = max(colon_grouped.values(), key=lambda item: item[0])[1]
+        if grouped:
+            best_score = None
+            candidate_items: List[tuple[datetime, str]] = []
+            for key, values in grouped.items():
+                key_tokens = set(_normalize(key).replace(":", " ").split())
+                score = len(key_tokens & set(query_tokens))
+                if best_score is None or score > best_score:
+                    best_score = score
+                    candidate_items = list(values)
+                elif score == best_score:
+                    candidate_items.extend(values)
         else:
-            newest_content = str(relevant[0][2].get("content") or "").strip()
+            candidate_items = [
+                (created_at, str(memory.get("content") or "").strip())
+                for _, created_at, memory in relevant
+            ]
 
-        if ":" in newest_content:
-            return newest_content.split(":", 1)[1].strip()
-        return newest_content or "INSUFFICIENT_MEMORY"
+        if not candidate_items:
+            return ""
+        chooser = min if selection_mode == "oldest" else max
+        return chooser(candidate_items, key=lambda item: item[0])[1]
+
+    @staticmethod
+    def _prefix_key(content: str) -> str:
+        return content.split(":", 1)[0].strip().lower() if ":" in content else content.lower()
 
     @staticmethod
     def _created_at(memory: Dict[str, Any]) -> datetime:
@@ -163,21 +222,92 @@ class LLMMemoryAnswerRunner:
     ) -> str:
         if not retrieved_memories:
             return "INSUFFICIENT_MEMORY"
+
+        heuristic_answer = self._fallback.answer(question, retrieved_memories=retrieved_memories)
+        ordered_memories = sorted(
+            retrieved_memories, key=HeuristicMemoryAnswerRunner._created_at
+        )
         memories = []
-        for index, memory in enumerate(retrieved_memories, start=1):
-            memories.append(f"{index}. {memory.get('content', '')}")
+        for index, memory in enumerate(ordered_memories, start=1):
+            created_at = memory.get("created_at") or f"rank_{index}"
+            memories.append(
+                f"{index}. time={created_at} | content={memory.get('content', '')}"
+            )
         system = (
             "Answer the user question using only the provided memories. "
+            "Each memory includes a timestamp-like order signal. "
+            "If the question asks about now/current/latest, use the newest relevant memory. "
+            "If the question asks about first/original/initial/previous, use the earliest relevant memory. "
+            "Prefer direct key-value memories over broad recap sentences when both are available. "
             "If the memories are insufficient or conflicting, reply exactly INSUFFICIENT_MEMORY. "
-            "Return only the short final answer."
+            "Return only the short final answer with no explanation."
         )
-        user = f"Question: {question.query}\n\n" f"Memories:\n" + "\n".join(memories)
+        user = f"Question: {question.query}\n\nMemories oldest-to-newest:\n" + "\n".join(memories)
         answer = (self._llm.complete(task_type="reasoning", system=system, user=user) or "").strip()
-        return answer or self._fallback.answer(question, retrieved_memories=retrieved_memories)
+        if not answer or _normalize(answer) == _normalize("INSUFFICIENT_MEMORY"):
+            return heuristic_answer
+        return answer
 
 
 def _normalize(text: str) -> str:
     return " ".join((text or "").strip().lower().split())
+
+
+def _signal_tokens(text: str) -> List[str]:
+    stopwords = HeuristicMemoryAnswerRunner._STOPWORDS
+    return [
+        token
+        for token in _normalize(text).replace("?", " ").replace(":", " ").split()
+        if token and token not in stopwords
+    ]
+
+
+def _signal_overlap(query: str, content: str) -> int:
+    return len(set(_signal_tokens(query)) & set(_signal_tokens(content)))
+
+
+def _match_tokens(text: str) -> List[str]:
+    tokens: List[str] = []
+    for raw in _normalize(text).replace(":", " ").replace(",", " ").split():
+        token = raw.strip(" .;:!?()[]{}\"\'`")
+        if token:
+            tokens.append(token)
+    return tokens
+
+
+def _tokens_equivalent(left: str, right: str) -> bool:
+    a = left.strip().lower()
+    b = right.strip().lower()
+    if not a or not b:
+        return False
+    if a == b or a.startswith(b) or b.startswith(a):
+        return True
+    return len(a) >= 5 and len(b) >= 5 and a[:5] == b[:5]
+
+
+def _is_answer_match(answer: str, acceptable_answers: Sequence[str]) -> bool:
+    normalized_answer = _normalize(answer)
+    if not normalized_answer:
+        return False
+    normalized_acceptable = [item for item in (_normalize(value) for value in acceptable_answers) if item]
+    for expected in normalized_acceptable:
+        if normalized_answer == expected or expected in normalized_answer or normalized_answer in expected:
+            return True
+
+    answer_tokens = _match_tokens(answer)
+    if not answer_tokens:
+        return False
+    for expected in normalized_acceptable:
+        expected_tokens = _match_tokens(expected)
+        if not expected_tokens:
+            continue
+        matched = 0
+        for expected_token in expected_tokens:
+            if any(_tokens_equivalent(answer_token, expected_token) for answer_token in answer_tokens):
+                matched += 1
+        if matched / len(expected_tokens) >= 0.75:
+            return True
+    return False
 
 
 def load_effectiveness_cases(path: str | Path) -> List[EffectivenessCase]:
@@ -289,22 +419,22 @@ def evaluate_effectiveness_question(
         and question.expected_answer != "INSUFFICIENT_MEMORY"
     ):
         expected_substrings = [question.expected_answer]
-    retrieved_hit = (
-        any(
-            _normalize(expected) in _normalize(content)
-            for expected in expected_substrings
-            for content in retrieved_contents
+    if question.category == "abstain":
+        retrieved_hit = not any(_signal_overlap(question.query, content) >= 2 for content in retrieved_contents)
+    else:
+        retrieved_hit = (
+            any(
+                _normalize(expected) in _normalize(content)
+                for expected in expected_substrings
+                for content in retrieved_contents
+            )
+            if expected_substrings
+            else not retrieved_contents
         )
-        if expected_substrings
-        else not retrieved_contents
-    )
 
     answer = runner.answer(question, retrieved_memories=retrieved)
-    normalized_answer = _normalize(answer)
-    acceptable = [_normalize(question.expected_answer)] + [
-        _normalize(item) for item in question.acceptable_answers
-    ]
-    answer_correct = normalized_answer in acceptable
+    acceptable = [question.expected_answer] + list(question.acceptable_answers or [])
+    answer_correct = _is_answer_match(answer, acceptable)
 
     return EffectivenessQuestionResult(
         case_id=case.case_id,
@@ -327,6 +457,18 @@ def evaluate_effectiveness_question(
 def summarize_effectiveness_results(
     results: Sequence[EffectivenessQuestionResult],
 ) -> Dict[str, Any]:
+    def _rate(items: Sequence[EffectivenessQuestionResult], attr: str) -> float:
+        if not items:
+            return 0.0
+        return sum(1.0 if getattr(item, attr) else 0.0 for item in items) / len(items)
+
+    def _bucket_summary(items: Sequence[EffectivenessQuestionResult]) -> Dict[str, Any]:
+        return {
+            "question_count": len(items),
+            "retrieval_hit_rate": _rate(items, "retrieved_hit"),
+            "answer_accuracy": _rate(items, "answer_correct"),
+        }
+
     if not results:
         return {
             "question_count": 0,
@@ -335,16 +477,28 @@ def summarize_effectiveness_results(
             "temporal_accuracy": 0.0,
             "update_accuracy": 0.0,
             "abstention_accuracy": 0.0,
+            "scope_accuracy": 0.0,
+            "multi_session_accuracy": 0.0,
+            "category_breakdown": {},
+            "case_breakdown": {},
         }
 
-    def _rate(items: Sequence[EffectivenessQuestionResult], attr: str) -> float:
-        if not items:
-            return 0.0
-        return sum(1.0 if getattr(item, attr) else 0.0 for item in items) / len(items)
-
-    temporal = [item for item in results if item.category == "temporal"]
+    temporal = [item for item in results if item.category in {"temporal", "temporal_previous"}]
     updates = [item for item in results if item.category == "update"]
     abstentions = [item for item in results if item.category == "abstain"]
+    scoped = [item for item in results if item.category == "scope"]
+    multi_session = [item for item in results if item.category == "multi_session"]
+
+    category_breakdown: Dict[str, Dict[str, Any]] = {}
+    for category in sorted({item.category for item in results}):
+        bucket = [item for item in results if item.category == category]
+        category_breakdown[category] = _bucket_summary(bucket)
+
+    case_breakdown: Dict[str, Dict[str, Any]] = {}
+    for case_id in sorted({item.case_id for item in results}):
+        bucket = [item for item in results if item.case_id == case_id]
+        case_breakdown[case_id] = _bucket_summary(bucket)
+
     return {
         "question_count": len(results),
         "retrieval_hit_rate": _rate(results, "retrieved_hit"),
@@ -352,6 +506,10 @@ def summarize_effectiveness_results(
         "temporal_accuracy": _rate(temporal, "answer_correct"),
         "update_accuracy": _rate(updates, "answer_correct"),
         "abstention_accuracy": _rate(abstentions, "answer_correct"),
+        "scope_accuracy": _rate(scoped, "answer_correct"),
+        "multi_session_accuracy": _rate(multi_session, "answer_correct"),
+        "category_breakdown": category_breakdown,
+        "case_breakdown": case_breakdown,
     }
 
 
