@@ -101,4 +101,27 @@ describe("studio-store", () => {
     expect(task?.actions).toHaveLength(1)
     expect(task?.actions[0].content).toBe("hello world")
   })
+
+  it("preserves provided agent task ids so backend progress updates map correctly", () => {
+    const { addAgentTask, updateAgentTask } = useStudioStore.getState()
+
+    const backendTaskId = "task-abc123"
+    addAgentTask({
+      id: backendTaskId,
+      title: "Implement data loader",
+      description: "Add deterministic fixtures",
+      status: "planning",
+      assignee: "claude",
+      progress: 0,
+      tags: [],
+      subtasks: [],
+    })
+
+    updateAgentTask(backendTaskId, { status: "in_progress", progress: 15 })
+
+    const task = useStudioStore.getState().agentTasks.find(t => t.id === backendTaskId)
+    expect(task).toBeDefined()
+    expect(task?.status).toBe("in_progress")
+    expect(task?.progress).toBe(15)
+  })
 })

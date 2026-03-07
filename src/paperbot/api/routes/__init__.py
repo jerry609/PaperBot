@@ -17,6 +17,7 @@ from . import (
     model_endpoints,
     repro_context,
     push_commands,
+    agent_board,
 )
 
 __all__ = [
@@ -36,4 +37,5 @@ __all__ = [
     "model_endpoints",
     "repro_context",
     "push_commands",
+    "agent_board",
 ]
