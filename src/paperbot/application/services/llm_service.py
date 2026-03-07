@@ -401,17 +401,18 @@ def _estimate_cost_usd(
 ) -> float:
     provider = (provider_name or "").lower()
     model = (model_name or "").lower()
+    model_alias = model.split("/", 1)[-1] if "/" in model else model
 
     in_price = 0.0
     out_price = 0.0
 
-    if provider == "openai" and "gpt-4o-mini" in model:
+    if "gpt-4o-mini" in model_alias:
         in_price, out_price = 0.15, 0.60
-    elif provider == "openai" and "gpt-4o" in model:
+    elif "gpt-4o" in model_alias:
         in_price, out_price = 2.50, 10.00
-    elif provider == "anthropic" and "claude-3-5-sonnet" in model:
+    elif "claude-3-5-sonnet" in model_alias:
         in_price, out_price = 3.00, 15.00
-    elif provider == "deepseek":
+    elif "deepseek" in model_alias or provider == "deepseek":
         in_price, out_price = 0.55, 2.19
     elif provider == "ollama":
         in_price, out_price = 0.0, 0.0

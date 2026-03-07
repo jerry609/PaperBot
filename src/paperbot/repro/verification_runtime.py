@@ -13,6 +13,21 @@ from typing import Any, Dict, Optional, Sequence
 _MAX_LOG_CHARS = 4000
 
 
+_PACKAGE_MAPPINGS = {
+    "cv2": "opencv-python",
+    "pil": "Pillow",
+    "sklearn": "scikit-learn",
+    "yaml": "pyyaml",
+    "skimage": "scikit-image",
+    "bs4": "beautifulsoup4",
+}
+
+_INVALID_REQUIREMENT_NAMES = {
+    "unknown module",
+    "unknown dependency",
+}
+
+
 def _default_cache_dir() -> Path:
     return Path(os.getenv("PAPERBOT_VERIFICATION_RUNTIME_CACHE_DIR") or "output/runtime_envs")
 
@@ -26,6 +41,41 @@ def _venv_python_path(venv_dir: Path) -> Path:
 def _requirements_hash(requirements_text: str) -> str:
     normalized = "\n".join(line.strip() for line in requirements_text.splitlines() if line.strip())
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:16]
+
+
+def _normalize_requirement_line(raw_line: str) -> str:
+    line = str(raw_line or "").strip()
+    if not line or line.startswith("#") or line.startswith("-"):
+        return line
+    if line.lower() in _INVALID_REQUIREMENT_NAMES:
+        return ""
+
+    match = re.match(r"^([A-Za-z0-9_.-]+)(.*)$", line)
+    if not match:
+        return line
+
+    package_name, suffix = match.groups()
+    lowered = package_name.strip().lower()
+    if lowered in _INVALID_REQUIREMENT_NAMES:
+        return ""
+
+    canonical_name = _PACKAGE_MAPPINGS.get(lowered, package_name)
+    return f"{canonical_name}{suffix}"
+
+
+def _normalize_requirements_text(requirements_text: str) -> str:
+    normalized_lines = []
+    seen = set()
+    for raw_line in str(requirements_text or "").splitlines():
+        normalized = _normalize_requirement_line(raw_line)
+        if not normalized:
+            continue
+        key = normalized.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        normalized_lines.append(normalized)
+    return "\n".join(normalized_lines)
 
 
 def _trim_log(text: Optional[str], *, limit: int = _MAX_LOG_CHARS) -> str:
@@ -238,7 +288,8 @@ def prepare_verification_runtime(
             requirements_path=str(requirements_path) if requirements_path.exists() else None,
         )
 
-    requirements_text = requirements_path.read_text(encoding="utf-8").strip()
+    raw_requirements_text = requirements_path.read_text(encoding="utf-8").strip()
+    requirements_text = _normalize_requirements_text(raw_requirements_text)
     if not requirements_text:
         return PreparedVerificationRuntime(
             python_executable=base_python,
@@ -287,8 +338,12 @@ def prepare_verification_runtime(
         timeout=install_timeout,
         env=_pip_env(),
     )
+    install_requirements_path = env_dir / ".paperbot_requirements.txt"
+    install_requirements_path.parent.mkdir(parents=True, exist_ok=True)
+    install_requirements_path.write_text(requirements_text + "\n", encoding="utf-8")
+
     _run_runtime_command(
-        [str(env_python), "-m", "pip", "install", "-r", str(requirements_path)],
+        [str(env_python), "-m", "pip", "install", "-r", str(install_requirements_path)],
         step="install_requirements",
         env_dir=env_dir,
         requirements_path=requirements_path,

@@ -4,6 +4,7 @@ from pathlib import Path
 import subprocess
 from paperbot.repro.verification_runtime import (
     VerificationRuntimePreparationError,
+    _normalize_requirements_text,
     prepare_verification_runtime,
 )
 
@@ -61,7 +62,10 @@ def test_prepare_verification_runtime_surfaces_install_failure(monkeypatch, tmp_
             python_path.parent.mkdir(parents=True, exist_ok=True)
             python_path.write_text("", encoding="utf-8")
             return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
-        if cmd[-3:] == ["install", "-r", str(output_dir / "requirements.txt")]:
+        if "install" in cmd and "-r" in cmd:
+            install_path = Path(cmd[-1])
+            assert install_path.exists()
+            assert install_path.read_text(encoding="utf-8") == "broken-package\n"
             raise subprocess.CalledProcessError(
                 1,
                 cmd,
@@ -87,3 +91,45 @@ def test_prepare_verification_runtime_surfaces_install_failure(monkeypatch, tmp_
         assert "broken-package" in failure_log.read_text(encoding="utf-8")
     else:
         raise AssertionError("Expected VerificationRuntimePreparationError")
+
+
+def test_normalize_requirements_text_maps_known_packages_and_deduplicates():
+    normalized = _normalize_requirements_text(
+        "PIL\nnumpy\nunknown module\npillow\n# keep me\n"
+    )
+
+    assert normalized.splitlines() == ["Pillow", "numpy", "# keep me"]
+
+
+def test_prepare_verification_runtime_installs_normalized_requirements(monkeypatch, tmp_path: Path):
+    output_dir = tmp_path / "out"
+    output_dir.mkdir()
+    (output_dir / "requirements.txt").write_text("PIL\nnumpy\n", encoding="utf-8")
+    observed_install_path = None
+
+    def _fake_run(cmd, **kwargs):
+        nonlocal observed_install_path
+        if cmd[:3] == ["python3", "-m", "venv"]:
+            env_dir = Path(cmd[-1])
+            python_path = env_dir / "bin" / "python"
+            python_path.parent.mkdir(parents=True, exist_ok=True)
+            python_path.write_text("", encoding="utf-8")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        if "install" in cmd and "-r" in cmd:
+            observed_install_path = Path(cmd[-1])
+            assert observed_install_path.exists()
+            assert observed_install_path.read_text(encoding="utf-8") == "Pillow\nnumpy\n"
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        return subprocess.CompletedProcess(cmd, 0, stdout="ok", stderr="")
+
+    monkeypatch.setattr("paperbot.repro.verification_runtime.subprocess.run", _fake_run)
+    runtime = prepare_verification_runtime(
+        output_dir,
+        base_python="python3",
+        prepare_requirements=True,
+        cache_dir=tmp_path / "cache",
+    )
+
+    assert runtime.prepared is True
+    assert observed_install_path is not None
+    assert observed_install_path.name == ".paperbot_requirements.txt"

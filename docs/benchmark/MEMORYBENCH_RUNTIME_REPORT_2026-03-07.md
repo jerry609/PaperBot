@@ -229,3 +229,49 @@ What this prototype covers:
 - abstention when memory is missing
 
 That makes it a better fit for “is the memory module effective?” than pure SQL pressure testing alone.
+
+### LLM-backed ROI smoke after provider/runtime fixes
+
+Artifacts:
+
+- `output/reports/memory_roi_benchmark_smoke_openrouter.json`
+
+Additional fixes validated in this run:
+
+- OpenRouter-compatible fallback for models that reject the `system` role
+- transient `429` / `5xx` retry handling in the OpenAI-compatible provider
+- requirement normalization during verification runtime prep (`PIL -> Pillow`, dropping placeholder names such as `Unknown module`)
+- non-zero cost estimation for OpenRouter-prefixed OpenAI models such as `openai/gpt-4o-mini`
+
+Command used on **March 7, 2026**:
+
+```bash
+env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy \
+  LLM_REASONING_PROVIDER=openai \
+  LLM_REASONING_MODEL=openai/gpt-4o-mini \
+  LLM_REASONING_API_KEY_ENV=OPENROUTER_API_KEY \
+  LLM_REASONING_BASE_URL=https://openrouter.ai/api/v1 \
+  LLM_CODE_MODEL=openai/gpt-4o-mini \
+  LLM_CODE_API_KEY_ENV=OPENROUTER_API_KEY \
+  LLM_CODE_BASE_URL=https://openrouter.ai/api/v1 \
+  PYTHONPATH=src python evals/memory/bench_roi.py \
+    --limit-cases 1 \
+    --runs-per-case 1 \
+    --max-repair-attempts 0 \
+    --output output/reports/memory_roi_benchmark_smoke_openrouter.json
+```
+
+Observed result:
+
+| Arm | First Pass | Repair Loops | Time to Pass | Token Cost |
+|-----|-----------:|-------------:|-------------:|-----------:|
+| A | 1.00 | 0.00 | 191.61s | $0.0078126 |
+| B | 1.00 | 0.00 | 196.15s | $0.0090378 |
+
+Interpretation:
+
+- this is the first local ROI smoke in this repo that is simultaneously **LLM-backed**, **dependency-aware**, and **cost-carrying**
+- the benchmark now measures a real reproduction outcome instead of failing at runtime bootstrap
+- for this single `transformer_seq2seq` sample, seeded memory did **not** help; it was slightly slower and slightly more expensive
+- the result is still not decision-grade because `n=1`; we need more cases and repeated runs to decide whether memory improves Paper2Code in aggregate
+- free OpenRouter models were not usable at this point in the day because the account hit the `free-models-per-day` limit, so this smoke used a low-cost paid model route instead

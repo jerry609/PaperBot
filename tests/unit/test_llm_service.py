@@ -1,6 +1,6 @@
 import json
 
-from paperbot.application.services.llm_service import LLMService
+from paperbot.application.services.llm_service import LLMService, _estimate_cost_usd
 
 
 class _FakeProvider:
@@ -132,3 +132,34 @@ def test_complete_records_usage():
     assert row["prompt_tokens"] >= 1
     assert row["completion_tokens"] >= 1
     assert row["estimated_cost_usd"] >= 0.0
+
+
+def test_estimate_cost_usd_supports_openrouter_prefixed_openai_models():
+    cost = _estimate_cost_usd(
+        provider_name="openrouter",
+        model_name="openai/gpt-4o-mini",
+        prompt_tokens=1000,
+        completion_tokens=500,
+    )
+
+    assert cost > 0.0
+
+
+def test_complete_records_nonzero_cost_for_openrouter_prefixed_openai_models():
+    class _OpenRouterOpenAIProvider(_FakeProvider):
+        @property
+        def info(self):
+            class _Info:
+                provider_name = "openrouter"
+                model_name = "openai/gpt-4o-mini"
+                cost_tier = 1
+
+            return _Info()
+
+    provider = _OpenRouterOpenAIProvider(response="usage")
+    usage_store = _FakeUsageStore()
+    service = LLMService(router=_FakeRouter(provider), usage_store=usage_store)
+
+    service.complete(task_type="summary", system="system prompt", user="user prompt")
+
+    assert usage_store.rows[0]["estimated_cost_usd"] > 0.0

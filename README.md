@@ -237,6 +237,7 @@ python -m black . && python -m isort .
 | [`docs/PAPERSCOOL_WORKFLOW.md`](docs/PAPERSCOOL_WORKFLOW.md) | Topic Workflow guide |
 | [`docs/p2c/`](docs/p2c/) | Paper2Context design docs |
 | [`docs/benchmark/MEMORYBENCH_EPIC_283_COMPLETION.md`](docs/benchmark/MEMORYBENCH_EPIC_283_COMPLETION.md) | MemoryBench Epic completion report |
+| [`docs/benchmark/MEMORYBENCH_RUNTIME_REPORT_2026-03-07.md`](docs/benchmark/MEMORYBENCH_RUNTIME_REPORT_2026-03-07.md) | Live ROI + 1M memory runtime report |
 | [`docs/search_eval.md`](docs/search_eval.md) | Retrieval benchmark guide |
 | [`docs/context_engine_eval.md`](docs/context_engine_eval.md) | Context extraction benchmark guide |
 | [`docs/memory_performance_eval.md`](docs/memory_performance_eval.md) | Memory performance benchmark guide |
