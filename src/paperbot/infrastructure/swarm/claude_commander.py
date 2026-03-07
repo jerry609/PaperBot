@@ -231,14 +231,18 @@ class ClaudeCommander:
 
         except asyncio.TimeoutError:
             return ReviewResult(
-                approved=True,
+                approved=False,
                 feedback=(
-                    "Auto-approved (review timeout after " f"{int(self.request_timeout_seconds)}s)"
+                    "AI review timed out after "
+                    f"{int(self.request_timeout_seconds)}s. Manual review required."
                 ),
             )
         except Exception:
-            log.exception("Claude review failed; auto-approving")
-            return ReviewResult(approved=True, feedback="Auto-approved (review error)")
+            log.exception("Claude review failed; rejecting output")
+            return ReviewResult(
+                approved=False,
+                feedback="Failed to perform AI review due to an internal error.",
+            )
 
     def accumulate_wisdom(self, task: dict, output: str) -> None:
         """Extract learnings from completed tasks for future workers."""

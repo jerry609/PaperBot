@@ -3,11 +3,33 @@ from __future__ import annotations
 import sys
 import types
 
+import pytest
 from fastapi.testclient import TestClient
 
 from paperbot.api import main as api_main
 from paperbot.api.routes import agent_board as agent_board_route
 from paperbot.infrastructure.swarm import CodexDispatcher, CodexResult, ReviewResult
+
+
+@pytest.fixture(autouse=True)
+def _isolated_board_store(monkeypatch, tmp_path):
+    db_url = f"sqlite:///{tmp_path / 'agent-board-route.db'}"
+    monkeypatch.setenv("PAPERBOT_DB_URL", db_url)
+    store = getattr(agent_board_route, "_board_store", None)
+    if store is not None:
+        try:
+            store.close()
+        except Exception:
+            pass
+    agent_board_route._board_store = None
+    yield
+    store = getattr(agent_board_route, "_board_store", None)
+    if store is not None:
+        try:
+            store.close()
+        except Exception:
+            pass
+    agent_board_route._board_store = None
 
 
 def _make_session_with_task(*, status: str = "human_review"):
@@ -30,12 +52,11 @@ def _make_session_with_task(*, status: str = "human_review"):
         ],
     )
     session.tasks.append(task)
-    agent_board_route._sessions[session.session_id] = session
+    agent_board_route._persist_session(session, checkpoint="seed", status="running")
     return task
 
 
 def test_human_review_approve_marks_task_done():
-    agent_board_route._sessions.clear()
     _make_session_with_task(status="human_review")
 
     with TestClient(api_main.app) as client:
@@ -54,7 +75,6 @@ def test_human_review_approve_marks_task_done():
 
 
 def test_human_review_request_changes_requeues_task():
-    agent_board_route._sessions.clear()
     _make_session_with_task(status="human_review")
 
     with TestClient(api_main.app) as client:
@@ -69,6 +89,64 @@ def test_human_review_request_changes_requeues_task():
     assert payload["progress"] == 0
     assert payload["human_reviews"][-1]["decision"] == "request_changes"
     assert "Need stronger tests." in (payload.get("review_feedback") or "")
+
+
+def test_create_session_rejects_dangerous_workspace_dir():
+    with TestClient(api_main.app) as client:
+        resp = client.post(
+            "/api/agent-board/sessions",
+            json={
+                "paper_id": "paper-1",
+                "context_pack_id": "cp-1",
+                "workspace_dir": "/etc",
+            },
+        )
+
+    assert resp.status_code == 400
+    assert "workspace_dir is not allowed" in resp.text
+
+
+def test_run_rejects_dangerous_workspace_dir_override():
+    session = agent_board_route.BoardSession(
+        session_id="board-security-test",
+        paper_id="paper-1",
+        context_pack_id="cp-1",
+        workspace_dir=None,
+    )
+    agent_board_route._persist_session(session, checkpoint="seed", status="running")
+
+    with TestClient(api_main.app) as client:
+        resp = client.post(
+            f"/api/agent-board/sessions/{session.session_id}/run",
+            json={"workspace_dir": "/etc"},
+        )
+
+    assert resp.status_code == 400
+    assert "workspace_dir is not allowed" in resp.text
+
+
+def test_session_survives_store_reinitialization():
+    with TestClient(api_main.app) as client:
+        create_resp = client.post(
+            "/api/agent-board/sessions",
+            json={
+                "paper_id": "paper-1",
+                "context_pack_id": "cp-1",
+                "workspace_dir": "tmp/agent-board-workspace",
+            },
+        )
+        assert create_resp.status_code == 200
+        session_id = create_resp.json()["session_id"]
+
+        store = getattr(agent_board_route, "_board_store", None)
+        if store is not None:
+            store.close()
+        agent_board_route._board_store = None
+
+        tasks_resp = client.get(f"/api/agent-board/sessions/{session_id}/tasks")
+
+    assert tasks_resp.status_code == 200
+    assert tasks_resp.json() == []
 
 
 def test_run_stream_emits_execution_logs(monkeypatch):
@@ -108,8 +186,7 @@ def test_run_stream_emits_execution_logs(monkeypatch):
             subtasks=[{"id": "s1", "title": "train loop", "done": False}],
         )
     )
-    agent_board_route._sessions.clear()
-    agent_board_route._sessions[session.session_id] = session
+    agent_board_route._persist_session(session, checkpoint="seed", status="running")
 
     monkeypatch.setattr(agent_board_route, "_get_commander", lambda: _FakeCommander())
     monkeypatch.setattr(agent_board_route, "_get_dispatcher", lambda: _FakeDispatcher())
@@ -121,7 +198,9 @@ def test_run_stream_emits_execution_logs(monkeypatch):
     assert "task_reviewed" in resp.text
     assert "[DONE]" in resp.text
 
-    task = session.tasks[0]
+    updated_session = agent_board_route._load_session(session.session_id)
+    assert updated_session is not None
+    task = updated_session.tasks[0]
     assert task.status == "human_review"
     assert len(task.execution_log) > 0
     assert task.generated_files == ["src/train.py"]
@@ -148,7 +227,7 @@ def test_run_stream_persists_generated_and_review_files_in_workspace(monkeypatch
         "File: src/train.py\n"
         "```python\n"
         "def train_model():\n"
-        "    \"\"\"Run one training pass.\"\"\"\n"
+        '    """Run one training pass."""\n'
         "    return True\n"
         "```\n"
     )
@@ -188,8 +267,7 @@ def test_run_stream_persists_generated_and_review_files_in_workspace(monkeypatch
             subtasks=[{"id": "s1", "title": "train loop", "done": False}],
         )
     )
-    agent_board_route._sessions.clear()
-    agent_board_route._sessions[session.session_id] = session
+    agent_board_route._persist_session(session, checkpoint="seed", status="running")
 
     monkeypatch.setattr(agent_board_route, "_get_commander", lambda: _FakeCommander())
     monkeypatch.setattr(agent_board_route, "_get_dispatcher", lambda: dispatcher)
@@ -202,7 +280,9 @@ def test_run_stream_persists_generated_and_review_files_in_workspace(monkeypatch
 
     assert resp.status_code == 200
 
-    task = session.tasks[0]
+    updated_session = agent_board_route._load_session(session.session_id)
+    assert updated_session is not None
+    task = updated_session.tasks[0]
     assert task.status == "human_review"
     assert "src/train.py" in task.generated_files
     assert "reviews/task-functional-user-review.md" in task.generated_files

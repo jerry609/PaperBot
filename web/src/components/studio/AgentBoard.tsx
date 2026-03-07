@@ -36,6 +36,7 @@ const COLUMNS = [
   { id: "human_review", label: "Human Review", color: "border-t-orange-500" },
   { id: "done", label: "Done", color: "border-t-green-500" },
 ] as const
+const RUN_ALL_TIMEOUT_MS = 10 * 60 * 1000
 
 type ColumnId = (typeof COLUMNS)[number]["id"]
 type HumanReviewDecision = "approve" | "request_changes"
@@ -256,7 +257,7 @@ export function AgentBoard({ paperId }: Props) {
     abortRef.current?.abort()
     const controller = new AbortController()
     abortRef.current = controller
-    const timeout = setTimeout(() => controller.abort(), 10 * 60 * 1000)
+    const timeout = setTimeout(() => controller.abort(), RUN_ALL_TIMEOUT_MS)
 
     try {
       const res = await fetch(

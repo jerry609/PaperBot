@@ -39,7 +39,7 @@ async def test_codex_dispatch_timeout_returns_failure(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_commander_review_timeout_auto_approves(monkeypatch):
+async def test_commander_review_timeout_rejects(monkeypatch):
     class _FakeMessages:
         async def create(self, **_kwargs):
             await asyncio.sleep(1.2)
@@ -63,8 +63,34 @@ async def test_commander_review_timeout_auto_approves(monkeypatch):
         codex_output="This is long enough output to trigger review.",
     )
 
-    assert review.approved is True
-    assert "timeout" in review.feedback.lower()
+    assert review.approved is False
+    assert "timed out" in review.feedback.lower()
+
+
+@pytest.mark.asyncio
+async def test_commander_review_internal_error_rejects(monkeypatch):
+    class _FakeMessages:
+        async def create(self, **_kwargs):
+            raise RuntimeError("anthropic transport error")
+
+    class _FakeAnthropicClient:
+        def __init__(self, **_kwargs):
+            self.messages = _FakeMessages()
+
+    fake_anthropic = types.SimpleNamespace(AsyncAnthropic=_FakeAnthropicClient)
+    monkeypatch.setitem(sys.modules, "anthropic", fake_anthropic)
+
+    commander = ClaudeCommander(
+        api_key="test-key",
+        request_timeout_seconds=1,
+    )
+    review = await commander.review(
+        {"title": "Task"},
+        codex_output="This is long enough output to trigger review.",
+    )
+
+    assert review.approved is False
+    assert "failed" in review.feedback.lower()
 
 
 @pytest.mark.asyncio

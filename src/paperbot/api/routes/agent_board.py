@@ -7,8 +7,10 @@ Codex API workers, reviews results, and manages the Kanban lifecycle.
 
 import asyncio
 import logging
+import os
+import tempfile
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, AsyncGenerator, Dict, List, Literal, Optional
 
@@ -16,18 +18,43 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+from ...infrastructure.stores.pipeline_session_store import PipelineSessionStore
 from ..streaming import StreamEvent, wrap_generator
 
 router = APIRouter(prefix="/api/agent-board")
 log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# In-memory store (replace with DB in production)
+# Persistent session store
 # ---------------------------------------------------------------------------
-_sessions: Dict[str, "BoardSession"] = {}
+_DEFAULT_WORKSPACE_DIR = Path("/tmp/paperbot-workspace")
+_DANGEROUS_WORKSPACE_ROOTS = (
+    Path("/etc"),
+    Path("/root"),
+    Path("/bin"),
+    Path("/sbin"),
+    Path("/usr"),
+    Path("/lib"),
+    Path("/lib64"),
+    Path("/System"),
+    Path("/Library"),
+    Path("/Applications"),
+)
+_board_store: Optional[PipelineSessionStore] = None
 
 # Shared commander instance (preserves wisdom across tasks)
 _commander = None
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _get_board_store() -> PipelineSessionStore:
+    global _board_store
+    if _board_store is None:
+        _board_store = PipelineSessionStore(auto_create_schema=True)
+    return _board_store
 
 
 def _get_commander():
@@ -54,13 +81,13 @@ class AgentTask(BaseModel):
     id: str
     title: str
     description: str
-    status: str = "planning"  # planning | in_progress | ai_review | human_review | done
+    status: Literal["planning", "in_progress", "ai_review", "human_review", "done"] = "planning"
     assignee: str = "claude"
     progress: int = 0
     tags: List[str] = []
     subtasks: List[Dict[str, Any]] = []
-    created_at: str = ""
-    updated_at: str = ""
+    created_at: str = Field(default_factory=_now_iso)
+    updated_at: str = Field(default_factory=_now_iso)
     paper_id: Optional[str] = None
     # Execution metadata
     codex_output: Optional[str] = None
@@ -95,6 +122,20 @@ class BoardSession:
             "created_at": self.created_at,
         }
 
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "BoardSession":
+        session = cls(
+            session_id=str(data.get("session_id", "")),
+            paper_id=str(data.get("paper_id", "")),
+            context_pack_id=str(data.get("context_pack_id", "")),
+            workspace_dir=data.get("workspace_dir"),
+        )
+        session.created_at = str(data.get("created_at", session.created_at))
+        tasks_raw = data.get("tasks", [])
+        if isinstance(tasks_raw, list):
+            session.tasks = [AgentTask.model_validate(item) for item in tasks_raw]
+        return session
+
 
 class PlanRequest(BaseModel):
     paper_id: str
@@ -103,7 +144,7 @@ class PlanRequest(BaseModel):
 
 
 class TaskUpdateRequest(BaseModel):
-    status: Optional[str] = None
+    status: Optional[Literal["planning", "in_progress", "ai_review", "human_review", "done"]] = None
     progress: Optional[int] = None
     assignee: Optional[str] = None
 
@@ -125,21 +166,26 @@ class HumanReviewRequest(BaseModel):
 @router.post("/sessions")
 async def create_session(request: PlanRequest):
     """Create a new agent board session."""
+    workspace_dir = (
+        str(_sanitize_workspace_dir(request.workspace_dir))
+        if request.workspace_dir and request.workspace_dir.strip()
+        else None
+    )
     session_id = f"board-{uuid.uuid4().hex[:12]}"
     session = BoardSession(
         session_id=session_id,
         paper_id=request.paper_id,
         context_pack_id=request.context_pack_id,
-        workspace_dir=request.workspace_dir,
+        workspace_dir=workspace_dir,
     )
-    _sessions[session_id] = session
+    _persist_session(session, checkpoint="created", status="running")
     return session.to_dict()
 
 
 @router.post("/sessions/{session_id}/plan")
 async def plan_session(session_id: str):
     """Claude decomposes context pack into tasks (SSE stream)."""
-    session = _sessions.get(session_id)
+    session = _load_session(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
@@ -153,12 +199,17 @@ async def plan_session(session_id: str):
 @router.post("/sessions/{session_id}/run")
 async def run_all_tasks(session_id: str, request: RunAllRequest):
     """Dispatch all planning tasks to Codex workers (SSE stream)."""
-    session = _sessions.get(session_id)
+    session = _load_session(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    if request.workspace_dir:
-        session.workspace_dir = request.workspace_dir
+    if request.workspace_dir and request.workspace_dir.strip():
+        session.workspace_dir = str(_sanitize_workspace_dir(request.workspace_dir))
+    elif session.workspace_dir:
+        session.workspace_dir = str(_sanitize_workspace_dir(session.workspace_dir))
+    else:
+        session.workspace_dir = str(_DEFAULT_WORKSPACE_DIR)
+    _persist_session(session, checkpoint="run_requested", status="running")
 
     return StreamingResponse(
         wrap_generator(_run_all_stream(session), workflow="agent_board_run"),
@@ -170,7 +221,7 @@ async def run_all_tasks(session_id: str, request: RunAllRequest):
 @router.get("/sessions/{session_id}/tasks")
 async def list_tasks(session_id: str):
     """List all tasks in a session."""
-    session = _sessions.get(session_id)
+    session = _load_session(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     return [task.model_dump() for task in session.tasks]
@@ -179,13 +230,15 @@ async def list_tasks(session_id: str):
 @router.post("/tasks/{task_id}/dispatch")
 async def dispatch_task(task_id: str):
     """Dispatch a single task to a Codex worker."""
-    task = _find_task(task_id)
-    if not task:
+    match = _find_task_with_session(task_id)
+    if not match:
         raise HTTPException(status_code=404, detail="Task not found")
+    session, task = match
 
     task.status = "in_progress"
     task.assignee = f"codex-{uuid.uuid4().hex[:4]}"
     task.updated_at = datetime.utcnow().isoformat()
+    _persist_session(session, checkpoint="task_dispatched", status="running")
 
     return task.model_dump()
 
@@ -193,11 +246,13 @@ async def dispatch_task(task_id: str):
 @router.post("/tasks/{task_id}/execute")
 async def execute_task(task_id: str):
     """Execute a single task: Codex runs, Claude reviews (SSE stream)."""
-    task = _find_task(task_id)
-    if not task:
+    match = _find_task_with_session(task_id)
+    if not match:
         raise HTTPException(status_code=404, detail="Task not found")
+    session, task = match
 
-    session = _find_session_for_task(task_id)
+    if session and session.workspace_dir:
+        session.workspace_dir = str(_sanitize_workspace_dir(session.workspace_dir))
 
     return StreamingResponse(
         wrap_generator(_execute_task_stream(task, session), workflow="agent_board_execute"),
@@ -209,9 +264,10 @@ async def execute_task(task_id: str):
 @router.patch("/tasks/{task_id}")
 async def update_task(task_id: str, request: TaskUpdateRequest):
     """Update a task's status or other fields."""
-    task = _find_task(task_id)
-    if not task:
+    match = _find_task_with_session(task_id)
+    if not match:
         raise HTTPException(status_code=404, detail="Task not found")
+    session, task = match
 
     if request.status:
         task.status = request.status
@@ -220,6 +276,7 @@ async def update_task(task_id: str, request: TaskUpdateRequest):
     if request.assignee:
         task.assignee = request.assignee
     task.updated_at = datetime.utcnow().isoformat()
+    _persist_session(session, checkpoint="task_updated", status="running")
 
     return task.model_dump()
 
@@ -227,9 +284,10 @@ async def update_task(task_id: str, request: TaskUpdateRequest):
 @router.post("/tasks/{task_id}/human-review")
 async def human_review_task(task_id: str, request: HumanReviewRequest):
     """Allow a user to approve or request changes for a human-review task."""
-    task = _find_task(task_id)
-    if not task:
+    match = _find_task_with_session(task_id)
+    if not match:
         raise HTTPException(status_code=404, detail="Task not found")
+    session, task = match
 
     notes = (request.notes or "").strip()
     review_entry = {
@@ -273,6 +331,7 @@ async def human_review_task(task_id: str, request: HumanReviewRequest):
         task.review_feedback = _merge_review_feedback(task.review_feedback, notes)
 
     task.updated_at = datetime.utcnow().isoformat()
+    _persist_session(session, checkpoint="human_reviewed", status="running")
     return task.model_dump()
 
 
@@ -322,6 +381,7 @@ async def _plan_stream(session: BoardSession) -> AsyncGenerator[StreamEvent, Non
                 message="Task created from context pack decomposition.",
             )
             session.tasks.append(task)
+            _persist_session(session, checkpoint="planned", status="running")
             yield StreamEvent(
                 type="progress",
                 data={"event": "task_created", "task": task.model_dump()},
@@ -334,9 +394,11 @@ async def _plan_stream(session: BoardSession) -> AsyncGenerator[StreamEvent, Non
                 "session_id": session.session_id,
             },
         )
+        _persist_session(session, checkpoint="plan_complete", status="running")
 
     except Exception as exc:
         log.exception("Planning failed")
+        _persist_session(session, checkpoint="plan_failed", status="failed")
         yield StreamEvent(type="error", message=str(exc))
 
 
@@ -361,7 +423,7 @@ async def _run_all_stream(
 
     commander = _get_commander()
     dispatcher = _get_dispatcher()
-    workspace = Path(session.workspace_dir or "/tmp/paperbot-workspace")
+    workspace = _sanitize_workspace_dir(session.workspace_dir or str(_DEFAULT_WORKSPACE_DIR))
 
     for i, task in enumerate(planning_tasks):
         # --- Dispatch to Codex ---
@@ -376,6 +438,7 @@ async def _run_all_stream(
             level="info",
             message=f"Dispatched to {task.assignee}.",
         )
+        _persist_session(session, checkpoint="task_dispatched", status="running")
 
         yield StreamEvent(
             type="progress",
@@ -427,6 +490,7 @@ async def _run_all_stream(
         task.codex_output = result.output if result.success else result.error
         task.generated_files = result.files_generated if result.success else []
         task.updated_at = datetime.utcnow().isoformat()
+        _persist_session(session, checkpoint="task_codex_done", status="running")
 
         if not result.success:
             task.status = "human_review"
@@ -447,6 +511,7 @@ async def _run_all_stream(
                     "error": result.error,
                 },
             )
+            _persist_session(session, checkpoint="task_failed", status="running")
             continue
 
         yield StreamEvent(
@@ -551,6 +616,7 @@ async def _run_all_stream(
             )
 
         task.updated_at = datetime.utcnow().isoformat()
+        _persist_session(session, checkpoint="task_reviewed", status="running")
 
         yield StreamEvent(
             type="progress",
@@ -572,6 +638,8 @@ async def _run_all_stream(
             "session_id": session.session_id,
         },
     )
+    final_status = "completed" if done_count == total else "running"
+    _persist_session(session, checkpoint="run_complete", status=final_status)
 
 
 async def _execute_task_stream(
@@ -581,7 +649,9 @@ async def _execute_task_stream(
     """Execute a single task through Codex + Claude review."""
     commander = _get_commander()
     dispatcher = _get_dispatcher()
-    workspace = Path((session.workspace_dir if session else None) or "/tmp/paperbot-workspace")
+    workspace = _sanitize_workspace_dir(
+        (session.workspace_dir if session else None) or str(_DEFAULT_WORKSPACE_DIR)
+    )
 
     # Dispatch
     task.status = "in_progress"
@@ -595,6 +665,8 @@ async def _execute_task_stream(
         level="info",
         message=f"Dispatched to {task.assignee}.",
     )
+    if session:
+        _persist_session(session, checkpoint="task_dispatched", status="running")
 
     yield StreamEvent(
         type="progress",
@@ -613,6 +685,8 @@ async def _execute_task_stream(
     task.codex_output = result.output if result.success else result.error
     task.generated_files = result.files_generated if result.success else []
     task.updated_at = datetime.utcnow().isoformat()
+    if session:
+        _persist_session(session, checkpoint="task_codex_done", status="running")
 
     if not result.success:
         task.status = "human_review"
@@ -632,6 +706,8 @@ async def _execute_task_stream(
                 "error": result.error,
             },
         )
+        if session:
+            _persist_session(session, checkpoint="task_failed", status="running")
         yield StreamEvent(type="result", data={"success": False})
         return
 
@@ -650,6 +726,8 @@ async def _execute_task_stream(
     task.assignee = "claude"
     task.progress = 85
     task.updated_at = datetime.utcnow().isoformat()
+    if session:
+        _persist_session(session, checkpoint="task_reviewed", status="running")
     _append_task_log(
         task,
         event="task_reviewing",
@@ -704,6 +782,8 @@ async def _execute_task_stream(
         },
     )
     yield StreamEvent(type="result", data={"success": review.approved})
+    if session:
+        _persist_session(session, checkpoint="task_execute_complete", status="running")
 
 
 # ---------------------------------------------------------------------------
@@ -778,19 +858,163 @@ def _build_subtasks(index: int, task_data: dict) -> List[Dict[str, Any]]:
     return subtasks
 
 
-def _find_task(task_id: str) -> Optional[AgentTask]:
-    """Find a task across all sessions."""
-    for session in _sessions.values():
+def _session_payload(session: BoardSession) -> Dict[str, Any]:
+    return {
+        "paper_id": session.paper_id,
+        "context_pack_id": session.context_pack_id,
+        "workspace_dir": session.workspace_dir,
+    }
+
+
+def _persist_session(
+    session: BoardSession,
+    *,
+    checkpoint: str,
+    status: str,
+) -> None:
+    store = _get_board_store()
+    payload = _session_payload(session)
+    snapshot = session.to_dict()
+
+    try:
+        existing = store.get_session(session.session_id)
+        if existing is None:
+            store.start_session(
+                workflow="agent_board",
+                payload=payload,
+                session_id=session.session_id,
+                resume=False,
+            )
+
+        store.update_status(
+            session_id=session.session_id,
+            status=status,
+            checkpoint=checkpoint,
+            state_patch={"board_session": snapshot},
+            result={"board_session": snapshot},
+        )
+    except Exception:
+        log.exception("Failed to persist agent board session %s", session.session_id)
+
+
+def _load_session(session_id: str) -> Optional[BoardSession]:
+    row = _get_board_store().get_session(session_id)
+    if not row or row.get("workflow") != "agent_board":
+        return None
+    return _session_from_store_row(row)
+
+
+def _session_from_store_row(row: Dict[str, Any]) -> Optional[BoardSession]:
+    if not isinstance(row, dict):
+        return None
+
+    state = row.get("state") if isinstance(row.get("state"), dict) else {}
+    snapshot = state.get("board_session") if isinstance(state, dict) else None
+
+    if isinstance(snapshot, dict):
+        try:
+            return BoardSession.from_dict(snapshot)
+        except Exception:
+            log.exception("Failed to parse board session snapshot")
+            return None
+
+    payload = row.get("payload") if isinstance(row.get("payload"), dict) else {}
+    session_id = str(row.get("session_id", "")).strip()
+    if not session_id:
+        return None
+    return BoardSession(
+        session_id=session_id,
+        paper_id=str(payload.get("paper_id", "")),
+        context_pack_id=str(payload.get("context_pack_id", "")),
+        workspace_dir=payload.get("workspace_dir"),
+    )
+
+
+def _find_task_with_session(task_id: str) -> Optional[tuple[BoardSession, AgentTask]]:
+    scan_limit = _session_scan_limit()
+    rows = _get_board_store().list_sessions(workflow="agent_board", limit=scan_limit)
+    for row in rows:
+        session = _session_from_store_row(row)
+        if not session:
+            continue
         for task in session.tasks:
             if task.id == task_id:
-                return task
+                return session, task
     return None
 
 
-def _find_session_for_task(task_id: str) -> Optional[BoardSession]:
-    """Find the session containing a task."""
-    for session in _sessions.values():
-        for task in session.tasks:
-            if task.id == task_id:
-                return session
-    return None
+def _session_scan_limit() -> int:
+    raw = os.getenv("PAPERBOT_AGENT_BOARD_SCAN_LIMIT", "500").strip()
+    try:
+        value = int(raw)
+    except ValueError:
+        value = 500
+    return max(50, min(value, 5000))
+
+
+def _sanitize_workspace_dir(raw_path: str) -> Path:
+    candidate_text = (raw_path or "").strip()
+    if not candidate_text:
+        raise HTTPException(status_code=400, detail="workspace_dir is required")
+    if "\x00" in candidate_text:
+        raise HTTPException(status_code=400, detail="workspace_dir contains invalid characters")
+
+    candidate = Path(candidate_text).expanduser()
+    if not candidate.is_absolute():
+        candidate = Path.cwd() / candidate
+    candidate = candidate.resolve(strict=False)
+
+    for blocked_root in _DANGEROUS_WORKSPACE_ROOTS:
+        blocked_root_resolved = blocked_root.resolve(strict=False)
+        if _is_within(candidate, blocked_root_resolved):
+            raise HTTPException(
+                status_code=400,
+                detail=f"workspace_dir is not allowed: {candidate}",
+            )
+
+    allowed_roots = _workspace_allowed_roots()
+    if not any(_is_within(candidate, root) for root in allowed_roots):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "workspace_dir must be under an allowed root: "
+                + ", ".join(str(root) for root in allowed_roots)
+            ),
+        )
+
+    return candidate
+
+
+def _workspace_allowed_roots() -> List[Path]:
+    configured = os.getenv("PAPERBOT_WORKSPACE_ALLOWED_ROOTS", "").strip()
+    roots: List[Path] = []
+
+    if configured:
+        raw_items = [item.strip() for item in configured.split(os.pathsep)]
+        for item in raw_items:
+            if item:
+                roots.append(Path(item).expanduser().resolve(strict=False))
+    else:
+        roots.extend(
+            [
+                Path.home().resolve(strict=False),
+                Path.cwd().resolve(strict=False),
+                Path(tempfile.gettempdir()).resolve(strict=False),
+            ]
+        )
+
+    roots.append(_DEFAULT_WORKSPACE_DIR.resolve(strict=False))
+
+    unique: List[Path] = []
+    for root in roots:
+        if root not in unique:
+            unique.append(root)
+    return unique
+
+
+def _is_within(candidate: Path, root: Path) -> bool:
+    try:
+        candidate.relative_to(root)
+        return True
+    except ValueError:
+        return False
