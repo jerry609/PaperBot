@@ -1,0 +1,63 @@
+[
+  {
+    "user_id": "roi_bench",
+    "paper_id": "roi:transformer_seq2seq",
+    "pattern_type": "success_pattern",
+    "content": "Successfully generated model.py with Transformer encoder/decoder blocks and positional encoding.",
+    "code_snippet": "class PositionalEncoding(nn.Module):\n    ...\nclass TransformerModel(nn.Module):\n    ..."
+  },
+  {
+    "user_id": "roi_bench",
+    "paper_id": "roi:transformer_seq2seq",
+    "pattern_type": "verified_structure",
+    "content": "Verified structure includes config.py, model.py, train.py, data.py, and requirements.txt for seq2seq training."
+  },
+  {
+    "user_id": "roi_bench",
+    "paper_id": "roi:gnn_link_prediction",
+    "pattern_type": "success_pattern",
+    "content": "Successfully generated graph encoder, sampler, and ranking loss pipeline for link prediction."
+  },
+  {
+    "user_id": "roi_bench",
+    "paper_id": "roi:gnn_link_prediction",
+    "pattern_type": "verified_structure",
+    "content": "Verified structure uses dataset.py, model.py, trainer.py, and eval.py with AUC-oriented verification."
+  },
+  {
+    "user_id": "roi_bench",
+    "paper_id": "roi:cnn_retrieval",
+    "pattern_type": "success_pattern",
+    "content": "Successfully generated text CNN encoder with margin ranking training step and retrieval evaluator."
+  },
+  {
+    "user_id": "roi_bench",
+    "paper_id": "roi:cnn_retrieval",
+    "pattern_type": "verified_structure",
+    "content": "Verified structure contains preprocess.py, model.py, train.py, metrics.py, and main.py for retrieval experiments."
+  },
+  {
+    "user_id": "roi_bench",
+    "paper_id": "roi:diffusion_denoiser",
+    "pattern_type": "success_pattern",
+    "content": "Successfully generated UNet-style diffusion denoiser with cosine scheduler and sample logging hooks."
+  },
+  {
+    "user_id": "roi_bench",
+    "paper_id": "roi:diffusion_denoiser",
+    "pattern_type": "verified_structure",
+    "content": "Verified structure includes noise_schedule.py, model.py, train.py, sample.py, and checkpoint helpers."
+  },
+  {
+    "user_id": "roi_bench",
+    "paper_id": "roi:rl_policy_gradient",
+    "pattern_type": "success_pattern",
+    "content": "Successfully generated actor_critic.py, rollout buffer utilities, and policy gradient update loop."
+  },
+  {
+    "user_id": "roi_bench",
+    "paper_id": "roi:rl_policy_gradient",
+    "pattern_type": "verified_structure",
+    "content": "Verified structure includes env.py, buffer.py, model.py, train.py, and evaluation logging for episodic control."
+  }
+]

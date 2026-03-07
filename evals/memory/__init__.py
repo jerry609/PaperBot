@@ -1,7 +1,5 @@
 """
-Memory evaluation tests for Scope and Acceptance criteria.
+Memory evaluation entrypoints.
 
-Test files:
-- test_deletion_compliance.py: Verify deleted items never retrieved
-- test_retrieval_hit_rate.py: Verify relevant memories are found
+Includes regression checks for retrieval/deletion guarantees and manual ROI benchmarking.
 """
