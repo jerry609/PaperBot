@@ -1,14 +1,23 @@
 """
-Scope Isolation Test (P0 Acceptance Criteria)
+Scope Isolation + CRUD Lifecycle Test (P0 Acceptance Criteria)
 
-Target: 0% leakage - no memory from another user or another scope should appear.
+Aligned with:
+  - Mem0: CRUD lifecycle (add/update/delete/ignore)
+  - LongMemEval: knowledge_update dimension
+
+Targets:
+  - cross_user_leak_rate  = 0 (any leak → FAIL)
+  - cross_scope_leak_rate = 0 (any leak → FAIL)
+  - CRUD update correctness = 100%
+  - CRUD dedup correctness   = 100%
 
 This test:
 1. Builds a deterministic user × scope matrix
 2. Exercises search_memories(), list_memories(), and search_memories_batch()
 3. Fails on any cross-user or cross-scope leakage
 4. Verifies same-user global memories stay visible on unscoped queries
-5. Records cross_user_leak_rate and cross_scope_leak_rate
+5. Tests CRUD lifecycle: update (old content gone), delete (not retrievable), dedup (skipped)
+6. Records cross_user_leak_rate and cross_scope_leak_rate
 """
 
 from __future__ import annotations
@@ -393,10 +402,101 @@ def run_scope_isolation_test() -> Dict[str, Any]:
             },
         )
 
+        # ── CRUD Lifecycle Tests (Mem0 alignment) ──
+        crud_failures: List[str] = []
+
+        # CRUD: Update — old content should not be retrievable after update
+        update_mem = MemoryCandidate(
+            kind="fact",
+            content=f"{COMMON_QUERY} CRUD_UPDATE_OLD_CONTENT optimizer is SGD",
+            confidence=0.90,
+            scope_type="track",
+            scope_id="track_1",
+        )
+        _, _, u_rows = store.add_memories(
+            user_id=USERS[0], memories=[update_mem], actor_id="crud_bench"
+        )
+        update_id = u_rows[0].id
+
+        store.update_item(
+            user_id=USERS[0],
+            item_id=update_id,
+            content=f"{COMMON_QUERY} CRUD_UPDATE_NEW_CONTENT optimizer is AdamW",
+            actor_id="crud_bench",
+        )
+
+        new_results = store.search_memories(
+            user_id=USERS[0], query="CRUD_UPDATE_NEW_CONTENT AdamW", limit=50,
+            scope_type="track", scope_id="track_1",
+        )
+        new_ids = {r["id"] for r in new_results}
+
+        old_results = store.search_memories(
+            user_id=USERS[0], query="CRUD_UPDATE_OLD_CONTENT SGD", limit=50,
+            scope_type="track", scope_id="track_1",
+        )
+        old_contents = [r.get("content", "") for r in old_results if r["id"] == update_id]
+
+        update_new_found = update_id in new_ids
+        update_old_gone = all("CRUD_UPDATE_OLD_CONTENT" not in c for c in old_contents)
+
+        if not update_new_found:
+            crud_failures.append("update: new content not found after update")
+        if not update_old_gone:
+            crud_failures.append("update: old content still retrievable after update")
+
+        # CRUD: Delete — soft-deleted item should not be retrievable
+        delete_mem = MemoryCandidate(
+            kind="fact",
+            content=f"{COMMON_QUERY} CRUD_DELETE_TARGET temporary note",
+            confidence=0.90,
+            scope_type="track",
+            scope_id="track_1",
+        )
+        _, _, d_rows = store.add_memories(
+            user_id=USERS[0], memories=[delete_mem], actor_id="crud_bench"
+        )
+        delete_id = d_rows[0].id
+
+        store.soft_delete_item(
+            user_id=USERS[0], item_id=delete_id, actor_id="crud_bench", reason="bench test"
+        )
+
+        del_results = store.search_memories(
+            user_id=USERS[0], query="CRUD_DELETE_TARGET", limit=50,
+            scope_type="track", scope_id="track_1",
+        )
+        del_ids = {r["id"] for r in del_results}
+        if delete_id in del_ids:
+            crud_failures.append("delete: soft-deleted item still retrievable")
+
+        # CRUD: Ignore/Dedup — exact duplicate should be skipped
+        dedup_content = f"{COMMON_QUERY} CRUD_DEDUP_EXACT exact duplicate content"
+        dedup_mem1 = MemoryCandidate(
+            kind="fact", content=dedup_content, confidence=0.90,
+            scope_type="track", scope_id="track_1",
+        )
+        store.add_memories(user_id=USERS[0], memories=[dedup_mem1], actor_id="crud_bench")
+
+        dedup_mem2 = MemoryCandidate(
+            kind="fact", content=dedup_content, confidence=0.90,
+            scope_type="track", scope_id="track_1",
+        )
+        created_2, skipped_2, _ = store.add_memories(
+            user_id=USERS[0], memories=[dedup_mem2], actor_id="crud_bench"
+        )
+        if skipped_2 != 1 or created_2 != 0:
+            crud_failures.append(
+                f"dedup: expected (created=0, skipped=1) got (created={created_2}, skipped={skipped_2})"
+            )
+
+        crud_passed = len(crud_failures) == 0
+
         passed = (
             cross_user_leak_checks == 0
             and cross_scope_leak_checks == 0
             and visibility_failures == 0
+            and crud_passed
         )
 
         return {
@@ -405,6 +505,8 @@ def run_scope_isolation_test() -> Dict[str, Any]:
             "cross_user_leak_checks": cross_user_leak_checks,
             "cross_scope_leak_checks": cross_scope_leak_checks,
             "visibility_failures": visibility_failures,
+            "crud_passed": crud_passed,
+            "crud_failures": crud_failures,
             "details": details,
         }
     finally:
@@ -424,8 +526,36 @@ def main() -> int:
     print(f"  Cross-user leak checks: {result['cross_user_leak_checks']}")
     print(f"  Cross-scope leak checks: {result['cross_scope_leak_checks']}")
     print(f"  Visibility failures: {result['visibility_failures']}")
+    print(f"  CRUD lifecycle: {'PASS' if result.get('crud_passed') else 'FAIL'}")
+    if result.get("crud_failures"):
+        for cf in result["crud_failures"]:
+            print(f"    CRUD FAIL: {cf}")
     print(f"  Status: {'PASS' if result['passed'] else 'FAIL'}")
     return 0 if result["passed"] else 1
+
+
+# ── Pytest entry ──
+
+
+def test_scope_isolation_bench():
+    result = run_scope_isolation_test()
+    print(f"\n{'=' * 60}")
+    print("Scope Isolation + CRUD Lifecycle Bench")
+    print(f"{'=' * 60}")
+    print(f"  Cross-user leak checks : {result['cross_user_leak_checks']}")
+    print(f"  Cross-scope leak checks: {result['cross_scope_leak_checks']}")
+    print(f"  Visibility failures    : {result['visibility_failures']}")
+    print(f"  CRUD lifecycle         : {'PASS' if result.get('crud_passed') else 'FAIL'}")
+    if result.get("crud_failures"):
+        for cf in result["crud_failures"]:
+            print(f"    CRUD FAIL: {cf}")
+    print(f"\n  Overall: {'PASS' if result['passed'] else 'FAIL'}")
+    assert result["passed"], (
+        f"Scope isolation FAILED: "
+        f"user_leaks={result.get('cross_user_leaks', 0)} "
+        f"scope_leaks={result.get('cross_scope_leaks', 0)} "
+        f"crud_passed={result.get('crud_passed')}"
+    )
 
 
 if __name__ == "__main__":

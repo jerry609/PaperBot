@@ -1,0 +1,70 @@
+{
+  "description": "MemoryBench v2 dataset: 100+ memories for retrieval/isolation/context evaluation",
+  "version": "2.0",
+  "aligned_benchmarks": ["LoCoMo", "LongMemEval", "Mem0"],
+  "users": {
+    "user_a": {
+      "description": "ML researcher focused on LLM and retrieval",
+      "memories": [
+        {"id": "m_a_g1", "kind": "profile", "content": "Senior ML researcher at Stanford, specializing in NLP and retrieval-augmented generation", "confidence": 0.90, "scope_type": "global", "scope_id": null, "tags": ["identity"]},
+        {"id": "m_a_g2", "kind": "preference", "content": "Prefers PyTorch over TensorFlow for all experiments", "confidence": 0.85, "scope_type": "global", "scope_id": null, "tags": ["framework"]},
+        {"id": "m_a_g3", "kind": "preference", "content": "Always uses wandb for experiment tracking and logging", "confidence": 0.80, "scope_type": "global", "scope_id": null, "tags": ["tooling"]},
+        {"id": "m_a_g4", "kind": "constraint", "content": "Must cite at least 3 related works from top-tier venues when writing papers", "confidence": 0.75, "scope_type": "global", "scope_id": null, "tags": ["writing"]},
+
+        {"id": "m_a_t1_1", "kind": "goal", "content": "Improve dense passage retrieval with contrastive learning on MS MARCO", "confidence": 0.88, "scope_type": "track", "scope_id": "1", "tags": ["retrieval", "contrastive"]},
+        {"id": "m_a_t1_2", "kind": "fact", "content": "ColBERT v2 achieves MRR@10 of 0.397 on MS MARCO dev set", "confidence": 0.92, "scope_type": "track", "scope_id": "1", "tags": ["baseline", "colbert"]},
+        {"id": "m_a_t1_3", "kind": "note", "content": "Hard negative mining with BM25 top-1000 gives better training signal than random negatives", "confidence": 0.82, "scope_type": "track", "scope_id": "1", "tags": ["training", "negative-mining"]},
+        {"id": "m_a_t1_4", "kind": "decision", "content": "Decided to use FAISS for ANN index instead of ScaNN due to better Python API", "confidence": 0.78, "scope_type": "track", "scope_id": "1", "tags": ["infrastructure"]},
+        {"id": "m_a_t1_5", "kind": "hypothesis", "content": "Late interaction models should outperform single-vector models on multi-hop queries", "confidence": 0.70, "scope_type": "track", "scope_id": "1", "tags": ["hypothesis"]},
+        {"id": "m_a_t1_6", "kind": "fact", "content": "Training converged after 150k steps with learning rate 2e-5 and batch size 128", "confidence": 0.85, "scope_type": "track", "scope_id": "1", "tags": ["training", "hyperparams"]},
+        {"id": "m_a_t1_7", "kind": "note", "content": "Query expansion using pseudo-relevance feedback improved recall@1000 by 8%", "confidence": 0.80, "scope_type": "track", "scope_id": "1", "tags": ["retrieval", "query-expansion"]},
+        {"id": "m_a_t1_8", "kind": "fact", "content": "Experiment deadline is March 15th for EMNLP 2025 submission", "confidence": 0.75, "scope_type": "track", "scope_id": "1", "tags": ["deadline"]},
+
+        {"id": "m_a_t2_1", "kind": "goal", "content": "Build a multi-agent system for automated paper review and meta-review generation", "confidence": 0.85, "scope_type": "track", "scope_id": "2", "tags": ["agents", "review"]},
+        {"id": "m_a_t2_2", "kind": "note", "content": "GPT-4 achieves 72% agreement with human reviewers on accept/reject decisions", "confidence": 0.82, "scope_type": "track", "scope_id": "2", "tags": ["evaluation", "gpt4"]},
+        {"id": "m_a_t2_3", "kind": "fact", "content": "Using chain-of-thought prompting reduces hallucinated review comments by 35%", "confidence": 0.88, "scope_type": "track", "scope_id": "2", "tags": ["cot", "hallucination"]},
+        {"id": "m_a_t2_4", "kind": "decision", "content": "Will use Anthropic Claude for review generation due to better instruction following", "confidence": 0.80, "scope_type": "track", "scope_id": "2", "tags": ["model-choice"]},
+        {"id": "m_a_t2_5", "kind": "hypothesis", "content": "Multi-agent debate between reviewer agents should improve review quality over single-agent", "confidence": 0.72, "scope_type": "track", "scope_id": "2", "tags": ["multi-agent"]},
+        {"id": "m_a_t2_6", "kind": "note", "content": "OpenReview API provides structured review data with confidence scores for training", "confidence": 0.78, "scope_type": "track", "scope_id": "2", "tags": ["data", "openreview"]},
+
+        {"id": "m_a_t3_1", "kind": "goal", "content": "Develop efficient inference for mixture-of-experts models on consumer GPUs", "confidence": 0.83, "scope_type": "track", "scope_id": "3", "tags": ["moe", "efficiency"]},
+        {"id": "m_a_t3_2", "kind": "fact", "content": "Mixtral 8x7B uses top-2 expert routing with 46.7B total but 12.9B active parameters", "confidence": 0.90, "scope_type": "track", "scope_id": "3", "tags": ["mixtral", "architecture"]},
+        {"id": "m_a_t3_3", "kind": "note", "content": "Expert parallelism across 4 GPUs reduces latency by 60% compared to tensor parallelism", "confidence": 0.80, "scope_type": "track", "scope_id": "3", "tags": ["parallelism", "latency"]},
+        {"id": "m_a_t3_4", "kind": "decision", "content": "Chose to implement expert offloading to CPU RAM for single-GPU deployment", "confidence": 0.76, "scope_type": "track", "scope_id": "3", "tags": ["offloading"]},
+
+        {"id": "m_a_p1_1", "kind": "note", "content": "This paper proposes RAPTOR which recursively clusters and summarizes document chunks for tree-based retrieval", "confidence": 0.85, "scope_type": "paper", "scope_id": "paper_raptor", "tags": ["raptor", "clustering"]},
+        {"id": "m_a_p1_2", "kind": "fact", "content": "RAPTOR improves answer accuracy on QuALITY by 20% over vanilla RAG with flat chunking", "confidence": 0.88, "scope_type": "paper", "scope_id": "paper_raptor", "tags": ["raptor", "results"]},
+        {"id": "m_a_p2_1", "kind": "note", "content": "This paper introduces self-RAG where the LLM learns to retrieve, critique, and generate with reflection tokens", "confidence": 0.82, "scope_type": "paper", "scope_id": "paper_selfrag", "tags": ["self-rag"]},
+        {"id": "m_a_p2_2", "kind": "decision", "content": "Self-RAG's reflection mechanism is too expensive for our real-time use case, will not adopt", "confidence": 0.78, "scope_type": "paper", "scope_id": "paper_selfrag", "tags": ["decision"]},
+
+        {"id": "m_a_t1_9", "kind": "note", "content": "LoRA fine-tuning of the query encoder with rank 16 gives comparable results to full fine-tuning", "confidence": 0.84, "scope_type": "track", "scope_id": "1", "tags": ["lora", "fine-tuning"]},
+        {"id": "m_a_t1_10", "kind": "fact", "content": "Switched from AdamW to LAMB optimizer in January for better large-batch training stability", "confidence": 0.80, "scope_type": "track", "scope_id": "1", "tags": ["optimizer", "temporal"]},
+        {"id": "m_a_t1_11", "kind": "note", "content": "Document encoder frozen during first 50k steps then unfrozen for joint fine-tuning", "confidence": 0.82, "scope_type": "track", "scope_id": "1", "tags": ["training-strategy"]},
+        {"id": "m_a_t2_7", "kind": "fact", "content": "Reviewer calibration dataset contains 2,500 papers from ICLR 2023 with 8,750 reviews", "confidence": 0.85, "scope_type": "track", "scope_id": "2", "tags": ["dataset"]},
+        {"id": "m_a_t2_8", "kind": "note", "content": "Aspect-based review scoring (novelty, clarity, soundness) correlates better with final decisions than holistic scoring", "confidence": 0.79, "scope_type": "track", "scope_id": "2", "tags": ["evaluation"]}
+      ]
+    },
+    "user_b": {
+      "description": "CV researcher focused on diffusion models and 3D vision",
+      "memories": [
+        {"id": "m_b_g1", "kind": "profile", "content": "PhD candidate at MIT working on generative models for 3D content creation", "confidence": 0.90, "scope_type": "global", "scope_id": null, "tags": ["identity"]},
+        {"id": "m_b_g2", "kind": "preference", "content": "Prefers JAX and Flax for all diffusion model implementations", "confidence": 0.85, "scope_type": "global", "scope_id": null, "tags": ["framework"]},
+        {"id": "m_b_g3", "kind": "constraint", "content": "All experiments must be reproducible with a single A100 GPU within 24 hours", "confidence": 0.80, "scope_type": "global", "scope_id": null, "tags": ["compute"]},
+
+        {"id": "m_b_t1_1", "kind": "goal", "content": "Accelerate diffusion sampling with consistency distillation for real-time image generation", "confidence": 0.88, "scope_type": "track", "scope_id": "10", "tags": ["diffusion", "distillation"]},
+        {"id": "m_b_t1_2", "kind": "fact", "content": "Consistency models achieve FID 3.55 on CIFAR-10 with only 1-step generation", "confidence": 0.90, "scope_type": "track", "scope_id": "10", "tags": ["consistency", "results"]},
+        {"id": "m_b_t1_3", "kind": "note", "content": "Progressive distillation from 1024 steps to 4 steps preserves 95% of image quality", "confidence": 0.82, "scope_type": "track", "scope_id": "10", "tags": ["distillation"]},
+        {"id": "m_b_t1_4", "kind": "decision", "content": "Using LPIPS loss instead of MSE for distillation gives perceptually better results", "confidence": 0.80, "scope_type": "track", "scope_id": "10", "tags": ["loss-function"]},
+        {"id": "m_b_t1_5", "kind": "fact", "content": "Training the student model takes 80k steps with batch size 256 on 8 A100 GPUs", "confidence": 0.85, "scope_type": "track", "scope_id": "10", "tags": ["training"]},
+
+        {"id": "m_b_t2_1", "kind": "goal", "content": "Generate 3D meshes from single images using score distillation sampling", "confidence": 0.85, "scope_type": "track", "scope_id": "11", "tags": ["3d", "sds"]},
+        {"id": "m_b_t2_2", "kind": "fact", "content": "DreamFusion uses SDS loss to optimize NeRF from a pretrained 2D diffusion prior", "confidence": 0.88, "scope_type": "track", "scope_id": "11", "tags": ["dreamfusion"]},
+        {"id": "m_b_t2_3", "kind": "note", "content": "Multi-view consistency improves 3D quality but adds 3x compute overhead per iteration", "confidence": 0.78, "scope_type": "track", "scope_id": "11", "tags": ["3d", "multi-view"]},
+        {"id": "m_b_t2_4", "kind": "decision", "content": "Switched from NeRF to 3D Gaussian Splatting for faster rendering and training", "confidence": 0.82, "scope_type": "track", "scope_id": "11", "tags": ["3dgs"]},
+
+        {"id": "m_b_p1_1", "kind": "note", "content": "This paper introduces DiT which replaces U-Net with a transformer backbone for diffusion models", "confidence": 0.86, "scope_type": "paper", "scope_id": "paper_dit", "tags": ["dit", "transformer"]},
+        {"id": "m_b_p1_2", "kind": "fact", "content": "DiT-XL/2 achieves FID 2.27 on ImageNet 256x256 class-conditional generation", "confidence": 0.90, "scope_type": "paper", "scope_id": "paper_dit", "tags": ["dit", "results"]}
+      ]
+    }
+  }
+}

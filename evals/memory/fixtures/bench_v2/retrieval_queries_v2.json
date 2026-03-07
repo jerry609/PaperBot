@@ -1,0 +1,287 @@
+{
+  "description": "MemoryBench v2 retrieval queries with graded relevance, aligned with LoCoMo + LongMemEval",
+  "version": "2.0",
+  "grading_scale": "0=irrelevant, 1=marginally relevant, 2=relevant, 3=highly relevant",
+  "test_cases": [
+    {
+      "id": "ret_001", "query": "dense passage retrieval contrastive learning", "user_id": "user_a",
+      "scope": {"type": "track", "id": "1"},
+      "relevant_memory_ids": ["m_a_t1_1", "m_a_t1_3", "m_a_t1_5"],
+      "relevance_grades": {"m_a_t1_1": 3, "m_a_t1_3": 2, "m_a_t1_5": 2},
+      "question_type": "single_hop", "memory_dimension": "information_extraction", "difficulty": "easy"
+    },
+    {
+      "id": "ret_002", "query": "ColBERT performance metrics", "user_id": "user_a",
+      "scope": {"type": "track", "id": "1"},
+      "relevant_memory_ids": ["m_a_t1_2"],
+      "relevance_grades": {"m_a_t1_2": 3},
+      "question_type": "single_hop", "memory_dimension": "information_extraction", "difficulty": "easy"
+    },
+    {
+      "id": "ret_003", "query": "what optimizer is being used for training", "user_id": "user_a",
+      "scope": {"type": "track", "id": "1"},
+      "relevant_memory_ids": ["m_a_t1_10"],
+      "relevance_grades": {"m_a_t1_10": 3},
+      "question_type": "single_hop", "memory_dimension": "knowledge_update", "difficulty": "easy"
+    },
+    {
+      "id": "ret_004", "query": "hard negative sampling strategy", "user_id": "user_a",
+      "scope": {"type": "track", "id": "1"},
+      "relevant_memory_ids": ["m_a_t1_3"],
+      "relevance_grades": {"m_a_t1_3": 3},
+      "question_type": "single_hop", "memory_dimension": "information_extraction", "difficulty": "easy"
+    },
+    {
+      "id": "ret_005", "query": "FAISS vs ScaNN decision", "user_id": "user_a",
+      "scope": {"type": "track", "id": "1"},
+      "relevant_memory_ids": ["m_a_t1_4"],
+      "relevance_grades": {"m_a_t1_4": 3},
+      "question_type": "single_hop", "memory_dimension": "information_extraction", "difficulty": "easy"
+    },
+    {
+      "id": "ret_006", "query": "LoRA fine-tuning rank", "user_id": "user_a",
+      "scope": {"type": "track", "id": "1"},
+      "relevant_memory_ids": ["m_a_t1_9"],
+      "relevance_grades": {"m_a_t1_9": 3},
+      "question_type": "single_hop", "memory_dimension": "information_extraction", "difficulty": "easy"
+    },
+    {
+      "id": "ret_007", "query": "query expansion pseudo relevance feedback results", "user_id": "user_a",
+      "scope": {"type": "track", "id": "1"},
+      "relevant_memory_ids": ["m_a_t1_7"],
+      "relevance_grades": {"m_a_t1_7": 3},
+      "question_type": "single_hop", "memory_dimension": "information_extraction", "difficulty": "easy"
+    },
+    {
+      "id": "ret_008", "query": "submission deadline", "user_id": "user_a",
+      "scope": {"type": "track", "id": "1"},
+      "relevant_memory_ids": ["m_a_t1_8"],
+      "relevance_grades": {"m_a_t1_8": 3},
+      "question_type": "single_hop", "memory_dimension": "temporal_reasoning", "difficulty": "easy"
+    },
+    {
+      "id": "ret_009", "query": "learning rate and batch size for training", "user_id": "user_a",
+      "scope": {"type": "track", "id": "1"},
+      "relevant_memory_ids": ["m_a_t1_6", "m_a_t1_11"],
+      "relevance_grades": {"m_a_t1_6": 3, "m_a_t1_11": 2},
+      "question_type": "multi_hop", "memory_dimension": "information_extraction", "difficulty": "medium"
+    },
+    {
+      "id": "ret_010", "query": "all training decisions and strategy changes", "user_id": "user_a",
+      "scope": {"type": "track", "id": "1"},
+      "relevant_memory_ids": ["m_a_t1_3", "m_a_t1_6", "m_a_t1_10", "m_a_t1_11"],
+      "relevance_grades": {"m_a_t1_3": 2, "m_a_t1_6": 3, "m_a_t1_10": 3, "m_a_t1_11": 3},
+      "question_type": "multi_hop", "memory_dimension": "multi_session_reasoning", "difficulty": "hard"
+    },
+    {
+      "id": "ret_011", "query": "retrieval model architecture comparisons late interaction vs single vector", "user_id": "user_a",
+      "scope": {"type": "track", "id": "1"},
+      "relevant_memory_ids": ["m_a_t1_2", "m_a_t1_5"],
+      "relevance_grades": {"m_a_t1_2": 2, "m_a_t1_5": 3},
+      "question_type": "multi_hop", "memory_dimension": "multi_session_reasoning", "difficulty": "medium"
+    },
+    {
+      "id": "ret_012", "query": "automated paper review system", "user_id": "user_a",
+      "scope": {"type": "track", "id": "2"},
+      "relevant_memory_ids": ["m_a_t2_1", "m_a_t2_2", "m_a_t2_3"],
+      "relevance_grades": {"m_a_t2_1": 3, "m_a_t2_2": 3, "m_a_t2_3": 2},
+      "question_type": "single_hop", "memory_dimension": "information_extraction", "difficulty": "easy"
+    },
+    {
+      "id": "ret_013", "query": "which LLM model for review generation and why", "user_id": "user_a",
+      "scope": {"type": "track", "id": "2"},
+      "relevant_memory_ids": ["m_a_t2_4"],
+      "relevance_grades": {"m_a_t2_4": 3},
+      "question_type": "single_hop", "memory_dimension": "information_extraction", "difficulty": "easy"
+    },
+    {
+      "id": "ret_014", "query": "chain of thought prompting effects", "user_id": "user_a",
+      "scope": {"type": "track", "id": "2"},
+      "relevant_memory_ids": ["m_a_t2_3"],
+      "relevance_grades": {"m_a_t2_3": 3},
+      "question_type": "single_hop", "memory_dimension": "information_extraction", "difficulty": "easy"
+    },
+    {
+      "id": "ret_015", "query": "multi-agent debate review quality", "user_id": "user_a",
+      "scope": {"type": "track", "id": "2"},
+      "relevant_memory_ids": ["m_a_t2_5"],
+      "relevance_grades": {"m_a_t2_5": 3},
+      "question_type": "single_hop", "memory_dimension": "information_extraction", "difficulty": "easy"
+    },
+    {
+      "id": "ret_016", "query": "review calibration data source", "user_id": "user_a",
+      "scope": {"type": "track", "id": "2"},
+      "relevant_memory_ids": ["m_a_t2_6", "m_a_t2_7"],
+      "relevance_grades": {"m_a_t2_6": 2, "m_a_t2_7": 3},
+      "question_type": "multi_hop", "memory_dimension": "information_extraction", "difficulty": "medium"
+    },
+    {
+      "id": "ret_017", "query": "aspect scoring vs holistic scoring", "user_id": "user_a",
+      "scope": {"type": "track", "id": "2"},
+      "relevant_memory_ids": ["m_a_t2_8"],
+      "relevance_grades": {"m_a_t2_8": 3},
+      "question_type": "single_hop", "memory_dimension": "information_extraction", "difficulty": "medium"
+    },
+    {
+      "id": "ret_018", "query": "MoE mixture of experts inference efficiency", "user_id": "user_a",
+      "scope": {"type": "track", "id": "3"},
+      "relevant_memory_ids": ["m_a_t3_1", "m_a_t3_2", "m_a_t3_3"],
+      "relevance_grades": {"m_a_t3_1": 3, "m_a_t3_2": 3, "m_a_t3_3": 3},
+      "question_type": "acronym_expansion", "memory_dimension": "information_extraction", "difficulty": "medium"
+    },
+    {
+      "id": "ret_019", "query": "Mixtral architecture details active parameters", "user_id": "user_a",
+      "scope": {"type": "track", "id": "3"},
+      "relevant_memory_ids": ["m_a_t3_2"],
+      "relevance_grades": {"m_a_t3_2": 3},
+      "question_type": "single_hop", "memory_dimension": "information_extraction", "difficulty": "easy"
+    },
+    {
+      "id": "ret_020", "query": "GPU deployment strategy offloading", "user_id": "user_a",
+      "scope": {"type": "track", "id": "3"},
+      "relevant_memory_ids": ["m_a_t3_3", "m_a_t3_4"],
+      "relevance_grades": {"m_a_t3_3": 2, "m_a_t3_4": 3},
+      "question_type": "multi_hop", "memory_dimension": "information_extraction", "difficulty": "medium"
+    },
+    {
+      "id": "ret_021", "query": "RAPTOR tree retrieval method", "user_id": "user_a",
+      "scope": {"type": "paper", "id": "paper_raptor"},
+      "relevant_memory_ids": ["m_a_p1_1", "m_a_p1_2"],
+      "relevance_grades": {"m_a_p1_1": 3, "m_a_p1_2": 3},
+      "question_type": "single_hop", "memory_dimension": "information_extraction", "difficulty": "easy"
+    },
+    {
+      "id": "ret_022", "query": "self-RAG reflection tokens", "user_id": "user_a",
+      "scope": {"type": "paper", "id": "paper_selfrag"},
+      "relevant_memory_ids": ["m_a_p2_1", "m_a_p2_2"],
+      "relevance_grades": {"m_a_p2_1": 3, "m_a_p2_2": 2},
+      "question_type": "single_hop", "memory_dimension": "information_extraction", "difficulty": "easy"
+    },
+    {
+      "id": "ret_023", "query": "RAG", "user_id": "user_a",
+      "scope": {"type": "track", "id": "1"},
+      "relevant_memory_ids": ["m_a_t1_1", "m_a_t1_7"],
+      "relevance_grades": {"m_a_t1_1": 3, "m_a_t1_7": 2},
+      "question_type": "acronym_expansion", "memory_dimension": "information_extraction", "difficulty": "medium"
+    },
+    {
+      "id": "ret_024", "query": "CoT", "user_id": "user_a",
+      "scope": {"type": "track", "id": "2"},
+      "relevant_memory_ids": ["m_a_t2_3"],
+      "relevance_grades": {"m_a_t2_3": 3},
+      "question_type": "acronym_expansion", "memory_dimension": "information_extraction", "difficulty": "medium"
+    },
+    {
+      "id": "ret_025", "query": "DiT diffusion transformer", "user_id": "user_b",
+      "scope": {"type": "paper", "id": "paper_dit"},
+      "relevant_memory_ids": ["m_b_p1_1", "m_b_p1_2"],
+      "relevance_grades": {"m_b_p1_1": 3, "m_b_p1_2": 3},
+      "question_type": "acronym_expansion", "memory_dimension": "information_extraction", "difficulty": "easy"
+    },
+    {
+      "id": "ret_026", "query": "consistency distillation sampling steps", "user_id": "user_b",
+      "scope": {"type": "track", "id": "10"},
+      "relevant_memory_ids": ["m_b_t1_2", "m_b_t1_3"],
+      "relevance_grades": {"m_b_t1_2": 3, "m_b_t1_3": 3},
+      "question_type": "single_hop", "memory_dimension": "information_extraction", "difficulty": "easy"
+    },
+    {
+      "id": "ret_027", "query": "3D generation from images score distillation", "user_id": "user_b",
+      "scope": {"type": "track", "id": "11"},
+      "relevant_memory_ids": ["m_b_t2_1", "m_b_t2_2"],
+      "relevance_grades": {"m_b_t2_1": 3, "m_b_t2_2": 3},
+      "question_type": "single_hop", "memory_dimension": "information_extraction", "difficulty": "easy"
+    },
+    {
+      "id": "ret_028", "query": "NeRF vs Gaussian splatting tradeoffs", "user_id": "user_b",
+      "scope": {"type": "track", "id": "11"},
+      "relevant_memory_ids": ["m_b_t2_3", "m_b_t2_4"],
+      "relevance_grades": {"m_b_t2_3": 2, "m_b_t2_4": 3},
+      "question_type": "multi_hop", "memory_dimension": "information_extraction", "difficulty": "medium"
+    },
+    {
+      "id": "ret_029", "query": "loss function choice for distillation training", "user_id": "user_b",
+      "scope": {"type": "track", "id": "10"},
+      "relevant_memory_ids": ["m_b_t1_4"],
+      "relevance_grades": {"m_b_t1_4": 3},
+      "question_type": "single_hop", "memory_dimension": "information_extraction", "difficulty": "easy"
+    },
+    {
+      "id": "ret_030", "query": "compute requirements A100 training", "user_id": "user_b",
+      "scope": {"type": "track", "id": "10"},
+      "relevant_memory_ids": ["m_b_t1_5"],
+      "relevance_grades": {"m_b_t1_5": 3},
+      "question_type": "single_hop", "memory_dimension": "information_extraction", "difficulty": "easy"
+    },
+    {
+      "id": "ret_031", "query": "what framework does user prefer", "user_id": "user_a",
+      "scope": null,
+      "relevant_memory_ids": ["m_a_g2"],
+      "relevance_grades": {"m_a_g2": 3},
+      "question_type": "single_hop", "memory_dimension": "information_extraction", "difficulty": "easy"
+    },
+    {
+      "id": "ret_032", "query": "experiment tracking tool", "user_id": "user_a",
+      "scope": null,
+      "relevant_memory_ids": ["m_a_g3"],
+      "relevance_grades": {"m_a_g3": 3},
+      "question_type": "single_hop", "memory_dimension": "information_extraction", "difficulty": "easy"
+    },
+    {
+      "id": "ret_033", "query": "when did the optimizer change happen", "user_id": "user_a",
+      "scope": {"type": "track", "id": "1"},
+      "relevant_memory_ids": ["m_a_t1_10"],
+      "relevance_grades": {"m_a_t1_10": 3},
+      "question_type": "temporal", "memory_dimension": "temporal_reasoning", "difficulty": "medium"
+    },
+    {
+      "id": "ret_034", "query": "training strategy what was frozen and when", "user_id": "user_a",
+      "scope": {"type": "track", "id": "1"},
+      "relevant_memory_ids": ["m_a_t1_11"],
+      "relevance_grades": {"m_a_t1_11": 3},
+      "question_type": "temporal", "memory_dimension": "temporal_reasoning", "difficulty": "medium"
+    },
+    {
+      "id": "ret_035", "query": "quantum computing error correction", "user_id": "user_a",
+      "scope": {"type": "track", "id": "1"},
+      "relevant_memory_ids": [],
+      "relevance_grades": {},
+      "question_type": "adversarial", "memory_dimension": "abstention", "difficulty": "easy"
+    },
+    {
+      "id": "ret_036", "query": "weather forecast for tomorrow", "user_id": "user_a",
+      "scope": null,
+      "relevant_memory_ids": [],
+      "relevance_grades": {},
+      "question_type": "adversarial", "memory_dimension": "abstention", "difficulty": "easy"
+    },
+    {
+      "id": "ret_037", "query": "stock market prediction algorithms", "user_id": "user_b",
+      "scope": {"type": "track", "id": "10"},
+      "relevant_memory_ids": [],
+      "relevance_grades": {},
+      "question_type": "adversarial", "memory_dimension": "abstention", "difficulty": "easy"
+    },
+    {
+      "id": "ret_038", "query": "reinforcement learning policy gradient methods", "user_id": "user_a",
+      "scope": {"type": "track", "id": "1"},
+      "relevant_memory_ids": [],
+      "relevance_grades": {},
+      "question_type": "adversarial", "memory_dimension": "abstention", "difficulty": "medium"
+    },
+    {
+      "id": "ret_039", "query": "training convergence steps learning rate", "user_id": "user_b",
+      "scope": {"type": "track", "id": "10"},
+      "relevant_memory_ids": ["m_b_t1_5"],
+      "relevance_grades": {"m_b_t1_5": 3},
+      "question_type": "single_hop", "memory_dimension": "information_extraction", "difficulty": "easy"
+    },
+    {
+      "id": "ret_040", "query": "multi-view consistency compute overhead 3D generation", "user_id": "user_b",
+      "scope": {"type": "track", "id": "11"},
+      "relevant_memory_ids": ["m_b_t2_3"],
+      "relevance_grades": {"m_b_t2_3": 3},
+      "question_type": "single_hop", "memory_dimension": "information_extraction", "difficulty": "medium"
+    }
+  ]
+}

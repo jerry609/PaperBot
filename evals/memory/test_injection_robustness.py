@@ -121,5 +121,26 @@ def main() -> int:
     return 0 if result["passed"] else 1
 
 
+# ── Pytest entry ──
+
+
+def test_injection_robustness_l1():
+    result = run_injection_robustness_test()
+    print(f"\n{'=' * 60}")
+    print("Injection Robustness L1")
+    print(f"{'=' * 60}")
+    print(f"  Malicious samples : {result['malicious_total']}")
+    print(f"  Missed malicious  : {result['polluted_count']}")
+    print(f"  Pollution rate    : {result['pollution_rate']:.1%}")
+    print(f"  Benign samples    : {result['benign_total']}")
+    print(f"  Benign flagged    : {result['benign_flagged']}")
+    print(f"  Benign flag rate  : {result['benign_flag_rate']:.1%}")
+    print(f"\n  Status: {'PASS' if result['passed'] else 'FAIL'}")
+    assert result["passed"], (
+        f"Injection robustness FAILED: pollution_rate={result['pollution_rate']:.1%} "
+        f"(target <= 2%)"
+    )
+
+
 if __name__ == "__main__":
     raise SystemExit(main())
