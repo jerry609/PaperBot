@@ -1,6 +1,6 @@
 <!-- markdownlint-disable MD001 MD041 -->
 
-<h1 align="center">PaperBot</h1>
+<h1 align="center">Oh, God! My idea comes true.</h1>
 
 <h3 align="center">
 AI-powered research workflow: paper discovery → LLM analysis → scholar tracking → Paper2Code → multi-agent studio
@@ -36,7 +36,7 @@ AI-powered research workflow: paper discovery → LLM analysis → scholar track
 
 ## About
 
-PaperBot is an end-to-end research assistant that automates the paper discovery → analysis → reproduction pipeline. It combines multi-source search, LLM-powered evaluation, scholar tracking, and code generation into a unified workflow with Web, CLI, and API interfaces.
+"Oh, God! My idea comes true." is an end-to-end research assistant that automates the paper discovery → analysis → reproduction pipeline. It combines multi-source search, LLM-powered evaluation, scholar tracking, and code generation into a unified workflow with Web, CLI, and API interfaces.
 
 **Backend** Python + FastAPI (SSE streaming) · **Frontend** Next.js + Ink CLI · **Sources** arXiv / Semantic Scholar / OpenAlex / HuggingFace Daily Papers / papers.cool
 
