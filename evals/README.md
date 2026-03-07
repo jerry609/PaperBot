@@ -6,6 +6,7 @@ Phase-0 intent:
 - Provide a stable place to add smoke cases for the two main trunks:
   - `scholar_pipeline`
   - `paper2code`
+- Add deterministic retrieval quality regression coverage for `PaperSearchService`
 - Track basic metrics (success rate, latency, cost estimate) and catch regressions early.
 
 Suggested layout (see `docs/PLAN.md` for details):
@@ -18,5 +19,4 @@ evals/
   scorers/
   reports/
 ```
-
 

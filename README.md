@@ -81,6 +81,7 @@ AI-powered research workflow: paper discovery → LLM analysis → scholar track
 - **Structured Cards** — LLM-extracted method / dataset / conclusion / limitations with DB caching
 - **Related Work** — Draft generation from saved papers with [AuthorYear] citation format
 - **Memory System** — Research memory with FTS5 + BM25 search, context engine for personalized recommendations
+- **MemoryBench Suite** — Retrieval / context / isolation / injection / performance / ROI benchmarks for the memory and Paper2Code stack
 
 ### Reproduction & Studio
 
@@ -209,6 +210,7 @@ Active Epics:
 | [#153](https://github.com/jerry609/PaperBot/issues/153) | Memory & Context | P0-P1 done |
 | [#154](https://github.com/jerry609/PaperBot/issues/154) | Agentic Research | Design done |
 | [#179](https://github.com/jerry609/PaperBot/issues/179) | Daily Push | Complete |
+| [#283](https://github.com/jerry609/PaperBot/issues/283) | MemoryBench | Complete |
 | [#159](https://github.com/jerry609/PaperBot/issues/159) | Obsidian CLI | Not started |
 
 ## Contributing
@@ -234,6 +236,11 @@ python -m black . && python -m isort .
 | [`docs/PLAN.md`](docs/PLAN.md) | Architecture assessment |
 | [`docs/PAPERSCOOL_WORKFLOW.md`](docs/PAPERSCOOL_WORKFLOW.md) | Topic Workflow guide |
 | [`docs/p2c/`](docs/p2c/) | Paper2Context design docs |
+| [`docs/benchmark/MEMORYBENCH_EPIC_283_COMPLETION.md`](docs/benchmark/MEMORYBENCH_EPIC_283_COMPLETION.md) | MemoryBench Epic completion report |
+| [`docs/search_eval.md`](docs/search_eval.md) | Retrieval benchmark guide |
+| [`docs/context_engine_eval.md`](docs/context_engine_eval.md) | Context extraction benchmark guide |
+| [`docs/memory_performance_eval.md`](docs/memory_performance_eval.md) | Memory performance benchmark guide |
+| [`docs/p2c/P2C_ROI_BENCHMARK.md`](docs/p2c/P2C_ROI_BENCHMARK.md) | ROI benchmark guide |
 | [`docs/memory_system.md`](docs/memory_system.md) | Memory system design |
 | [`docs/anchor_system.md`](docs/anchor_system.md) | Anchor author system |
 | [`docs/AGENTIC_RESEARCH_EVOLUTION.md`](docs/AGENTIC_RESEARCH_EVOLUTION.md) | Agentic Research evolution plan |
