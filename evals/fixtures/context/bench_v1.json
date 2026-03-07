@@ -1,0 +1,353 @@
+[
+  {
+    "case_id": "survey_router_medical",
+    "query": "clinical rag",
+    "query_type": "short",
+    "stage": "survey",
+    "user_id": "bench-user",
+    "active_track_id": 1,
+    "expected": {
+      "layers": {
+        "layer0_profile": true,
+        "layer1_track": true,
+        "layer2_query": false,
+        "layer3_paper": false
+      },
+      "token_guard": false,
+      "router_track_id": 2
+    },
+    "state": {
+      "tracks": [
+        {
+          "id": 1,
+          "name": "Agent Evaluation",
+          "description": "General LLM agent evaluation and tooling.",
+          "keywords": ["agent eval", "tool use", "llm agents"],
+          "methods": ["benchmarking"],
+          "venues": ["neurips"]
+        },
+        {
+          "id": 2,
+          "name": "Medical RAG",
+          "description": "Clinical retrieval and evidence QA.",
+          "keywords": ["medical rag", "clinical retrieval", "evidence qa"],
+          "methods": ["retrieval augmented generation"],
+          "venues": ["jamia"]
+        },
+        {
+          "id": 3,
+          "name": "GraphRAG Systems",
+          "description": "Graph retrieval systems and routing.",
+          "keywords": ["graphrag", "graph retrieval", "router"],
+          "methods": ["knowledge graph"],
+          "venues": ["kdd"]
+        }
+      ],
+      "global_memories": [
+        {"id": 1, "content": "Prefer concise context packs."},
+        {"id": 2, "content": "Always attach evidence for claims."},
+        {"id": 3, "content": "Regression guards matter."}
+      ],
+      "track_memories": {
+        "1": [
+          {"id": 101, "content": "tool use evaluation harness for llm agents"}
+        ],
+        "2": [
+          {"id": 201, "content": "clinical retrieval notes for medical rag evidence qa"},
+          {"id": 202, "content": "hospital question answering with evidence retrieval"}
+        ],
+        "3": [
+          {"id": 301, "content": "graphrag router notes for graph retrieval systems"}
+        ]
+      },
+      "paper_memories": {},
+      "tasks_by_track": {
+        "1": [{"id": 11, "title": "stabilize agent eval harness"}],
+        "2": [{"id": 21, "title": "clinical evidence qa pipeline"}],
+        "3": [{"id": 31, "title": "graph retrieval router"}]
+      },
+      "milestones_by_track": {
+        "1": [{"id": 41, "name": "agent eval baseline"}],
+        "2": [{"id": 42, "name": "medical rag review"}],
+        "3": [{"id": 43, "name": "graph router rollout"}]
+      }
+    }
+  },
+  {
+    "case_id": "writing_long_medical",
+    "query": "draft a medical retrieval augmented generation benchmark for clinical evidence question answering",
+    "query_type": "long",
+    "stage": "writing",
+    "user_id": "bench-user",
+    "active_track_id": 1,
+    "track_id": 2,
+    "expected": {
+      "layers": {
+        "layer0_profile": true,
+        "layer1_track": true,
+        "layer2_query": true,
+        "layer3_paper": false
+      },
+      "token_guard": false
+    },
+    "state": {
+      "tracks": [
+        {
+          "id": 1,
+          "name": "Agent Evaluation",
+          "description": "General LLM agent evaluation and tooling.",
+          "keywords": ["agent eval", "tool use", "llm agents"],
+          "methods": ["benchmarking"],
+          "venues": ["neurips"]
+        },
+        {
+          "id": 2,
+          "name": "Medical RAG",
+          "description": "Clinical retrieval and evidence QA.",
+          "keywords": ["medical rag", "clinical retrieval", "evidence qa"],
+          "methods": ["retrieval augmented generation"],
+          "venues": ["jamia"]
+        }
+      ],
+      "global_memories": [
+        {"id": 1, "content": "Prefer concise context packs."},
+        {"id": 2, "content": "Always attach evidence for claims."}
+      ],
+      "track_memories": {
+        "2": [
+          {"id": 201, "content": "clinical retrieval notes for medical rag evidence qa"},
+          {"id": 202, "content": "benchmark medical retrieval for evidence question answering"}
+        ]
+      },
+      "paper_memories": {},
+      "tasks_by_track": {
+        "2": [
+          {"id": 21, "title": "clinical evidence qa pipeline"},
+          {"id": 22, "title": "benchmark medical retrieval"}
+        ]
+      },
+      "milestones_by_track": {
+        "2": [{"id": 42, "name": "medical rag review"}]
+      }
+    }
+  },
+  {
+    "case_id": "rebuttal_paper_targeted",
+    "query": "paper specific ablation for clinical retrieval",
+    "query_type": "paper_targeted",
+    "stage": "rebuttal",
+    "user_id": "bench-user",
+    "active_track_id": 2,
+    "track_id": 2,
+    "paper_id": "paper-ml-rag-01",
+    "expected": {
+      "layers": {
+        "layer0_profile": true,
+        "layer1_track": true,
+        "layer2_query": true,
+        "layer3_paper": true
+      },
+      "token_guard": false
+    },
+    "state": {
+      "tracks": [
+        {
+          "id": 2,
+          "name": "Medical RAG",
+          "description": "Clinical retrieval and evidence QA.",
+          "keywords": ["medical rag", "clinical retrieval", "evidence qa"],
+          "methods": ["retrieval augmented generation"],
+          "venues": ["jamia"]
+        }
+      ],
+      "global_memories": [
+        {"id": 1, "content": "Prefer concise context packs."},
+        {"id": 2, "content": "Always attach evidence for claims."}
+      ],
+      "track_memories": {
+        "2": [
+          {"id": 201, "content": "clinical retrieval notes for medical rag evidence qa"}
+        ]
+      },
+      "paper_memories": {
+        "paper-ml-rag-01": [
+          {"id": 501, "content": "Ablation table note for the target paper."},
+          {"id": 502, "content": "Reviewer concern about evidence retrieval failure modes."}
+        ]
+      },
+      "tasks_by_track": {
+        "2": [{"id": 21, "title": "clinical evidence qa pipeline"}]
+      },
+      "milestones_by_track": {
+        "2": [{"id": 42, "name": "medical rag review"}]
+      }
+    }
+  },
+  {
+    "case_id": "survey_cross_track_router",
+    "query": "graph retrieval router",
+    "query_type": "track_query",
+    "stage": "survey",
+    "user_id": "bench-user",
+    "active_track_id": 2,
+    "include_cross_track": true,
+    "expected": {
+      "layers": {
+        "layer0_profile": true,
+        "layer1_track": true,
+        "layer2_query": true,
+        "layer3_paper": false
+      },
+      "token_guard": false,
+      "router_track_id": 3
+    },
+    "state": {
+      "tracks": [
+        {
+          "id": 2,
+          "name": "Medical RAG",
+          "description": "Clinical retrieval and evidence QA.",
+          "keywords": ["medical rag", "clinical retrieval", "evidence qa"],
+          "methods": ["retrieval augmented generation"],
+          "venues": ["jamia"]
+        },
+        {
+          "id": 3,
+          "name": "GraphRAG Systems",
+          "description": "Graph retrieval systems and routing.",
+          "keywords": ["graphrag", "graph retrieval", "router"],
+          "methods": ["knowledge graph"],
+          "venues": ["kdd"]
+        }
+      ],
+      "global_memories": [
+        {"id": 1, "content": "Prefer concise context packs."},
+        {"id": 2, "content": "Always attach evidence for claims."}
+      ],
+      "track_memories": {
+        "2": [
+          {"id": 201, "content": "clinical retrieval notes for medical rag evidence qa"}
+        ],
+        "3": [
+          {"id": 301, "content": "graphrag router notes for graph retrieval systems"},
+          {"id": 302, "content": "graph retrieval router benchmark and routing heuristics"}
+        ]
+      },
+      "paper_memories": {},
+      "tasks_by_track": {
+        "2": [{"id": 21, "title": "clinical evidence qa pipeline"}],
+        "3": [{"id": 31, "title": "graph retrieval router"}]
+      },
+      "milestones_by_track": {
+        "2": [{"id": 42, "name": "medical rag review"}],
+        "3": [{"id": 43, "name": "graph router rollout"}]
+      }
+    }
+  },
+  {
+    "case_id": "writing_token_guard",
+    "query": "graph retrieval router token budget",
+    "query_type": "long",
+    "stage": "writing",
+    "user_id": "bench-user",
+    "active_track_id": 3,
+    "track_id": 3,
+    "paper_id": "paper-token-1",
+    "context_token_budget": 160,
+    "expected": {
+      "layers": {
+        "layer0_profile": true,
+        "layer1_track": true,
+        "layer2_query": false,
+        "layer3_paper": false
+      },
+      "token_guard": true
+    },
+    "state": {
+      "tracks": [
+        {
+          "id": 3,
+          "name": "GraphRAG Systems",
+          "description": "Graph retrieval systems and routing.",
+          "keywords": ["graphrag", "graph retrieval", "router"],
+          "methods": ["knowledge graph"],
+          "venues": ["kdd"]
+        }
+      ],
+      "global_memories": [
+        {"id": 1, "content": "Prefer concise context packs."},
+        {"id": 2, "content": "Always attach evidence for claims."},
+        {"id": 3, "content": "Regression guards matter."}
+      ],
+      "track_memories": {
+        "3": [
+          {"id": 301, "content": "graphrag router notes for graph retrieval systems"},
+          {"id": 302, "content": "graph retrieval router benchmark and routing heuristics"}
+        ]
+      },
+      "paper_memories": {
+        "paper-token-1": [
+          {"id": 601, "content": "Paper-specific note about token budgets."},
+          {"id": 602, "content": "Another paper note about retrieval router details."}
+        ]
+      },
+      "tasks_by_track": {
+        "3": [
+          {"id": 31, "title": "graph retrieval router"},
+          {"id": 32, "title": "token budget guard"},
+          {"id": 33, "title": "benchmark regression checks"}
+        ]
+      },
+      "milestones_by_track": {
+        "3": [{"id": 43, "name": "graph router rollout"}]
+      }
+    }
+  },
+  {
+    "case_id": "rebuttal_agent_eval",
+    "query": "agent eval harness",
+    "query_type": "short",
+    "stage": "rebuttal",
+    "user_id": "bench-user",
+    "active_track_id": 1,
+    "track_id": 1,
+    "expected": {
+      "layers": {
+        "layer0_profile": true,
+        "layer1_track": true,
+        "layer2_query": true,
+        "layer3_paper": false
+      },
+      "token_guard": false
+    },
+    "state": {
+      "tracks": [
+        {
+          "id": 1,
+          "name": "Agent Evaluation",
+          "description": "General LLM agent evaluation and tooling.",
+          "keywords": ["agent eval", "tool use", "llm agents"],
+          "methods": ["benchmarking"],
+          "venues": ["neurips"]
+        }
+      ],
+      "global_memories": [
+        {"id": 1, "content": "Prefer concise context packs."},
+        {"id": 2, "content": "Always attach evidence for claims."}
+      ],
+      "track_memories": {
+        "1": [
+          {"id": 101, "content": "tool use evaluation harness for llm agents"},
+          {"id": 102, "content": "agent eval benchmark regression checklist"}
+        ]
+      },
+      "paper_memories": {},
+      "tasks_by_track": {
+        "1": [{"id": 11, "title": "stabilize agent eval harness"}]
+      },
+      "milestones_by_track": {
+        "1": [{"id": 41, "name": "agent eval baseline"}]
+      }
+    }
+  }
+]
