@@ -51,3 +51,18 @@ def test_generation_node_uses_project_llm_with_memory_context():
     user_prompt = llm.calls[0]["user"]
     assert "Prior experience: Successfully generated trainer.py" in user_prompt
     assert "Relevant Code Patterns" in user_prompt
+
+
+def test_template_main_skips_data_loader_when_data_file_missing():
+    node = GenerationNode(use_rag=False)
+    plan = ReproductionPlan(
+        project_name="Transformer Repro",
+        description="demo",
+        file_structure={"main.py": "Entry point", "model.py": "Model", "config.py": "Config"},
+        key_components=["Model"],
+        dependencies=["torch"],
+    )
+    rendered = node._template_main(plan, ImplementationSpec())
+
+    assert "from data import DataLoader" not in rendered
+    assert "data_loader = DataLoader(config)" not in rendered
