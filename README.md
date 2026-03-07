@@ -197,6 +197,77 @@ python main.py review --title "..." --abstract "..."
 | **Usable** | Scholar Tracking · Deep Review · Paper2Code · Memory · Context Engine · Discovery · AgentSwarm · Harvest · Import/Sync |
 | **Planned** | [DB Modernization #231](https://github.com/jerry609/PaperBot/issues/231) · [Obsidian Integration #159](https://github.com/jerry609/PaperBot/issues/159) |
 
+## MemoryBench Evaluation
+
+> Aligned with [LongMemEval](https://arxiv.org/abs/2407.15460) (ICLR 2025), [LoCoMo](https://arxiv.org/abs/2402.09281) (ACL 2024), Mem0, Letta. Full methodology: [`evals/memory/README.md`](evals/memory/README.md) · Epic [#283](https://github.com/jerry609/PaperBot/issues/283)
+
+<details open>
+<summary><b>Retrieval Quality</b> — 40 queries, 45 memories, 2 users (FTS5 + BM25)</summary>
+
+| Metric | Target | Result | |
+|--------|--------|--------|-|
+| Recall@5 | ≥ 0.80 | **0.873** | :white_check_mark: |
+| MRR@10 | ≥ 0.65 | **0.731** | :white_check_mark: |
+| nDCG@10 | ≥ 0.70 | **0.747** | :white_check_mark: |
+| Hit@10 | — | 1.000 | |
+
+Breakdown by LoCoMo question type:
+
+| Type | Recall@5 | MRR@10 |
+|------|----------|--------|
+| single-hop (24) | 0.931 | 0.770 |
+| multi-hop (6) | 0.708 | 0.583 |
+| temporal (2) | 1.000 | 0.417 |
+| acronym (4) | 0.708 | 0.875 |
+
+</details>
+
+<details>
+<summary><b>Scope Isolation + CRUD</b> — zero-leak enforcement, Mem0 lifecycle</summary>
+
+| Check | Result |
+|-------|--------|
+| Cross-user leak rate | **0** (zero tolerance) |
+| Cross-scope leak rate | **0** (zero tolerance) |
+| CRUD Update (old content gone) | PASS |
+| CRUD Delete (soft-delete enforced) | PASS |
+| CRUD Dedup (exact duplicate skipped) | PASS |
+
+</details>
+
+<details>
+<summary><b>Context Extraction</b> — L0-L3 layer assembly, Letta alignment</summary>
+
+| Test | Result |
+|------|--------|
+| Layer completeness (L0 profile → L3 paper) | 8/8 PASS |
+| Graceful degradation (missing paper / empty user) | 3/3 PASS |
+| Context precision (query → relevant memories) | **100%** (3/3) |
+| Token budget guard (300 token cap) | **215 tokens** |
+| TrackRouter accuracy (query → correct track) | **100%** (5/5) |
+
+</details>
+
+<details>
+<summary><b>Injection Robustness</b> — offline pattern detection</summary>
+
+| Metric | Target | Result |
+|--------|--------|--------|
+| Pollution rate (missed malicious) | ≤ 2% | **0.0%** (6/6 caught) |
+| False positive rate (benign flagged) | — | **0.0%** (0/6 flagged) |
+
+Covers: instruction override, tag escape, special token injection, role hijack, Unicode bypass, privilege escalation.
+
+</details>
+
+```bash
+# Run full MemoryBench suite (~6s, fully offline, no API keys needed)
+PYTHONPATH=src pytest -q evals/memory/test_retrieval_bench.py \
+  evals/memory/test_scope_isolation.py \
+  evals/memory/test_context_extraction.py \
+  evals/memory/test_injection_robustness.py -s
+```
+
 ## Roadmap
 
 > **[Roadmap #232](https://github.com/jerry609/PaperBot/issues/232)** — Living roadmap organized by functional area, with checkbox tracking and Epic links.
