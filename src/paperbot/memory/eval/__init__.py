@@ -10,5 +10,15 @@ Provides metrics collection and evaluation for:
 """
 
 from paperbot.memory.eval.collector import MemoryMetricCollector
+from paperbot.memory.eval.injection_guard import (
+    InjectionDetectionResult,
+    detect_injection_patterns,
+    normalize_injection_text,
+)
 
-__all__ = ["MemoryMetricCollector"]
+__all__ = [
+    "InjectionDetectionResult",
+    "MemoryMetricCollector",
+    "detect_injection_patterns",
+    "normalize_injection_text",
+]
