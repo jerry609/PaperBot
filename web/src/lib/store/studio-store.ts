@@ -37,6 +37,45 @@ export interface Task {
     paperId?: string  // Link task to a paper
 }
 
+export type AgentTaskStatus = 'planning' | 'in_progress' | 'ai_review' | 'human_review' | 'done'
+
+export interface AgentTaskLog {
+    id: string
+    timestamp: string
+    event: string
+    phase: string
+    level: "info" | "warning" | "error" | "success"
+    message: string
+    details?: Record<string, unknown>
+}
+
+export interface HumanReviewEntry {
+    id: string
+    decision: "approve" | "request_changes"
+    notes: string
+    timestamp: string
+}
+
+export interface AgentTask {
+    id: string
+    title: string
+    description: string
+    status: AgentTaskStatus
+    assignee: string
+    progress: number
+    tags: string[]
+    createdAt: string
+    updatedAt: string
+    subtasks: { id: string; title: string; done: boolean }[]
+    codexOutput?: string
+    generatedFiles?: string[]
+    reviewFeedback?: string
+    lastError?: string
+    executionLog?: AgentTaskLog[]
+    humanReviews?: HumanReviewEntry[]
+    paperId?: string
+}
+
 export type GenCodeResult = {
     success?: boolean
     outputDir?: string
@@ -134,6 +173,15 @@ interface StudioState {
     generationProgress: StageProgressEvent[]
     liveObservations: StageObservationsEvent[]
 
+    // Agent Board state
+    agentTasks: AgentTask[]
+    boardSessionId: string | null
+    setBoardSessionId: (id: string | null) => void
+    addAgentTask: (task: Omit<AgentTask, 'createdAt' | 'updatedAt'> & { id?: string }) => string
+    updateAgentTask: (taskId: string, updates: Partial<AgentTask>) => void
+    moveAgentTask: (taskId: string, status: AgentTask['status']) => void
+    clearAgentTasks: () => void
+
     // Paper actions
     addPaper: (paper: Omit<StudioPaper, 'id' | 'createdAt' | 'updatedAt' | 'taskIds' | 'status'>) => string
     updatePaper: (paperId: string, updates: Partial<Omit<StudioPaper, 'id' | 'createdAt'>>) => void
@@ -183,6 +231,18 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     contextPackError: null,
     generationProgress: [],
     liveObservations: [],
+
+    // Agent Board state
+    agentTasks: [],
+    boardSessionId: null,
+
+    setBoardSessionId: (id) => {
+        set({ boardSessionId: id })
+    },
+
+    clearAgentTasks: () => {
+        set({ agentTasks: [], boardSessionId: null })
+    },
 
     // Paper actions
     addPaper: (paper) => {
@@ -343,6 +403,45 @@ export const useStudioStore = create<StudioState>((set, get) => ({
             }
         }
         return id
+    },
+
+    addAgentTask: (task) => {
+        const id = task.id?.trim() || `agent-task-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
+        const now = new Date().toISOString()
+        set(state => ({
+            agentTasks: [
+                ...state.agentTasks,
+                {
+                    ...task,
+                    id,
+                    createdAt: now,
+                    updatedAt: now,
+                    executionLog: task.executionLog || [],
+                    humanReviews: task.humanReviews || [],
+                },
+            ],
+        }))
+        return id
+    },
+
+    updateAgentTask: (taskId, updates) => {
+        set(state => ({
+            agentTasks: state.agentTasks.map(task =>
+                task.id === taskId
+                    ? { ...task, ...updates, updatedAt: new Date().toISOString() }
+                    : task
+            ),
+        }))
+    },
+
+    moveAgentTask: (taskId, status) => {
+        set(state => ({
+            agentTasks: state.agentTasks.map(task =>
+                task.id === taskId
+                    ? { ...task, status, updatedAt: new Date().toISOString() }
+                    : task
+            ),
+        }))
     },
 
     updateTaskStatus: (taskId, status) => {

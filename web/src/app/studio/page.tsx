@@ -1,11 +1,12 @@
 "use client"
 
-import { useEffect, Suspense, useRef } from "react"
+import { useEffect, Suspense, useRef, useState } from "react"
 import { useSearchParams, useRouter } from "next/navigation"
-import { ArrowLeft, PanelsTopLeft, Loader2 } from "lucide-react"
+import { ArrowLeft, PanelsTopLeft, Loader2, ExternalLink } from "lucide-react"
 import { PaperGallery } from "@/components/studio/PaperGallery"
-import { ReproductionLog } from "@/components/studio/ReproductionLog"
+import { ReproductionLog, type ReproductionViewMode } from "@/components/studio/ReproductionLog"
 import { FilesPanel } from "@/components/studio/FilesPanel"
+import { ChatHistoryPanel } from "@/components/studio/ChatHistoryPanel"
 import { MCPProvider } from "@/lib/mcp"
 import { useStudioStore, type StudioPaperStatus } from "@/lib/store/studio-store"
 import { useContextPackGeneration } from "@/hooks/useContextPackGeneration"
@@ -51,6 +52,7 @@ function StudioContent() {
         loadPapers,
         papers,
         selectedPaperId,
+        lastGenCodeResult,
         setContextPack,
         setContextPackLoading,
         setContextPackError,
@@ -60,6 +62,7 @@ function StudioContent() {
     const searchParams = useSearchParams()
     const router = useRouter()
     const hasProcessedParams = useRef(false)
+    const [viewMode, setViewMode] = useState<ReproductionViewMode>("log")
 
     // Load papers from localStorage on mount
     useEffect(() => {
@@ -169,6 +172,7 @@ function StudioContent() {
     const paperStatus = selectedPaper?.status || "draft"
     const config = statusConfig[paperStatus]
     const isLoading = paperStatus === "generating" || paperStatus === "running"
+    const projectDir = selectedPaper?.outputDir || lastGenCodeResult?.outputDir || null
 
     return (
         <div className="flex h-screen min-h-0 flex-col">
@@ -194,23 +198,47 @@ function StudioContent() {
                     {isLoading && <Loader2 className="mr-1 h-2.5 w-2.5 animate-spin" />}
                     {config.label}
                 </span>
+                <div className="flex-1" />
+                <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 text-xs gap-1.5 shrink-0"
+                    onClick={() => {
+                        if (projectDir) {
+                            window.open(`vscode://file${projectDir}`, "_blank")
+                        }
+                    }}
+                    disabled={!projectDir}
+                    title={projectDir ? `Open ${projectDir} in VS Code` : "Set up a workspace first"}
+                >
+                    <ExternalLink className="h-3.5 w-3.5" />
+                    Open in VS Code
+                </Button>
             </div>
 
-            {/* Desktop: 2-panel workspace (FilesPanel left, ReproductionLog right) */}
+            {/* Desktop: 2-panel workspace (ChatHistory left, ReproductionLog right) */}
             <div className="hidden md:flex flex-1 min-h-0">
-                <ResizablePanelGroup orientation="horizontal" className="flex-1">
-                    {/* Left: Files Panel */}
-                    <ResizablePanel defaultSize={18} minSize={12}>
-                        <FilesPanel />
-                    </ResizablePanel>
+                {viewMode === "agent_board" ? (
+                    <ReproductionLog
+                        viewMode={viewMode}
+                        onViewModeChange={setViewMode}
+                    />
+                ) : (
+                    <ResizablePanelGroup orientation="horizontal" className="flex-1">
+                        <ResizablePanel defaultSize={20} minSize={14}>
+                            <ChatHistoryPanel />
+                        </ResizablePanel>
 
-                    <ResizableHandle withHandle />
+                        <ResizableHandle withHandle />
 
-                    {/* Right: Reproduction Log */}
-                    <ResizablePanel defaultSize={82} minSize={40}>
-                        <ReproductionLog />
-                    </ResizablePanel>
-                </ResizablePanelGroup>
+                        <ResizablePanel defaultSize={80} minSize={40}>
+                            <ReproductionLog
+                                viewMode={viewMode}
+                                onViewModeChange={setViewMode}
+                            />
+                        </ResizablePanel>
+                    </ResizablePanelGroup>
+                )}
             </div>
 
             {/* Mobile: 2-tab workspace */}
@@ -225,7 +253,7 @@ function StudioContent() {
                         </TabsTrigger>
                     </TabsList>
                     <TabsContent value="log" className="flex-1 min-h-0 m-0">
-                        <ReproductionLog />
+                        <ReproductionLog viewMode={viewMode} onViewModeChange={setViewMode} />
                     </TabsContent>
                     <TabsContent value="files" className="flex-1 min-h-0 m-0">
                         <FilesPanel />
