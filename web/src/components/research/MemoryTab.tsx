@@ -4,6 +4,7 @@ import { useEffect, useState } from "react"
 import { Loader2, RefreshCw } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { getErrorMessage } from "@/lib/fetch"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 
@@ -50,7 +51,7 @@ export function MemoryTab({ userId, trackId }: MemoryTabProps) {
       const payload = (await res.json()) as MemoryResponse
       setItems(payload.items || [])
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      setError(getErrorMessage(e))
       setItems([])
     } finally {
       setLoading(false)
