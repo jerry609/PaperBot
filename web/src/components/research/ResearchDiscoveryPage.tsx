@@ -5,8 +5,7 @@ import { useEffect, useMemo, useState } from "react"
 import { useSearchParams } from "next/navigation"
 
 import { ArrowLeft, Compass } from "lucide-react"
-import { mergeTracksStable } from "@/lib/utils"
-import { fetchJson } from "@/lib/fetch"
+import { fetchJson, getErrorMessage } from "@/lib/fetch"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -15,8 +14,6 @@ import DiscoveryGraphWorkspace from "./DiscoveryGraphWorkspace"
 import type { Track } from "./TrackSelector"
 
 type SeedType = "doi" | "arxiv" | "openalex" | "semantic_scholar" | "author"
-
-// Note: fetchJson is imported from @/lib/fetch
 export default function ResearchDiscoveryPage() {
   const searchParams = useSearchParams()
   const [userId] = useState("default")
@@ -48,7 +45,7 @@ export default function ResearchDiscoveryPage() {
   )
 
   useEffect(() => {
-    refreshTracks().catch((err) => setError(err instanceof Error ? err.message : String(err)))
+    refreshTracks().catch((err) => setError(getErrorMessage(err)))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -64,9 +61,8 @@ export default function ResearchDiscoveryPage() {
     const data = await fetchJson<{ tracks: Track[] }>(
       `/api/research/tracks?user_id=${encodeURIComponent(userId)}`
     )
-    const tracksFromApi = data.tracks || []
-    setTracks((prev) => mergeTracksStable(prev, tracksFromApi))
-    const active = tracksFromApi.find((track) => track.is_active)
+    setTracks(data.tracks || [])
+    const active = data.tracks.find((track) => track.is_active)
     setActiveTrackId(active?.id ?? null)
   }
 
@@ -84,7 +80,7 @@ export default function ResearchDiscoveryPage() {
       )
       await refreshTracks()
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      setError(getErrorMessage(err))
     } finally {
       setLoading(false)
     }

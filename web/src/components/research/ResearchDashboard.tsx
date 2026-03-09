@@ -2,8 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react"
 
-import { fetchJson } from "@/lib/fetch"
-import { mergeTracksStable } from "@/lib/utils"
+import { fetchJson, getErrorMessage } from "@/lib/fetch"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -91,8 +90,6 @@ type ConfirmAction =
   | { type: "bulk_moderate"; status: "approved" | "rejected"; itemIds: number[] }
   | { type: "bulk_move"; itemIds: number[]; targetTrackId: number }
   | { type: "clear_track_memory"; trackId: number }
-
-// Using shared fetch helpers from @/lib/fetch; remove local duplicates
 function clampNumber(value: number, min: number, max: number, fallback: number) {
   if (!Number.isFinite(value)) return fallback
   return Math.min(max, Math.max(min, value))
@@ -187,9 +184,8 @@ export default function ResearchDashboard() {
 
   async function refreshTracks(): Promise<number | null> {
     const data = await fetchJson<{ tracks: Track[] }>(`/api/research/tracks?user_id=${encodeURIComponent(userId)}`)
-    const tracksFromApi = data.tracks || []
-    setTracks((prev) => mergeTracksStable(prev, tracksFromApi))
-    const active = tracksFromApi.find((t) => t.is_active)
+    setTracks(data.tracks || [])
+    const active = data.tracks.find((t) => t.is_active)
     const activeId = active?.id ?? null
     setActiveTrackId(activeId)
     setMoveTargetTrackId("")
@@ -214,7 +210,7 @@ export default function ResearchDashboard() {
 
   useEffect(() => {
     setError(null)
-    refreshTracks().catch((e) => setError(e instanceof Error ? e.message : String(e)))
+    refreshTracks().catch((e) => setError(getErrorMessage(e)))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -267,7 +263,7 @@ export default function ResearchDashboard() {
         await refreshTracks()
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      setError(getErrorMessage(e))
     } finally {
       setLoading(false)
     }
@@ -292,7 +288,7 @@ export default function ResearchDashboard() {
       setSuggestText("")
       await refreshInbox(activeTrackId)
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      setError(getErrorMessage(e))
     } finally {
       setLoading(false)
     }
@@ -315,7 +311,7 @@ export default function ResearchDashboard() {
       })
       await refreshInbox(activeTrackId)
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      setError(getErrorMessage(e))
     } finally {
       setLoading(false)
     }
@@ -339,7 +335,7 @@ export default function ResearchDashboard() {
       })
       await refreshInbox(activeTrackId)
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      setError(getErrorMessage(e))
     } finally {
       setLoading(false)
     }
@@ -378,7 +374,7 @@ export default function ResearchDashboard() {
       const activeId = await refreshTracks()
       await refreshInbox(activeId)
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      setError(getErrorMessage(e))
     } finally {
       setLoading(false)
     }
@@ -416,7 +412,7 @@ export default function ResearchDashboard() {
       })
       await buildContext(false)
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      setError(getErrorMessage(e))
     } finally {
       setLoading(false)
     }
@@ -432,7 +428,7 @@ export default function ResearchDashboard() {
       )
       await refreshInbox(trackId)
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      setError(getErrorMessage(e))
     } finally {
       setLoading(false)
     }
@@ -931,7 +927,7 @@ export default function ResearchDashboard() {
                       />
                       <Button
                         variant="outline"
-                        onClick={() => refreshEval().catch((e) => setError(e instanceof Error ? e.message : String(e)))}
+                        onClick={() => refreshEval().catch((e) => setError(getErrorMessage(e)))}
                         disabled={loading}
                       >
                         Refresh
@@ -947,7 +943,7 @@ export default function ResearchDashboard() {
                   </div>
 
                   {!evalSummary ? (
-                    <Button variant="secondary" onClick={() => refreshEval().catch((e) => setError(e instanceof Error ? e.message : String(e)))} disabled={loading}>
+                    <Button variant="secondary" onClick={() => refreshEval().catch((e) => setError(getErrorMessage(e)))} disabled={loading}>
                       Load Summary
                     </Button>
                   ) : (

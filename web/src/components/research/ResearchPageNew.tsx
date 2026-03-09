@@ -4,8 +4,9 @@ import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useSearchParams } from "next/navigation"
 
+<<<<<<< HEAD
 import { cn, mergeTracksStable } from "@/lib/utils"
-import { fetchJson } from "@/lib/fetch"
+import { fetchJson, getErrorMessage } from "@/lib/fetch"
 import { showDiscoveryLink } from "@/config/features"
 import { ArrowRight, BookOpen } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
@@ -47,9 +48,6 @@ type ContextPack = {
   paper_recommendations?: Paper[]
   paper_recommendation_reasons?: Record<string, string[]>
 }
-
-// Removed local UpstreamErrorBody/toFriendlyErrorMessage/fetchJson duplicates — using @/lib/fetch
-
 function getGreeting(): string {
   const hour = new Date().getHours()
   if (hour < 12) return "Good morning"
@@ -110,7 +108,7 @@ export default function ResearchPageNew() {
 
   // Load tracks on mount
   useEffect(() => {
-    refreshTracks().catch((e) => setError(e instanceof Error ? e.message : String(e)))
+    refreshTracks().catch((e) => setError(getErrorMessage(e)))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -153,7 +151,7 @@ export default function ResearchPageNew() {
       )
       await refreshTracks()
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      setError(getErrorMessage(e))
     } finally {
       setLoading(false)
     }
@@ -203,7 +201,7 @@ export default function ResearchPageNew() {
 
       setContextPack(data.context_pack)
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      setError(getErrorMessage(e))
     } finally {
       setIsSearching(false)
     }
@@ -274,7 +272,7 @@ export default function ResearchPageNew() {
       await refreshTracks()
       return true
     } catch (e) {
-      const message = e instanceof Error ? e.message : String(e)
+      const message = getErrorMessage(e)
       if (message.startsWith("409")) {
         setCreateError(`Track "${name}" already exists.`)
       } else {
@@ -320,7 +318,7 @@ export default function ResearchPageNew() {
       await refreshTracks()
       return true
     } catch (e) {
-      const message = e instanceof Error ? e.message : String(e)
+      const message = getErrorMessage(e)
       if (message.startsWith("409")) {
         setEditError(`Track "${name}" already exists.`)
       } else {
@@ -354,7 +352,7 @@ export default function ResearchPageNew() {
       setConfirmClearOpen(false)
       setTrackToClear(null)
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      setError(getErrorMessage(e))
     } finally {
       setLoading(false)
     }
