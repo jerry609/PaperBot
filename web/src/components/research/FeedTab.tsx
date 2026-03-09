@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react"
 import { Loader2, RefreshCw } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { getErrorMessage } from "@/lib/fetch"
 import { Card, CardContent } from "@/components/ui/card"
 
 import { PaperCard, type Paper } from "./PaperCard"
@@ -81,7 +82,7 @@ export function FeedTab({ userId, trackId, onLike, onSave, onDislike }: FeedTabP
       const payload = (await res.json()) as FeedResponse
       setItems(payload.items || [])
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      setError(getErrorMessage(e))
       setItems([])
     } finally {
       setLoading(false)

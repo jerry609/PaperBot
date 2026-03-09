@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Textarea } from "@/components/ui/textarea"
-import { GenCodeResult, useStudioStore, AgentAction } from "@/lib/store/studio-store"
+import { useStudioStore, AgentAction } from "@/lib/store/studio-store"
 import { useProjectContext } from "@/lib/store/project-context"
 import { readSSE } from "@/lib/sse"
 import { CodeBlock } from "@/components/ai-elements"
@@ -12,6 +12,7 @@ import { DiffModal } from "./DiffViewer"
 import { WorkspaceSetupDialog } from "./WorkspaceSetupDialog"
 import { ContextPackPanel } from "./ContextPackPanel"
 import { GenerationProgressPanel } from "./GenerationProgressPanel"
+import { AgentBoard } from "./AgentBoard"
 import { useContextPackGeneration } from "@/hooks/useContextPackGeneration"
 import { cn } from "@/lib/utils"
 import {
@@ -34,6 +35,7 @@ import {
     Package,
     MessageSquare,
     Play,
+    LayoutDashboard,
 } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import Editor from "@monaco-editor/react"
@@ -42,6 +44,12 @@ import type { ContextPackSession } from "@/lib/types/p2c"
 
 type StepStatus = "idle" | "running" | "success" | "error"
 type Mode = "Code" | "Plan" | "Ask"
+export type ReproductionViewMode = "log" | "generating" | "context_pack" | "agent_board"
+
+interface ReproductionLogProps {
+    viewMode: ReproductionViewMode
+    onViewModeChange: (mode: ReproductionViewMode) => void
+}
 
 const actionIcons: Record<string, React.ElementType> = {
     thinking: Loader2,
@@ -161,7 +169,7 @@ function ActionItem({ action, onViewDiff, isLast }: ActionItemProps) {
     )
 }
 
-export function ReproductionLog() {
+export function ReproductionLog({ viewMode, onViewModeChange }: ReproductionLogProps) {
     const { theme } = useTheme()
     const {
         papers,
@@ -178,9 +186,7 @@ export function ReproductionLog() {
         addAction,
         appendToLastAction,
         updateTaskStatus,
-        setLastGenCodeResult,
         updatePaper,
-        selectPaper,
     } = useStudioStore()
 
     const { generate: generateContextPack, status: genStatus } = useContextPackGeneration()
@@ -201,14 +207,12 @@ export function ReproductionLog() {
     const [messageInput, setMessageInput] = useState("")
     const [showWorkspaceSetup, setShowWorkspaceSetup] = useState(false)
     const [pendingAction, setPendingAction] = useState<"chat" | null>(null)
-    const [viewMode, setViewMode] = useState<"log" | "generating" | "context_pack">("log")
-
     // Switch to "generating" view when generation starts
     useEffect(() => {
-        if (contextPackLoading) {
-            setViewMode("generating")
+        if (contextPackLoading && viewMode !== "generating") {
+            onViewModeChange("generating")
         }
-    }, [contextPackLoading])
+    }, [contextPackLoading, onViewModeChange, viewMode])
 
     // Do not auto-switch away from "generating"; keep it open until the user changes tabs.
 
@@ -278,7 +282,7 @@ export function ReproductionLog() {
     const handleSendMessageWithDir = async (message: string, targetDir?: string) => {
         setStatus("running")
         setLastError(null)
-        setViewMode("log")
+        onViewModeChange("log")
 
         const taskId = addTask(`Chat — ${message.slice(0, 30)}${message.length > 30 ? "…" : ""}`)
         addAction(taskId, { type: "thinking", content: `[${mode}] Sending to Claude...` })
@@ -394,7 +398,7 @@ export function ReproductionLog() {
     }
 
     const handleSessionCreated = (session: ContextPackSession) => {
-        setViewMode("log")
+        onViewModeChange("log")
         if (session.initial_prompt) {
             setMessageInput(session.initial_prompt)
         }
@@ -408,10 +412,11 @@ export function ReproductionLog() {
                     { key: "generating" as const, label: "Progress", icon: Activity },
                     { key: "context_pack" as const, label: "Context Pack", icon: Package },
                     { key: "log" as const, label: "Chat", icon: MessageSquare },
+                    { key: "agent_board" as const, label: "Agent Board", icon: LayoutDashboard },
                 ]).map(({ key, label, icon: TabIcon }) => (
                     <button
                         key={key}
-                        onClick={() => setViewMode(key)}
+                        onClick={() => onViewModeChange(key)}
                         className={cn(
                             "flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium transition-colors relative",
                             viewMode === key
@@ -472,7 +477,11 @@ export function ReproductionLog() {
                     )
                 ) : viewMode === "context_pack" ? (
                     contextPack ? (
-                        <ContextPackPanel pack={contextPack} onSessionCreated={handleSessionCreated} />
+                        <ContextPackPanel
+                            pack={contextPack}
+                            onSessionCreated={handleSessionCreated}
+                            onDeployToBoard={() => onViewModeChange("agent_board")}
+                        />
                     ) : (
                         <div className="flex flex-col items-center justify-center text-muted-foreground py-20 space-y-4">
                             <Package className="h-8 w-8 opacity-30" />
@@ -480,6 +489,8 @@ export function ReproductionLog() {
                             <p className="text-xs">Please start in the &ldquo;Progress&rdquo; section.</p>
                         </div>
                     )
+                ) : viewMode === "agent_board" ? (
+                    <AgentBoard paperId={selectedPaperId} />
                 ) : activeFileData ? (
                     /* File Viewer */
                     <div className="h-full flex flex-col">

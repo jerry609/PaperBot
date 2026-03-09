@@ -5,6 +5,7 @@ import Link from "next/link"
 import { useSearchParams } from "next/navigation"
 
 import { cn } from "@/lib/utils"
+import { fetchJson, getErrorMessage } from "@/lib/fetch"
 import { ArrowRight, BookOpen, GitBranch, Search, Sparkles } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"

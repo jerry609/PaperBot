@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react"
 import { Copy, Download, FileText, Loader2, RefreshCw } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { getErrorMessage } from "@/lib/fetch"
 import { Card, CardContent } from "@/components/ui/card"
 import {
   Dialog,
@@ -145,7 +146,7 @@ export function SavedTab({ userId, trackId }: SavedTabProps) {
       const payload = (await res.json()) as SavedResponse
       setItems(payload.items || [])
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      setError(getErrorMessage(e))
       setItems([])
     } finally {
       setLoading(false)

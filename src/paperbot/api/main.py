@@ -6,6 +6,8 @@ Supports Server-Sent Events (SSE) for streaming responses
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import find_dotenv, load_dotenv
+from pathlib import Path
+import os
 
 from .routes import (
     track,
@@ -27,13 +29,21 @@ from .routes import (
     repro_context,
     feed,
     push_commands,
+    agent_board,
 )
 from paperbot.infrastructure.event_log.logging_event_log import LoggingEventLog
 from paperbot.infrastructure.event_log.composite_event_log import CompositeEventLog
 from paperbot.infrastructure.event_log.sqlalchemy_event_log import SqlAlchemyEventLog
 
-# Load local .env automatically so model/router keys are available in API mode.
-load_dotenv(find_dotenv(usecwd=True), override=False)
+# Load repo .env deterministically so API keys match local config.
+# override=True is intentional to avoid picking up a different .env from another cwd.
+_repo_root = Path(__file__).resolve().parents[3]
+_env_path = _repo_root / ".env"
+_override = os.getenv("PAPERBOT_DOTENV_OVERRIDE", "true").lower() in {"1", "true", "yes"}
+if _env_path.exists():
+    load_dotenv(_env_path, override=_override)
+else:
+    load_dotenv(find_dotenv(usecwd=True), override=False)
 
 app = FastAPI(
     title="PaperBot API",
@@ -77,6 +87,7 @@ app.include_router(studio_chat.router, prefix="/api", tags=["Studio Chat"])
 app.include_router(repro_context.router, prefix="/api/research/repro/context", tags=["P2C"])
 app.include_router(feed.router, prefix="/api", tags=["Feed"])
 app.include_router(push_commands.router, prefix="/api", tags=["Push"])
+app.include_router(agent_board.router, tags=["Agent Board"])
 
 
 @app.on_event("startup")
