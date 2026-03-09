@@ -47,6 +47,52 @@ type ContextPack = {
   paper_recommendation_reasons?: Record<string, string[]>
 }
 
+type UpstreamErrorBody = {
+  detail?: string
+  error?: string
+}
+
+function toFriendlyErrorMessage(status: number, rawText: string): string | null {
+  if (!rawText) return null
+
+  let parsed: UpstreamErrorBody | null = null
+  try {
+    parsed = JSON.parse(rawText) as UpstreamErrorBody
+  } catch {
+    parsed = null
+  }
+
+  const detail = parsed && typeof parsed.detail === "string" ? parsed.detail : undefined
+
+  if (detail && (detail.includes("Upstream API unreachable") || detail.includes("Upstream API timed out"))) {
+    if (detail.includes("timed out")) {
+      return "Unable to connect to service (request timed out). Please ensure the backend is running. Please try again."
+    }
+    return "Unable to connect to service. Please ensure the backend is running."
+  }
+
+  // Fallback: surface backend-provided detail when available
+  if (detail) return detail
+
+  return null
+}
+
+async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(url, init)
+  if (!res.ok) {
+    const text = await res.text().catch(() => "")
+    const friendly = toFriendlyErrorMessage(res.status, text)
+    if (friendly) {
+      throw new Error(friendly)
+    }
+    const statusLabel = `${res.status} ${res.statusText}`.trim()
+    const base = statusLabel || "Request failed"
+    const message = text ? `${base} ${text}`.trim() : base
+    throw new Error(message)
+  }
+  return res.json() as Promise<T>
+}
+
 function getGreeting(): string {
   const hour = new Date().getHours()
   if (hour < 12) return "Good morning"
@@ -107,7 +153,7 @@ export default function ResearchPageNew() {
 
   // Load tracks on mount
   useEffect(() => {
-    refreshTracks().catch((e) => setError(getErrorMessage(e)))
+    refreshTracks().catch((e) => setError(e instanceof Error ? e.message : String(e)))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -149,7 +195,7 @@ export default function ResearchPageNew() {
       )
       await refreshTracks()
     } catch (e) {
-      setError(getErrorMessage(e))
+      setError(e instanceof Error ? e.message : String(e))
     } finally {
       setLoading(false)
     }
@@ -199,7 +245,7 @@ export default function ResearchPageNew() {
 
       setContextPack(data.context_pack)
     } catch (e) {
-      setError(getErrorMessage(e))
+      setError(e instanceof Error ? e.message : String(e))
     } finally {
       setIsSearching(false)
     }
@@ -270,7 +316,7 @@ export default function ResearchPageNew() {
       await refreshTracks()
       return true
     } catch (e) {
-      const message = getErrorMessage(e)
+      const message = e instanceof Error ? e.message : String(e)
       if (message.startsWith("409")) {
         setCreateError(`Track "${name}" already exists.`)
       } else {
@@ -316,7 +362,7 @@ export default function ResearchPageNew() {
       await refreshTracks()
       return true
     } catch (e) {
-      const message = getErrorMessage(e)
+      const message = e instanceof Error ? e.message : String(e)
       if (message.startsWith("409")) {
         setEditError(`Track "${name}" already exists.`)
       } else {
@@ -350,7 +396,7 @@ export default function ResearchPageNew() {
       setConfirmClearOpen(false)
       setTrackToClear(null)
     } catch (e) {
-      setError(getErrorMessage(e))
+      setError(e instanceof Error ? e.message : String(e))
     } finally {
       setLoading(false)
     }
