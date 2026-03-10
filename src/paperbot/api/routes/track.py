@@ -5,9 +5,8 @@ Scholar Tracking API Route
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Query, Request
-from fastapi.responses import StreamingResponse
 
-from ..streaming import StreamEvent, wrap_generator
+from ..streaming import StreamEvent, sse_response
 
 router = APIRouter()
 
@@ -208,23 +207,16 @@ async def track_scholar(
     if not scholar_id and not scholar_name:
         return {"error": "Either scholar_id or scholar_name is required"}
 
-    return StreamingResponse(
-        wrap_generator(
-            track_scholar_stream(
-                http_request,
-                scholar_id,
-                scholar_name,
-                force,
-                dry_run=dry_run,
-                max_new_papers=max_new_papers,
-                persist_report=persist_report,
-                offline=offline,
-            ),
-            workflow="track",
+    return sse_response(
+        track_scholar_stream(
+            http_request,
+            scholar_id,
+            scholar_name,
+            force,
+            dry_run=dry_run,
+            max_new_papers=max_new_papers,
+            persist_report=persist_report,
+            offline=offline,
         ),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-        },
+        workflow="track",
     )

@@ -10,10 +10,9 @@ from urllib.parse import urlparse
 
 import requests
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from paperbot.api.streaming import StreamEvent, wrap_generator
+from paperbot.api.streaming import StreamEvent, sse_response
 from paperbot.application.services.daily_push_service import DailyPushService
 from paperbot.application.services.llm_service import get_llm_service
 from paperbot.application.services.enrichment_pipeline import (
@@ -805,11 +804,7 @@ async def generate_daily_report(req: DailyPaperRequest):
             raise
 
     # SSE streaming path for long-running operations
-    return StreamingResponse(
-        wrap_generator(_dailypaper_stream(req), workflow="paperscool_daily"),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
-    )
+    return sse_response(_dailypaper_stream(req), workflow="paperscool_daily")
 
 
 @router.get("/research/paperscool/sessions/{session_id}", response_model=PipelineSessionResponse)
@@ -1479,11 +1474,4 @@ async def analyze_daily_report(req: PapersCoolAnalyzeRequest):
     if not isinstance(req.report, dict) or not req.report.get("queries"):
         raise HTTPException(status_code=400, detail="report with queries is required")
 
-    return StreamingResponse(
-        wrap_generator(_paperscool_analyze_stream(req), workflow="paperscool_analyze"),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-        },
-    )
+    return sse_response(_paperscool_analyze_stream(req), workflow="paperscool_analyze")

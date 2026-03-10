@@ -17,10 +17,9 @@ from dataclasses import asdict as _asdict
 from typing import Literal, Optional
 
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from paperbot.api.streaming import StreamEvent, wrap_generator
+from paperbot.api.streaming import StreamEvent, sse_response
 from paperbot.application.services.p2c.models import (
     GenerateContextRequest as P2CRequest,
     RawPaperData,
@@ -331,14 +330,7 @@ async def generate_context_pack(request: GenerateContextPackRequest):
         f"[M2] generate_request trace_id={trace_id} paper_id={request.paper_id} user_id={request.user_id}",
         file=LogFiles.API,
     )
-    return StreamingResponse(
-        wrap_generator(
-            _generate_stream(request),
-            workflow="p2c_generate",
-        ),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
-    )
+    return sse_response(_generate_stream(request), workflow="p2c_generate")
 
 
 # ------------------------------------------------------------------ #

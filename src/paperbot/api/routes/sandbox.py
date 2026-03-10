@@ -13,10 +13,9 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request
-from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from ..streaming import StreamEvent, wrap_generator
+from ..streaming import StreamEvent, sse_response
 
 router = APIRouter()
 
@@ -181,13 +180,10 @@ async def stream_logs(run_id: str, http_request: Request):
 
     Returns Server-Sent Events with log entries.
     """
-    return StreamingResponse(
-        wrap_generator(_log_stream_generator(run_id), workflow="sandbox_logs"),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-        },
+    return sse_response(
+        _log_stream_generator(run_id),
+        workflow="sandbox_logs",
+        timeout_seconds=None,
     )
 
 
@@ -235,13 +231,10 @@ async def stream_metrics(run_id: str, http_request: Request):
 
     Returns Server-Sent Events with CPU/memory metrics.
     """
-    return StreamingResponse(
-        wrap_generator(_metrics_stream_generator(run_id), workflow="sandbox_metrics"),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-        },
+    return sse_response(
+        _metrics_stream_generator(run_id),
+        workflow="sandbox_metrics",
+        timeout_seconds=None,
     )
 
 
