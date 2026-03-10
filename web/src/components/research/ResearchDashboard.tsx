@@ -93,6 +93,17 @@ type ConfirmAction =
 
 // Using shared fetch helpers from @/lib/fetch; remove local duplicates
 
+function mergeTracksStable(prev: Track[], next: Track[]): Track[] {
+  if (!prev.length) return next.slice()
+  const indexMap = new Map(prev.map((track, index) => [track.id, index]))
+  return [...next].sort((a, b) => {
+    const ia = indexMap.has(a.id) ? indexMap.get(a.id)! : Number.MAX_SAFE_INTEGER
+    const ib = indexMap.has(b.id) ? indexMap.get(b.id)! : Number.MAX_SAFE_INTEGER
+    if (ia !== ib) return ia - ib
+    return a.id - b.id
+  })
+}
+
 function clampNumber(value: number, min: number, max: number, fallback: number) {
   if (!Number.isFinite(value)) return fallback
   return Math.min(max, Math.max(min, value))
@@ -187,8 +198,9 @@ export default function ResearchDashboard() {
 
   async function refreshTracks(): Promise<number | null> {
     const data = await fetchJson<{ tracks: Track[] }>(`/api/research/tracks?user_id=${encodeURIComponent(userId)}`)
-    setTracks(data.tracks || [])
-    const active = data.tracks.find((t) => t.is_active)
+    const tracksFromApi = data.tracks || []
+    setTracks((prev) => mergeTracksStable(prev, tracksFromApi))
+    const active = tracksFromApi.find((t) => t.is_active)
     const activeId = active?.id ?? null
     setActiveTrackId(activeId)
     setMoveTargetTrackId("")

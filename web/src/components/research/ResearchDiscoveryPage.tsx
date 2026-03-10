@@ -17,6 +17,17 @@ type SeedType = "doi" | "arxiv" | "openalex" | "semantic_scholar" | "author"
 
 // Note: fetchJson and getErrorMessage are imported from @/lib/fetch
 
+function mergeTracksStable(prev: Track[], next: Track[]): Track[] {
+  if (!prev.length) return next.slice()
+  const indexMap = new Map(prev.map((track, index) => [track.id, index]))
+  return [...next].sort((a, b) => {
+    const ia = indexMap.has(a.id) ? indexMap.get(a.id)! : Number.MAX_SAFE_INTEGER
+    const ib = indexMap.has(b.id) ? indexMap.get(b.id)! : Number.MAX_SAFE_INTEGER
+    if (ia !== ib) return ia - ib
+    return a.id - b.id
+  })
+}
+
 export default function ResearchDiscoveryPage() {
   const searchParams = useSearchParams()
   const [userId] = useState("default")
@@ -64,8 +75,9 @@ export default function ResearchDiscoveryPage() {
     const data = await fetchJson<{ tracks: Track[] }>(
       `/api/research/tracks?user_id=${encodeURIComponent(userId)}`
     )
-    setTracks(data.tracks || [])
-    const active = data.tracks.find((track) => track.is_active)
+    const tracksFromApi = data.tracks || []
+    setTracks((prev) => mergeTracksStable(prev, tracksFromApi))
+    const active = tracksFromApi.find((track) => track.is_active)
     setActiveTrackId(active?.id ?? null)
   }
 
