@@ -156,9 +156,7 @@ class SqlAlchemyResearchStore:
             stmt = select(ResearchTrackModel).where(ResearchTrackModel.user_id == user_id)
             if not include_archived:
                 stmt = stmt.where(ResearchTrackModel.archived_at.is_(None))
-            stmt = stmt.order_by(
-                desc(ResearchTrackModel.is_active), desc(ResearchTrackModel.updated_at)
-            ).limit(limit)
+            stmt = stmt.order_by(ResearchTrackModel.id).limit(limit)
             tracks = session.execute(stmt).scalars().all()
             return [self._track_to_dict(t) for t in tracks]
 
