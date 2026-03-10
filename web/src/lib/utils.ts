@@ -18,3 +18,15 @@ export function safeHref(url?: string | null) {
     return null
   }
 }
+
+
+export function mergeTracksStable<T extends { id: number }>(prev: T[], next: T[]): T[] {
+  if (!prev.length) return next.slice()
+  const indexMap = new Map(prev.map((item, index) => [item.id, index]))
+  return [...next].sort((a, b) => {
+    const ia = indexMap.has(a.id) ? indexMap.get(a.id)! : Number.MAX_SAFE_INTEGER
+    const ib = indexMap.has(b.id) ? indexMap.get(b.id)! : Number.MAX_SAFE_INTEGER
+    if (ia !== ib) return ia - ib
+    return a.id - b.id
+  })
+}

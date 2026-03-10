@@ -4,9 +4,9 @@ import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useSearchParams } from "next/navigation"
 
-import { cn } from "@/lib/utils"
-import { fetchJson, getErrorMessage } from "@/lib/fetch"
-import { ArrowRight, BookOpen, GitBranch, Search, Sparkles } from "lucide-react"
+import { cn, mergeTracksStable } from "@/lib/utils"
+import { fetchJson } from "@/lib/fetch"
+import { ArrowRight, BookOpen } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import {
@@ -46,18 +46,6 @@ type ContextPack = {
   paper_recommendations?: Paper[]
   paper_recommendation_reasons?: Record<string, string[]>
 }
-
-function mergeTracksStable(prev: Track[], next: Track[]): Track[] {
-  if (!prev.length) return next.slice()
-  const indexMap = new Map(prev.map((track, index) => [track.id, index]))
-  return [...next].sort((a, b) => {
-    const ia = indexMap.has(a.id) ? indexMap.get(a.id)! : Number.MAX_SAFE_INTEGER
-    const ib = indexMap.has(b.id) ? indexMap.get(b.id)! : Number.MAX_SAFE_INTEGER
-    if (ia !== ib) return ia - ib
-    return a.id - b.id
-  })
-}
-
 
 // Removed local UpstreamErrorBody/toFriendlyErrorMessage/fetchJson duplicates — using @/lib/fetch
 
@@ -564,40 +552,6 @@ export default function ResearchPageNew() {
               disabled={loading}
             />
           </div>
-        )}
-
-        {!hasSearched && (
-          <Card className="mx-auto mb-8 max-w-3xl border-border/70 bg-card/80 backdrop-blur-sm">
-            <CardContent className="grid gap-3 p-4 sm:grid-cols-3 sm:p-5">
-              <div className="rounded-md border bg-background/70 p-3">
-                <p className="mb-2 flex items-center gap-2 text-sm font-medium">
-                  <Search className="h-4 w-4 text-primary" />
-                  Search
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  Start from a query with year window and source filters.
-                </p>
-              </div>
-              <div className="rounded-md border bg-background/70 p-3">
-                <p className="mb-2 flex items-center gap-2 text-sm font-medium">
-                  <Sparkles className="h-4 w-4 text-primary" />
-                  Rank
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  Capture like/save/dislike feedback to steer recommendations.
-                </p>
-              </div>
-              <div className="rounded-md border bg-background/70 p-3">
-                <p className="mb-2 flex items-center gap-2 text-sm font-medium">
-                  <GitBranch className="h-4 w-4 text-primary" />
-                  Discover
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  Expand with citation graph and timeline slices in one workspace.
-                </p>
-              </div>
-            </CardContent>
-          </Card>
         )}
 
         {/* Error Display */}

@@ -5,7 +5,8 @@ import { useEffect, useMemo, useState } from "react"
 import { useSearchParams } from "next/navigation"
 
 import { ArrowLeft, Compass } from "lucide-react"
-import { fetchJson, getErrorMessage } from "@/lib/fetch"
+import { mergeTracksStable } from "@/lib/utils"
+import { fetchJson } from "@/lib/fetch"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -15,19 +16,7 @@ import type { Track } from "./TrackSelector"
 
 type SeedType = "doi" | "arxiv" | "openalex" | "semantic_scholar" | "author"
 
-// Note: fetchJson and getErrorMessage are imported from @/lib/fetch
-
-function mergeTracksStable(prev: Track[], next: Track[]): Track[] {
-  if (!prev.length) return next.slice()
-  const indexMap = new Map(prev.map((track, index) => [track.id, index]))
-  return [...next].sort((a, b) => {
-    const ia = indexMap.has(a.id) ? indexMap.get(a.id)! : Number.MAX_SAFE_INTEGER
-    const ib = indexMap.has(b.id) ? indexMap.get(b.id)! : Number.MAX_SAFE_INTEGER
-    if (ia !== ib) return ia - ib
-    return a.id - b.id
-  })
-}
-
+// Note: fetchJson is imported from @/lib/fetch
 export default function ResearchDiscoveryPage() {
   const searchParams = useSearchParams()
   const [userId] = useState("default")

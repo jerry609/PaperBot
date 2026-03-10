@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react"
 
-import { fetchJson, getErrorMessage } from "@/lib/fetch"
+import { fetchJson } from "@/lib/fetch"
+import { mergeTracksStable } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -92,18 +93,6 @@ type ConfirmAction =
   | { type: "clear_track_memory"; trackId: number }
 
 // Using shared fetch helpers from @/lib/fetch; remove local duplicates
-
-function mergeTracksStable(prev: Track[], next: Track[]): Track[] {
-  if (!prev.length) return next.slice()
-  const indexMap = new Map(prev.map((track, index) => [track.id, index]))
-  return [...next].sort((a, b) => {
-    const ia = indexMap.has(a.id) ? indexMap.get(a.id)! : Number.MAX_SAFE_INTEGER
-    const ib = indexMap.has(b.id) ? indexMap.get(b.id)! : Number.MAX_SAFE_INTEGER
-    if (ia !== ib) return ia - ib
-    return a.id - b.id
-  })
-}
-
 function clampNumber(value: number, min: number, max: number, fallback: number) {
   if (!Number.isFinite(value)) return fallback
   return Math.min(max, Math.max(min, value))
