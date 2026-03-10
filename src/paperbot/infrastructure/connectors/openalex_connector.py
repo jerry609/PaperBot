@@ -88,12 +88,46 @@ class OpenAlexConnector:
         return rows if isinstance(rows, list) else []
 
     async def get_works_by_ids(self, ids: List[str], *, limit: int = 20) -> List[Dict[str, Any]]:
-        rows: List[Dict[str, Any]] = []
+        normalized_ids: List[str] = []
         for raw_id in ids[: max(1, int(limit))]:
-            work = await self.get_work(raw_id)
-            if work:
-                rows.append(work)
-        return rows
+            normalized = self._normalize_work_id(raw_id)
+            if normalized:
+                normalized_ids.append(normalized)
+        if not normalized_ids:
+            return []
+
+        results: List[Dict[str, Any]] = []
+        chunk_size = 50
+        for idx in range(0, len(normalized_ids), chunk_size):
+            batch = normalized_ids[idx : idx + chunk_size]
+            payload = await self._request.get_json(
+                f"{self.base_url}/works",
+                headers=self._headers,
+                params={
+                    "filter": f"openalex_id:{'|'.join(batch)}",
+                    "per-page": len(batch),
+                },
+            )
+            if not isinstance(payload, dict):
+                continue
+            rows = payload.get("results")
+            if not isinstance(rows, list):
+                continue
+
+            by_id: Dict[str, Dict[str, Any]] = {}
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                normalized = self._normalize_work_id(str(row.get("id") or ""))
+                if normalized:
+                    by_id[normalized] = row
+
+            for batch_id in batch:
+                row = by_id.get(batch_id)
+                if row:
+                    results.append(row)
+
+        return results
 
     async def _search_one(self, filter_expr: str) -> Optional[Dict[str, Any]]:
         payload = await self._request.get_json(

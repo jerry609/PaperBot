@@ -36,12 +36,16 @@ async def test_resolve_work_by_doi():
 
 
 @pytest.mark.asyncio
-async def test_related_and_references_load_by_ids():
+async def test_related_and_references_load_by_batched_ids():
     request_layer = _FakeRequestLayer(
         [
-            {"id": "https://openalex.org/W2", "title": "Related"},
-            {"id": "https://openalex.org/W3", "title": "Ref"},
-            {"id": "https://openalex.org/W3", "title": "Ref"},
+            {
+                "results": [
+                    {"id": "https://openalex.org/W2", "title": "Related"},
+                    {"id": "https://openalex.org/W3", "title": "Ref"},
+                ]
+            },
+            {"results": [{"id": "https://openalex.org/W3", "title": "Ref"}]},
         ]
     )
     connector = OpenAlexConnector(request_layer=request_layer)
@@ -57,8 +61,7 @@ async def test_related_and_references_load_by_ids():
 
     assert [row["title"] for row in related] == ["Related", "Ref"]
     assert [row["title"] for row in refs] == ["Ref"]
-    assert request_layer.calls[0]["url"].endswith("/works/W2")
-    assert request_layer.calls[1]["url"].endswith("/works/W3")
+    assert "openalex_id:W2|W3" in request_layer.calls[0]["params"]["filter"]
 
 
 @pytest.mark.asyncio
