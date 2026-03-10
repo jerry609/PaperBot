@@ -7,6 +7,8 @@ Provides shared S2 search functionality to avoid code duplication.
 from typing import Dict, List, Any, Optional
 import logging
 
+from paperbot.infrastructure.api_clients.semantic_scholar import SemanticScholarClient
+
 logger = logging.getLogger(__name__)
 
 
@@ -22,11 +24,20 @@ class SemanticScholarMixin:
     """
     
     S2_API_BASE = "https://api.semanticscholar.org/graph/v1"
-    
+
     def init_s2_client(self, config: Optional[Dict[str, Any]] = None):
         """Initialize S2 client with API key from config."""
         self._s2_api_key = config.get('semantic_scholar_api_key') if config else None
-        self._s2_session = None  # Lazy initialized
+        self._s2_client: Optional[SemanticScholarClient] = None
+
+    def _get_s2_client(self) -> SemanticScholarClient:
+        if self._s2_client is None:
+            request_interval = 0.3 if self._s2_api_key else 3.0
+            self._s2_client = SemanticScholarClient(
+                api_key=self._s2_api_key,
+                request_interval=request_interval,
+            )
+        return self._s2_client
     
     async def search_semantic_scholar(
         self,
@@ -45,36 +56,15 @@ class SemanticScholarMixin:
         Returns:
             List of paper dictionaries
         """
-        import aiohttp
-        
         if fields is None:
             fields = ["title", "abstract", "year", "citationCount", "authors"]
-        
-        papers = []
+
         try:
-            async with aiohttp.ClientSession() as session:
-                headers = {"x-api-key": self._s2_api_key} if self._s2_api_key else {}
-                params = {
-                    "query": query,
-                    "limit": limit,
-                    "fields": ",".join(fields)
-                }
-                
-                async with session.get(
-                    f"{self.S2_API_BASE}/paper/search",
-                    params=params,
-                    headers=headers
-                ) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        papers = data.get("data", [])
-                    else:
-                        logger.warning(f"S2 API returned status {resp.status}")
-                        
+            client = self._get_s2_client()
+            return await client.search_papers(query=query, limit=limit, fields=fields)
         except Exception as e:
             logger.warning(f"S2 search error: {e}")
-        
-        return papers
+            return []
     
     async def get_paper_details(self, paper_id: str) -> Optional[Dict[str, Any]]:
         """
@@ -86,28 +76,15 @@ class SemanticScholarMixin:
         Returns:
             Paper details dictionary or None if not found
         """
-        import aiohttp
-        
         try:
-            async with aiohttp.ClientSession() as session:
-                headers = {"x-api-key": self._s2_api_key} if self._s2_api_key else {}
-                params = {
-                    "fields": "title,abstract,year,citationCount,authors,references,citations"
-                }
-                
-                async with session.get(
-                    f"{self.S2_API_BASE}/paper/{paper_id}",
-                    params=params,
-                    headers=headers
-                ) as resp:
-                    if resp.status == 200:
-                        return await resp.json()
-                    else:
-                        logger.warning(f"S2 paper lookup failed: {resp.status}")
-                        
+            client = self._get_s2_client()
+            return await client.get_paper(
+                paper_id,
+                fields=["title", "abstract", "year", "citationCount", "authors", "references", "citations"],
+            )
         except Exception as e:
             logger.warning(f"S2 paper lookup error: {e}")
-        
+
         return None
     
     def format_papers_for_context(self, papers: List[Dict[str, Any]], max_papers: int = 5) -> str:
@@ -150,3 +127,8 @@ class SemanticScholarMixin:
             )
         
         return "\n".join(formatted)
+
+    async def close_s2_client(self) -> None:
+        if self._s2_client is not None:
+            await self._s2_client.close()
+            self._s2_client = None

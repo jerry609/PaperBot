@@ -10,7 +10,7 @@ from typing import List, Dict, Any, Optional
 from paperbot.agents.base import BaseAgent
 from paperbot.domain.paper import PaperMeta
 from paperbot.domain.scholar import Scholar
-from paperbot.infrastructure.services.api_client import APIClient
+from paperbot.infrastructure.api_clients.semantic_scholar import SemanticScholarClient
 
 logger = logging.getLogger(__name__)
 
@@ -69,13 +69,12 @@ class SemanticScholarAgent(BaseAgent):
         self.request_interval = api_config.get("request_interval", 1.0)
         
         # 初始化 API 客户端
-        self._client: Optional[APIClient] = None
-    
-    async def _get_client(self) -> APIClient:
+        self._client: Optional[SemanticScholarClient] = None
+
+    async def _get_client(self) -> SemanticScholarClient:
         """获取 API 客户端"""
         if self._client is None:
-            self._client = APIClient(
-                base_url=self.BASE_URL,
+            self._client = SemanticScholarClient(
                 api_key=self.api_key,
                 timeout=self.timeout,
                 request_interval=self.request_interval,
@@ -104,10 +103,7 @@ class SemanticScholarAgent(BaseAgent):
         client = await self._get_client()
         
         try:
-            endpoint = f"author/{author_id}"
-            params = {"fields": ",".join(self.AUTHOR_FIELDS)}
-            
-            data = await client.get(endpoint, params)
+            data = await client.get_author(author_id, fields=self.AUTHOR_FIELDS)
             
             if data:
                 logger.info(f"Fetched author info: {data.get('name', author_id)}")
@@ -137,14 +133,14 @@ class SemanticScholarAgent(BaseAgent):
         client = await self._get_client()
         
         try:
-            endpoint = f"author/{author_id}/papers"
-            params = {
-                "fields": ",".join(self.PAPER_FIELDS),
-                "limit": min(limit, 100),  # API 最大限制 100
-                "offset": offset,
-            }
-            
-            data = await client.get(endpoint, params)
+            data = await client.get(
+                f"author/{author_id}/papers",
+                {
+                    "fields": ",".join(self.PAPER_FIELDS),
+                    "limit": min(limit, 100),
+                    "offset": offset,
+                },
+            )
             
             if not data or "data" not in data:
                 logger.warning(f"No papers found for author {author_id}")
@@ -178,10 +174,7 @@ class SemanticScholarAgent(BaseAgent):
         client = await self._get_client()
         
         try:
-            endpoint = f"paper/{paper_id}"
-            params = {"fields": ",".join(self.PAPER_FIELDS)}
-            
-            data = await client.get(endpoint, params)
+            data = await client.get_paper(paper_id, fields=self.PAPER_FIELDS)
             
             if data:
                 paper = PaperMeta.from_semantic_scholar(data)
@@ -212,17 +205,16 @@ class SemanticScholarAgent(BaseAgent):
         client = await self._get_client()
         
         try:
-            endpoint = "paper/search"
             params = {
                 "query": query,
                 "fields": ",".join(self.PAPER_FIELDS),
                 "limit": min(limit, 100),
             }
-            
+
             if year_range:
                 params["year"] = f"{year_range[0]}-{year_range[1]}"
-            
-            data = await client.get(endpoint, params)
+
+            data = await client.get("paper/search", params)
             
             if not data or "data" not in data:
                 return []
