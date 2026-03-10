@@ -61,7 +61,7 @@ class HashEmbeddingProvider(EmbeddingProvider):
 
     def __init__(self, dim: int = 1536):
         self.dim = max(64, int(dim))
-        self._token_rx = re.compile(r"[A-Za-z0-9_+-]+")
+        self._token_rx = re.compile(r"[A-Za-z0-9_+-]+|[\u4e00-\u9fff\u3400-\u4dbf]")
 
     def embed(self, text: str) -> Optional[List[float]]:
         s = (text or "").strip()
