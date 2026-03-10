@@ -6,6 +6,7 @@ import { useSearchParams } from "next/navigation"
 
 import { cn, mergeTracksStable } from "@/lib/utils"
 import { fetchJson } from "@/lib/fetch"
+import { showDiscoveryLink } from "@/config/features"
 import { ArrowRight, BookOpen } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -581,12 +582,14 @@ export default function ResearchPageNew() {
                   <Badge variant="outline">Sources: {searchSources.length}</Badge>
                   <Badge variant="secondary">Results: {papers.length}</Badge>
                 </div>
-                <Button asChild size="sm" className="gap-1.5">
-                  <Link href={discoveryHref}>
-                    Open Discovery Workspace
-                    <ArrowRight className="h-4 w-4" />
-                  </Link>
-                </Button>
+                {showDiscoveryLink() && (
+                  <Button asChild size="sm" className="gap-1.5">
+                    <Link href={discoveryHref}>
+                      Open Discovery Workspace
+                      <ArrowRight className="h-4 w-4" />
+                    </Link>
+                  </Button>
+                )}
               </CardContent>
             </Card>
 
