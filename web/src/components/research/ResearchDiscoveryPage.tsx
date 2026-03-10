@@ -5,7 +5,8 @@ import { useEffect, useMemo, useState } from "react"
 import { useSearchParams } from "next/navigation"
 
 import { ArrowLeft, Compass } from "lucide-react"
-import { fetchJson, getErrorMessage } from "@/lib/fetch"
+import { mergeTracksStable } from "@/lib/utils"
+import { fetchJson } from "@/lib/fetch"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -15,8 +16,7 @@ import type { Track } from "./TrackSelector"
 
 type SeedType = "doi" | "arxiv" | "openalex" | "semantic_scholar" | "author"
 
-// Note: fetchJson and getErrorMessage are imported from @/lib/fetch
-
+// Note: fetchJson is imported from @/lib/fetch
 export default function ResearchDiscoveryPage() {
   const searchParams = useSearchParams()
   const [userId] = useState("default")
@@ -64,8 +64,9 @@ export default function ResearchDiscoveryPage() {
     const data = await fetchJson<{ tracks: Track[] }>(
       `/api/research/tracks?user_id=${encodeURIComponent(userId)}`
     )
-    setTracks(data.tracks || [])
-    const active = data.tracks.find((track) => track.is_active)
+    const tracksFromApi = data.tracks || []
+    setTracks((prev) => mergeTracksStable(prev, tracksFromApi))
+    const active = tracksFromApi.find((track) => track.is_active)
     setActiveTrackId(active?.id ?? null)
   }
 
