@@ -1293,7 +1293,10 @@ async def discover_from_seed(req: DiscoverySeedRequest):
                         )
 
             try:
-                openalex_work = openalex.resolve_work(seed_type=req.seed_type, seed_id=req.seed_id)
+                openalex_work = await openalex.resolve_work(
+                    seed_type=req.seed_type,
+                    seed_id=req.seed_id,
+                )
             except Exception:
                 openalex_work = None
             if openalex_work:
@@ -1303,7 +1306,10 @@ async def discover_from_seed(req: DiscoverySeedRequest):
                     seed_info["year"] = openalex_work.get("publication_year")
                 if req.include_related:
                     try:
-                        related_rows = openalex.get_related_works(openalex_work, limit=req.limit)
+                        related_rows = await openalex.get_related_works(
+                            openalex_work,
+                            limit=req.limit,
+                        )
                     except Exception:
                         related_rows = []
                     for row in related_rows:
@@ -1317,7 +1323,10 @@ async def discover_from_seed(req: DiscoverySeedRequest):
                         )
                 if req.include_cited:
                     try:
-                        cited_rows = openalex.get_referenced_works(openalex_work, limit=req.limit)
+                        cited_rows = await openalex.get_referenced_works(
+                            openalex_work,
+                            limit=req.limit,
+                        )
                     except Exception:
                         cited_rows = []
                     for row in cited_rows:
@@ -1331,7 +1340,10 @@ async def discover_from_seed(req: DiscoverySeedRequest):
                         )
                 if req.include_citing:
                     try:
-                        citing_rows = openalex.get_citing_works(openalex_work, limit=req.limit)
+                        citing_rows = await openalex.get_citing_works(
+                            openalex_work,
+                            limit=req.limit,
+                        )
                     except Exception:
                         citing_rows = []
                     for row in citing_rows:
@@ -1345,6 +1357,7 @@ async def discover_from_seed(req: DiscoverySeedRequest):
                         )
     finally:
         await client.close()
+        await openalex.close()
 
     candidates = list(candidate_map.values())
     filtered = _filter_discovery_candidates(

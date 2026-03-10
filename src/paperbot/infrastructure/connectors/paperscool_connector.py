@@ -5,11 +5,11 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlencode, urljoin
 
-import requests
 from bs4 import BeautifulSoup, Tag
 
 from paperbot.application.collaboration.message_schema import make_event
 from paperbot.application.ports.event_log_port import EventLogPort
+from paperbot.infrastructure.crawling.request_layer import AsyncRequestLayer, RequestPolicy
 
 
 @dataclass
@@ -49,10 +49,17 @@ class PapersCoolRecord:
 class PapersCoolConnector:
     """Minimal papers.cool connector for branch search pages."""
 
-    def __init__(self, *, base_url: str = "https://papers.cool", timeout_s: float = 20.0):
+    def __init__(
+        self,
+        *,
+        base_url: str = "https://papers.cool",
+        timeout_s: float = 20.0,
+        request_layer: Optional[AsyncRequestLayer] = None,
+    ):
         self.base_url = base_url.rstrip("/")
         self.timeout_s = timeout_s
         self._headers = {"User-Agent": "PaperBot/2.0"}
+        self._request = request_layer or AsyncRequestLayer(RequestPolicy(timeout_s=timeout_s))
 
     def build_search_url(
         self,
@@ -74,7 +81,7 @@ class PapersCoolConnector:
 
         return f"{self.base_url}/{normalized_branch}/search?{urlencode(params)}"
 
-    def fetch_search_html(
+    async def fetch_search_html(
         self,
         *,
         branch: str,
@@ -83,11 +90,9 @@ class PapersCoolConnector:
         show: Optional[int] = None,
     ) -> str:
         url = self.build_search_url(branch=branch, query=query, highlight=highlight, show=show)
-        resp = requests.get(url, headers=self._headers, timeout=self.timeout_s)
-        resp.raise_for_status()
-        return resp.text
+        return await self._request.get_text(url, headers=self._headers)
 
-    def search(
+    async def search(
         self,
         *,
         branch: str,
@@ -95,7 +100,12 @@ class PapersCoolConnector:
         highlight: bool = True,
         show: Optional[int] = None,
     ) -> List[PapersCoolRecord]:
-        html = self.fetch_search_html(branch=branch, query=query, highlight=highlight, show=show)
+        html = await self.fetch_search_html(
+            branch=branch,
+            query=query,
+            highlight=highlight,
+            show=show,
+        )
         return self.parse_search_html(html, branch=branch)
 
     def parse_search_html(self, html: str, *, branch: str) -> List[PapersCoolRecord]:
@@ -223,3 +233,6 @@ class PapersCoolConnector:
         if not match:
             return 0
         return int(match.group())
+
+    async def close(self) -> None:
+        await self._request.close()
