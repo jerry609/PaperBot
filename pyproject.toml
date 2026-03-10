@@ -38,6 +38,7 @@ dependencies = [
     "SQLAlchemy>=2.0.0",
     "alembic>=1.13.0",
     "keyring>=25.0.0",
+    "rapidfuzz>=3.0.0",
 ]
 
 [project.optional-dependencies]
