@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useSearchParams } from "next/navigation"
 
-<<<<<<< HEAD
 import { cn, mergeTracksStable } from "@/lib/utils"
 import { fetchJson, getErrorMessage } from "@/lib/fetch"
 import { showDiscoveryLink } from "@/config/features"
