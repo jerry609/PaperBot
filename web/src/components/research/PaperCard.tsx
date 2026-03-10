@@ -78,7 +78,12 @@ export function PaperCard({
   const evidenceQuotes = judge?.evidence_quotes || []
 
   const handleSave = async () => {
-    if (!onSave || isSaved) return
+    if (!onSave) return
+    // Toggle local saved state; only call onSave when transitioning from unsaved -> saved.
+    if (isSaved) {
+      setIsSaved(false)
+      return
+    }
     setActionLoading("save")
     try {
       await onSave()
@@ -90,6 +95,11 @@ export function PaperCard({
 
   const handleLike = async () => {
     if (!onLike) return
+    // Toggle like; when turning off, only update local state.
+    if (isLiked) {
+      setIsLiked(false)
+      return
+    }
     setActionLoading("like")
     try {
       await onLike()
@@ -102,6 +112,11 @@ export function PaperCard({
 
   const handleDislike = async () => {
     if (!onDislike) return
+    // Toggle dislike; when turning off, only update local state.
+    if (isDisliked) {
+      setIsDisliked(false)
+      return
+    }
     setActionLoading("dislike")
     try {
       await onDislike()
@@ -325,7 +340,7 @@ export function PaperCard({
                     isSaved && "bg-green-600 hover:bg-green-700 text-white"
                   ),
                   onClick: handleSave,
-                  disabled: isLoading || actionLoading !== null || isSaved,
+                  disabled: isLoading || actionLoading !== null,
                   icon:
                     actionLoading === "save" ? (
                       <Loader2 className="h-3.5 w-3.5 animate-spin" />
