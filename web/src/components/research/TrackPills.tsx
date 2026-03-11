@@ -64,7 +64,9 @@ export function TrackPills({
               ? "bg-primary text-primary-foreground shadow-sm"
               : "bg-background hover:bg-accent"
           )}
-          onClick={() => onSelectTrack(track.id)}
+          onClick={() => {
+            if (track.id !== activeTrackId) onSelectTrack(track.id)
+          }}
           disabled={disabled}
         >
           {(() => {
