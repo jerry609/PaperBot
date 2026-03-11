@@ -16,6 +16,10 @@ from paperbot.context_engine import ContextEngine, ContextEngineConfig
 from paperbot.context_engine.track_router import TrackRouter
 from paperbot.domain.paper_identity import normalize_arxiv_id, normalize_doi
 from paperbot.infrastructure.api_clients.semantic_scholar import SemanticScholarClient
+from paperbot.infrastructure.exporters.obsidian_sync import (
+    export_track_snapshot,
+    obsidian_auto_export_enabled,
+)
 from paperbot.infrastructure.stores.memory_store import SqlAlchemyMemoryStore
 from paperbot.infrastructure.stores.research_store import SqlAlchemyResearchStore
 from paperbot.infrastructure.stores.workflow_metric_store import WorkflowMetricStore
@@ -59,6 +63,26 @@ def _get_track_router() -> TrackRouter:
             memory_store=_get_memory_store(),
         )
     return _track_router
+
+
+def _schedule_obsidian_export(
+    background_tasks: BackgroundTasks,
+    *,
+    user_id: str,
+    track_id: int,
+    for_tracks: bool = False,
+) -> None:
+    if track_id <= 0:
+        return
+    if not obsidian_auto_export_enabled(for_tracks=for_tracks):
+        return
+    background_tasks.add_task(
+        export_track_snapshot,
+        user_id=user_id,
+        track_id=track_id,
+    )
+
+
 ENABLE_ANCHOR_AUTHORS = os.getenv("PAPERBOT_ENABLE_ANCHOR_AUTHORS", "true").lower() == "true"
 
 _DISCOVERY_STOPWORDS: Set[str] = {
@@ -304,6 +328,12 @@ def create_track(req: TrackCreateRequest, background_tasks: BackgroundTasks):
     _schedule_embedding_precompute(
         background_tasks, user_id=req.user_id, track_ids=[int(track.get("id") or 0)]
     )
+    _schedule_obsidian_export(
+        background_tasks,
+        user_id=req.user_id,
+        track_id=int(track.get("id") or 0),
+        for_tracks=True,
+    )
     return TrackResponse(track=track)
 
 
@@ -449,6 +479,12 @@ def update_track(
     if not track:
         raise HTTPException(status_code=404, detail="Track not found")
     _schedule_embedding_precompute(background_tasks, user_id=user_id, track_ids=[track_id])
+    _schedule_obsidian_export(
+        background_tasks,
+        user_id=user_id,
+        track_id=track_id,
+        for_tracks=True,
+    )
     return TrackResponse(track=track)
 
 
@@ -982,7 +1018,7 @@ class PaperFeedbackResponse(BaseModel):
 
 
 @router.post("/research/papers/feedback", response_model=PaperFeedbackResponse)
-def add_paper_feedback(req: PaperFeedbackRequest):
+def add_paper_feedback(req: PaperFeedbackRequest, background_tasks: BackgroundTasks):
     set_trace_id()  # Initialize trace_id for this request
     Logger.info(f"Received paper feedback request, action={req.action}", file=LogFiles.HARVEST)
     research_store = _get_research_store()
@@ -1068,6 +1104,13 @@ def add_paper_feedback(req: PaperFeedbackRequest):
     Logger.info("Paper feedback recorded successfully", file=LogFiles.HARVEST)
     normalized_action = research_store._normalize_feedback_action(req.action)
     current_action = research_store._effective_feedback_action(normalized_action)
+    if normalized_action in {"save", "unsave"}:
+        _schedule_obsidian_export(
+            background_tasks,
+            user_id=req.user_id,
+            track_id=int(track_id),
+            for_tracks=False,
+        )
     return PaperFeedbackResponse(
         feedback=fb,
         library_paper_id=library_paper_id,

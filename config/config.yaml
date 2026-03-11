@@ -116,3 +116,13 @@ apis:
     model: "claude-3-5-sonnet-20241022"
     max_tokens: 4096
     temperature: 0.0
+
+# Obsidian 集成（可选）
+obsidian:
+  enabled: false
+  vault_path: ""
+  root_dir: "PaperBot"
+  paper_template_path: null
+  auto_export_on_save: true
+  auto_sync_tracks: true
+  export_limit: 200

@@ -182,3 +182,62 @@ def test_patch_track_default_user(client_with_store):
 
     assert response.status_code == 200
     assert response.json()["track"]["name"] == "Updated Name"
+
+
+def test_create_track_schedules_obsidian_export(client_with_store, monkeypatch):
+    """Track creation should trigger the Obsidian export hook for MOC/note bootstrap."""
+    client, _ = client_with_store
+
+    import paperbot.api.routes.research as research_module
+
+    captured: list[dict[str, object]] = []
+
+    monkeypatch.setattr(research_module, "_schedule_embedding_precompute", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        research_module,
+        "_schedule_obsidian_export",
+        lambda background_tasks, *, user_id, track_id, for_tracks=False: captured.append(
+            {"user_id": user_id, "track_id": track_id, "for_tracks": for_tracks}
+        ),
+    )
+
+    response = client.post(
+        "/api/research/tracks",
+        json={
+            "user_id": "test",
+            "name": "Obsidian Sync Track",
+            "keywords": ["obsidian", "knowledge-base"],
+            "activate": False,
+        },
+    )
+
+    assert response.status_code == 200
+    track_id = int(response.json()["track"]["id"])
+    assert captured == [{"user_id": "test", "track_id": track_id, "for_tracks": True}]
+
+
+def test_patch_track_schedules_obsidian_export(client_with_store, monkeypatch):
+    """Track updates should refresh the exported track snapshot."""
+    client, store = client_with_store
+
+    import paperbot.api.routes.research as research_module
+
+    track = store.create_track(user_id="test", name="Original", activate=False)
+    captured: list[dict[str, object]] = []
+
+    monkeypatch.setattr(research_module, "_schedule_embedding_precompute", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        research_module,
+        "_schedule_obsidian_export",
+        lambda background_tasks, *, user_id, track_id, for_tracks=False: captured.append(
+            {"user_id": user_id, "track_id": track_id, "for_tracks": for_tracks}
+        ),
+    )
+
+    response = client.patch(
+        f"/api/research/tracks/{track['id']}?user_id=test",
+        json={"keywords": ["obsidian", "moc"]},
+    )
+
+    assert response.status_code == 200
+    assert captured == [{"user_id": "test", "track_id": int(track["id"]), "for_tracks": True}]

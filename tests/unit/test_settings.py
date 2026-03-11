@@ -38,6 +38,24 @@ def test_from_dict_preserves_defaults_for_partial_dict_sections() -> None:
     assert settings.collab["host"]["temperature"] == 0.3
 
 
+def test_from_dict_loads_obsidian_section() -> None:
+    settings = Settings.from_dict(
+        {
+            "obsidian": {
+                "enabled": True,
+                "vault_path": "/tmp/vault",
+                "root_dir": "Research Notes",
+                "paper_template_path": "/tmp/paper.md.j2",
+            }
+        }
+    )
+
+    assert settings.obsidian.enabled is True
+    assert settings.obsidian.vault_path == "/tmp/vault"
+    assert settings.obsidian.root_dir == "Research Notes"
+    assert settings.obsidian.paper_template_path == "/tmp/paper.md.j2"
+
+
 def test_load_from_file_merges_partial_nested_dicts(tmp_path: Path) -> None:
     config_path = tmp_path / "settings.yaml"
     config_path.write_text(
@@ -82,3 +100,24 @@ def test_from_dict_raises_validation_error_for_invalid_nested_section_types(
         Settings.from_dict(payload)
 
     assert field_name in str(excinfo.value)
+
+
+def test_load_environment_variables_overrides_obsidian(monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = Settings()
+    monkeypatch.setenv("PAPERBOT_OBSIDIAN_ENABLED", "true")
+    monkeypatch.setenv("PAPERBOT_OBSIDIAN_VAULT_PATH", "/tmp/obsidian-vault")
+    monkeypatch.setenv("PAPERBOT_OBSIDIAN_ROOT_DIR", "PaperBot Notes")
+    monkeypatch.setenv("PAPERBOT_OBSIDIAN_PAPER_TEMPLATE", "/tmp/paper.md.j2")
+    monkeypatch.setenv("PAPERBOT_OBSIDIAN_AUTO_EXPORT", "false")
+    monkeypatch.setenv("PAPERBOT_OBSIDIAN_AUTO_SYNC_TRACKS", "false")
+    monkeypatch.setenv("PAPERBOT_OBSIDIAN_EXPORT_LIMIT", "42")
+
+    settings.load_environment_variables()
+
+    assert settings.obsidian.enabled is True
+    assert settings.obsidian.vault_path == "/tmp/obsidian-vault"
+    assert settings.obsidian.root_dir == "PaperBot Notes"
+    assert settings.obsidian.paper_template_path == "/tmp/paper.md.j2"
+    assert settings.obsidian.auto_export_on_save is False
+    assert settings.obsidian.auto_sync_tracks is False
+    assert settings.obsidian.export_limit == 42
