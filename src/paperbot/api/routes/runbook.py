@@ -39,6 +39,7 @@ def _get_provider() -> SessionProvider:
     global _provider
     if _provider is None:
         _provider = SessionProvider()
+        _provider.ensure_tables(Base.metadata)
     return _provider
 
 

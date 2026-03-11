@@ -11,6 +11,7 @@ from sqlalchemy import and_, desc, func, or_, select
 
 from paperbot.infrastructure.stores.models import (
     AuthorModel,
+    Base,
     PaperAuthorModel,
     PaperFeedbackModel,
     PaperModel,
@@ -131,6 +132,7 @@ class AnchorService:
         provider: Optional[SessionProvider] = None,
     ):
         self._provider = provider or SessionProvider(db_url or get_db_url())
+        self._provider.ensure_tables(Base.metadata)
 
     def discover(
         self,
