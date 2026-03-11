@@ -15,16 +15,16 @@ export const AVAILABLE_MODELS: ModelConfig[] = [
         description: 'Fast & efficient, great for code generation',
     },
     {
-        id: 'claude-3-5-sonnet-20241022',
-        name: 'Claude 3.5 Sonnet',
+        id: 'claude-sonnet-4-5',
+        name: 'Claude Sonnet 4.5',
         provider: 'anthropic',
-        description: 'Best for complex reasoning & analysis',
+        description: 'Best balance of speed and reasoning',
     },
     {
-        id: 'llama3.3:70b',
-        name: 'Llama 3.3 70B',
-        provider: 'ollama',
-        description: 'Local model, privacy-first',
+        id: 'claude-opus-4-5',
+        name: 'Claude Opus 4.5',
+        provider: 'anthropic',
+        description: 'Best for complex reasoning & analysis',
     },
 ]
 
