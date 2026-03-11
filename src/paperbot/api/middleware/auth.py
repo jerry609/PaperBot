@@ -36,9 +36,6 @@ def resolve_cors_origins() -> list[str]:
 
 
 def get_request_host(request: Request) -> str:
-    forwarded = request.headers.get("x-forwarded-for", "")
-    if forwarded:
-        return forwarded.split(",")[0].strip().lower()
     client = request.client.host if request.client else ""
     return str(client or "").strip().lower()
 

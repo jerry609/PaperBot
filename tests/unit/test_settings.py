@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+from pydantic import ValidationError
+
 from config.settings import Settings
 
 
@@ -60,3 +63,22 @@ collab:
     assert settings.collab["enabled"] is True
     assert settings.collab["host"]["model"] == "gpt-4o-mini"
     assert settings.collab["host"]["top_p"] == 0.7
+
+
+@pytest.mark.parametrize(
+    ("payload", "field_name"),
+    [
+        ({"collab": None}, "collab"),
+        ({"data_source": "invalid"}, "data_source"),
+        ({"report": "invalid"}, "report"),
+        ({"repro": None}, "repro"),
+    ],
+)
+def test_from_dict_raises_validation_error_for_invalid_nested_section_types(
+    payload: dict,
+    field_name: str,
+) -> None:
+    with pytest.raises(ValidationError) as excinfo:
+        Settings.from_dict(payload)
+
+    assert field_name in str(excinfo.value)

@@ -38,7 +38,8 @@ def test_code_mode_uses_safe_permission_mode():
 
 
 async def _request(app: FastAPI, method: str, path: str, **kwargs) -> httpx.Response:
-    transport = httpx.ASGITransport(app=app)
+    client = kwargs.pop("client", ("203.0.113.10", 123))
+    transport = httpx.ASGITransport(app=app, client=client)
     async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
         return await client.request(method, path, **kwargs)
 
@@ -52,7 +53,7 @@ async def test_local_requests_bypass_api_key(monkeypatch):
         app,
         "GET",
         "/api/chat",
-        headers={"X-Forwarded-For": "127.0.0.1"},
+        client=("127.0.0.1", 123),
     )
 
     assert response.status_code == 200
@@ -63,12 +64,7 @@ async def test_remote_requests_require_api_key(monkeypatch):
     monkeypatch.setenv("PAPERBOT_API_KEY", "secret")
     app = _make_secured_app()
 
-    response = await _request(
-        app,
-        "GET",
-        "/api/chat",
-        headers={"X-Forwarded-For": "203.0.113.10"},
-    )
+    response = await _request(app, "GET", "/api/chat")
 
     assert response.status_code == 401
     payload = response.json()
@@ -85,13 +81,25 @@ async def test_remote_requests_accept_valid_bearer_token(monkeypatch):
         app,
         "GET",
         "/api/chat",
-        headers={
-            "X-Forwarded-For": "203.0.113.10",
-            "Authorization": "Bearer secret",
-        },
+        headers={"Authorization": "Bearer secret"},
     )
 
     assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_spoofed_forwarded_for_does_not_bypass_api_key(monkeypatch):
+    monkeypatch.setenv("PAPERBOT_API_KEY", "secret")
+    app = _make_secured_app()
+
+    response = await _request(
+        app,
+        "GET",
+        "/api/chat",
+        headers={"X-Forwarded-For": "127.0.0.1"},
+    )
+
+    assert response.status_code == 401
 
 
 @pytest.mark.asyncio
@@ -99,10 +107,7 @@ async def test_llm_rate_limit_returns_429(monkeypatch):
     monkeypatch.setenv("PAPERBOT_API_KEY", "secret")
     monkeypatch.setenv("PAPERBOT_RATE_LIMIT_LLM_PER_MINUTE", "2")
     app = _make_secured_app()
-    headers = {
-        "X-Forwarded-For": "203.0.113.10",
-        "Authorization": "Bearer secret",
-    }
+    headers = {"Authorization": "Bearer secret"}
 
     assert (await _request(app, "GET", "/api/chat", headers=headers)).status_code == 200
     assert (await _request(app, "GET", "/api/chat", headers=headers)).status_code == 200
