@@ -46,6 +46,8 @@ AI-powered research workflow: paper discovery → LLM analysis → scholar track
 <summary><b>Web Dashboard</b></summary>
 <br>
 
+Current dashboard layout focused on the active research question, the workflow console, and decision-critical alerts.
+
 ![Dashboard](asset/ui/dashboard.png)
 
 | Research Workspace | AgentSwarm Studio |

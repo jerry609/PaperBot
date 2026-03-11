@@ -1,10 +1,20 @@
 import type {
   Activity,
   AnchorPreviewItem,
+  IntelligenceFeedResponse,
   ReadingQueueItem,
   ResearchTrackSummary,
   TrackFeedItem,
 } from "./types"
+
+export interface IntelligenceFeedFilters {
+  source?: string
+  keyword?: string
+  repo?: string
+  sortBy?: string
+  sortOrder?: string
+  trackId?: number
+}
 
 const API_BASE_URL = (process.env.PAPERBOT_API_BASE_URL || "http://127.0.0.1:8000") + "/api"
 
@@ -100,6 +110,33 @@ export async function fetchDashboardReadingQueue(
       priority: index + 1,
     }
   })
+}
+
+export async function fetchIntelligenceFeed(
+  userId: string = "default",
+  limit: number = 6,
+  filters?: IntelligenceFeedFilters,
+): Promise<IntelligenceFeedResponse> {
+  const qs = new URLSearchParams({
+    user_id: userId,
+    limit: String(limit),
+  })
+  if (filters?.source) qs.set("source", filters.source)
+  if (filters?.keyword) qs.set("keyword", filters.keyword)
+  if (filters?.repo) qs.set("repo", filters.repo)
+  if (filters?.sortBy) qs.set("sort_by", filters.sortBy)
+  if (filters?.sortOrder) qs.set("sort_order", filters.sortOrder)
+  if (filters?.trackId) qs.set("track_id", String(filters.trackId))
+
+  const payload = await fetchJsonOrNull<IntelligenceFeedResponse>(`/intelligence/feed?${qs.toString()}`)
+  return payload || {
+    items: [],
+    refreshed_at: null,
+    refresh_scheduled: false,
+    keywords: [],
+    watch_repos: [],
+    subreddits: [],
+  }
 }
 
 export async function fetchDashboardActivities(userId: string = "default"): Promise<Activity[]> {
