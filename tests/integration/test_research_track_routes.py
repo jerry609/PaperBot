@@ -241,3 +241,54 @@ def test_patch_track_schedules_obsidian_export(client_with_store, monkeypatch):
 
     assert response.status_code == 200
     assert captured == [{"user_id": "test", "track_id": int(track["id"]), "for_tracks": True}]
+
+
+def test_create_track_schedules_obsidian_export_using_persisted_track_owner(monkeypatch):
+    import paperbot.api.routes.research as research_module
+
+    class _FakeResearchStore:
+        def create_track(self, **kwargs):
+            return {
+                "id": 41,
+                "user_id": "persisted-owner",
+                "name": kwargs["name"],
+                "description": kwargs.get("description", ""),
+                "keywords": kwargs.get("keywords") or [],
+                "methods": kwargs.get("methods") or [],
+                "venues": kwargs.get("venues") or [],
+                "is_active": False,
+            }
+
+    captured: list[dict[str, object]] = []
+    monkeypatch.setattr(research_module, "_research_store", _FakeResearchStore())
+    monkeypatch.setattr(
+        research_module,
+        "_schedule_embedding_precompute",
+        lambda background_tasks, *, user_id, track_ids: captured.append(
+            {"kind": "embedding", "user_id": user_id, "track_ids": track_ids}
+        ),
+    )
+    monkeypatch.setattr(
+        research_module,
+        "_schedule_obsidian_export",
+        lambda background_tasks, *, user_id, track_id, for_tracks=False: captured.append(
+            {"kind": "obsidian", "user_id": user_id, "track_id": track_id, "for_tracks": for_tracks}
+        ),
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/research/tracks",
+            json={
+                "user_id": "spoofed-request-user",
+                "name": "Obsidian Sync Track",
+                "keywords": ["obsidian"],
+                "activate": False,
+            },
+        )
+
+    assert response.status_code == 200
+    assert captured == [
+        {"kind": "embedding", "user_id": "persisted-owner", "track_ids": [41]},
+        {"kind": "obsidian", "user_id": "persisted-owner", "track_id": 41, "for_tracks": True},
+    ]

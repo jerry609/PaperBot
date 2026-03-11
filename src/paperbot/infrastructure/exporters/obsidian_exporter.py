@@ -5,7 +5,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import yaml
-from jinja2 import Environment, FileSystemLoader
+from jinja2 import Environment, FileSystemLoader, select_autoescape
+from markupsafe import Markup
 
 from paperbot.application.ports.vault_exporter_port import VaultExporterPort
 
@@ -85,9 +86,6 @@ def _yaml_frontmatter(payload: Dict[str, Any]) -> str:
 class ObsidianFilesystemExporter(VaultExporterPort):
     """Write PaperBot artifacts directly into an Obsidian-compatible vault."""
 
-    def __init__(self, *, paper_template_path: Optional[Path] = None):
-        self._paper_template_path = Path(paper_template_path).expanduser() if paper_template_path else None
-
     def export_library_snapshot(
         self,
         *,
@@ -100,7 +98,9 @@ class ObsidianFilesystemExporter(VaultExporterPort):
         vault_dir = Path(vault_path).expanduser().resolve()
         if not vault_dir.exists() or not vault_dir.is_dir():
             raise ValueError("vault_path must be an existing directory")
-        template_path = self._resolve_paper_template_path(paper_template_path)
+        template_path = (
+            Path(paper_template_path).expanduser() if paper_template_path is not None else None
+        )
 
         root_path = vault_dir / root_dir
         papers_dir = root_path / "Papers"
@@ -355,10 +355,19 @@ class ObsidianFilesystemExporter(VaultExporterPort):
             links.append(f"[arXiv](https://arxiv.org/abs/{arxiv_id})")
         return links
 
-    def _resolve_paper_template_path(self, paper_template_path: Optional[Path]) -> Optional[Path]:
-        if paper_template_path is not None:
-            return Path(paper_template_path).expanduser()
-        return self._paper_template_path
+    @staticmethod
+    def _build_template_environment(*, loader: Optional[FileSystemLoader] = None) -> Environment:
+        return Environment(
+            loader=loader,
+            autoescape=select_autoescape(
+                enabled_extensions=("html", "htm", "xml"),
+                default_for_string=True,
+                default=True,
+            ),
+            keep_trailing_newline=True,
+            trim_blocks=False,
+            lstrip_blocks=False,
+        )
 
     def _render_paper_note(
         self,
@@ -377,16 +386,12 @@ class ObsidianFilesystemExporter(VaultExporterPort):
     ) -> str:
         if template_path:
             resolved = template_path.expanduser().resolve()
-            environment = Environment(
-                loader=FileSystemLoader(str(resolved.parent)),
-                autoescape=False,
-                keep_trailing_newline=True,
-                trim_blocks=False,
-                lstrip_blocks=False,
+            environment = self._build_template_environment(
+                loader=FileSystemLoader(str(resolved.parent))
             )
             template = environment.get_template(resolved.name)
             return template.render(
-                frontmatter=frontmatter,
+                frontmatter=Markup(frontmatter),
                 title=title,
                 abstract=abstract,
                 metadata_rows=metadata_rows,
@@ -398,8 +403,8 @@ class ObsidianFilesystemExporter(VaultExporterPort):
                 related_titles=related_titles,
             )
 
-        return Environment(autoescape=False).from_string(DEFAULT_PAPER_TEMPLATE).render(
-            frontmatter=frontmatter,
+        return self._build_template_environment().from_string(DEFAULT_PAPER_TEMPLATE).render(
+            frontmatter=Markup(frontmatter),
             title=title,
             abstract=abstract,
             metadata_rows=metadata_rows,

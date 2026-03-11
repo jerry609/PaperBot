@@ -56,17 +56,18 @@ def export_track_snapshot(
             track_id=track_id,
             limit=max(1, int(config.export_limit)),
         )
-        if config.paper_template_path:
-            exporter = ObsidianFilesystemExporter(
-                paper_template_path=Path(config.paper_template_path).expanduser()
-            )
-        else:
-            exporter = ObsidianFilesystemExporter()
+        exporter = ObsidianFilesystemExporter()
+        template_path = (
+            Path(config.paper_template_path).expanduser()
+            if config.paper_template_path
+            else None
+        )
         result = exporter.export_library_snapshot(
             vault_path=vault_path,
             saved_items=saved_items,
             track=track,
             root_dir=config.root_dir,
+            paper_template_path=template_path,
         )
         Logger.info(
             f"Exported track {track_id} snapshot to Obsidian vault {vault_path}",

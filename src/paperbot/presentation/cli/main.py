@@ -627,17 +627,16 @@ def _run_obsidian_export(parsed: argparse.Namespace) -> int:
             print(f"Error: no saved papers found{scope}", file=sys.stderr)
             return 1
 
-        if paper_template_path:
-            exporter = ObsidianFilesystemExporter(
-                paper_template_path=Path(paper_template_path).expanduser()
-            )
-        else:
-            exporter = ObsidianFilesystemExporter()
+        exporter = ObsidianFilesystemExporter()
+        template_path = (
+            Path(paper_template_path).expanduser() if paper_template_path else None
+        )
         result = exporter.export_library_snapshot(
             vault_path=Path(vault_value),
             saved_items=saved_items,
             track=track,
             root_dir=root_dir,
+            paper_template_path=template_path,
         )
 
         if parsed.json:

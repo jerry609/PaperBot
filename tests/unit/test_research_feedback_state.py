@@ -167,3 +167,53 @@ def test_feedback_route_schedules_obsidian_export_for_save_and_unsave(tmp_path: 
         {"user_id": "u-feedback", "track_id": int(track["id"]), "for_tracks": False},
         {"user_id": "u-feedback", "track_id": int(track["id"]), "for_tracks": False},
     ]
+
+
+def test_feedback_route_schedules_obsidian_export_using_persisted_track_owner(monkeypatch):
+    class _FakeResearchStore:
+        def get_active_track(self, *, user_id: str):
+            assert user_id == "spoofed-request-user"
+            return None
+
+        def add_paper_feedback(self, **kwargs):
+            assert kwargs["user_id"] == "spoofed-request-user"
+            assert kwargs["track_id"] == 9
+            return {"id": 1, "track_id": 9}
+
+        def _normalize_feedback_action(self, action: str) -> str:
+            return action
+
+        def _effective_feedback_action(self, action: str):
+            return action
+
+        def get_track(self, *, user_id: str, track_id: int):
+            assert user_id == "spoofed-request-user"
+            assert track_id == 9
+            return {"id": 9, "user_id": "persisted-owner", "name": "Secure Track"}
+
+    monkeypatch.setattr(research_route, "_research_store", _FakeResearchStore())
+
+    captured: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        research_route,
+        "_schedule_obsidian_export",
+        lambda background_tasks, *, user_id, track_id, for_tracks=False: captured.append(
+            {"user_id": user_id, "track_id": track_id, "for_tracks": for_tracks}
+        ),
+    )
+
+    with TestClient(api_main.app) as client:
+        response = client.post(
+            "/api/research/papers/feedback",
+            json={
+                "user_id": "spoofed-request-user",
+                "track_id": 9,
+                "paper_id": "paper-1",
+                "action": "save",
+            },
+        )
+
+    assert response.status_code == 200
+    assert captured == [
+        {"user_id": "persisted-owner", "track_id": 9, "for_tracks": False},
+    ]
