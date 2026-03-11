@@ -4,9 +4,14 @@ import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useSearchParams } from "next/navigation"
 
-import { cn, mergeTracksStable } from "@/lib/utils"
+import {
+  currentFeedbackFromRequestAction,
+  normalizePaperFeedbackAction,
+  type PaperFeedbackAction,
+  type PaperFeedbackRequestAction,
+} from "@/lib/paper-feedback"
+import { cn } from "@/lib/utils"
 import { fetchJson, getErrorMessage } from "@/lib/fetch"
-import { showDiscoveryLink } from "@/config/features"
 import { ArrowRight, BookOpen } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -129,9 +134,8 @@ export default function ResearchPageNew() {
     const data = await fetchJson<{ tracks: Track[] }>(
       `/api/research/tracks?user_id=${encodeURIComponent(userId)}`
     )
-    const tracksFromApi = data.tracks || []
-    setTracks((prev) => mergeTracksStable(prev, tracksFromApi))
-    const active = tracksFromApi.find((t) => t.is_active)
+    setTracks(data.tracks || [])
+    const active = data.tracks.find((t) => t.is_active)
     const activeId = active?.id ?? null
     setActiveTrackId(activeId)
     return activeId
@@ -359,10 +363,10 @@ export default function ResearchPageNew() {
 
   async function handleFeedback(
     paperId: string,
-    action: string,
+    action: PaperFeedbackRequestAction,
     rank?: number,
     paper?: Paper
-  ): Promise<void> {
+  ): Promise<PaperFeedbackAction | null> {
     // Don't set global loading - PaperCard handles its own loading state
     setError(null)
     const body: Record<string, unknown> = {
@@ -395,11 +399,12 @@ export default function ResearchPageNew() {
       body.paper_source = paper.source || "semantic_scholar"
     }
 
-    await fetchJson(`/api/research/papers/feedback`, {
+    const payload = await fetchJson<{ current_action?: string | null }>(`/api/research/papers/feedback`, {
       method: "POST",
       body: JSON.stringify(body),
       headers: { "Content-Type": "application/json" },
     })
+    return normalizePaperFeedbackAction(payload.current_action) ?? currentFeedbackFromRequestAction(action)
   }
 
   const trackToClearName = tracks.find((t) => t.id === trackToClear)?.name || "this track"
@@ -410,6 +415,19 @@ export default function ResearchPageNew() {
     const qs = params.toString()
     return qs ? `/research/discovery?${qs}` : "/research/discovery"
   }, [query, activeTrackId])
+
+  const communityRadarHref = useMemo(() => {
+    const params = new URLSearchParams()
+    if (activeTrackId) params.set("radar_track", String(activeTrackId))
+
+    const keywordSeed = query.trim() || activeTrack?.keywords?.[0] || ""
+    if (keywordSeed) {
+      params.set("radar_keyword", keywordSeed)
+    }
+
+    const qs = params.toString()
+    return qs ? `/dashboard?${qs}` : "/dashboard"
+  }, [query, activeTrack, activeTrackId])
 
   return (
     <div
@@ -579,14 +597,20 @@ export default function ResearchPageNew() {
                   <Badge variant="outline">Sources: {searchSources.length}</Badge>
                   <Badge variant="secondary">Results: {papers.length}</Badge>
                 </div>
-                {showDiscoveryLink() && (
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button asChild size="sm" variant="outline" className="gap-1.5">
+                    <Link href={communityRadarHref}>
+                      Open Community Radar
+                      <ArrowRight className="h-4 w-4" />
+                    </Link>
+                  </Button>
                   <Button asChild size="sm" className="gap-1.5">
                     <Link href={discoveryHref}>
                       Open Discovery Workspace
                       <ArrowRight className="h-4 w-4" />
                     </Link>
                   </Button>
-                )}
+                </div>
               </CardContent>
             </Card>
 
@@ -597,9 +621,9 @@ export default function ResearchPageNew() {
               hasSearched={hasSearched}
               selectedSources={searchSources}
               onToggleSource={toggleSearchSource}
-              onLike={(paperId, rank, paper) => handleFeedback(paperId, "like", rank, paper)}
-              onSave={(paperId, rank, paper) => handleFeedback(paperId, "save", rank, paper)}
-              onDislike={(paperId, rank, paper) => handleFeedback(paperId, "dislike", rank, paper)}
+              onFeedbackAction={(paperId, action, rank, paper) =>
+                handleFeedback(paperId, action, rank, paper)
+              }
             />
           </div>
         )}
