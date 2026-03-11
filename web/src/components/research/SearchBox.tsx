@@ -4,6 +4,7 @@ import { KeyboardEvent, useRef, useState } from "react"
 import { Brain, CalendarRange, Check, Loader2, Search } from "lucide-react"
 
 import { cn } from "@/lib/utils"
+import { showTrackMemoryButton } from "@/config/features"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Popover, PopoverContent, PopoverAnchor } from "@/components/ui/popover"
@@ -247,16 +248,18 @@ export function SearchBox({
 
           {/* Right side - Memory, Track selector and Search button */}
           <div className="flex items-center gap-1.5 sm:gap-2">
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8"
-              onClick={onOpenMemory}
-              disabled={disabled || isSearching}
-              title="Track Memory"
-            >
-              <Brain className="h-4 w-4" />
-            </Button>
+            {onOpenMemory && showTrackMemoryButton() && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                onClick={onOpenMemory}
+                disabled={disabled || isSearching}
+                title="Track Memory"
+              >
+                <Brain className="h-4 w-4" />
+              </Button>
+            )}
 
             <TrackSelector
               tracks={tracks}
