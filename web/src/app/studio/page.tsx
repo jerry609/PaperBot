@@ -10,7 +10,7 @@ import { ChatHistoryPanel } from "@/components/studio/ChatHistoryPanel"
 import { MCPProvider } from "@/lib/mcp"
 import { useStudioStore, type StudioPaperStatus } from "@/lib/store/studio-store"
 import { useContextPackGeneration } from "@/hooks/useContextPackGeneration"
-import type { ReproContextPack } from "@/lib/types/p2c"
+import { normalizePack } from "@/lib/context-pack-utils"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable"
@@ -23,26 +23,6 @@ const statusConfig: Record<StudioPaperStatus, { label: string; className: string
     running: { label: "Run", className: "bg-violet-500 text-white" },
     completed: { label: "Done", className: "bg-emerald-500 text-white" },
     error: { label: "Error", className: "bg-red-500 text-white" },
-}
-
-function isReproContextPack(payload: unknown): payload is ReproContextPack {
-    if (!payload || typeof payload !== "object") return false
-    const value = payload as Partial<ReproContextPack> & {
-        paper?: { paper_id?: unknown }
-        confidence?: { overall?: unknown }
-    }
-    return (
-        typeof value.context_pack_id === "string" &&
-        typeof value.version === "string" &&
-        typeof value.created_at === "string" &&
-        typeof value.objective === "string" &&
-        typeof value.paper_type === "string" &&
-        Array.isArray(value.observations) &&
-        Array.isArray(value.task_roadmap) &&
-        Array.isArray(value.warnings) &&
-        typeof value.paper?.paper_id === "string" &&
-        typeof value.confidence?.overall === "number"
-    )
 }
 
 function StudioContent() {
@@ -69,20 +49,6 @@ function StudioContent() {
         loadPapers()
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [])
-
-    const normalizePack = (payload: unknown): ReproContextPack | null => {
-        if (!payload || typeof payload !== "object") return null
-        const raw = payload as Record<string, unknown>
-        if (raw.pack && typeof raw.pack === "object") {
-            const pack = raw.pack as Record<string, unknown>
-            const maybePack: Record<string, unknown> =
-                !pack.context_pack_id && typeof raw.context_pack_id === "string"
-                    ? { ...pack, context_pack_id: raw.context_pack_id }
-                    : pack
-            return isReproContextPack(maybePack) ? maybePack : null
-        }
-        return isReproContextPack(raw) ? raw : null
-    }
 
     // Handle URL params from the Papers detail entry point and context pack deep links
     useEffect(() => {

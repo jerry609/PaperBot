@@ -1,10 +1,10 @@
 "use client"
 
-import { useMemo } from "react"
+import { useCallback, useEffect, useMemo } from "react"
 import { cn } from "@/lib/utils"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Button } from "@/components/ui/button"
-import { X, Check, ChevronDown, ChevronUp } from "lucide-react"
+import { X, Check } from "lucide-react"
 import { computeDiff } from "@/lib/diff"
 
 interface DiffLine {
@@ -144,13 +144,34 @@ interface DiffModalProps extends DiffViewerProps {
 }
 
 export function DiffModal({ isOpen, ...props }: DiffModalProps) {
-    if (!isOpen) return null;
+    const handleClose = props.onClose
+
+    const handleBackdropClick = useCallback(
+        (e: React.MouseEvent<HTMLDivElement>) => {
+            if (e.target === e.currentTarget) handleClose?.()
+        },
+        [handleClose],
+    )
+
+    useEffect(() => {
+        if (!isOpen) return
+        const handleEscape = (e: KeyboardEvent) => {
+            if (e.key === "Escape") handleClose?.()
+        }
+        document.addEventListener("keydown", handleEscape)
+        return () => document.removeEventListener("keydown", handleEscape)
+    }, [isOpen, handleClose])
+
+    if (!isOpen) return null
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+        <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+            onClick={handleBackdropClick}
+        >
             <div className="w-[90vw] h-[80vh] max-w-4xl">
                 <DiffViewer {...props} />
             </div>
         </div>
-    );
+    )
 }
