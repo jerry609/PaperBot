@@ -4,7 +4,6 @@ from math import log1p
 import os
 import re
 import xml.etree.ElementTree as ET
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from html import unescape
@@ -259,71 +258,64 @@ class IntelligenceRadarService:
     ) -> List[Dict[str, Any]]:
         allowed_subreddits = {item.lower() for item in profile.subreddits if item}
         results: List[Dict[str, Any]] = []
-        max_workers = min(4, max(1, len(profile.keywords)))
+        for keyword in profile.keywords[:4]:
+            try:
+                row = self._fetch_reddit_keyword_summary(keyword, allowed_subreddits)
+            except Exception:
+                continue
+            if row is None:
+                continue
 
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            future_map = {
-                executor.submit(self._fetch_reddit_keyword_summary, keyword, allowed_subreddits): keyword
-                for keyword in profile.keywords[:4]
-            }
-            for future in as_completed(future_map):
-                try:
-                    row = future.result()
-                except Exception:
-                    continue
-                if row is None:
-                    continue
-
-                keyword = row["keyword"]
-                entry_titles = [entry["title"] for entry in row["entries"]]
-                author_matches = _find_matches(profile.scholar_names, entry_titles)
-                repo_matches = _find_matches(profile.watch_repos, entry_titles)
-                external_id = f"reddit:keyword:{_slugify(keyword)}"
-                previous = self._store.get_event(user_id=user_id, external_id=external_id)
-                metric_value = len(row["entries"])
-                previous_value = int(previous.get("metric_value") or 0) if previous else 0
-                metric_delta = metric_value - previous_value
-                subreddits = row["subreddits"]
-                top_entry = row["entries"][0]
-                score, breakdown = _score_signal(
-                    source="reddit",
-                    kind="keyword_spike",
-                    metric_value=metric_value,
-                    metric_delta=metric_delta,
-                    published_at=row["latest_published_at"],
-                    keyword_hits=[keyword],
-                    author_matches=author_matches,
-                    repo_matches=repo_matches,
-                )
-                summary = (
-                    f"24h mentions: {metric_value} across {', '.join(f'r/{name}' for name in subreddits[:3])}. "
-                    f"Top post: {top_entry['title']}."
-                )
-                results.append(
-                    {
-                        "external_id": external_id,
-                        "source": "reddit",
-                        "source_label": "Reddit Search",
-                        "kind": "keyword_spike",
-                        "title": f"Reddit spike: {keyword}",
-                        "summary": summary,
-                        "url": top_entry["link"],
-                        "keyword_hits": [keyword],
-                        "author_matches": author_matches,
-                        "repo_matches": repo_matches,
-                        "metric_name": "mentions/24h",
-                        "metric_value": metric_value,
-                        "metric_delta": metric_delta,
-                        "score": score,
-                        "published_at": row["latest_published_at"],
-                        "payload": {
-                            "subreddits": subreddits,
-                            "top_post": top_entry,
-                            "entries": row["entries"][:5],
-                            "score_breakdown": breakdown,
-                        },
-                    }
-                )
+            keyword = row["keyword"]
+            entry_titles = [entry["title"] for entry in row["entries"]]
+            author_matches = _find_matches(profile.scholar_names, entry_titles)
+            repo_matches = _find_matches(profile.watch_repos, entry_titles)
+            external_id = f"reddit:keyword:{_slugify(keyword)}"
+            previous = self._store.get_event(user_id=user_id, external_id=external_id)
+            metric_value = len(row["entries"])
+            previous_value = int(previous.get("metric_value") or 0) if previous else 0
+            metric_delta = metric_value - previous_value
+            subreddits = row["subreddits"]
+            top_entry = row["entries"][0]
+            score, breakdown = _score_signal(
+                source="reddit",
+                kind="keyword_spike",
+                metric_value=metric_value,
+                metric_delta=metric_delta,
+                published_at=row["latest_published_at"],
+                keyword_hits=[keyword],
+                author_matches=author_matches,
+                repo_matches=repo_matches,
+            )
+            summary = (
+                f"24h mentions: {metric_value} across {', '.join(f'r/{name}' for name in subreddits[:3])}. "
+                f"Top post: {top_entry['title']}."
+            )
+            results.append(
+                {
+                    "external_id": external_id,
+                    "source": "reddit",
+                    "source_label": "Reddit Search",
+                    "kind": "keyword_spike",
+                    "title": f"Reddit spike: {keyword}",
+                    "summary": summary,
+                    "url": top_entry["link"],
+                    "keyword_hits": [keyword],
+                    "author_matches": author_matches,
+                    "repo_matches": repo_matches,
+                    "metric_name": "mentions/24h",
+                    "metric_value": metric_value,
+                    "metric_delta": metric_delta,
+                    "score": score,
+                    "published_at": row["latest_published_at"],
+                    "payload": {
+                        "subreddits": subreddits,
+                        "top_post": top_entry,
+                        "entries": row["entries"][:5],
+                        "score_breakdown": breakdown,
+                    },
+                }
+            )
         return results
 
     def _collect_reddit_comment_events(
@@ -414,19 +406,17 @@ class IntelligenceRadarService:
         if not profile.watch_repos:
             return results
 
-        max_workers = min(4, max(1, len(profile.watch_repos) * 2))
         tasks = []
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            for repo in profile.watch_repos[:4]:
-                tasks.append((repo, "commits", executor.submit(self._fetch_github_feed, repo, "commits")))
-                tasks.append((repo, "releases", executor.submit(self._fetch_github_feed, repo, "releases")))
+        grouped: Dict[str, Dict[str, Any]] = {}
+        for repo in profile.watch_repos[:4]:
+            tasks.append((repo, "commits"))
+            tasks.append((repo, "releases"))
 
-            grouped: Dict[str, Dict[str, Any]] = {}
-            for repo, feed_type, future in tasks:
-                try:
-                    grouped.setdefault(repo, {})[feed_type] = future.result()
-                except Exception:
-                    grouped.setdefault(repo, {})[feed_type] = []
+        for repo, feed_type in tasks:
+            try:
+                grouped.setdefault(repo, {})[feed_type] = self._fetch_github_feed(repo, feed_type)
+            except Exception:
+                grouped.setdefault(repo, {})[feed_type] = []
 
         for repo, payload in grouped.items():
             commits = payload.get("commits") or []
@@ -592,27 +582,25 @@ class IntelligenceRadarService:
         profile: RadarProfile,
     ) -> List[Dict[str, Any]]:
         aggregated: Dict[str, Dict[str, Any]] = {}
-        max_workers = min(4, max(1, len(profile.keywords)))
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            future_map = {
-                executor.submit(self._hf_daily.search, query=keyword, max_results=2, page_size=50, max_pages=1): keyword
-                for keyword in profile.keywords[:4]
-            }
-            for future in as_completed(future_map):
-                keyword = future_map[future]
-                try:
-                    records = future.result()
-                except Exception:
-                    records = []
-                for record in records:
-                    bucket = aggregated.setdefault(
-                        record.paper_id,
-                        {
-                            "record": record,
-                            "keyword_hits": [],
-                        },
-                    )
-                    bucket["keyword_hits"].append(keyword)
+        for keyword in profile.keywords[:4]:
+            try:
+                records = self._hf_daily.search(
+                    query=keyword,
+                    max_results=2,
+                    page_size=50,
+                    max_pages=1,
+                )
+            except Exception:
+                records = []
+            for record in records:
+                bucket = aggregated.setdefault(
+                    record.paper_id,
+                    {
+                        "record": record,
+                        "keyword_hits": [],
+                    },
+                )
+                bucket["keyword_hits"].append(keyword)
 
         results: List[Dict[str, Any]] = []
         for paper_id, payload in aggregated.items():
@@ -676,68 +664,61 @@ class IntelligenceRadarService:
         if not self._x_client.enabled:
             return results
 
-        max_workers = min(4, max(1, len(profile.keywords)))
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            future_map = {
-                executor.submit(self._x_client.search_recent, keyword, 10): keyword
-                for keyword in profile.keywords[:4]
-            }
-            for future in as_completed(future_map):
-                keyword = future_map[future]
-                try:
-                    tweets = future.result()
-                except Exception:
-                    tweets = []
-                if not tweets:
-                    continue
+        for keyword in profile.keywords[:4]:
+            try:
+                tweets = self._x_client.search_recent(keyword, 10)
+            except Exception:
+                tweets = []
+            if not tweets:
+                continue
 
-                texts = [
-                    f"{tweet.get('text') or ''}\n{tweet.get('author_name') or ''}\n{tweet.get('username') or ''}"
-                    for tweet in tweets
-                ]
-                author_matches = _find_matches(profile.scholar_names, texts)
-                repo_matches = _find_matches(profile.watch_repos, texts)
-                external_id = f"twitter_x:keyword:{_slugify(keyword)}"
-                previous = self._store.get_event(user_id=user_id, external_id=external_id)
-                metric_value = len(tweets)
-                previous_value = int(previous.get("metric_value") or 0) if previous else 0
-                metric_delta = metric_value - previous_value
-                latest = tweets[0]
-                score, breakdown = _score_signal(
-                    source="twitter_x",
-                    kind="keyword_spike",
-                    metric_value=metric_value,
-                    metric_delta=metric_delta,
-                    published_at=latest.get("created_at"),
-                    keyword_hits=[keyword],
-                    author_matches=author_matches,
-                    repo_matches=repo_matches,
-                )
-                results.append(
-                    {
-                        "external_id": external_id,
-                        "source": "twitter_x",
-                        "source_label": "X Recent Search",
-                        "kind": "keyword_spike",
-                        "title": f"X spike: {keyword}",
-                        "summary": (
-                            f"24h posts: {metric_value}. "
-                            f"Top post by @{latest.get('username') or 'unknown'}: "
-                            f"{_truncate_text(latest.get('text') or '', limit=110)}"
-                        ),
-                        "url": latest.get("url") or "",
-                        "author_name": latest.get("author_name") or "",
-                        "keyword_hits": [keyword],
-                        "author_matches": author_matches,
-                        "repo_matches": repo_matches,
-                        "metric_name": "posts/24h",
-                        "metric_value": metric_value,
-                        "metric_delta": metric_delta,
-                        "score": score,
-                        "published_at": latest.get("created_at"),
-                        "payload": {"posts": tweets[:6], "score_breakdown": breakdown},
-                    }
-                )
+            texts = [
+                f"{tweet.get('text') or ''}\n{tweet.get('author_name') or ''}\n{tweet.get('username') or ''}"
+                for tweet in tweets
+            ]
+            author_matches = _find_matches(profile.scholar_names, texts)
+            repo_matches = _find_matches(profile.watch_repos, texts)
+            external_id = f"twitter_x:keyword:{_slugify(keyword)}"
+            previous = self._store.get_event(user_id=user_id, external_id=external_id)
+            metric_value = len(tweets)
+            previous_value = int(previous.get("metric_value") or 0) if previous else 0
+            metric_delta = metric_value - previous_value
+            latest = tweets[0]
+            score, breakdown = _score_signal(
+                source="twitter_x",
+                kind="keyword_spike",
+                metric_value=metric_value,
+                metric_delta=metric_delta,
+                published_at=latest.get("created_at"),
+                keyword_hits=[keyword],
+                author_matches=author_matches,
+                repo_matches=repo_matches,
+            )
+            results.append(
+                {
+                    "external_id": external_id,
+                    "source": "twitter_x",
+                    "source_label": "X Recent Search",
+                    "kind": "keyword_spike",
+                    "title": f"X spike: {keyword}",
+                    "summary": (
+                        f"24h posts: {metric_value}. "
+                        f"Top post by @{latest.get('username') or 'unknown'}: "
+                        f"{_truncate_text(latest.get('text') or '', limit=110)}"
+                    ),
+                    "url": latest.get("url") or "",
+                    "author_name": latest.get("author_name") or "",
+                    "keyword_hits": [keyword],
+                    "author_matches": author_matches,
+                    "repo_matches": repo_matches,
+                    "metric_name": "posts/24h",
+                    "metric_value": metric_value,
+                    "metric_delta": metric_delta,
+                    "score": score,
+                    "published_at": latest.get("created_at"),
+                    "payload": {"posts": tweets[:6], "score_breakdown": breakdown},
+                }
+            )
         return results
 
     def _fetch_reddit_keyword_summary(
