@@ -16,11 +16,16 @@ class WorkflowMetricPort(Protocol):
         stage: str = "",
         status: str = "completed",
         track_id: Optional[int] = None,
-        coverage: Optional[float] = None,
-        latency_ms: Optional[int] = None,
-        detail_json: Optional[str] = None,
-    ) -> None: ...
+        claim_count: int = 0,
+        evidence_count: int = 0,
+        elapsed_ms: float = 0.0,
+        detail: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]: ...
 
     def summarize(
-        self, *, days: int = 7, workflow: Optional[str] = None
+        self,
+        *,
+        days: int = 7,
+        workflow: Optional[str] = None,
+        track_id: Optional[int] = None,
     ) -> Dict[str, Any]: ...

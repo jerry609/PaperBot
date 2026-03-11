@@ -14,7 +14,7 @@ class ModelEndpointPort(Protocol):
     ) -> List[Dict[str, Any]]: ...
 
     def get_endpoint(
-        self, endpoint_id: int, include_secrets: bool = False
+        self, endpoint_id: int, *, include_secrets: bool = False
     ) -> Optional[Dict[str, Any]]: ...
 
     def upsert_endpoint(

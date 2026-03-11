@@ -17,9 +17,8 @@ class LLMUsagePort(Protocol):
         model_name: str,
         prompt_tokens: int,
         completion_tokens: int,
-        total_cost: float = 0.0,
-    ) -> None: ...
-
-    def summarize(
-        self, *, days: int = 7, task_type: Optional[str] = None
+        estimated_cost_usd: float,
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]: ...
+
+    def summarize(self, *, days: int = 7) -> Dict[str, Any]: ...

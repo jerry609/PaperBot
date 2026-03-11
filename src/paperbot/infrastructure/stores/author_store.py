@@ -113,6 +113,27 @@ class AuthorStore(AuthorPort):
             session.refresh(row)
             return self._author_to_dict(row)
 
+    def get_author(self, author_id: int) -> Optional[dict[str, Any]]:
+        with self._provider.session() as session:
+            row = session.execute(
+                select(AuthorModel).where(AuthorModel.id == int(author_id)).limit(1)
+            ).scalar_one_or_none()
+            return self._author_to_dict(row) if row else None
+
+    def list_authors(self, *, limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
+        with self._provider.session() as session:
+            rows = (
+                session.execute(
+                    select(AuthorModel)
+                    .order_by(func.lower(AuthorModel.name), AuthorModel.id)
+                    .offset(max(0, int(offset)))
+                    .limit(max(1, int(limit)))
+                )
+                .scalars()
+                .all()
+            )
+            return [self._author_to_dict(row) for row in rows]
+
     def replace_paper_authors(
         self, *, paper_id: int, authors: Iterable[Any]
     ) -> list[dict[str, Any]]:
