@@ -3,9 +3,9 @@ Studio Chat API Route - Claude CLI Integration for DeepStudio
 
 Spawns Claude CLI as a subprocess and streams responses.
 Supports three modes like CodePilot:
-- Code: Can edit files, run commands (permissionMode: acceptEdits)
-- Plan: Planning only, no execution (permissionMode: plan)
-- Ask: Text-only conversation, no tools (permissionMode: default)
+- Code: execution-capable only when explicitly enabled by env
+- Plan: planning only, no execution
+- Ask: text-only conversation, no tools
 """
 
 import asyncio
@@ -69,11 +69,23 @@ def find_claude_cli() -> Optional[str]:
     return None
 
 
+def is_code_mode_enabled() -> bool:
+    raw = os.getenv("PAPERBOT_STUDIO_ENABLE_CODE_MODE", "").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
+def resolve_execution_mode(mode: Mode) -> Mode:
+    if mode == "Code" and not is_code_mode_enabled():
+        return "Plan"
+    return mode
+
+
 def get_mode_flags(mode: Mode) -> List[str]:
     """Map mode to Claude CLI permission flags."""
-    if mode == "Code":
+    effective_mode = resolve_execution_mode(mode)
+    if effective_mode == "Code":
         return ["--permission-mode", "acceptEdits"]
-    if mode == "Plan":
+    if effective_mode == "Plan":
         return ["--permission-mode", "plan"]
     return []
 
@@ -451,17 +463,20 @@ async def stream_claude_cli(request: StudioChatRequest) -> AsyncGenerator[Stream
     model_id = get_model_id(request.model, for_cli=True)
     cmd.extend(["--model", model_id])
 
+    effective_mode = resolve_execution_mode(request.mode)
     cmd.extend(get_mode_flags(request.mode))
 
-    prompt = build_prompt_with_context(request.message, request.paper, request.mode)
+    prompt = build_prompt_with_context(request.message, request.paper, effective_mode)
     cmd.extend(["-p", prompt, "--output-format", "stream-json", "--verbose"])
 
     yield StreamEvent(
         type="progress",
         data={
             "phase": "Starting",
-            "message": f"[{request.mode}] Connecting to Claude CLI...",
+            "message": f"[{effective_mode}] Connecting to Claude CLI...",
             "model": request.model,
+            "mode": effective_mode,
+            "requested_mode": request.mode,
         }
     )
 
@@ -513,7 +528,11 @@ async def stream_claude_cli(request: StudioChatRequest) -> AsyncGenerator[Stream
             except asyncio.TimeoutError:
                 yield StreamEvent(
                     type="progress",
-                    data={"keepalive": True, "mode": request.mode},
+                    data={
+                        "keepalive": True,
+                        "mode": effective_mode,
+                        "requested_mode": request.mode,
+                    },
                 )
                 continue
 
@@ -569,10 +588,16 @@ async def stream_claude_cli(request: StudioChatRequest) -> AsyncGenerator[Stream
 
 async def stream_anthropic_api(request: StudioChatRequest) -> AsyncGenerator[StreamEvent, None]:
     """Fallback: Stream response using Anthropic API directly."""
+    effective_mode = resolve_execution_mode(request.mode)
 
     yield StreamEvent(
         type="progress",
-        data={"phase": "Processing", "message": f"[{request.mode}] Thinking..."},
+        data={
+            "phase": "Processing",
+            "message": f"[{effective_mode}] Thinking...",
+            "mode": effective_mode,
+            "requested_mode": request.mode,
+        },
     )
 
     try:
@@ -591,9 +616,9 @@ async def stream_anthropic_api(request: StudioChatRequest) -> AsyncGenerator[Str
         )
 
         # Build system prompt based on mode
-        if request.mode == "Code":
+        if effective_mode == "Code":
             system = "You are an expert AI coding assistant. Generate high-quality, well-documented code. Include type hints and docstrings. Wrap code in appropriate markdown code blocks."
-        elif request.mode == "Plan":
+        elif effective_mode == "Plan":
             system = "You are a research implementation architect. Create detailed implementation plans WITHOUT generating actual code. Focus on architecture, components, and step-by-step planning."
         else:
             system = "You are a helpful research assistant. Answer questions clearly and concisely."
@@ -619,7 +644,8 @@ async def stream_anthropic_api(request: StudioChatRequest) -> AsyncGenerator[Str
                     data={
                         "delta": chunk.delta,
                         "content": full_content,
-                        "mode": request.mode,
+                        "mode": effective_mode,
+                        "requested_mode": request.mode,
                     }
                 )
 
@@ -627,7 +653,8 @@ async def stream_anthropic_api(request: StudioChatRequest) -> AsyncGenerator[Str
             type="result",
             data={
                 "content": full_content,
-                "mode": request.mode,
+                "mode": effective_mode,
+                "requested_mode": request.mode,
                 "model": request.model,
             }
         )
@@ -665,7 +692,7 @@ async def studio_chat(request: StudioChatRequest):
     Interactive chat for DeepStudio with Claude CLI integration.
 
     Modes:
-    - Code: Generate/modify code (full tool access)
+    - Code: Generate/modify code only when PAPERBOT_STUDIO_ENABLE_CODE_MODE is enabled
     - Plan: Create implementation plans (no execution)
     - Ask: Answer questions (no tools)
 

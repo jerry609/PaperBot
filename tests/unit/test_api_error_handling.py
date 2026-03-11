@@ -82,6 +82,26 @@ async def test_request_size_limit_rejects_large_payloads(monkeypatch):
     assert payload["trace_id"]
 
 
+@pytest.mark.asyncio
+async def test_request_size_limit_preserves_body_for_downstream_handlers(monkeypatch):
+    monkeypatch.setenv("PAPERBOT_MAX_REQUEST_BYTES", "128")
+    app = _make_guarded_app()
+
+    @app.post("/echo")
+    async def echo(payload: dict):
+        return payload
+
+    response = await _request(
+        app,
+        "POST",
+        "/echo",
+        json={"message": "small"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"message": "small"}
+
+
 def test_chat_request_trims_history_to_recent_entries(monkeypatch):
     monkeypatch.setenv("PAPERBOT_CHAT_MAX_HISTORY", "3")
     request = ChatRequest(

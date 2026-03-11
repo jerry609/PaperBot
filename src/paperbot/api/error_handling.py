@@ -128,7 +128,16 @@ class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
                 detail=f"Request body too large (max {max_request_bytes} bytes)",
             )
 
-        return await call_next(request)
+        body_sent = False
+
+        async def receive() -> Dict[str, Any]:
+            nonlocal body_sent
+            if body_sent:
+                return {"type": "http.request", "body": b"", "more_body": False}
+            body_sent = True
+            return {"type": "http.request", "body": body, "more_body": False}
+
+        return await call_next(Request(request.scope, receive))
 
 
 def register_exception_handlers(app: FastAPI) -> None:

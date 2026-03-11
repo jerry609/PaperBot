@@ -31,10 +31,16 @@ def _make_secured_app() -> FastAPI:
     return app
 
 
-def test_code_mode_uses_safe_permission_mode():
+def test_code_mode_defaults_to_plan_without_explicit_opt_in(monkeypatch):
+    monkeypatch.delenv("PAPERBOT_STUDIO_ENABLE_CODE_MODE", raising=False)
+    flags = get_mode_flags("Code")
+    assert flags == ["--permission-mode", "plan"]
+
+
+def test_code_mode_accepts_edits_only_when_explicitly_enabled(monkeypatch):
+    monkeypatch.setenv("PAPERBOT_STUDIO_ENABLE_CODE_MODE", "true")
     flags = get_mode_flags("Code")
     assert flags == ["--permission-mode", "acceptEdits"]
-    assert "--dangerously-skip-permissions" not in flags
 
 
 async def _request(app: FastAPI, method: str, path: str, **kwargs) -> httpx.Response:
