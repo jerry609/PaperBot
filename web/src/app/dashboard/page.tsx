@@ -11,7 +11,7 @@ import {
   type LucideIcon,
 } from "lucide-react"
 
-import TopicWorkflowDashboard from "@/components/research/TopicWorkflowDashboard"
+import WorkflowDockCard from "@/components/dashboard/WorkflowDockCard"
 import { fetchDeadlineRadar, fetchLLMUsage, fetchPapers, fetchPipelineTasks } from "@/lib/api"
 import {
   buildDashboardIntelligenceCards,
@@ -1056,16 +1056,13 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
                 </div>
               </article>
 
-              <TopicWorkflowDashboard
+              <WorkflowDockCard
                 initialQueries={initialQueries}
-                compact
-                dashboardContext={{
-                  activeTrackName: activeTrack?.name ?? null,
-                  activeTrackHref: activeTrack ? `/research?track_id=${activeTrack.id}` : "/research",
-                  readingQueueCount: readingQueue.length,
-                  urgentDeadlineCount: urgentDeadlines.length,
-                  signalCount,
-                }}
+                activeTrackName={activeTrack?.name ?? null}
+                activeTrackHref={activeTrack ? `/research?track_id=${activeTrack.id}` : "/research"}
+                readingQueueCount={readingQueue.length}
+                urgentDeadlineCount={urgentDeadlines.length}
+                signalCount={signalCount}
               />
             </div>
 
