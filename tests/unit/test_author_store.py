@@ -48,3 +48,19 @@ def test_replace_and_get_paper_authors(tmp_path: Path):
 
     reloaded = author_store.get_paper_authors(paper_id=int(paper["id"]))
     assert [row["name"] for row in reloaded] == ["Ashish Vaswani", "Noam Shazeer"]
+
+
+def test_get_author_and_list_authors_return_persisted_rows(tmp_path: Path):
+    db_url = f"sqlite:///{tmp_path / 'author-read.db'}"
+    store = AuthorStore(db_url=db_url)
+
+    bengio = store.upsert_author(name="Yoshua Bengio")
+    lecun = store.upsert_author(name="Yann LeCun")
+
+    loaded = store.get_author(int(bengio["id"]))
+    assert loaded is not None
+    assert loaded["name"] == "Yoshua Bengio"
+
+    authors = store.list_authors(limit=10, offset=0)
+    assert [row["name"] for row in authors] == ["Yann LeCun", "Yoshua Bengio"]
+    assert {int(row["id"]) for row in authors} == {int(bengio["id"]), int(lecun["id"])}

@@ -156,8 +156,6 @@ def test_anchor_service_discovers_and_scores_authors(tmp_path: Path):
 
 def test_anchor_service_raises_for_unknown_track(tmp_path: Path):
     db_url = f"sqlite:///{tmp_path / 'anchor-track-missing.db'}"
-    provider = SessionProvider(db_url)
-    Base.metadata.create_all(provider.engine)
     service = AnchorService(db_url=db_url)
     with pytest.raises(ValueError, match="track not found"):
         service.discover(track_id=999, user_id="default")

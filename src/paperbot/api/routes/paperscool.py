@@ -46,8 +46,15 @@ from paperbot.utils.text_processing import extract_github_url
 
 router = APIRouter()
 _paper_search_service: Optional[PaperSearchService] = None
-_pipeline_session_store = PipelineSessionStore()
+_pipeline_session_store: Optional[PipelineSessionStore] = None
 _workflow_metric_store: Optional[WorkflowMetricStore] = None
+
+
+def _get_pipeline_session_store() -> PipelineSessionStore:
+    global _pipeline_session_store
+    if _pipeline_session_store is None:
+        _pipeline_session_store = PipelineSessionStore()
+    return _pipeline_session_store
 # Test compatibility hook: unit tests can monkeypatch this to inject a fake workflow.
 PapersCoolTopicSearchWorkflow = None
 
@@ -256,7 +263,7 @@ async def _dailypaper_stream(req: DailyPaperRequest):
     phase_start = started
     metric_store = _get_workflow_metric_store()
 
-    session = _pipeline_session_store.start_session(
+    session = _get_pipeline_session_store().start_session(
         workflow="paperscool_daily",
         payload=req.model_dump(),
         session_id=req.session_id,
@@ -336,7 +343,7 @@ async def _dailypaper_stream(req: DailyPaperRequest):
             show_per_branch=req.show_per_branch,
             min_score=req.min_score,
         )
-        _pipeline_session_store.save_checkpoint(
+        _get_pipeline_session_store().save_checkpoint(
             session_id=session_id,
             checkpoint="search_done",
             state={"search_result": search_result},
@@ -367,7 +374,7 @@ async def _dailypaper_stream(req: DailyPaperRequest):
         report = build_daily_paper_report(
             search_result=search_result, title=req.title, top_n=req.top_n
         )
-        _pipeline_session_store.save_checkpoint(
+        _get_pipeline_session_store().save_checkpoint(
             session_id=session_id,
             checkpoint="report_built",
             state={"search_result": search_result, "report": report},
@@ -629,7 +636,7 @@ async def _dailypaper_stream(req: DailyPaperRequest):
             },
         )
 
-    _pipeline_session_store.save_checkpoint(
+    _get_pipeline_session_store().save_checkpoint(
         session_id=session_id,
         checkpoint="enriched",
         state={"search_result": search_result, "report": report},
@@ -650,7 +657,7 @@ async def _dailypaper_stream(req: DailyPaperRequest):
             "resumed": False,
             "approval_status": "pending_approval",
         }
-        _pipeline_session_store.update_status(
+        _get_pipeline_session_store().update_status(
             session_id=session_id,
             status="pending_approval",
             checkpoint="approval_pending",
@@ -739,7 +746,7 @@ async def _dailypaper_stream(req: DailyPaperRequest):
         "resumed": False,
         "approval_status": "approved",
     }
-    _pipeline_session_store.save_result(
+    _get_pipeline_session_store().save_result(
         session_id=session_id, result=result_payload, status="completed"
     )
 
@@ -809,7 +816,7 @@ async def generate_daily_report(req: DailyPaperRequest):
 
 @router.get("/research/paperscool/sessions/{session_id}", response_model=PipelineSessionResponse)
 async def get_daily_session(session_id: str):
-    session = _pipeline_session_store.get_session(session_id)
+    session = _get_pipeline_session_store().get_session(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="session not found")
     return PipelineSessionResponse(session=session)
@@ -817,7 +824,7 @@ async def get_daily_session(session_id: str):
 
 @router.get("/research/paperscool/approvals", response_model=ApprovalQueueResponse)
 async def list_pending_approvals(limit: int = 20):
-    rows = _pipeline_session_store.list_sessions(
+    rows = _get_pipeline_session_store().list_sessions(
         workflow="paperscool_daily",
         status="pending_approval",
         limit=max(1, min(int(limit), 200)),
@@ -912,7 +919,7 @@ def _finalize_approved_session(session: Dict[str, Any]) -> Dict[str, Any]:
     "/research/paperscool/sessions/{session_id}/approve", response_model=PipelineSessionResponse
 )
 async def approve_daily_session(session_id: str):
-    session = _pipeline_session_store.get_session(session_id)
+    session = _get_pipeline_session_store().get_session(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="session not found")
     if session.get("status") != "pending_approval":
@@ -920,7 +927,7 @@ async def approve_daily_session(session_id: str):
 
     final_payload = _finalize_approved_session(session)
     claims, evidences = _count_report_claims_and_evidence(final_payload.get("report") or {})
-    _pipeline_session_store.update_status(
+    _get_pipeline_session_store().update_status(
         session_id=session_id,
         status="completed",
         checkpoint="result",
@@ -935,7 +942,7 @@ async def approve_daily_session(session_id: str):
         evidence_count=evidences,
         detail={"session_id": session_id, "mode": "approval"},
     )
-    updated = _pipeline_session_store.get_session(session_id)
+    updated = _get_pipeline_session_store().get_session(session_id)
     return PipelineSessionResponse(session=updated or {})
 
 
@@ -943,7 +950,7 @@ async def approve_daily_session(session_id: str):
     "/research/paperscool/sessions/{session_id}/reject", response_model=PipelineSessionResponse
 )
 async def reject_daily_session(session_id: str, req: ApprovalDecisionRequest):
-    session = _pipeline_session_store.get_session(session_id)
+    session = _get_pipeline_session_store().get_session(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="session not found")
     if session.get("status") != "pending_approval":
@@ -957,7 +964,7 @@ async def reject_daily_session(session_id: str, req: ApprovalDecisionRequest):
         "rejected_reason": req.reason or "",
     }
 
-    _pipeline_session_store.update_status(
+    _get_pipeline_session_store().update_status(
         session_id=session_id,
         status="rejected",
         checkpoint="approval_rejected",
@@ -970,7 +977,7 @@ async def reject_daily_session(session_id: str, req: ApprovalDecisionRequest):
         status="rejected",
         detail={"session_id": session_id, "reason": req.reason or ""},
     )
-    updated = _pipeline_session_store.get_session(session_id)
+    updated = _get_pipeline_session_store().get_session(session_id)
     return PipelineSessionResponse(session=updated or {})
 
 

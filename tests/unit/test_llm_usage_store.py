@@ -6,7 +6,7 @@ from paperbot.infrastructure.stores.llm_usage_store import LLMUsageStore
 
 
 def test_llm_usage_store_records_and_summarizes(tmp_path: Path):
-    db_url = f"sqlite:///{tmp_path / llm-usage.db}"
+    db_url = f"sqlite:///{tmp_path / 'llm-usage.db'}"
     store = LLMUsageStore(db_url=db_url)
 
     store.record_usage(

@@ -11,6 +11,7 @@ from sqlalchemy import and_, desc, func, or_, select
 
 from paperbot.infrastructure.stores.models import (
     AuthorModel,
+    Base,
     PaperAuthorModel,
     PaperFeedbackModel,
     PaperModel,
@@ -124,8 +125,14 @@ def _collapse_effective_feedback_actions(rows: list[PaperFeedbackModel]) -> list
 class AnchorService:
     """Discover anchor authors with intrinsic + relevance + network scoring."""
 
-    def __init__(self, db_url: Optional[str] = None):
-        self._provider = SessionProvider(db_url or get_db_url())
+    def __init__(
+        self,
+        db_url: Optional[str] = None,
+        *,
+        provider: Optional[SessionProvider] = None,
+    ):
+        self._provider = provider or SessionProvider(db_url or get_db_url())
+        self._provider.ensure_tables(Base.metadata)
 
     def discover(
         self,

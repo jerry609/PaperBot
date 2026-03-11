@@ -13,7 +13,14 @@ from paperbot.memory.schema import MemoryCandidate
 from paperbot.memory.eval.collector import MemoryMetricCollector
 router = APIRouter()
 
-_store = SqlAlchemyMemoryStore()
+_store: Optional[SqlAlchemyMemoryStore] = None
+
+
+def _get_store() -> SqlAlchemyMemoryStore:
+    global _store
+    if _store is None:
+        _store = SqlAlchemyMemoryStore()
+    return _store
 
 
 def _sha256_bytes(data: bytes) -> str:
@@ -64,7 +71,7 @@ async def ingest_memory(
     effective_platform = platform or parsed.platform or "unknown"
     candidates = extract_memories(parsed.messages, use_llm=use_llm, redact=redact, language_hint=language_hint)
 
-    src = _store.upsert_source(
+    src = _get_store().upsert_source(
         user_id=user_id,
         platform=effective_platform,
         filename=filename,
@@ -74,7 +81,7 @@ async def ingest_memory(
         metadata={**parsed.metadata, "parsed_platform": parsed.platform},
     )
 
-    created, skipped, _ = _store.add_memories(
+    created, skipped, _ = _get_store().add_memories(
         user_id=user_id,
         workspace_id=workspace_id,
         memories=candidates,
@@ -122,7 +129,7 @@ def list_memories(
     include_pending: bool = False,
     include_deleted: bool = False,
 ):
-    items = _store.list_memories(
+    items = _get_store().list_memories(
         user_id=user_id,
         limit=limit,
         kind=kind,
@@ -168,13 +175,13 @@ class ContextResponse(BaseModel):
 
 @router.post("/memory/context", response_model=ContextResponse)
 def memory_context(req: ContextRequest):
-    items = _store.search_memories(
+    items = _get_store().search_memories(
         user_id=req.user_id,
         workspace_id=req.workspace_id,
         query=req.query,
         limit=req.limit,
     )
-    _store.touch_usage(item_ids=[int(i["id"]) for i in items if i.get("id")], actor_id=req.actor_id)
+    _get_store().touch_usage(item_ids=[int(i["id"]) for i in items if i.get("id")], actor_id=req.actor_id)
     cands = [
         MemoryCandidate(
             kind=i.get("kind") or "fact",  # type: ignore[arg-type]
@@ -221,7 +228,7 @@ class MemoryItemUpdateRequest(BaseModel):
 
 @router.patch("/memory/items/{item_id}", response_model=MemoryItemOut)
 def update_memory_item(user_id: str, item_id: int, body: MemoryItemUpdateRequest):
-    updated = _store.update_item(
+    updated = _get_store().update_item(
         user_id=user_id,
         item_id=item_id,
         actor_id=body.actor_id,
@@ -257,9 +264,9 @@ def delete_memory_item(
     hard: bool = False,
 ):
     if hard:
-        ok = _store.hard_delete_item(user_id=user_id, item_id=item_id, actor_id=actor_id)
+        ok = _get_store().hard_delete_item(user_id=user_id, item_id=item_id, actor_id=actor_id)
     else:
-        ok = _store.soft_delete_item(user_id=user_id, item_id=item_id, actor_id=actor_id, reason=reason)
+        ok = _get_store().soft_delete_item(user_id=user_id, item_id=item_id, actor_id=actor_id, reason=reason)
     if not ok:
         raise HTTPException(status_code=404, detail="memory item not found")
     return {"status": "ok"}

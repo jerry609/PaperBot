@@ -10,13 +10,14 @@ from sqlalchemy import select, func
 
 from paperbot.infrastructure.stores.models import ReproContextPackModel, ReproContextStageResultModel
 from paperbot.infrastructure.stores.sqlalchemy_db import SessionProvider
+from paperbot.application.ports.repro_context_port import ReproContextPort
 
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-class SqlAlchemyReproContextStore:
+class SqlAlchemyReproContextStore(ReproContextPort):
     """SQLAlchemy implementation of ReproContextPort."""
 
     def __init__(self, db_url: Optional[str] = None):

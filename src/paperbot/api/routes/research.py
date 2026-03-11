@@ -59,8 +59,6 @@ def _get_track_router() -> TrackRouter:
             memory_store=_get_memory_store(),
         )
     return _track_router
-
-
 ENABLE_ANCHOR_AUTHORS = os.getenv("PAPERBOT_ENABLE_ANCHOR_AUTHORS", "true").lower() == "true"
 
 _DISCOVERY_STOPWORDS: Set[str] = {

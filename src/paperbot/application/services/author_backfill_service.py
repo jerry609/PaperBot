@@ -42,9 +42,10 @@ def run_author_backfill(
     db_url: Optional[str] = None,
     limit: Optional[int] = None,
     paper_id: Optional[int] = None,
+    provider: Optional[SessionProvider] = None,
 ) -> dict[str, int]:
     url = db_url or get_db_url()
-    provider = SessionProvider(url)
+    provider = provider or SessionProvider(url)
     author_store = AuthorStore(db_url=url)
 
     with provider.session() as session:
