@@ -71,29 +71,33 @@ def test_saved_papers_rank_higher_than_skipped(tmp_path: Path):
         )
 
         # Add "save" feedback for saved_pid
-        session.add(PaperFeedbackModel(
-            user_id=user_id,
-            track_id=track_id,
-            paper_id=str(saved_pid),
-            paper_ref_id=saved_pid,
-            canonical_paper_id=saved_pid,
-            action="save",
-            weight=0.0,
-            ts=now,
-            metadata_json="{}",
-        ))
+        session.add(
+            PaperFeedbackModel(
+                user_id=user_id,
+                track_id=track_id,
+                paper_id=str(saved_pid),
+                paper_ref_id=saved_pid,
+                canonical_paper_id=saved_pid,
+                action="save",
+                weight=0.0,
+                ts=now,
+                metadata_json="{}",
+            )
+        )
         # Add "skip" feedback for skipped_pid
-        session.add(PaperFeedbackModel(
-            user_id=user_id,
-            track_id=track_id,
-            paper_id=str(skipped_pid),
-            paper_ref_id=skipped_pid,
-            canonical_paper_id=skipped_pid,
-            action="skip",
-            weight=0.0,
-            ts=now,
-            metadata_json="{}",
-        ))
+        session.add(
+            PaperFeedbackModel(
+                user_id=user_id,
+                track_id=track_id,
+                paper_id=str(skipped_pid),
+                paper_ref_id=skipped_pid,
+                canonical_paper_id=skipped_pid,
+                action="skip",
+                weight=0.0,
+                ts=now,
+                metadata_json="{}",
+            )
+        )
         session.commit()
 
     result = store.list_track_feed(user_id=user_id, track_id=track_id, limit=10, offset=0)
@@ -113,3 +117,112 @@ def test_saved_papers_rank_higher_than_skipped(tmp_path: Path):
         f"Saved paper score ({scores_by_pid[saved_pid]}) should be higher "
         f"than skipped paper score ({scores_by_pid[skipped_pid]})"
     )
+
+
+def test_track_feed_restores_saved_state_after_preference_is_cleared(tmp_path: Path):
+    """Clearing a preference should preserve an independent save state."""
+    db_url = f"sqlite:///{tmp_path / 'feed-effective-state.db'}"
+    store = SqlAlchemyResearchStore(db_url=db_url)
+
+    user_id = "test-user"
+    track = store.create_track(
+        user_id=user_id,
+        name="ML Research",
+        keywords=["machine learning"],
+        activate=True,
+    )
+    track_id = int(track["id"])
+
+    with store._provider.session() as session:
+        paper_id = _insert_paper(
+            session,
+            title="Effective Feedback State Paper",
+            keywords=["machine learning", "optimization"],
+        )
+        session.commit()
+
+    store.add_paper_feedback(
+        user_id=user_id,
+        track_id=track_id,
+        paper_id=str(paper_id),
+        action="save",
+    )
+    store.add_paper_feedback(
+        user_id=user_id,
+        track_id=track_id,
+        paper_id=str(paper_id),
+        action="like",
+    )
+    store.add_paper_feedback(
+        user_id=user_id,
+        track_id=track_id,
+        paper_id=str(paper_id),
+        action="unlike",
+    )
+
+    result = store.list_track_feed(user_id=user_id, track_id=track_id, limit=10, offset=0)
+    item = next(row for row in result["items"] if int(row["paper"]["id"]) == paper_id)
+
+    assert item["is_saved"] is True
+    assert item["is_liked"] is False
+    assert item["is_disliked"] is False
+    assert item["latest_feedback_action"] == "save"
+
+
+def test_track_feed_keeps_save_and_like_as_independent_flags(tmp_path: Path):
+    db_url = f"sqlite:///{tmp_path / 'feed-flags.db'}"
+    store = SqlAlchemyResearchStore(db_url=db_url)
+
+    user_id = "stateful-user"
+    track = store.create_track(
+        user_id=user_id,
+        name="Agents",
+        keywords=["agent"],
+        activate=True,
+    )
+    track_id = int(track["id"])
+
+    with store._provider.session() as session:
+        paper_id = _insert_paper(
+            session,
+            title="Agent Planning Systems",
+            keywords=["agent", "planning"],
+        )
+        session.commit()
+
+    store.add_paper_feedback(
+        user_id=user_id,
+        track_id=track_id,
+        paper_id=str(paper_id),
+        action="save",
+        metadata={"title": "Agent Planning Systems"},
+    )
+    store.add_paper_feedback(
+        user_id=user_id,
+        track_id=track_id,
+        paper_id=str(paper_id),
+        action="like",
+        metadata={"title": "Agent Planning Systems"},
+    )
+
+    first = store.list_track_feed(user_id=user_id, track_id=track_id, limit=10, offset=0)
+    item = next(row for row in first["items"] if int(row["paper"]["id"]) == paper_id)
+    assert item["is_saved"] is True
+    assert item["is_liked"] is True
+    assert item["is_disliked"] is False
+    assert item["latest_feedback_action"] == "like"
+
+    store.add_paper_feedback(
+        user_id=user_id,
+        track_id=track_id,
+        paper_id=str(paper_id),
+        action="unlike",
+        metadata={"title": "Agent Planning Systems"},
+    )
+
+    second = store.list_track_feed(user_id=user_id, track_id=track_id, limit=10, offset=0)
+    item = next(row for row in second["items"] if int(row["paper"]["id"]) == paper_id)
+    assert item["is_saved"] is True
+    assert item["is_liked"] is False
+    assert item["is_disliked"] is False
+    assert item["latest_feedback_action"] == "save"

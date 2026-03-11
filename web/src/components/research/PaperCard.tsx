@@ -3,6 +3,14 @@
 import { useEffect, useState } from "react"
 import { Check, ChevronDown, ChevronRight, ExternalLink, FlaskConical, Database, CheckCircle, AlertTriangle, Heart, Loader2, Save, ThumbsDown } from "lucide-react"
 
+import {
+  normalizePaperPreferenceAction,
+  togglePaperPreferenceAction,
+  toggleSaveFeedbackAction,
+  type PaperFeedbackAction,
+  type PaperPreferenceAction,
+  type PaperFeedbackRequestAction,
+} from "@/lib/paper-feedback"
 import { cn, safeHref } from "@/lib/utils"
 import { ReasoningBlock, ToolActionsGroup } from "@/components/ai-elements"
 import { Badge } from "@/components/ui/badge"
@@ -24,6 +32,9 @@ export type Paper = {
     evidence_quotes?: Array<{ text: string; source_url?: string; page_hint?: string }>
   }
   is_saved?: boolean
+  is_liked?: boolean
+  is_disliked?: boolean
+  feedback_action?: PaperFeedbackAction | null
   retrieval_sources?: string[]
   retrieval_score?: number
   source?: string
@@ -39,30 +50,56 @@ interface PaperCardProps {
   paper: Paper
   rank?: number
   reasons?: string[]
-  onLike?: () => Promise<void> | void
-  onSave?: () => Promise<void> | void
-  onDislike?: () => Promise<void> | void
+  onFeedbackAction?: (
+    action: PaperFeedbackRequestAction
+  ) => Promise<PaperFeedbackAction | null | undefined> | PaperFeedbackAction | null | undefined
   isLoading?: boolean
   className?: string
+}
+
+function derivePreferenceAction(
+  feedbackAction: Paper["feedback_action"],
+  isLiked: Paper["is_liked"],
+  isDisliked: Paper["is_disliked"]
+): PaperPreferenceAction | null {
+  const explicitAction = normalizePaperPreferenceAction(feedbackAction)
+  if (explicitAction) {
+    return explicitAction
+  }
+  if (isLiked) {
+    return "like"
+  }
+  if (isDisliked) {
+    return "dislike"
+  }
+  return null
 }
 
 export function PaperCard({
   paper,
   rank,
   reasons,
-  onLike,
-  onSave,
-  onDislike,
+  onFeedbackAction,
   isLoading = false,
   className,
 }: PaperCardProps) {
   const [isSaved, setIsSaved] = useState(Boolean(paper.is_saved))
+  const derivedPreferenceAction = derivePreferenceAction(
+    paper.feedback_action,
+    paper.is_liked,
+    paper.is_disliked
+  )
+  const [preferenceAction, setPreferenceAction] = useState<PaperPreferenceAction | null>(
+    derivedPreferenceAction
+  )
 
   useEffect(() => {
     setIsSaved(Boolean(paper.is_saved))
-  }, [paper.is_saved])
-  const [isLiked, setIsLiked] = useState(false)
-  const [isDisliked, setIsDisliked] = useState(false)
+    setPreferenceAction(derivedPreferenceAction)
+  }, [derivedPreferenceAction, paper.is_saved])
+
+  const isLiked = preferenceAction === "like"
+  const isDisliked = preferenceAction === "dislike"
   const [actionLoading, setActionLoading] = useState<string | null>(null)
   const [evidenceOpen, setEvidenceOpen] = useState(false)
   const [cardOpen, setCardOpen] = useState(false)
@@ -77,54 +114,40 @@ export function PaperCard({
   const judgeRec = String(judge?.recommendation || "").replace(/_/g, " ")
   const evidenceQuotes = judge?.evidence_quotes || []
 
-  const handleSave = async () => {
-    if (!onSave) return
-    // Toggle local saved state; only call onSave when transitioning from unsaved -> saved.
-    if (isSaved) {
-      setIsSaved(false)
-      return
-    }
+  const runSaveAction = async () => {
+    if (!onFeedbackAction) return
+    const requestAction = toggleSaveFeedbackAction(isSaved)
     setActionLoading("save")
     try {
-      await onSave()
-      setIsSaved(true)
+      await onFeedbackAction(requestAction)
+      setIsSaved((prev) => !prev)
     } finally {
       setActionLoading(null)
     }
+  }
+
+  const runPreferenceAction = async (targetAction: PaperPreferenceAction) => {
+    if (!onFeedbackAction) return
+    const requestAction = togglePaperPreferenceAction(preferenceAction, targetAction)
+    setActionLoading(targetAction)
+    try {
+      await onFeedbackAction(requestAction)
+      setPreferenceAction(requestAction === targetAction ? targetAction : null)
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
+  const handleSave = async () => {
+    await runSaveAction()
   }
 
   const handleLike = async () => {
-    if (!onLike) return
-    // Toggle like; when turning off, only update local state.
-    if (isLiked) {
-      setIsLiked(false)
-      return
-    }
-    setActionLoading("like")
-    try {
-      await onLike()
-      setIsLiked(true)
-      setIsDisliked(false)
-    } finally {
-      setActionLoading(null)
-    }
+    await runPreferenceAction("like")
   }
 
   const handleDislike = async () => {
-    if (!onDislike) return
-    // Toggle dislike; when turning off, only update local state.
-    if (isDisliked) {
-      setIsDisliked(false)
-      return
-    }
-    setActionLoading("dislike")
-    try {
-      await onDislike()
-      setIsDisliked(true)
-      setIsLiked(false)
-    } finally {
-      setActionLoading(null)
-    }
+    await runPreferenceAction("dislike")
   }
 
   const handleToggleCard = async () => {
@@ -324,7 +347,7 @@ export function PaperCard({
         className="pt-1"
         ariaLabel="Paper actions"
         actions={[
-          ...(onSave
+          ...(onFeedbackAction
             ? [
                 {
                   id: "save",
@@ -352,7 +375,7 @@ export function PaperCard({
                 },
               ]
             : []),
-          ...(onLike
+          ...(onFeedbackAction
             ? [
                 {
                   id: "like",
@@ -370,7 +393,7 @@ export function PaperCard({
                 },
               ]
             : []),
-          ...(onDislike
+          ...(onFeedbackAction
             ? [
                 {
                   id: "dislike",

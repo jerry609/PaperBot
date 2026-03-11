@@ -26,15 +26,40 @@ from paperbot.utils.logging_config import LogFiles, Logger, set_trace_id
 
 router = APIRouter()
 
-_research_store = SqlAlchemyResearchStore()
-_memory_store = SqlAlchemyMemoryStore()
-_track_router = TrackRouter(research_store=_research_store, memory_store=_memory_store)
+_research_store: Optional[SqlAlchemyResearchStore] = None
+_memory_store: Optional[SqlAlchemyMemoryStore] = None
+_track_router: Optional[TrackRouter] = None
 _metric_collector: Optional[MemoryMetricCollector] = None
 _workflow_metric_store: Optional[WorkflowMetricStore] = None
 _paper_store: Optional["PaperStore"] = None
 _paper_search_service: Optional["PaperSearchService"] = None
 _anchor_service: Optional["AnchorService"] = None
 _subscription_service: Optional["SubscriptionService"] = None
+
+
+def _get_research_store() -> SqlAlchemyResearchStore:
+    global _research_store
+    if _research_store is None:
+        _research_store = SqlAlchemyResearchStore()
+    return _research_store
+
+
+def _get_memory_store() -> SqlAlchemyMemoryStore:
+    global _memory_store
+    if _memory_store is None:
+        _memory_store = SqlAlchemyMemoryStore()
+    return _memory_store
+
+
+def _get_track_router() -> TrackRouter:
+    global _track_router
+    if _track_router is None:
+        _track_router = TrackRouter(
+            research_store=_get_research_store(),
+            memory_store=_get_memory_store(),
+        )
+    return _track_router
+
 
 ENABLE_ANCHOR_AUTHORS = os.getenv("PAPERBOT_ENABLE_ANCHOR_AUTHORS", "true").lower() == "true"
 
@@ -208,7 +233,7 @@ def _schedule_embedding_precompute(
 
     def _run() -> None:
         try:
-            _track_router.precompute_track_embeddings(user_id=user_id, track_ids=ids)
+            _get_track_router().precompute_track_embeddings(user_id=user_id, track_ids=ids)
         except Exception:
             return
 
@@ -269,7 +294,7 @@ class TrackResponse(BaseModel):
 
 @router.post("/research/tracks", response_model=TrackResponse)
 def create_track(req: TrackCreateRequest, background_tasks: BackgroundTasks):
-    track = _research_store.create_track(
+    track = _get_research_store().create_track(
         user_id=req.user_id,
         name=req.name,
         description=req.description,
@@ -295,7 +320,7 @@ def list_tracks(
     include_archived: bool = Query(False),
     limit: int = Query(100, ge=1, le=500),
 ):
-    tracks = _research_store.list_tracks(
+    tracks = _get_research_store().list_tracks(
         user_id=user_id, include_archived=include_archived, limit=limit
     )
     return TrackListResponse(user_id=user_id, tracks=tracks)
@@ -327,7 +352,7 @@ def get_deadline_radar(
     now = datetime.now(timezone.utc)
     cutoff = now + timedelta(days=int(days))
 
-    tracks = _research_store.list_tracks(user_id=user_id, include_archived=False, limit=200)
+    tracks = _get_research_store().list_tracks(user_id=user_id, include_archived=False, limit=200)
     track_tokens: Dict[int, set[str]] = {}
     for track in tracks:
         track_id = int(track.get("id") or 0)
@@ -399,7 +424,7 @@ def get_deadline_radar(
 
 @router.get("/research/tracks/active", response_model=TrackResponse)
 def get_active_track(user_id: str = "default"):
-    track = _research_store.get_active_track(user_id=user_id)
+    track = _get_research_store().get_active_track(user_id=user_id)
     if not track:
         raise HTTPException(status_code=404, detail="No active track for user")
     return TrackResponse(track=track)
@@ -418,7 +443,9 @@ def update_track(
         raise HTTPException(status_code=400, detail="No fields to update")
 
     try:
-        track = _research_store.update_track(user_id=user_id, track_id=track_id, **update_data)
+        track = _get_research_store().update_track(
+            user_id=user_id, track_id=track_id, **update_data
+        )
     except IntegrityError:
         raise HTTPException(status_code=409, detail="Track name already exists") from None
     if not track:
@@ -429,7 +456,7 @@ def update_track(
 
 @router.post("/research/tracks/{track_id}/activate", response_model=TrackResponse)
 def activate_track(track_id: int, background_tasks: BackgroundTasks, user_id: str = "default"):
-    track = _research_store.activate_track(user_id=user_id, track_id=track_id)
+    track = _get_research_store().activate_track(user_id=user_id, track_id=track_id)
     if not track:
         raise HTTPException(status_code=404, detail="Track not found")
     _schedule_embedding_precompute(background_tasks, user_id=user_id, track_ids=[track_id])
@@ -452,7 +479,7 @@ class TaskResponse(BaseModel):
 
 @router.post("/research/tracks/{track_id}/tasks", response_model=TaskResponse)
 def add_task(track_id: int, req: TaskCreateRequest, background_tasks: BackgroundTasks):
-    task = _research_store.add_task(
+    task = _get_research_store().add_task(
         user_id=req.user_id,
         track_id=track_id,
         title=req.title,
@@ -481,7 +508,7 @@ def list_tasks(
     status: Optional[str] = None,
     limit: int = Query(100, ge=1, le=500),
 ):
-    tasks = _research_store.list_tasks(
+    tasks = _get_research_store().list_tasks(
         user_id=user_id, track_id=track_id, status=status, limit=limit
     )
     return TaskListResponse(user_id=user_id, track_id=track_id, tasks=tasks)
@@ -510,7 +537,7 @@ def _resolve_track_scope_id(
         return scope_id
     if scope_id:
         return scope_id
-    active = _research_store.get_active_track(user_id=user_id)
+    active = _get_research_store().get_active_track(user_id=user_id)
     if not active:
         return None
     return str(active["id"])
@@ -533,7 +560,7 @@ def create_memory_item(req: MemoryItemCreateRequest, background_tasks: Backgroun
         scope_id=scope_id,
         status=req.status,
     )
-    created, _, rows = _memory_store.add_memories(user_id=req.user_id, memories=[cand])
+    created, _, rows = _get_memory_store().add_memories(user_id=req.user_id, memories=[cand])
     if created <= 0 or not rows:
         raise HTTPException(
             status_code=409, detail="Duplicate memory item (same scope/kind/content)"
@@ -560,7 +587,7 @@ def list_memory_items(
     include_pending: bool = False,
     limit: int = Query(100, ge=1, le=500),
 ):
-    items = _memory_store.list_memories(
+    items = _get_memory_store().list_memories(
         user_id=user_id,
         limit=limit,
         kind=kind,
@@ -579,12 +606,12 @@ def list_memory_inbox(
     limit: int = Query(100, ge=1, le=500),
 ):
     if track_id is None:
-        active = _research_store.get_active_track(user_id=user_id)
+        active = _get_research_store().get_active_track(user_id=user_id)
         if not active:
             raise HTTPException(status_code=404, detail="No active track for user")
         track_id = int(active["id"])
 
-    items = _memory_store.list_memories(
+    items = _get_memory_store().list_memories(
         user_id=user_id,
         limit=limit,
         scope_type="track",
@@ -637,7 +664,7 @@ def suggest_memories(req: MemorySuggestRequest, background_tasks: BackgroundTask
         )
         for m in extracted
     ]
-    created, skipped, rows = _memory_store.add_memories(user_id=req.user_id, memories=pending)
+    created, skipped, rows = _get_memory_store().add_memories(user_id=req.user_id, memories=pending)
     if scope_type == "track":
         _schedule_embedding_precompute(
             background_tasks, user_id=req.user_id, track_ids=[int(scope_id or 0)]
@@ -662,7 +689,7 @@ class MemoryModerateRequest(BaseModel):
 
 @router.post("/research/memory/items/{item_id}/moderate", response_model=MemoryItemResponse)
 def moderate_memory_item(item_id: int, req: MemoryModerateRequest):
-    updated = _memory_store.update_item(
+    updated = _get_memory_store().update_item(
         user_id=req.user_id,
         item_id=item_id,
         status=req.status,
@@ -692,9 +719,9 @@ class BulkModerateResponse(BaseModel):
 @router.post("/research/memory/bulk_moderate", response_model=BulkModerateResponse)
 def bulk_moderate(req: BulkModerateRequest, background_tasks: BackgroundTasks):
     # Get items before update to check their confidence for P0 metrics
-    items_before = _memory_store.get_items_by_ids(user_id=req.user_id, item_ids=req.item_ids)
+    items_before = _get_memory_store().get_items_by_ids(user_id=req.user_id, item_ids=req.item_ids)
 
-    updated = _memory_store.bulk_update_items(
+    updated = _get_memory_store().bulk_update_items(
         user_id=req.user_id,
         item_ids=req.item_ids,
         status=req.status,
@@ -748,7 +775,7 @@ def bulk_move(req: BulkMoveRequest, background_tasks: BackgroundTasks):
     scope_id = _resolve_track_scope_id(req.user_id, scope_type, req.scope_id)
     if scope_type == "track" and not scope_id:
         raise HTTPException(status_code=400, detail="scope_id missing and no active track")
-    updated = _memory_store.bulk_update_items(
+    updated = _get_memory_store().bulk_update_items(
         user_id=req.user_id,
         item_ids=req.item_ids,
         scope_type=scope_type,
@@ -850,7 +877,7 @@ def clear_track_memory(
 ):
     if not confirm:
         raise HTTPException(status_code=400, detail="confirm=true required")
-    deleted = _memory_store.soft_delete_by_scope(
+    deleted = _get_memory_store().soft_delete_by_scope(
         user_id=user_id,
         scope_type="track",
         scope_id=str(track_id),
@@ -862,7 +889,7 @@ def clear_track_memory(
     # P0 Hook: Verify deletion compliance - deleted items should not be retrievable
     if deleted > 0:
         # Try to retrieve items from the cleared scope (should return empty)
-        retrieved_after_delete = _memory_store.list_memories(
+        retrieved_after_delete = _get_memory_store().list_memories(
             user_id=user_id,
             scope_type="track",
             scope_id=str(track_id),
@@ -871,7 +898,7 @@ def clear_track_memory(
             limit=100,
         )
         # Also try searching
-        search_results = _memory_store.search_memories(
+        search_results = _get_memory_store().search_memories(
             user_id=user_id,
             query="*",  # broad query
             scope_type="track",
@@ -908,7 +935,7 @@ class PrecomputeEmbeddingsResponse(BaseModel):
 
 @router.post("/research/embeddings/precompute", response_model=PrecomputeEmbeddingsResponse)
 def precompute_embeddings(req: PrecomputeEmbeddingsRequest):
-    result = _track_router.precompute_track_embeddings(
+    result = _get_track_router().precompute_track_embeddings(
         user_id=req.user_id, track_ids=req.track_ids or None
     )
     return PrecomputeEmbeddingsResponse(user_id=req.user_id, result=result)
@@ -926,7 +953,7 @@ def eval_summary(
     track_id: Optional[int] = None,
     days: int = Query(30, ge=1, le=365),
 ):
-    summary = _research_store.summarize_eval(user_id=user_id, track_id=track_id, days=days)
+    summary = _get_research_store().summarize_eval(user_id=user_id, track_id=track_id, days=days)
     return EvalSummaryResponse(user_id=user_id, track_id=track_id, summary=summary)
 
 
@@ -934,7 +961,7 @@ class PaperFeedbackRequest(BaseModel):
     user_id: str = "default"
     track_id: Optional[int] = None
     paper_id: str = Field(..., min_length=1)
-    action: str = Field(..., min_length=1)  # like/dislike/skip/save/cite
+    action: str = Field(..., min_length=1)  # like/unlike/dislike/undislike/skip/save/unsave/cite
     weight: float = 0.0
     metadata: Dict[str, Any] = {}
     context_run_id: Optional[int] = None
@@ -953,17 +980,19 @@ class PaperFeedbackRequest(BaseModel):
 class PaperFeedbackResponse(BaseModel):
     feedback: Dict[str, Any]
     library_paper_id: Optional[int] = None  # ID in papers table if saved
+    current_action: Optional[str] = None
 
 
 @router.post("/research/papers/feedback", response_model=PaperFeedbackResponse)
 def add_paper_feedback(req: PaperFeedbackRequest):
     set_trace_id()  # Initialize trace_id for this request
     Logger.info(f"Received paper feedback request, action={req.action}", file=LogFiles.HARVEST)
+    research_store = _get_research_store()
 
     track_id = req.track_id
     if track_id is None:
         Logger.info("No track specified, getting active track", file=LogFiles.HARVEST)
-        active = _research_store.get_active_track(user_id=req.user_id)
+        active = research_store.get_active_track(user_id=req.user_id)
         if not active:
             Logger.error("No active track found", file=LogFiles.HARVEST)
             raise HTTPException(status_code=400, detail="track_id missing and no active track")
@@ -1027,7 +1056,7 @@ def add_paper_feedback(req: PaperFeedbackRequest):
             Logger.warning(f"Failed to save paper to library: {e}", file=LogFiles.HARVEST)
 
     Logger.info("Recording paper feedback to research store", file=LogFiles.HARVEST)
-    fb = _research_store.add_paper_feedback(
+    fb = research_store.add_paper_feedback(
         user_id=req.user_id,
         track_id=track_id,
         paper_id=req.paper_id,  # Always use external ID for consistency
@@ -1039,7 +1068,13 @@ def add_paper_feedback(req: PaperFeedbackRequest):
         Logger.error("Failed to record feedback - track not found", file=LogFiles.HARVEST)
         raise HTTPException(status_code=404, detail="Track not found")
     Logger.info("Paper feedback recorded successfully", file=LogFiles.HARVEST)
-    return PaperFeedbackResponse(feedback=fb, library_paper_id=library_paper_id)
+    normalized_action = research_store._normalize_feedback_action(req.action)
+    current_action = research_store._effective_feedback_action(normalized_action)
+    return PaperFeedbackResponse(
+        feedback=fb,
+        library_paper_id=library_paper_id,
+        current_action=current_action,
+    )
 
 
 class PaperFeedbackListResponse(BaseModel):
@@ -1055,7 +1090,7 @@ def list_paper_feedback(
     action: Optional[str] = None,
     limit: int = Query(200, ge=1, le=1000),
 ):
-    items = _research_store.list_paper_feedback(
+    items = _get_research_store().list_paper_feedback(
         user_id=user_id, track_id=track_id, action=action, limit=limit
     )
     return PaperFeedbackListResponse(user_id=user_id, track_id=track_id, items=items)
@@ -1186,7 +1221,7 @@ class PaperRepoListResponse(BaseModel):
 
 @router.post("/research/papers/{paper_id}/status", response_model=PaperReadingStatusResponse)
 def update_paper_status(paper_id: str, req: PaperReadingStatusRequest):
-    status = _research_store.set_paper_reading_status(
+    status = _get_research_store().set_paper_reading_status(
         user_id=req.user_id,
         paper_id=paper_id,
         status=req.status,
@@ -1206,7 +1241,7 @@ def list_saved_papers(
     sort_by: str = Query("saved_at"),
     limit: int = Query(200, ge=1, le=1000),
 ):
-    items = _research_store.list_saved_papers(
+    items = _get_research_store().list_saved_papers(
         user_id=user_id,
         track_id=track_id,
         collection_id=collection_id,
@@ -1470,7 +1505,7 @@ async def discover_from_seed(req: DiscoverySeedRequest):
 @router.post("/research/collections", response_model=PaperCollectionResponse)
 def create_collection(req: PaperCollectionCreateRequest):
     try:
-        collection = _research_store.create_collection(
+        collection = _get_research_store().create_collection(
             user_id=req.user_id,
             name=req.name,
             description=req.description,
@@ -1488,7 +1523,7 @@ def list_collections(
     track_id: Optional[int] = Query(default=None),
     limit: int = Query(200, ge=1, le=1000),
 ):
-    items = _research_store.list_collections(
+    items = _get_research_store().list_collections(
         user_id=user_id,
         include_archived=include_archived,
         track_id=track_id,
@@ -1500,7 +1535,7 @@ def list_collections(
 @router.patch("/research/collections/{collection_id}", response_model=PaperCollectionResponse)
 def update_collection(collection_id: int, req: PaperCollectionUpdateRequest):
     try:
-        collection = _research_store.update_collection(
+        collection = _get_research_store().update_collection(
             user_id=req.user_id,
             collection_id=collection_id,
             name=req.name,
@@ -1523,7 +1558,7 @@ def list_collection_items(
     user_id: str = "default",
     limit: int = Query(500, ge=1, le=5000),
 ):
-    items = _research_store.list_collection_items(
+    items = _get_research_store().list_collection_items(
         user_id=user_id,
         collection_id=collection_id,
         limit=limit,
@@ -1536,7 +1571,7 @@ def list_collection_items(
     response_model=PaperCollectionItemsResponse,
 )
 def upsert_collection_item(collection_id: int, req: PaperCollectionItemUpsertRequest):
-    item = _research_store.upsert_collection_item(
+    item = _get_research_store().upsert_collection_item(
         user_id=req.user_id,
         collection_id=collection_id,
         paper_id=req.paper_id,
@@ -1545,7 +1580,9 @@ def upsert_collection_item(collection_id: int, req: PaperCollectionItemUpsertReq
     )
     if item is None:
         raise HTTPException(status_code=404, detail="Collection or paper not found")
-    items = _research_store.list_collection_items(user_id=req.user_id, collection_id=collection_id)
+    items = _get_research_store().list_collection_items(
+        user_id=req.user_id, collection_id=collection_id
+    )
     return PaperCollectionItemsResponse(
         user_id=req.user_id, collection_id=collection_id, items=items
     )
@@ -1556,7 +1593,7 @@ def upsert_collection_item(collection_id: int, req: PaperCollectionItemUpsertReq
     response_model=PaperCollectionItemsResponse,
 )
 def patch_collection_item(collection_id: int, paper_id: str, req: PaperCollectionItemPatchRequest):
-    item = _research_store.upsert_collection_item(
+    item = _get_research_store().upsert_collection_item(
         user_id=req.user_id,
         collection_id=collection_id,
         paper_id=paper_id,
@@ -1565,7 +1602,9 @@ def patch_collection_item(collection_id: int, paper_id: str, req: PaperCollectio
     )
     if item is None:
         raise HTTPException(status_code=404, detail="Collection or paper not found")
-    items = _research_store.list_collection_items(user_id=req.user_id, collection_id=collection_id)
+    items = _get_research_store().list_collection_items(
+        user_id=req.user_id, collection_id=collection_id
+    )
     return PaperCollectionItemsResponse(
         user_id=req.user_id, collection_id=collection_id, items=items
     )
@@ -1573,7 +1612,7 @@ def patch_collection_item(collection_id: int, paper_id: str, req: PaperCollectio
 
 @router.delete("/research/collections/{collection_id}/items/{paper_id}")
 def delete_collection_item(collection_id: int, paper_id: str, user_id: str = "default"):
-    ok = _research_store.remove_collection_item(
+    ok = _get_research_store().remove_collection_item(
         user_id=user_id,
         collection_id=collection_id,
         paper_id=paper_id,
@@ -1590,11 +1629,11 @@ def get_track_feed(
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
 ):
-    track = _research_store.get_track(user_id=user_id, track_id=track_id)
+    track = _get_research_store().get_track(user_id=user_id, track_id=track_id)
     if not track:
         raise HTTPException(status_code=404, detail="Track not found")
 
-    payload = _research_store.list_track_feed(
+    payload = _get_research_store().list_track_feed(
         user_id=user_id,
         track_id=track_id,
         limit=limit,
@@ -1616,7 +1655,7 @@ def export_papers(
     track_id: Optional[int] = None,
     format: str = Query("bibtex", pattern="^(bibtex|ris|markdown|csl_json)$"),
 ):
-    items = _research_store.list_saved_papers(user_id=user_id, track_id=track_id, limit=1000)
+    items = _get_research_store().list_saved_papers(user_id=user_id, track_id=track_id, limit=1000)
     papers = [item["paper"] for item in items if item.get("paper")]
 
     if not papers:
@@ -1697,7 +1736,7 @@ def import_bibtex(req: BibtexImportRequest):
     track_pk = int(track["id"])
 
     paper_store = _get_paper_store()
-    existing_saved_ids = _research_store.list_paper_feedback_ids(
+    existing_saved_ids = _get_research_store().list_paper_feedback_ids(
         user_id=req.user_id,
         track_id=track_pk,
         action="save",
@@ -1738,7 +1777,7 @@ def import_bibtex(req: BibtexImportRequest):
                     "citation_key": str(entry.get("key") or ""),
                     "entry_type": str(entry.get("entry_type") or ""),
                 }
-                _research_store.add_paper_feedback(
+                _get_research_store().add_paper_feedback(
                     user_id=req.user_id,
                     track_id=track_pk,
                     paper_id=paper_ref,
@@ -1810,7 +1849,7 @@ def pull_from_zotero(req: ZoteroSyncRequest):
         raise HTTPException(status_code=502, detail=f"Failed to pull from Zotero: {exc}") from exc
 
     paper_store = _get_paper_store()
-    existing_saved_ids = _research_store.list_paper_feedback_ids(
+    existing_saved_ids = _get_research_store().list_paper_feedback_ids(
         user_id=req.user_id,
         track_id=track_pk,
         action="save",
@@ -1851,7 +1890,7 @@ def pull_from_zotero(req: ZoteroSyncRequest):
                     "zotero_library_type": req.library_type,
                     "zotero_library_id": req.library_id,
                 }
-                _research_store.add_paper_feedback(
+                _get_research_store().add_paper_feedback(
                     user_id=req.user_id,
                     track_id=track_pk,
                     paper_id=paper_ref,
@@ -1898,12 +1937,12 @@ def push_to_zotero(req: ZoteroPushRequest):
     from paperbot.infrastructure.connectors.zotero_connector import ZoteroConnector
 
     if req.track_id is not None:
-        track = _research_store.get_track(user_id=req.user_id, track_id=req.track_id)
+        track = _get_research_store().get_track(user_id=req.user_id, track_id=req.track_id)
         if not track:
             raise HTTPException(status_code=404, detail="Track not found")
 
     connector = ZoteroConnector()
-    local_items = _research_store.list_saved_papers(
+    local_items = _get_research_store().list_saved_papers(
         user_id=req.user_id,
         track_id=req.track_id,
         sort_by="saved_at",
@@ -1984,7 +2023,7 @@ def discover_track_anchors(
 ):
     _ensure_anchor_feature_enabled()
 
-    track = _research_store.get_track(user_id=user_id, track_id=track_id)
+    track = _get_research_store().get_track(user_id=user_id, track_id=track_id)
     if not track:
         raise HTTPException(status_code=404, detail="Track not found")
 
@@ -2018,7 +2057,7 @@ def discover_track_anchors(
 def set_anchor_action(track_id: int, author_id: int, req: AnchorActionRequest):
     _ensure_anchor_feature_enabled()
 
-    track = _research_store.get_track(user_id=req.user_id, track_id=track_id)
+    track = _get_research_store().get_track(user_id=req.user_id, track_id=track_id)
     if not track:
         raise HTTPException(status_code=404, detail="Track not found")
 
@@ -2054,7 +2093,7 @@ def set_anchor_action(track_id: int, author_id: int, req: AnchorActionRequest):
 def list_anchor_actions(track_id: int, user_id: str = "default"):
     _ensure_anchor_feature_enabled()
 
-    track = _research_store.get_track(user_id=user_id, track_id=track_id)
+    track = _get_research_store().get_track(user_id=user_id, track_id=track_id)
     if not track:
         raise HTTPException(status_code=404, detail="Track not found")
 
@@ -2064,7 +2103,7 @@ def list_anchor_actions(track_id: int, user_id: str = "default"):
 
 @router.get("/research/papers/{paper_id}", response_model=PaperDetailResponse)
 def get_paper_detail(paper_id: str, user_id: str = "default"):
-    detail = _research_store.get_paper_detail(paper_id=paper_id, user_id=user_id)
+    detail = _get_research_store().get_paper_detail(paper_id=paper_id, user_id=user_id)
     if not detail:
         raise HTTPException(status_code=404, detail="Paper not found in registry")
     return PaperDetailResponse(detail=detail)
@@ -2072,7 +2111,7 @@ def get_paper_detail(paper_id: str, user_id: str = "default"):
 
 @router.get("/research/papers/{paper_id}/repos", response_model=PaperRepoListResponse)
 def get_paper_repos(paper_id: str):
-    repos = _research_store.list_paper_repos(paper_id=paper_id)
+    repos = _get_research_store().list_paper_repos(paper_id=paper_id)
     if repos is None:
         raise HTTPException(status_code=404, detail="Paper not found in registry")
     return PaperRepoListResponse(paper_id=paper_id, repos=repos)
@@ -2089,10 +2128,10 @@ class RouterSuggestResponse(BaseModel):
 
 @router.post("/research/router/suggest", response_model=RouterSuggestResponse)
 def suggest_track(req: RouterSuggestRequest):
-    active = _research_store.get_active_track(user_id=req.user_id)
+    active = _get_research_store().get_active_track(user_id=req.user_id)
     if not active:
         return RouterSuggestResponse(suggestion=None)
-    suggestion = _track_router.suggest_track(
+    suggestion = _get_track_router().suggest_track(
         user_id=req.user_id, query=req.query, active_track_id=int(active["id"])
     )
     return RouterSuggestResponse(suggestion=suggestion)
@@ -2191,7 +2230,7 @@ async def build_context(req: ContextRequest):
 
     if req.activate_track_id is not None:
         Logger.info("Activating research track", file=LogFiles.HARVEST)
-        activated = _research_store.activate_track(
+        activated = _get_research_store().activate_track(
             user_id=req.user_id, track_id=req.activate_track_id
         )
         if not activated:
@@ -2210,11 +2249,11 @@ async def build_context(req: ContextRequest):
             )
 
     engine = ContextEngine(
-        research_store=_research_store,
-        memory_store=_memory_store,
+        research_store=_get_research_store(),
+        memory_store=_get_memory_store(),
         paper_store=_get_paper_store(),
         search_service=search_service,
-        track_router=_track_router,
+        track_router=_get_track_router(),
         config=ContextEngineConfig(
             memory_limit=req.memory_limit,
             paper_limit=req.paper_limit,
@@ -3187,20 +3226,20 @@ def _build_feedback_profile(user_id: str, track_id: Optional[int]) -> Dict[str, 
     limit = 400
     feedback_rows: List[Dict[str, Any]]
     if track_id is not None:
-        feedback_rows = _research_store.list_paper_feedback(
+        feedback_rows = _get_research_store().list_effective_paper_feedback(
             user_id=user_id,
             track_id=int(track_id),
-            action=None,
             limit=limit,
         )
     else:
         feedback_rows = []
-        for track in _research_store.list_tracks(user_id=user_id, include_archived=False, limit=20):
+        for track in _get_research_store().list_tracks(
+            user_id=user_id, include_archived=False, limit=20
+        ):
             feedback_rows.extend(
-                _research_store.list_paper_feedback(
+                _get_research_store().list_effective_paper_feedback(
                     user_id=user_id,
                     track_id=int(track.get("id") or 0),
-                    action=None,
                     limit=100,
                 )
             )
@@ -3231,7 +3270,9 @@ def _build_feedback_profile(user_id: str, track_id: Optional[int]) -> Dict[str, 
         for term in _extract_profile_terms(paper_text):
             profile[term] = profile.get(term, 0.0) + coeff
 
-    saved_rows = _research_store.list_saved_papers(user_id=user_id, track_id=track_id, limit=200)
+    saved_rows = _get_research_store().list_saved_papers(
+        user_id=user_id, track_id=track_id, limit=200
+    )
     for item in saved_rows:
         paper = item.get("paper") or {}
         paper_text = " ".join(
@@ -3302,7 +3343,7 @@ def _find_track_by_name(*, user_id: str, track_name: str) -> Optional[Dict[str, 
     target = (track_name or "").strip().casefold()
     if not target:
         return None
-    tracks = _research_store.list_tracks(user_id=user_id, include_archived=True, limit=500)
+    tracks = _get_research_store().list_tracks(user_id=user_id, include_archived=True, limit=500)
     for track in tracks:
         if str(track.get("name") or "").strip().casefold() == target:
             return track
@@ -3317,7 +3358,7 @@ def _resolve_or_create_import_track(
     default_track_name: str,
 ) -> Dict[str, Any]:
     if track_id is not None:
-        track = _research_store.get_track(user_id=user_id, track_id=int(track_id))
+        track = _get_research_store().get_track(user_id=user_id, track_id=int(track_id))
         if not track:
             raise HTTPException(status_code=404, detail="Track not found")
         return track
@@ -3326,19 +3367,19 @@ def _resolve_or_create_import_track(
         found = _find_track_by_name(user_id=user_id, track_name=track_name)
         if found:
             return found
-        return _research_store.create_track(
+        return _get_research_store().create_track(
             user_id=user_id,
             name=(track_name or "").strip(),
             description=f"Imported from {default_track_name.lower()}",
             activate=True,
         )
 
-    active = _research_store.get_active_track(user_id=user_id)
+    active = _get_research_store().get_active_track(user_id=user_id)
     if active:
         return active
 
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    return _research_store.create_track(
+    return _get_research_store().create_track(
         user_id=user_id,
         name=f"{default_track_name} {today}",
         description=f"Auto-created for {default_track_name.lower()}",
@@ -3758,7 +3799,7 @@ class StructuredCardResponse(BaseModel):
 
 @router.get("/research/papers/{paper_id}/card", response_model=StructuredCardResponse)
 def get_structured_card(paper_id: str, user_id: str = "default"):
-    detail = _research_store.get_paper_detail(paper_id=paper_id, user_id=user_id)
+    detail = _get_research_store().get_paper_detail(paper_id=paper_id, user_id=user_id)
     if not detail:
         raise HTTPException(status_code=404, detail="Paper not found")
 
@@ -3823,7 +3864,7 @@ class RelatedWorkResponse(BaseModel):
 
 @router.post("/research/papers/related-work", response_model=RelatedWorkResponse)
 def generate_related_work(req: RelatedWorkRequest):
-    items = _research_store.list_saved_papers(
+    items = _get_research_store().list_saved_papers(
         user_id=req.user_id, track_id=req.track_id, limit=req.limit
     )
     papers = [item["paper"] for item in items if item.get("paper")]

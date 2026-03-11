@@ -7,7 +7,10 @@ from pathlib import Path
 import pytest
 from sqlalchemy import select
 
-from paperbot.application.services.anchor_service import AnchorService
+from paperbot.application.services.anchor_service import (
+    AnchorService,
+    _collapse_effective_feedback_actions,
+)
 from paperbot.infrastructure.stores.author_store import AuthorStore
 from paperbot.infrastructure.stores.models import (
     AuthorModel,
@@ -153,9 +156,52 @@ def test_anchor_service_discovers_and_scores_authors(tmp_path: Path):
 
 def test_anchor_service_raises_for_unknown_track(tmp_path: Path):
     db_url = f"sqlite:///{tmp_path / 'anchor-track-missing.db'}"
+    provider = SessionProvider(db_url)
+    Base.metadata.create_all(provider.engine)
     service = AnchorService(db_url=db_url)
     with pytest.raises(ValueError, match="track not found"):
         service.discover(track_id=999, user_id="default")
+
+
+def test_collapse_effective_feedback_actions_ignores_toggled_off_state() -> None:
+    now = datetime.now(timezone.utc)
+    rows = [
+        PaperFeedbackModel(
+            user_id="u1",
+            track_id=1,
+            paper_id="42",
+            paper_ref_id=42,
+            canonical_paper_id=42,
+            action="unlike",
+            weight=0.0,
+            ts=now,
+            metadata_json="{}",
+        ),
+        PaperFeedbackModel(
+            user_id="u1",
+            track_id=1,
+            paper_id="42",
+            paper_ref_id=42,
+            canonical_paper_id=42,
+            action="like",
+            weight=0.0,
+            ts=now,
+            metadata_json="{}",
+        ),
+        PaperFeedbackModel(
+            user_id="u1",
+            track_id=1,
+            paper_id="84",
+            paper_ref_id=84,
+            canonical_paper_id=84,
+            action="dislike",
+            weight=0.0,
+            ts=now,
+            metadata_json="{}",
+        ),
+    ]
+
+    assert _collapse_effective_feedback_actions(rows) == ["dislike"]
 
 
 def test_recompute_author_network_scores_updates_metadata(tmp_path: Path):
@@ -204,3 +250,33 @@ def test_recompute_author_network_scores_updates_metadata(tmp_path: Path):
                 found += 1
                 assert metadata["network_score"] >= 0
         assert found >= 3
+
+
+def test_cleared_feedback_does_not_contribute_to_anchor_personalization() -> None:
+    now = datetime.now(timezone.utc)
+    rows = [
+        PaperFeedbackModel(
+            user_id="default",
+            track_id=1,
+            paper_id="paper-1",
+            paper_ref_id=1,
+            canonical_paper_id=1,
+            action="unlike",
+            weight=0.0,
+            ts=now,
+            metadata_json="{}",
+        ),
+        PaperFeedbackModel(
+            user_id="default",
+            track_id=1,
+            paper_id="paper-1",
+            paper_ref_id=1,
+            canonical_paper_id=1,
+            action="like",
+            weight=0.0,
+            ts=now,
+            metadata_json="{}",
+        ),
+    ]
+
+    assert _collapse_effective_feedback_actions(rows) == []

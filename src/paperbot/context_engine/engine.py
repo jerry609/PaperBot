@@ -524,7 +524,7 @@ class ContextEngine:
             config=self.config.track_router,
         )
         self._layer0_cache: Dict[str, Dict[str, Any]] = {}  # keyed by user_id
-        self._layer0_cache_ts: Dict[str, float] = {}      # keyed by user_id
+        self._layer0_cache_ts: Dict[str, float] = {}  # keyed by user_id
         self._layer0_ttl: float = 300.0  # 5 minutes
 
     def _attach_latest_judge(self, papers: List[Dict[str, Any]]) -> None:
@@ -591,9 +591,7 @@ class ContextEngine:
         self._layer0_cache_ts[user_id] = now
         return prefs
 
-    def _load_layer1_track(
-        self, user_id: str, track: Optional[Dict[str, Any]]
-    ) -> Dict[str, Any]:
+    def _load_layer1_track(self, user_id: str, track: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         """Layer 1: track context — goals, keywords, tasks, milestones (~500 tokens)."""
         tasks: List[Dict[str, Any]] = []
         milestones: List[Dict[str, Any]] = []
@@ -771,9 +769,7 @@ class ContextEngine:
 
         return prefs, task_list, milestone_list, relevant, cross_track, paper, layers, trimmed
 
-    def _load_layer3_paper(
-        self, user_id: str, paper_id: Optional[str]
-    ) -> List[Dict[str, Any]]:
+    def _load_layer3_paper(self, user_id: str, paper_id: Optional[str]) -> List[Dict[str, Any]]:
         """Layer 3: paper-scoped memories (on-demand, only when paper_id given)."""
         if not paper_id:
             return []
@@ -917,11 +913,23 @@ class ContextEngine:
 
                     if self.config.personalized and routed_track:
                         try:
-                            feedback_rows = self.research_store.list_paper_feedback(
-                                user_id=user_id,
-                                track_id=int(routed_track["id"]),
-                                limit=500,
+                            list_effective_feedback = getattr(
+                                self.research_store,
+                                "list_effective_paper_feedback",
+                                None,
                             )
+                            if callable(list_effective_feedback):
+                                feedback_rows = list_effective_feedback(
+                                    user_id=user_id,
+                                    track_id=int(routed_track["id"]),
+                                    limit=500,
+                                )
+                            else:
+                                feedback_rows = self.research_store.list_paper_feedback(
+                                    user_id=user_id,
+                                    track_id=int(routed_track["id"]),
+                                    limit=500,
+                                )
                             default_rrf_weights = getattr(
                                 self.search_service,
                                 "DEFAULT_SOURCE_WEIGHTS",

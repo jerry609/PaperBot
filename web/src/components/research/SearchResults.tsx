@@ -2,6 +2,10 @@
 
 import { Loader2 } from "lucide-react"
 
+import {
+  type PaperFeedbackAction,
+  type PaperFeedbackRequestAction,
+} from "@/lib/paper-feedback"
 import { cn } from "@/lib/utils"
 import { Card, CardContent } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -16,9 +20,12 @@ interface SearchResultsProps {
   className?: string
   selectedSources?: string[]
   onToggleSource?: (source: string) => void
-  onLike?: (paperId: string, rank: number, paper: Paper) => Promise<void> | void
-  onSave?: (paperId: string, rank: number, paper: Paper) => Promise<void> | void
-  onDislike?: (paperId: string, rank: number, paper: Paper) => Promise<void> | void
+  onFeedbackAction?: (
+    paperId: string,
+    action: PaperFeedbackRequestAction,
+    rank: number,
+    paper: Paper
+  ) => Promise<PaperFeedbackAction | null | undefined> | PaperFeedbackAction | null | undefined
 }
 
 const SOURCE_OPTIONS: Array<{ value: string; label: string }> = [
@@ -60,9 +67,7 @@ export function SearchResults({
   className,
   selectedSources = ["semantic_scholar"],
   onToggleSource,
-  onLike,
-  onSave,
-  onDislike,
+  onFeedbackAction,
 }: SearchResultsProps) {
   // Not searched yet - show nothing
   if (!hasSearched) {
@@ -143,9 +148,11 @@ export function SearchResults({
             paper={paper}
             rank={idx}
             reasons={reasons?.[paper.paper_id]}
-            onLike={onLike ? () => onLike(paper.paper_id, idx, paper) : undefined}
-            onSave={onSave ? () => onSave(paper.paper_id, idx, paper) : undefined}
-            onDislike={onDislike ? () => onDislike(paper.paper_id, idx, paper) : undefined}
+            onFeedbackAction={
+              onFeedbackAction
+                ? (action) => onFeedbackAction(paper.paper_id, action, idx, paper)
+                : undefined
+            }
             className={cn(
               "animate-in fade-in slide-in-from-bottom-2",
               // Staggered animation delay

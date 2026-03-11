@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections import defaultdict
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
 from sqlalchemy import desc, func, or_, select
 from sqlalchemy.exc import IntegrityError
 
+from paperbot.application.ports.feedback_port import FeedbackPort
 from paperbot.application.services.identity_resolver import IdentityResolver
 from paperbot.domain.paper_identity import normalize_arxiv_id, normalize_doi
 from paperbot.infrastructure.stores.models import (
@@ -80,7 +82,34 @@ def _parse_datetime(value: Any) -> Optional[datetime]:
         return None
 
 
-class SqlAlchemyResearchStore:
+_FEEDBACK_ACTION_ALIASES: Dict[str, str] = {
+    "not_relevant": "dislike",
+    "not-relevant": "dislike",
+    "not related": "dislike",
+}
+_FEEDBACK_GROUP_BY_ACTION: Dict[str, str] = {
+    "save": "save_state",
+    "unsave": "save_state",
+    "like": "preference_state",
+    "unlike": "preference_state",
+    "dislike": "preference_state",
+    "undislike": "preference_state",
+    "skip": "preference_state",
+    "cite": "cite_state",
+}
+_FEEDBACK_EFFECTIVE_ACTIONS: Dict[str, Optional[str]] = {
+    "save": "save",
+    "unsave": None,
+    "like": "like",
+    "unlike": None,
+    "dislike": "dislike",
+    "undislike": None,
+    "skip": "skip",
+    "cite": "cite",
+}
+
+
+class SqlAlchemyResearchStore(FeedbackPort):
     """
     Track/progress store for personalized paper recommendation.
 
@@ -94,9 +123,70 @@ class SqlAlchemyResearchStore:
     def __init__(self, db_url: Optional[str] = None, *, auto_create_schema: bool = True):
         self.db_url = db_url or get_db_url()
         self._provider = SessionProvider(self.db_url)
-        self._identity_resolver = IdentityResolver(db_url=self.db_url)
         if auto_create_schema:
             Base.metadata.create_all(self._provider.engine)
+        self._identity_resolver = IdentityResolver(db_url=self.db_url)
+
+    @staticmethod
+    def _normalize_feedback_action(value: str) -> str:
+        normalized = (value or "").strip().lower().replace(" ", "_")
+        return _FEEDBACK_ACTION_ALIASES.get(normalized, normalized)
+
+    @staticmethod
+    def _feedback_group(action: str) -> str:
+        return _FEEDBACK_GROUP_BY_ACTION.get(action, action)
+
+    @staticmethod
+    def _effective_feedback_action(action: str) -> Optional[str]:
+        return _FEEDBACK_EFFECTIVE_ACTIONS.get(action, action or None)
+
+    @staticmethod
+    def _feedback_identity_key(
+        *,
+        paper_ref_id: Optional[int],
+        canonical_paper_id: Optional[int],
+        paper_id: str,
+    ) -> str:
+        resolved_ref_id = int(canonical_paper_id or paper_ref_id or 0)
+        if resolved_ref_id > 0:
+            return f"ref:{resolved_ref_id}"
+        normalized_paper_id = str(paper_id or "").strip()
+        return f"external:{normalized_paper_id}"
+
+    @classmethod
+    def _feedback_state_key(
+        cls, row: PaperFeedbackModel, normalized_action: str
+    ) -> tuple[str, str]:
+        return (
+            cls._feedback_identity_key(
+                paper_ref_id=row.paper_ref_id,
+                canonical_paper_id=row.canonical_paper_id,
+                paper_id=row.paper_id,
+            ),
+            cls._feedback_group(normalized_action),
+        )
+
+    @classmethod
+    def _collapse_effective_feedback_rows(
+        cls, rows: Iterable[PaperFeedbackModel]
+    ) -> List[Dict[str, Any]]:
+        collapsed: List[Dict[str, Any]] = []
+        seen: set[tuple[str, str]] = set()
+        for row in rows:
+            normalized_action = cls._normalize_feedback_action(str(row.action or ""))
+            state_key = cls._feedback_state_key(row, normalized_action)
+            if state_key in seen:
+                continue
+            seen.add(state_key)
+
+            effective_action = cls._effective_feedback_action(normalized_action)
+            if effective_action is None:
+                continue
+
+            payload = cls._feedback_to_dict(row)
+            payload["action"] = effective_action
+            collapsed.append(payload)
+        return collapsed
 
     def create_track(
         self,
@@ -156,9 +246,7 @@ class SqlAlchemyResearchStore:
             stmt = select(ResearchTrackModel).where(ResearchTrackModel.user_id == user_id)
             if not include_archived:
                 stmt = stmt.where(ResearchTrackModel.archived_at.is_(None))
-            stmt = stmt.order_by(
-                desc(ResearchTrackModel.is_active), desc(ResearchTrackModel.updated_at)
-            ).limit(limit)
+            stmt = stmt.order_by(ResearchTrackModel.id).limit(limit)
             tracks = session.execute(stmt).scalars().all()
             return [self._track_to_dict(t) for t in tracks]
 
@@ -406,6 +494,7 @@ class SqlAlchemyResearchStore:
         Logger.info("Recording paper feedback", file=LogFiles.HARVEST)
         now = _utcnow()
         metadata = dict(metadata or {})
+        normalized_action = self._normalize_feedback_action(action)
         with self._provider.session() as session:
             track = session.execute(
                 select(ResearchTrackModel).where(
@@ -428,23 +517,44 @@ class SqlAlchemyResearchStore:
                 paper_id=(paper_id or "").strip(),
                 paper_ref_id=resolved_paper_ref_id,
                 canonical_paper_id=resolved_paper_ref_id,  # dual-write
-                action=(action or "").strip(),
+                action=normalized_action,
                 weight=float(weight or 0.0),
                 ts=now,
                 metadata_json=json.dumps(metadata or {}, ensure_ascii=False),
             )
             session.add(row)
 
-            if resolved_paper_ref_id and (action or "").strip() == "save":
-                self._upsert_reading_status_row(
-                    session=session,
-                    user_id=user_id,
-                    paper_ref_id=resolved_paper_ref_id,
-                    status="unread",
-                    mark_saved=True,
-                    metadata=metadata,
-                    now=now,
-                )
+            if resolved_paper_ref_id:
+                if normalized_action == "save":
+                    self._upsert_reading_status_row(
+                        session=session,
+                        user_id=user_id,
+                        paper_ref_id=resolved_paper_ref_id,
+                        status="unread",
+                        mark_saved=True,
+                        metadata=metadata,
+                        now=now,
+                    )
+                elif normalized_action == "unsave":
+                    existing_status = session.execute(
+                        select(PaperReadingStatusModel).where(
+                            PaperReadingStatusModel.user_id == user_id,
+                            PaperReadingStatusModel.paper_id == int(resolved_paper_ref_id),
+                        )
+                    ).scalar_one_or_none()
+                    self._upsert_reading_status_row(
+                        session=session,
+                        user_id=user_id,
+                        paper_ref_id=resolved_paper_ref_id,
+                        status=(
+                            str(existing_status.status or "unread")
+                            if existing_status is not None
+                            else "unread"
+                        ),
+                        mark_saved=False,
+                        metadata=metadata,
+                        now=now,
+                    )
 
             track.updated_at = now
             session.add(track)
@@ -452,6 +562,37 @@ class SqlAlchemyResearchStore:
             session.refresh(row)
             Logger.info("Feedback record created successfully", file=LogFiles.HARVEST)
             return self._feedback_to_dict(row)
+
+    def list_effective_paper_feedback(
+        self,
+        *,
+        user_id: str,
+        track_id: int,
+        limit: int = 200,
+    ) -> List[Dict[str, Any]]:
+        with self._provider.session() as session:
+            track = session.execute(
+                select(ResearchTrackModel).where(
+                    ResearchTrackModel.user_id == user_id, ResearchTrackModel.id == track_id
+                )
+            ).scalar_one_or_none()
+            if track is None:
+                return []
+
+            rows = (
+                session.execute(
+                    select(PaperFeedbackModel)
+                    .where(
+                        PaperFeedbackModel.user_id == user_id,
+                        PaperFeedbackModel.track_id == track_id,
+                    )
+                    .order_by(desc(PaperFeedbackModel.ts), desc(PaperFeedbackModel.id))
+                )
+                .scalars()
+                .all()
+            )
+            collapsed = self._collapse_effective_feedback_rows(rows)
+            return collapsed[: max(1, int(limit))]
 
     def list_paper_feedback(
         self,
@@ -474,7 +615,9 @@ class SqlAlchemyResearchStore:
                 PaperFeedbackModel.user_id == user_id, PaperFeedbackModel.track_id == track_id
             )
             if action:
-                stmt = stmt.where(PaperFeedbackModel.action == action)
+                stmt = stmt.where(
+                    PaperFeedbackModel.action == self._normalize_feedback_action(action)
+                )
             stmt = stmt.order_by(desc(PaperFeedbackModel.ts)).limit(limit)
             rows = session.execute(stmt).scalars().all()
             return [self._feedback_to_dict(r) for r in rows]
@@ -488,9 +631,14 @@ class SqlAlchemyResearchStore:
         limit: int = 500,
     ) -> set[str]:
         ids: set[str] = set()
-        for row in self.list_paper_feedback(
-            user_id=user_id, track_id=track_id, action=action, limit=limit
+        normalized_action = self._normalize_feedback_action(action)
+        for row in self.list_effective_paper_feedback(
+            user_id=user_id,
+            track_id=track_id,
+            limit=limit,
         ):
+            if row.get("action") != normalized_action:
+                continue
             pid = str(row.get("paper_id") or "").strip()
             if pid:
                 ids.add(pid)
@@ -540,6 +688,7 @@ class SqlAlchemyResearchStore:
     ) -> List[Dict[str, Any]]:
         with self._provider.session() as session:
             saved_at_by_paper: Dict[int, datetime] = {}
+            saved_track_membership: Dict[int, set[int]] = defaultdict(set)
 
             status_rows = (
                 session.execute(
@@ -557,29 +706,45 @@ class SqlAlchemyResearchStore:
 
             feedback_rows = (
                 session.execute(
-                    select(PaperFeedbackModel).where(
+                    select(PaperFeedbackModel)
+                    .where(
                         PaperFeedbackModel.user_id == user_id,
-                        PaperFeedbackModel.action == "save",
+                        PaperFeedbackModel.action.in_(["save", "unsave"]),
                         PaperFeedbackModel.paper_ref_id.is_not(None),
-                        (
-                            PaperFeedbackModel.track_id == int(track_id)
-                            if track_id is not None
-                            else True
-                        ),
                     )
+                    .order_by(desc(PaperFeedbackModel.ts), desc(PaperFeedbackModel.id))
                 )
                 .scalars()
                 .all()
             )
+            latest_save_state: Dict[int, tuple[bool, Optional[datetime]]] = {}
             for row in feedback_rows:
                 pid = int(row.paper_ref_id or 0)
                 if pid <= 0:
                     continue
-                current = saved_at_by_paper.get(pid)
-                if current is None or (row.ts and row.ts > current):
-                    saved_at_by_paper[pid] = row.ts or _utcnow()
+                normalized_action = self._normalize_feedback_action(str(row.action or ""))
+                if normalized_action == "save":
+                    saved_track_membership[pid].add(int(row.track_id or 0))
+                if pid not in latest_save_state:
+                    latest_save_state[pid] = (normalized_action == "save", row.ts)
 
-            paper_ids = list(saved_at_by_paper.keys())
+            for pid, (is_saved, ts) in latest_save_state.items():
+                if not is_saved:
+                    saved_at_by_paper.pop(pid, None)
+                    continue
+                current = saved_at_by_paper.get(pid)
+                if current is None or ((ts or _utcnow()) > current):
+                    saved_at_by_paper[pid] = ts or _utcnow()
+
+            if track_id is not None:
+                scoped_paper_ids = [
+                    pid
+                    for pid in saved_at_by_paper.keys()
+                    if int(track_id) in saved_track_membership.get(pid, set())
+                ]
+                paper_ids = scoped_paper_ids
+            else:
+                paper_ids = list(saved_at_by_paper.keys())
             if not paper_ids:
                 return []
 
@@ -721,7 +886,18 @@ class SqlAlchemyResearchStore:
                     .where(
                         PaperFeedbackModel.user_id == user_id,
                         PaperFeedbackModel.track_id == int(track_id),
-                        PaperFeedbackModel.action.in_(["save", "like", "dislike", "skip"]),
+                        PaperFeedbackModel.action.in_(
+                            [
+                                "save",
+                                "unsave",
+                                "like",
+                                "unlike",
+                                "dislike",
+                                "undislike",
+                                "skip",
+                                "cite",
+                            ]
+                        ),
                     )
                     .order_by(desc(PaperFeedbackModel.ts), desc(PaperFeedbackModel.id))
                 )
@@ -764,18 +940,53 @@ class SqlAlchemyResearchStore:
 
             candidate_ids = [int(p.id) for p in candidates]
 
-            feedback_by_paper: Dict[int, PaperFeedbackModel] = {}
             feedback_summary_by_paper: Dict[int, Dict[str, int]] = {}
+            feedback_state_by_paper: Dict[int, Dict[str, Any]] = {}
+            resolved_feedback_groups: set[tuple[int, str]] = set()
             for row in feedback_rows:
                 pid = int(row.canonical_paper_id or row.paper_ref_id or 0)
                 if pid <= 0:
                     continue
-                action = str(row.action or "").strip().lower()
-                if action:
+                normalized_action = self._normalize_feedback_action(str(row.action or ""))
+                if normalized_action:
                     action_counter = feedback_summary_by_paper.setdefault(pid, {})
-                    action_counter[action] = action_counter.get(action, 0) + 1
-                if pid not in feedback_by_paper:
-                    feedback_by_paper[pid] = row
+                    action_counter[normalized_action] = action_counter.get(normalized_action, 0) + 1
+
+                group = self._feedback_group(normalized_action)
+                group_key = (pid, group)
+                if group_key in resolved_feedback_groups:
+                    continue
+                resolved_feedback_groups.add(group_key)
+
+                effective_action = self._effective_feedback_action(normalized_action)
+                if effective_action is None:
+                    continue
+
+                state = feedback_state_by_paper.setdefault(
+                    pid,
+                    {
+                        "is_saved": False,
+                        "is_liked": False,
+                        "is_disliked": False,
+                        "latest_effective_action": None,
+                        "latest_effective_ts": None,
+                    },
+                )
+
+                if effective_action == "save":
+                    state["is_saved"] = True
+                elif effective_action == "like":
+                    state["is_liked"] = True
+                    state["is_disliked"] = False
+                elif effective_action == "dislike":
+                    state["is_disliked"] = True
+                    state["is_liked"] = False
+
+                event_ts = row.ts or _utcnow()
+                latest_effective_ts = state.get("latest_effective_ts")
+                if latest_effective_ts is None or event_ts >= latest_effective_ts:
+                    state["latest_effective_action"] = effective_action
+                    state["latest_effective_ts"] = event_ts
 
             status_by_paper = {
                 int(row.paper_id): row
@@ -820,16 +1031,19 @@ class SqlAlchemyResearchStore:
                 matched_terms = [term for term in terms if term and term in text_blob]
                 keyword_score = float(len(matched_terms))
 
-                latest_feedback = feedback_by_paper.get(pid)
+                feedback_state = feedback_state_by_paper.get(pid, {})
                 latest_feedback_action = (
-                    str(latest_feedback.action or "").strip().lower() if latest_feedback else ""
+                    str(feedback_state.get("latest_effective_action") or "").strip().lower()
                 )
-                feedback_boost = {
-                    "save": 3.0,
-                    "like": 2.0,
-                    "skip": -1.0,
-                    "dislike": -4.0,
-                }.get(latest_feedback_action, 0.0)
+                feedback_boost = 0.0
+                if bool(feedback_state.get("is_saved")):
+                    feedback_boost += 3.0
+                if bool(feedback_state.get("is_liked")):
+                    feedback_boost += 2.0
+                if bool(feedback_state.get("is_disliked")):
+                    feedback_boost -= 4.0
+                if latest_feedback_action == "skip":
+                    feedback_boost -= 1.0
 
                 citation_score = min(float(paper.citation_count or 0) / 200.0, 2.0)
                 judge_row = latest_judge_by_paper.get(pid)
@@ -855,6 +1069,9 @@ class SqlAlchemyResearchStore:
                             else None
                         ),
                         "latest_feedback_action": latest_feedback_action or None,
+                        "is_saved": bool(feedback_state.get("is_saved")),
+                        "is_liked": bool(feedback_state.get("is_liked")),
+                        "is_disliked": bool(feedback_state.get("is_disliked")),
                         "feedback_summary": feedback_summary_by_paper.get(pid, {}),
                         "matched_terms": matched_terms,
                         "keyword_score": keyword_score,
@@ -1993,6 +2210,7 @@ class SqlAlchemyResearchStore:
             "track_id": f.track_id,
             "paper_id": f.paper_id,
             "paper_ref_id": f.paper_ref_id,
+            "canonical_paper_id": f.canonical_paper_id,
             "action": f.action,
             "weight": float(f.weight or 0.0),
             "ts": f.ts.isoformat() if f.ts else None,
