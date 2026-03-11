@@ -1293,3 +1293,45 @@ class ReproCodeExperienceModel(Base):
     content: Mapped[str] = mapped_column(Text, default="")
     code_snippet: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+class IntelligenceEventModel(Base):
+    """Cached community radar signal from external sources."""
+
+    __tablename__ = "intelligence_events"
+    __table_args__ = (
+        UniqueConstraint("user_id", "external_id", name="uq_intelligence_events_user_external"),
+        Index("ix_intelligence_events_user_score", "user_id", "score"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True, default="default")
+    external_id: Mapped[str] = mapped_column(String(255), nullable=False)
+
+    source: Mapped[str] = mapped_column(String(32), default="unknown", index=True)
+    source_label: Mapped[str] = mapped_column(String(64), default="")
+    kind: Mapped[str] = mapped_column(String(64), default="signal", index=True)
+
+    title: Mapped[str] = mapped_column(Text, default="")
+    summary: Mapped[str] = mapped_column(Text, default="")
+    url: Mapped[str] = mapped_column(Text, default="")
+
+    repo_full_name: Mapped[str] = mapped_column(String(128), default="", index=True)
+    author_name: Mapped[str] = mapped_column(String(128), default="", index=True)
+
+    keyword_hits_json: Mapped[str] = mapped_column(Text, default="[]")
+    author_matches_json: Mapped[str] = mapped_column(Text, default="[]")
+    repo_matches_json: Mapped[str] = mapped_column(Text, default="[]")
+
+    metric_name: Mapped[str] = mapped_column(String(64), default="")
+    metric_value: Mapped[int] = mapped_column(Integer, default=0)
+    metric_delta: Mapped[int] = mapped_column(Integer, default=0)
+    score: Mapped[float] = mapped_column(Float, default=0.0, index=True)
+
+    published_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    detected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+    payload_json: Mapped[str] = mapped_column(Text, default="{}")

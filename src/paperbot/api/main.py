@@ -28,6 +28,7 @@ from .routes import (
     studio_chat,
     repro_context,
     feed,
+    intelligence,
     push_commands,
     agent_board,
 )
@@ -86,6 +87,7 @@ app.include_router(model_endpoints.router, prefix="/api", tags=["Model Endpoints
 app.include_router(studio_chat.router, prefix="/api", tags=["Studio Chat"])
 app.include_router(repro_context.router, prefix="/api/research/repro/context", tags=["P2C"])
 app.include_router(feed.router, prefix="/api", tags=["Feed"])
+app.include_router(intelligence.router, prefix="/api", tags=["Intelligence"])
 app.include_router(push_commands.router, prefix="/api", tags=["Push"])
 app.include_router(agent_board.router, tags=["Agent Board"])
 

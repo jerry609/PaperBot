@@ -16,6 +16,8 @@ from . import (
     newsletter,
     model_endpoints,
     repro_context,
+    feed,
+    intelligence,
     push_commands,
     agent_board,
 )
@@ -36,6 +38,8 @@ __all__ = [
     "newsletter",
     "model_endpoints",
     "repro_context",
+    "feed",
+    "intelligence",
     "push_commands",
     "agent_board",
 ]
