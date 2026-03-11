@@ -98,7 +98,7 @@ def test_intelligence_feed_route_returns_external_signal_payload(monkeypatch):
         resp = client.get(
             "/api/intelligence/feed",
             params={
-                "user_id": "u-radar",
+                "user_id": "default",
                 "limit": 1,
                 "source": "reddit",
                 "keyword": "rag",
@@ -114,7 +114,7 @@ def test_intelligence_feed_route_returns_external_signal_payload(monkeypatch):
 
     assert service.list_feed_calls == [
         {
-            "user_id": "u-radar",
+            "user_id": "default",
             "limit": 50,
             "source": "reddit",
             "keyword": "rag",
@@ -150,3 +150,16 @@ def test_intelligence_feed_route_returns_external_signal_payload(monkeypatch):
         }
     ]
     assert "rag" in item["research_query"]
+
+
+def test_intelligence_feed_route_rejects_cross_user_access(monkeypatch):
+    service = _FakeIntelligenceService()
+    monkeypatch.setattr(intelligence_route, "_service", service)
+    monkeypatch.setattr(intelligence_route, "_research_store", _FakeResearchStore())
+
+    with TestClient(api_main.app) as client:
+        resp = client.get("/api/intelligence/feed", params={"user_id": "u-radar"})
+
+    assert resp.status_code == 403
+    assert resp.json()["detail"] == "cross-user intelligence access requires authenticated user context"
+    assert service.list_feed_calls == []

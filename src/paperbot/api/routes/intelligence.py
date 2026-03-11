@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, BackgroundTasks, Query
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from paperbot.infrastructure.services.intelligence_radar_service import IntelligenceRadarService
@@ -12,6 +12,7 @@ from paperbot.infrastructure.stores.research_store import SqlAlchemyResearchStor
 router = APIRouter()
 _service: Optional[IntelligenceRadarService] = None
 _research_store = SqlAlchemyResearchStore()
+_DEFAULT_USER_ID = "default"
 
 _SIGNAL_STOPWORDS = {
     "about",
@@ -96,6 +97,16 @@ class IntelligenceFeedResponse(BaseModel):
     subreddits: List[str] = Field(default_factory=list)
 
 
+def _resolve_feed_user_id(requested_user_id: Optional[str]) -> str:
+    user_id = str(requested_user_id or _DEFAULT_USER_ID).strip() or _DEFAULT_USER_ID
+    if user_id != _DEFAULT_USER_ID:
+        raise HTTPException(
+            status_code=403,
+            detail="cross-user intelligence access requires authenticated user context",
+        )
+    return _DEFAULT_USER_ID
+
+
 @router.get("/intelligence/feed", response_model=IntelligenceFeedResponse)
 def get_intelligence_feed(
     background_tasks: BackgroundTasks,
@@ -112,21 +123,22 @@ def get_intelligence_feed(
     sort_order: str = Query("desc", pattern="^(asc|desc)$"),
     track_id: Optional[int] = Query(None, ge=1),
 ):
+    resolved_user_id = _resolve_feed_user_id(user_id)
     service = _get_service()
     refresh_scheduled = False
 
     if refresh:
-        service.refresh(user_id=user_id)
-    elif service.needs_refresh(user_id=user_id):
-        cached = service.list_feed(user_id=user_id, limit=1)
+        service.refresh(user_id=resolved_user_id)
+    elif service.needs_refresh(user_id=resolved_user_id):
+        cached = service.list_feed(user_id=resolved_user_id, limit=1)
         if cached:
-            background_tasks.add_task(service.refresh, user_id=user_id)
+            background_tasks.add_task(service.refresh, user_id=resolved_user_id)
             refresh_scheduled = True
         else:
-            service.refresh(user_id=user_id)
+            service.refresh(user_id=resolved_user_id)
 
     rows = service.list_feed(
-        user_id=user_id,
+        user_id=resolved_user_id,
         limit=max(int(limit) * 10, 50),
         source=source,
         keyword=keyword,
@@ -134,7 +146,7 @@ def get_intelligence_feed(
         sort_by=sort_by,
         sort_order=sort_order,
     )
-    annotated_rows = [_annotate_intelligence_row(user_id=user_id, row=row) for row in rows]
+    annotated_rows = [_annotate_intelligence_row(user_id=resolved_user_id, row=row) for row in rows]
     if track_id:
         annotated_rows = [
             row
@@ -142,11 +154,11 @@ def get_intelligence_feed(
             if any(int(track.get("track_id") or 0) == int(track_id) for track in row.get("matched_tracks") or [])
         ]
 
-    profile = service.build_profile(user_id=user_id)
+    profile = service.build_profile(user_id=resolved_user_id)
 
     return IntelligenceFeedResponse(
         items=[_to_response_item(row) for row in annotated_rows[: max(1, int(limit))]],
-        refreshed_at=service.latest_refresh(user_id=user_id),
+        refreshed_at=service.latest_refresh(user_id=resolved_user_id),
         refresh_scheduled=refresh_scheduled,
         keywords=profile.keywords,
         watch_repos=profile.watch_repos,
