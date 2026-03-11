@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
 
 try:
@@ -20,6 +20,8 @@ except Exception:  # pragma: no cover
     Job = None  # type: ignore[assignment]
 
 import os
+
+from ..error_handling import json_error_response, json_internal_error_response
 
 router = APIRouter()
 
@@ -47,13 +49,21 @@ class AnalyzePaperJobRequest(BaseModel):
 
 
 @router.post("/jobs/track-scholar")
-async def enqueue_track_scholar(req: TrackScholarJobRequest):
+async def enqueue_track_scholar(req: TrackScholarJobRequest, http_request: Request):
     try:
         if create_pool is None:
-            return {"error": "arq is not installed; install dependencies to enable jobs endpoints"}
+            return json_error_response(
+                http_request,
+                status_code=503,
+                detail="Job queue is not available",
+            )
         settings = _redis_settings()
         if settings is None:
-            return {"error": "arq is not installed; install dependencies to enable jobs endpoints"}
+            return json_error_response(
+                http_request,
+                status_code=503,
+                detail="Job queue is not available",
+            )
         redis = await create_pool(settings)
         job = await redis.enqueue_job(
             "track_scholar_job",
@@ -63,17 +73,27 @@ async def enqueue_track_scholar(req: TrackScholarJobRequest):
         )
         return {"job_id": job.job_id}
     except Exception as e:
-        return {"error": str(e)}
+        return json_internal_error_response(
+            http_request, exc=e, log_message="Failed to enqueue track scholar job"
+        )
 
 
 @router.post("/jobs/analyze-paper")
-async def enqueue_analyze_paper(req: AnalyzePaperJobRequest):
+async def enqueue_analyze_paper(req: AnalyzePaperJobRequest, http_request: Request):
     try:
         if create_pool is None:
-            return {"error": "arq is not installed; install dependencies to enable jobs endpoints"}
+            return json_error_response(
+                http_request,
+                status_code=503,
+                detail="Job queue is not available",
+            )
         settings = _redis_settings()
         if settings is None:
-            return {"error": "arq is not installed; install dependencies to enable jobs endpoints"}
+            return json_error_response(
+                http_request,
+                status_code=503,
+                detail="Job queue is not available",
+            )
         redis = await create_pool(settings)
         job = await redis.enqueue_job(
             "analyze_paper_job",
@@ -82,17 +102,27 @@ async def enqueue_analyze_paper(req: AnalyzePaperJobRequest):
         )
         return {"job_id": job.job_id}
     except Exception as e:
-        return {"error": str(e)}
+        return json_internal_error_response(
+            http_request, exc=e, log_message="Failed to enqueue analyze-paper job"
+        )
 
 
 @router.get("/jobs/{job_id}")
-async def get_job_status(job_id: str):
+async def get_job_status(job_id: str, http_request: Request):
     try:
         if create_pool is None or Job is None:
-            return {"error": "arq is not installed; install dependencies to enable jobs endpoints"}
+            return json_error_response(
+                http_request,
+                status_code=503,
+                detail="Job queue is not available",
+            )
         settings = _redis_settings()
         if settings is None:
-            return {"error": "arq is not installed; install dependencies to enable jobs endpoints"}
+            return json_error_response(
+                http_request,
+                status_code=503,
+                detail="Job queue is not available",
+            )
         redis = await create_pool(settings)
         job = Job(job_id, redis)
         info = await job.info()
@@ -105,4 +135,8 @@ async def get_job_status(job_id: str):
                 result = None
         return {"job_id": job_id, "info": info.model_dump() if info else None, "result": result}
     except Exception as e:
-        return {"error": str(e)}
+        return json_internal_error_response(
+            http_request,
+            exc=e,
+            log_message="Failed to load job status",
+        )

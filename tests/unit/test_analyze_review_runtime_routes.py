@@ -3,7 +3,8 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 
-from fastapi.testclient import TestClient
+import httpx
+import pytest
 
 from paperbot.api import main as api_main
 
@@ -68,16 +69,22 @@ class _FakeReviewerAgent:
         )
 
 
-def test_analyze_route_uses_runtime_contract(monkeypatch):
+async def _request(path: str, payload: dict) -> httpx.Response:
+    transport = httpx.ASGITransport(app=api_main.app, raise_app_exceptions=False)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        return await client.post(path, json=payload)
+
+
+@pytest.mark.asyncio
+async def test_analyze_route_uses_runtime_contract(monkeypatch):
     import paperbot.agents.research as research_pkg
 
     monkeypatch.setattr(research_pkg, "ResearchAgent", _FakeResearchAgent)
 
-    with TestClient(api_main.app) as client:
-        resp = client.post(
-            "/api/analyze",
-            json={"title": "UniICL", "abstract": "context compression"},
-        )
+    resp = await _request(
+        "/api/analyze",
+        {"title": "UniICL", "abstract": "context compression"},
+    )
 
     assert resp.status_code == 200
     payloads = _parse_sse_payloads(resp.text)
@@ -88,16 +95,16 @@ def test_analyze_route_uses_runtime_contract(monkeypatch):
     assert payloads[-1]["envelope"]["trace_id"]
 
 
-def test_review_route_uses_runtime_contract(monkeypatch):
+@pytest.mark.asyncio
+async def test_review_route_uses_runtime_contract(monkeypatch):
     import paperbot.agents.review as review_pkg
 
     monkeypatch.setattr(review_pkg, "ReviewerAgent", _FakeReviewerAgent)
 
-    with TestClient(api_main.app) as client:
-        resp = client.post(
-            "/api/review",
-            json={"title": "VL-Cache", "abstract": "kv cache"},
-        )
+    resp = await _request(
+        "/api/review",
+        {"title": "VL-Cache", "abstract": "kv cache"},
+    )
 
     assert resp.status_code == 200
     payloads = _parse_sse_payloads(resp.text)

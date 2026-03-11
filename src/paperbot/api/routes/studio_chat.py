@@ -69,14 +69,13 @@ def find_claude_cli() -> Optional[str]:
     return None
 
 
-def get_mode_flag(mode: Mode) -> str:
-    """Map mode to Claude CLI permission flag."""
+def get_mode_flags(mode: Mode) -> List[str]:
+    """Map mode to Claude CLI permission flags."""
     if mode == "Code":
-        return "--dangerously-skip-permissions"  # Allow all operations
-    elif mode == "Plan":
-        return "--plan"  # Planning mode - no execution
-    else:  # Ask
-        return ""  # Default - no tools
+        return ["--permission-mode", "acceptEdits"]
+    if mode == "Plan":
+        return ["--permission-mode", "plan"]
+    return []
 
 
 def get_model_id(model: Model, for_cli: bool = False) -> str:
@@ -452,9 +451,7 @@ async def stream_claude_cli(request: StudioChatRequest) -> AsyncGenerator[Stream
     model_id = get_model_id(request.model, for_cli=True)
     cmd.extend(["--model", model_id])
 
-    mode_flag = get_mode_flag(request.mode)
-    if mode_flag:
-        cmd.append(mode_flag)
+    cmd.extend(get_mode_flags(request.mode))
 
     prompt = build_prompt_with_context(request.message, request.paper, request.mode)
     cmd.extend(["-p", prompt, "--output-format", "stream-json", "--verbose"])
