@@ -167,6 +167,48 @@ export interface Activity {
     }
 }
 
+export interface IntelligenceMatchedTrack {
+    track_id: number
+    track_name: string
+    matched_keywords: string[]
+}
+
+export interface IntelligenceFeedItem {
+    id: string
+    source: "reddit" | "github" | "huggingface" | "twitter_x" | string
+    source_label: string
+    kind: string
+    title: string
+    summary: string
+    url?: string
+    repo_full_name?: string
+    author_name?: string
+    keyword_hits: string[]
+    author_matches: string[]
+    repo_matches: string[]
+    match_reasons: string[]
+    score: number
+    metric: {
+        name: string
+        value: number
+        delta: number
+    }
+    published_at?: string | null
+    detected_at?: string | null
+    matched_tracks: IntelligenceMatchedTrack[]
+    research_query?: string
+    payload?: Record<string, unknown>
+}
+
+export interface IntelligenceFeedResponse {
+    items: IntelligenceFeedItem[]
+    refreshed_at?: string | null
+    refresh_scheduled?: boolean
+    keywords: string[]
+    watch_repos: string[]
+    subreddits: string[]
+}
+
 export interface PipelineTask {
     id: string
     paper_title: string
@@ -199,6 +241,7 @@ export interface DeadlineRadarItem {
         track_id: number
         track_name: string
         matched_keywords: string[]
+        matched_terms?: string[]
     }>
 }
 

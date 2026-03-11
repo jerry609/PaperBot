@@ -215,6 +215,36 @@ def _schedule_embedding_precompute(
     background_tasks.add_task(_run)
 
 
+def _normalize_deadline_match_terms(values: List[Any]) -> Set[str]:
+    terms: Set[str] = set()
+    for value in values:
+        normalized = str(value or "").strip().lower()
+        if not normalized:
+            continue
+        terms.add(normalized)
+        for token in re.split(r"[^a-z0-9]+", normalized):
+            token = token.strip()
+            if len(token) >= 2:
+                terms.add(token)
+    return terms
+
+
+def _collect_track_deadline_terms(track: Dict[str, Any]) -> Set[str]:
+    values: List[Any] = []
+    for key in ("keywords", "methods", "venues"):
+        values.extend(track.get(key) or [])
+    return _normalize_deadline_match_terms(values)
+
+
+def _collect_conference_deadline_terms(item: Dict[str, Any]) -> Set[str]:
+    values: List[Any] = list(item.get("keywords") or [])
+    values.append(item.get("field") or "")
+    name = re.sub(r"\b20\d{2}\b", "", str(item.get("name") or ""), flags=re.IGNORECASE).strip()
+    if name:
+        values.append(name)
+    return _normalize_deadline_match_terms(values)
+
+
 class TrackCreateRequest(BaseModel):
     user_id: str = "default"
     name: str = Field(..., min_length=1, max_length=128)
@@ -303,9 +333,7 @@ def get_deadline_radar(
         track_id = int(track.get("id") or 0)
         if track_id <= 0:
             continue
-        tokens = {
-            str(term).strip().lower() for term in (track.get("keywords") or []) if str(term).strip()
-        }
+        tokens = _collect_track_deadline_terms(track)
         track_tokens[track_id] = tokens
 
     rows: List[Dict[str, Any]] = []
@@ -327,19 +355,21 @@ def get_deadline_radar(
         conf_keywords = {
             str(k).strip().lower() for k in (item.get("keywords") or []) if str(k).strip()
         }
+        conf_terms = _collect_conference_deadline_terms(item)
 
         matched_tracks: List[Dict[str, Any]] = []
         for track in tracks:
             track_id = int(track.get("id") or 0)
             if track_id <= 0:
                 continue
-            overlap = sorted(conf_keywords & track_tokens.get(track_id, set()))
+            overlap = sorted(conf_terms & track_tokens.get(track_id, set()))
             if overlap:
                 matched_tracks.append(
                     {
                         "track_id": track_id,
                         "track_name": str(track.get("name") or ""),
                         "matched_keywords": overlap,
+                        "matched_terms": overlap,
                     }
                 )
 
