@@ -19,4 +19,4 @@ jobs:
           vercel-token: ${{ secrets.VERCEL_TOKEN }}          # Vercel 访问令牌
           vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}        # Vercel 组织 ID
           vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}# Vercel 项目 ID
-          vercel-args: '--previews'                         # dev 分支走预览部署
+          vercel-args: '--preview'                          # dev 分支走预览部署 (CLI 默认也是预览)
