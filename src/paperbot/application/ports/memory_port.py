@@ -14,20 +14,26 @@ class MemoryPort(Protocol):
         *,
         user_id: str,
         memories: list,
-        workspace_id: str = "default",
-        scope_type: str = "global",
-        scope_id: str = "",
-        source_type: str = "chat",
-        source_name: str = "",
-    ) -> Tuple[int, int, List[Dict[str, Any]]]: ...
+        source_id: Optional[int] = None,
+        workspace_id: Optional[str] = None,
+        scope_type: Optional[str] = None,
+        scope_id: Optional[str] = None,
+        status: Optional[str] = None,
+        actor_id: str = "system",
+    ) -> Tuple[int, int, List[Any]]: ...
 
     def list_memories(
         self,
         *,
         user_id: str,
-        workspace_id: str = "default",
-        limit: int = 50,
-        offset: int = 0,
+        limit: int = 100,
+        kind: Optional[str] = None,
+        workspace_id: Optional[str] = None,
+        scope_type: Optional[str] = None,
+        scope_id: Optional[str] = None,
+        include_pending: bool = False,
+        include_deleted: bool = False,
+        status: Optional[str] = None,
     ) -> List[Dict[str, Any]]: ...
 
     def search_memories(
