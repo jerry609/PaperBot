@@ -83,6 +83,38 @@ async def test_request_size_limit_rejects_large_payloads(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_request_size_limit_rejects_chunked_payloads_without_content_length(monkeypatch):
+    class ChunkedJsonStream(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            yield b'{"message":"'
+            yield b"this is definitely too large"
+            yield b'"}'
+
+        async def aclose(self) -> None:
+            return None
+
+    monkeypatch.setenv("PAPERBOT_MAX_REQUEST_BYTES", "16")
+    app = _make_guarded_app()
+
+    @app.post("/echo")
+    async def echo(payload: dict):
+        return payload
+
+    response = await _request(
+        app,
+        "POST",
+        "/echo",
+        content=ChunkedJsonStream(),
+        headers={"content-type": "application/json"},
+    )
+
+    assert response.status_code == 413
+    payload = response.json()
+    assert payload["detail"] == "Request body too large (max 16 bytes)"
+    assert payload["trace_id"]
+
+
+@pytest.mark.asyncio
 async def test_request_size_limit_preserves_body_for_downstream_handlers(monkeypatch):
     monkeypatch.setenv("PAPERBOT_MAX_REQUEST_BYTES", "128")
     app = _make_guarded_app()

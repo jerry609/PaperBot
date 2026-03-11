@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import tempfile
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -27,7 +28,7 @@ def test_prepare_project_dir_creates_missing_directory_under_cwd(tmp_path: Path,
 
 def test_prepare_project_dir_rejects_path_outside_allowed_prefixes(tmp_path: Path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    disallowed = Path.home().parent / "paperbot-runbook-disallowed"
+    disallowed = Path(tempfile.gettempdir()).resolve().parent / "paperbot-runbook-disallowed"
 
     with TestClient(api_main.app) as client:
         resp = client.post(
@@ -74,7 +75,7 @@ def test_add_allowed_dir_rejects_outside_allowed_prefixes(tmp_path: Path, monkey
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("PAPERBOT_RUNBOOK_ALLOWLIST_MUTATION", "true")
 
-    outside = Path.home().resolve()
+    outside = Path(tempfile.gettempdir()).resolve().parent / "paperbot-unsafe"
 
     with TestClient(api_main.app) as client:
         resp = client.post("/api/runbook/allowed-dirs", json={"directory": str(outside)})
