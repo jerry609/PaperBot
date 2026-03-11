@@ -120,24 +120,22 @@ class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
             except ValueError:
                 pass
 
-        body = await request.body()
-        if len(body) > max_request_bytes:
-            return json_error_response(
-                request,
-                status_code=413,
-                detail=f"Request body too large (max {max_request_bytes} bytes)",
-            )
+        total_bytes = 0
+        chunks: list[bytes] = []
+        async for chunk in request.stream():
+            if not chunk:
+                continue
+            total_bytes += len(chunk)
+            if total_bytes > max_request_bytes:
+                return json_error_response(
+                    request,
+                    status_code=413,
+                    detail=f"Request body too large (max {max_request_bytes} bytes)",
+                )
+            chunks.append(bytes(chunk))
 
-        body_sent = False
-
-        async def receive() -> Dict[str, Any]:
-            nonlocal body_sent
-            if body_sent:
-                return {"type": "http.request", "body": b"", "more_body": False}
-            body_sent = True
-            return {"type": "http.request", "body": body, "more_body": False}
-
-        return await call_next(Request(request.scope, receive))
+        request._body = b"".join(chunks)  # type: ignore[attr-defined]
+        return await call_next(request)
 
 
 def register_exception_handlers(app: FastAPI) -> None:
