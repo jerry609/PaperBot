@@ -6,7 +6,7 @@ def test_default_sources_include_twitter_import_only_and_disabled():
     reg = register_default_sources(SourceRegistry())
     x = reg.get("twitter_x")
     assert x is not None
-    assert x.acquisition_mode == AcquisitionMode.import_only
+    assert x.acquisition_mode == AcquisitionMode.api_first
     assert x.enabled_by_default is False
 
 

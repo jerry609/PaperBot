@@ -98,17 +98,46 @@ def register_default_sources(registry: SourceRegistry) -> SourceRegistry:
         )
     )
 
-    # X/Twitter: best-effort only; default off; import-only in mainline.
+    registry.register(
+        SourceDescriptor(
+            name="github",
+            version="v1",
+            reliability=0.88,
+            rate_limit_rps=1.0,
+            auth="api_key",
+            acquisition_mode=AcquisitionMode.api_first,
+            enabled_by_default=True,
+            metadata={"feeds": ["commits", "releases", "issues"]},
+        )
+    )
+
+    registry.register(
+        SourceDescriptor(
+            name="huggingface",
+            version="v1",
+            reliability=0.8,
+            rate_limit_rps=1.0,
+            auth="none",
+            acquisition_mode=AcquisitionMode.api_first,
+            enabled_by_default=True,
+            metadata={"feed": "daily_papers"},
+        )
+    )
+
+    # X/Twitter official recent-search API. Default off until a bearer token is configured.
     registry.register(
         SourceDescriptor(
             name="twitter_x",
             version="v1",
-            reliability=0.2,
-            rate_limit_rps=None,
+            reliability=0.62,
+            rate_limit_rps=1.0,
             auth="oauth",
-            acquisition_mode=AcquisitionMode.import_only,
+            acquisition_mode=AcquisitionMode.api_first,
             enabled_by_default=False,
-            metadata={"policy": "best_effort"},
+            metadata={
+                "policy": "official_recent_search",
+                "requires": "PAPERBOT_X_BEARER_TOKEN",
+            },
         )
     )
 
