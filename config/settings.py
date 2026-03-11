@@ -9,6 +9,7 @@ that supports YAML loading and environment variable overrides.
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -180,6 +181,12 @@ class Settings(BaseModel):
     offline: bool = False
     conferences: Dict[str, ConferenceConfig] = Field(default_factory=dict)
 
+    @staticmethod
+    def _merge_default_section(defaults: Dict[str, Any], value: Any) -> Any:
+        if not isinstance(value, Mapping):
+            return value
+        return {**defaults, **dict(value)}
+
     @classmethod
     def load_from_file(cls, config_path: Optional[str] = None) -> Settings:
         if config_path is None:
@@ -219,22 +226,31 @@ class Settings(BaseModel):
 
         if "collab" in config_data:
             collab_cfg = config_data["collab"]
-            host_cfg = collab_cfg.get("host", {})
-            collab_data = dict(defaults.collab)
-            collab_data.update({k: v for k, v in collab_cfg.items() if k != "host"})
-            host_data = dict(collab_data.get("host") or CollabHostConfig().model_dump())
-            host_data.update(host_cfg)
-            collab_data["host"] = host_data
-            mapped["collab"] = collab_data
+            if isinstance(collab_cfg, Mapping):
+                host_cfg = collab_cfg.get("host", {})
+                collab_data = dict(defaults.collab)
+                collab_data.update({k: v for k, v in collab_cfg.items() if k != "host"})
+                if isinstance(host_cfg, Mapping):
+                    host_data = dict(collab_data.get("host") or CollabHostConfig().model_dump())
+                    host_data.update(dict(host_cfg))
+                    collab_data["host"] = host_data
+                else:
+                    collab_data["host"] = host_cfg
+                mapped["collab"] = collab_data
+            else:
+                mapped["collab"] = collab_cfg
 
         if "data_source" in config_data:
-            mapped["data_source"] = {**defaults.data_source, **config_data["data_source"]}
+            mapped["data_source"] = cls._merge_default_section(
+                defaults.data_source,
+                config_data["data_source"],
+            )
 
         if "report" in config_data:
-            mapped["report"] = {**defaults.report, **config_data["report"]}
+            mapped["report"] = cls._merge_default_section(defaults.report, config_data["report"])
 
         if "repro" in config_data:
-            mapped["repro"] = {**defaults.repro, **config_data["repro"]}
+            mapped["repro"] = cls._merge_default_section(defaults.repro, config_data["repro"])
 
         if "conferences" in config_data:
             mapped["conferences"] = config_data["conferences"]

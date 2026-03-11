@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -21,7 +22,7 @@ def test_resolve_cli_project_dir_accepts_path_under_cwd(tmp_path: Path, monkeypa
 
 def test_resolve_cli_project_dir_rejects_outside_allowed_prefixes(tmp_path: Path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    disallowed = Path.home().resolve()
+    disallowed = Path(tempfile.gettempdir()).resolve().parent
 
     with pytest.raises(ValueError, match="not allowed"):
         _resolve_cli_project_dir(str(disallowed))
