@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from paperbot.context_engine.embeddings import try_build_default_embedding_provider
+from paperbot.context_engine.embeddings import (
+    HashEmbeddingProvider,
+    try_build_default_embedding_provider,
+)
 
 
 def test_hash_fallback_provider_available_without_openai_key(monkeypatch):
@@ -21,3 +24,19 @@ def test_none_chain_disables_provider(monkeypatch):
 
     provider = try_build_default_embedding_provider()
     assert provider is None
+
+
+def test_hash_provider_tokenizes_japanese_kana_and_kanji() -> None:
+    provider = HashEmbeddingProvider()
+
+    tokens = provider._token_rx.findall("機械学習のテスト")
+
+    assert tokens == ["機", "械", "学", "習", "の", "テ", "ス", "ト"]
+
+
+def test_hash_provider_tokenizes_hangul_characters() -> None:
+    provider = HashEmbeddingProvider()
+
+    tokens = provider._token_rx.findall("한국어테스트")
+
+    assert tokens == list("한국어테스트")
