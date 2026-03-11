@@ -124,7 +124,7 @@ class SqlAlchemyResearchStore(FeedbackPort):
         self.db_url = db_url or get_db_url()
         self._provider = SessionProvider(self.db_url)
         if auto_create_schema:
-            self._provider.ensure_tables(Base.metadata)
+            Base.metadata.create_all(self._provider.engine)
         self._identity_resolver = IdentityResolver(db_url=self.db_url)
 
     @staticmethod
