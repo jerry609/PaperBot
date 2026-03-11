@@ -35,6 +35,7 @@ class PaperDeduplicator:
         self._arxiv_index: Dict[str, PaperCandidate] = {}
         self._title_entries: List[Tuple[str, PaperCandidate]] = []
         self._canonical: Dict[int, PaperCandidate] = {}  # id(original) -> surviving paper
+        self._ordered_results: List[PaperCandidate] = []
 
     def add(self, paper: PaperCandidate) -> bool:
         """Add a paper. Returns True if new (kept), False if duplicate (merged)."""
@@ -64,7 +65,11 @@ class PaperDeduplicator:
         # Tier 3: rapidfuzz title similarity
         normalized = normalize_title(paper.title)
         if normalized:
-            match = self._find_title_match(normalized)
+            match = self._find_title_match(
+                normalized,
+                doi_values=self._extract_doi_values(paper),
+                arxiv_values=self._extract_arxiv_values(paper),
+            )
             if match is not None:
                 self._merge_into(match, paper)
                 self._canonical[id(paper)] = match
@@ -77,6 +82,7 @@ class PaperDeduplicator:
 
         # No duplicate found — register as new
         self._canonical[id(paper)] = paper
+        self._ordered_results.append(paper)
         if normalized:
             self._title_entries.append((normalized, paper))
         return True
@@ -87,34 +93,46 @@ class PaperDeduplicator:
 
     def results(self) -> List[PaperCandidate]:
         """Return deduplicated papers in insertion order."""
-        seen_ids: set = set()
-        out: List[PaperCandidate] = []
-        for _, paper in self._title_entries:
-            obj_id = id(paper)
-            if obj_id not in seen_ids:
-                seen_ids.add(obj_id)
-                out.append(paper)
-        # Also include papers that had no normalizable title but were kept
-        for paper in self._doi_index.values():
-            obj_id = id(paper)
-            if obj_id not in seen_ids:
-                seen_ids.add(obj_id)
-                out.append(paper)
-        for paper in self._arxiv_index.values():
-            obj_id = id(paper)
-            if obj_id not in seen_ids:
-                seen_ids.add(obj_id)
-                out.append(paper)
-        return out
+        return list(self._ordered_results)
 
-    def _find_title_match(self, normalized: str) -> Optional[PaperCandidate]:
+    def _find_title_match(
+        self,
+        normalized: str,
+        *,
+        doi_values: set[str],
+        arxiv_values: set[str],
+    ) -> Optional[PaperCandidate]:
         """Linear scan for a fuzzy title match above threshold."""
         threshold = self._title_threshold * 100  # rapidfuzz uses 0-100 scale
         for existing_title, existing_paper in self._title_entries:
+            if self._has_conflicting_identity(
+                existing_paper,
+                doi_values=doi_values,
+                arxiv_values=arxiv_values,
+            ):
+                continue
             score = fuzz.ratio(normalized, existing_title)
             if score >= threshold:
                 return existing_paper
         return None
+
+    @classmethod
+    def _has_conflicting_identity(
+        cls,
+        paper: PaperCandidate,
+        *,
+        doi_values: set[str],
+        arxiv_values: set[str],
+    ) -> bool:
+        existing_dois = cls._extract_doi_values(paper)
+        if doi_values and existing_dois and doi_values.isdisjoint(existing_dois):
+            return True
+
+        existing_arxiv_ids = cls._extract_arxiv_values(paper)
+        if arxiv_values and existing_arxiv_ids and arxiv_values.isdisjoint(existing_arxiv_ids):
+            return True
+
+        return False
 
     @staticmethod
     def _merge_into(winner: PaperCandidate, donor: PaperCandidate) -> None:
@@ -126,6 +144,15 @@ class PaperDeduplicator:
         # Keep longer abstract
         if len(donor.abstract or "") > len(winner.abstract or ""):
             winner.abstract = donor.abstract
+
+        if len(donor.authors or []) > len(winner.authors or []):
+            winner.authors = list(donor.authors or [])
+
+        if not winner.url and donor.url:
+            winner.url = donor.url
+
+        if not winner.pdf_url and donor.pdf_url:
+            winner.pdf_url = donor.pdf_url
 
         # Merge identities (avoid duplicates)
         existing_pairs = {(i.source, i.external_id) for i in winner.identities}
@@ -142,31 +169,65 @@ class PaperDeduplicator:
         if not winner.venue and donor.venue:
             winner.venue = donor.venue
 
+        if not winner.publication_date and donor.publication_date:
+            winner.publication_date = donor.publication_date
+
+        winner.keywords = PaperDeduplicator._merge_text_list(winner.keywords, donor.keywords)
+        winner.fields_of_study = PaperDeduplicator._merge_text_list(
+            winner.fields_of_study,
+            donor.fields_of_study,
+        )
+
         # Merge retrieval sources
-        existing_sources = set(winner.retrieval_sources or [])
-        for src in donor.retrieval_sources or []:
-            if src not in existing_sources:
-                winner.retrieval_sources.append(src)
-                existing_sources.add(src)
+        winner.retrieval_sources = PaperDeduplicator._merge_text_list(
+            winner.retrieval_sources,
+            donor.retrieval_sources,
+        )
+
+    @staticmethod
+    def _merge_text_list(current: List[str], incoming: List[str]) -> List[str]:
+        merged: List[str] = []
+        seen: set[str] = set()
+        for value in list(current or []) + list(incoming or []):
+            text = str(value or "").strip()
+            if not text or text in seen:
+                continue
+            seen.add(text)
+            merged.append(text)
+        return merged
 
     @staticmethod
     def _extract_doi(paper: PaperCandidate) -> str:
         """Extract and normalize a DOI from the paper's identities."""
-        for ident in paper.identities:
-            if ident.source == "doi" and ident.external_id:
-                return ident.external_id.strip().lower()
-        return ""
+        values = sorted(PaperDeduplicator._extract_doi_values(paper))
+        return values[0] if values else ""
 
     @staticmethod
     def _extract_arxiv_id(paper: PaperCandidate) -> str:
         """Extract and normalize an arxiv_id, stripping the version suffix."""
+        values = sorted(PaperDeduplicator._extract_arxiv_values(paper))
+        return values[0] if values else ""
+
+    @staticmethod
+    def _extract_doi_values(paper: PaperCandidate) -> set[str]:
+        values: set[str] = set()
         for ident in paper.identities:
-            if ident.source == "arxiv" and ident.external_id:
-                raw = ident.external_id.strip().lower().removeprefix("arxiv:")
-                # Strip version suffix (e.g. 2301.12345v2 -> 2301.12345)
-                if "v" in raw:
-                    head, tail = raw.rsplit("v", 1)
-                    if head and tail.isdigit():
-                        return head
-                return raw
-        return ""
+            if ident.source == "doi" and ident.external_id:
+                values.add(ident.external_id.strip().lower())
+        return values
+
+    @staticmethod
+    def _extract_arxiv_values(paper: PaperCandidate) -> set[str]:
+        values: set[str] = set()
+        for ident in paper.identities:
+            if ident.source != "arxiv" or not ident.external_id:
+                continue
+            raw = ident.external_id.strip().lower().removeprefix("arxiv:")
+            # Strip version suffix (e.g. 2301.12345v2 -> 2301.12345)
+            if "v" in raw:
+                head, tail = raw.rsplit("v", 1)
+                if head and tail.isdigit():
+                    values.add(head)
+                    continue
+            values.add(raw)
+        return values

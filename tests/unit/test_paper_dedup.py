@@ -13,18 +13,30 @@ def _make_paper(
     title: str,
     *,
     abstract: str = "",
+    authors: Optional[List[str]] = None,
     citation_count: int = 0,
     identities: Optional[List[PaperIdentity]] = None,
     year: Optional[int] = None,
     venue: Optional[str] = None,
+    url: Optional[str] = None,
+    pdf_url: Optional[str] = None,
+    publication_date: Optional[str] = None,
+    keywords: Optional[List[str]] = None,
+    fields_of_study: Optional[List[str]] = None,
 ) -> PaperCandidate:
     return PaperCandidate(
         title=title,
         abstract=abstract,
+        authors=list(authors or []),
         citation_count=citation_count,
         identities=list(identities or []),
         year=year,
         venue=venue,
+        url=url,
+        pdf_url=pdf_url,
+        publication_date=publication_date,
+        keywords=list(keywords or []),
+        fields_of_study=list(fields_of_study or []),
     )
 
 
@@ -148,6 +160,36 @@ class TestDifferentPapersNotMerged:
         assert dedup.add(p2) is True
         assert len(dedup.results()) == 2
 
+    def test_same_title_with_conflicting_dois_stays_separate(self) -> None:
+        dedup = PaperDeduplicator()
+        p1 = _make_paper(
+            "Same Title",
+            identities=[PaperIdentity(source="doi", external_id="10.1234/foo")],
+        )
+        p2 = _make_paper(
+            "Same Title",
+            identities=[PaperIdentity(source="doi", external_id="10.1234/bar")],
+        )
+
+        assert dedup.add(p1) is True
+        assert dedup.add(p2) is True
+        assert len(dedup.results()) == 2
+
+    def test_same_title_with_conflicting_arxiv_ids_stays_separate(self) -> None:
+        dedup = PaperDeduplicator()
+        p1 = _make_paper(
+            "Same Title",
+            identities=[PaperIdentity(source="arxiv", external_id="2501.12345")],
+        )
+        p2 = _make_paper(
+            "Same Title",
+            identities=[PaperIdentity(source="arxiv", external_id="2501.67890")],
+        )
+
+        assert dedup.add(p1) is True
+        assert dedup.add(p2) is True
+        assert len(dedup.results()) == 2
+
     def test_different_dois_different_titles_both_kept(self) -> None:
         dedup = PaperDeduplicator()
         p1 = _make_paper(
@@ -224,6 +266,44 @@ class TestMergePicksBestMetadata:
         merged = dedup.results()[0]
         assert merged.year == 2023
         assert merged.venue == "NeurIPS"
+
+    def test_merge_preserves_richer_metadata_when_second_copy_is_more_complete(self) -> None:
+        dedup = PaperDeduplicator()
+        p1 = _make_paper(
+            "Unified Paper",
+            abstract="Short abstract.",
+            identities=[PaperIdentity(source="doi", external_id="10.1234/unified")],
+        )
+        p2 = _make_paper(
+            "Unified Paper",
+            abstract="A much longer abstract for the same paper.",
+            authors=["Alice", "Bob"],
+            identities=[PaperIdentity(source="doi", external_id="10.1234/unified")],
+            url="https://example.com/paper",
+            pdf_url="https://example.com/paper.pdf",
+            publication_date="2026-03-01",
+            keywords=["retrieval", "agents"],
+            fields_of_study=["NLP"],
+        )
+
+        dedup.add(p1)
+        dedup.add(p2)
+
+        merged = dedup.results()[0]
+        assert merged.authors == ["Alice", "Bob"]
+        assert merged.url == "https://example.com/paper"
+        assert merged.pdf_url == "https://example.com/paper.pdf"
+        assert merged.publication_date == "2026-03-01"
+        assert merged.keywords == ["retrieval", "agents"]
+        assert merged.fields_of_study == ["NLP"]
+        assert "much longer" in merged.abstract
+
+    def test_results_include_identity_free_empty_title_papers(self) -> None:
+        dedup = PaperDeduplicator()
+        paper = _make_paper("")
+
+        assert dedup.add(paper) is True
+        assert dedup.results() == [paper]
 
 
 class TestThresholdEdgeCases:
