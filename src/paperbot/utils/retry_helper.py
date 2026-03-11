@@ -6,11 +6,18 @@
 适配: PaperBot 学者追踪系统
 """
 
+import asyncio
+import random
 import time
 from functools import wraps
 from typing import Callable, Any, Optional, Tuple
 import requests
 from loguru import logger
+
+try:
+    import httpx
+except ImportError:  # pragma: no cover - optional transport dependency
+    httpx = None
 
 
 class RetryConfig:
@@ -56,6 +63,14 @@ class RetryConfig:
 
 # 默认配置
 DEFAULT_RETRY_CONFIG = RetryConfig()
+
+if httpx is not None:
+    DEFAULT_RETRY_CONFIG.retry_on_exceptions = (
+        *DEFAULT_RETRY_CONFIG.retry_on_exceptions,
+        httpx.TimeoutException,
+        httpx.TransportError,
+        httpx.HTTPStatusError,
+    )
 
 
 def with_retry(config: Optional[RetryConfig] = None):
@@ -137,6 +152,59 @@ def retry_on_network_error(
         backoff_factor=backoff_factor
     )
     return with_retry(config)
+
+
+def async_retry(config: Optional[RetryConfig] = None):
+    """
+    Async 重试装饰器。
+
+    使用 asyncio.sleep 实现指数退避，适合 async HTTP / Agent 调用链。
+    """
+    if config is None:
+        config = DEFAULT_RETRY_CONFIG
+
+    def decorator(func: Callable) -> Callable:
+        @wraps(func)
+        async def wrapper(*args, **kwargs) -> Any:
+            last_exception = None
+
+            for attempt in range(config.max_retries + 1):
+                try:
+                    result = await func(*args, **kwargs)
+                    if attempt > 0:
+                        logger.info(f"异步函数 {func.__name__} 在第 {attempt + 1} 次尝试后成功")
+                    return result
+
+                except config.retry_on_exceptions as e:
+                    last_exception = e
+                    if attempt == config.max_retries:
+                        logger.error(
+                            f"异步函数 {func.__name__} 在 {config.max_retries + 1} 次尝试后仍然失败"
+                        )
+                        logger.error(f"最终错误: {str(e)}")
+                        raise e
+
+                    base_delay = min(
+                        config.initial_delay * (config.backoff_factor ** attempt),
+                        config.max_delay,
+                    )
+                    jitter = base_delay * 0.25 * (2 * random.random() - 1)
+                    delay = max(0.0, base_delay + jitter)
+
+                    logger.warning(f"异步函数 {func.__name__} 第 {attempt + 1} 次尝试失败: {str(e)}")
+                    logger.info(f"将在 {delay:.1f} 秒后进行第 {attempt + 2} 次尝试...")
+                    await asyncio.sleep(delay)
+
+                except Exception as e:
+                    logger.error(f"异步函数 {func.__name__} 遇到不可重试的异常: {str(e)}")
+                    raise e
+
+            if last_exception:
+                raise last_exception
+
+        return wrapper
+
+    return decorator
 
 
 class RetryableError(Exception):

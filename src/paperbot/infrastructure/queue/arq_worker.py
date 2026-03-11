@@ -5,10 +5,13 @@ from typing import Any, Dict, List, Optional
 
 from arq import cron
 from arq.connections import RedisSettings
+from arq.worker import func
 
 from paperbot.application.collaboration.message_schema import new_run_id, new_trace_id, make_event
 from paperbot.infrastructure.event_log.sqlalchemy_event_log import SqlAlchemyEventLog
 from paperbot.infrastructure.services.subscription_service import SubscriptionService
+
+_EVENT_LOG: Optional[SqlAlchemyEventLog] = None
 
 
 def _redis_settings() -> RedisSettings:
@@ -21,8 +24,11 @@ def _redis_settings() -> RedisSettings:
 
 
 def _event_log() -> SqlAlchemyEventLog:
-    # Uses PAPERBOT_DB_URL if present.
-    return SqlAlchemyEventLog()
+    global _EVENT_LOG
+    if _EVENT_LOG is None:
+        # Uses PAPERBOT_DB_URL if present.
+        _EVENT_LOG = SqlAlchemyEventLog()
+    return _EVENT_LOG
 
 
 def _subscription_service() -> SubscriptionService:
@@ -680,11 +686,11 @@ async def analyze_paper_job(
 
 class WorkerSettings:
     functions = [
-        track_scholar_job,
-        analyze_paper_job,
-        cron_track_subscriptions,
-        cron_daily_papers,
-        daily_papers_job,
+        func(track_scholar_job, timeout=600, max_tries=3),
+        func(analyze_paper_job, timeout=900, max_tries=2),
+        func(cron_track_subscriptions, timeout=60, max_tries=1),
+        func(cron_daily_papers, timeout=60, max_tries=1),
+        func(daily_papers_job, timeout=1200, max_tries=2),
     ]
     redis_settings = _redis_settings()
 

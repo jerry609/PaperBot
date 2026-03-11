@@ -14,10 +14,9 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request
-from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from paperbot.api.streaming import StreamEvent, wrap_generator
+from paperbot.api.streaming import StreamEvent, sse_response
 from paperbot.application.workflows.harvest_pipeline import (
     HarvestConfig,
     HarvestFinalResult,
@@ -126,14 +125,7 @@ async def harvest_papers(request: HarvestRequest):
     """
     trace_id = set_trace_id()
     Logger.info(f"Starting harvest request: keywords={request.keywords}", file=LogFiles.HARVEST)
-    return StreamingResponse(
-        wrap_generator(harvest_stream(request), workflow="harvest"),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-        },
-    )
+    return sse_response(harvest_stream(request), workflow="harvest")
 
 
 class HarvestRunResponse(BaseModel):

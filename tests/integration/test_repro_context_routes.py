@@ -245,7 +245,7 @@ def test_generate_stream_returns_sse(client_and_store, monkeypatch):
         task_roadmap: list = field(default_factory=list)
 
     class _FakeOrchestrator:
-        async def run(self, request, on_stage_complete=None):
+        async def run(self, request, raw_paper=None, on_stage_complete=None):
             if on_stage_complete:
                 await on_stage_complete("extraction", [_FakeObservation()], [])
             return _FakePack()
@@ -258,6 +258,7 @@ def test_generate_stream_returns_sse(client_and_store, monkeypatch):
     )
     assert resp.status_code == 200
     assert "text/event-stream" in resp.headers.get("content-type", "")
+    assert resp.headers.get("x-accel-buffering") == "no"
 
     events = _parse_sse_events(resp.text)
     assert len(events) >= 1

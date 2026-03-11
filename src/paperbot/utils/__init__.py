@@ -17,6 +17,7 @@ from paperbot.utils.logger import setup_logger, LogContext, log_with_context
 from paperbot.utils.downloader import PaperDownloader
 from paperbot.utils.retry_helper import (
     RetryConfig,
+    async_retry,
     with_retry,
     retry_on_network_error,
     with_graceful_retry,
@@ -59,6 +60,7 @@ __all__ = [
     'PaperDownloader',
     # 重试机制
     'RetryConfig',
+    'async_retry',
     'with_retry',
     'retry_on_network_error',
     'with_graceful_retry',

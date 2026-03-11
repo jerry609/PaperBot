@@ -93,3 +93,6 @@ feedgen>=1.0.0
 
 # Vector search (optional — graceful fallback to FTS5 if unavailable)
 sqlite-vec>=0.1.6
+
+# Fuzzy string matching for paper deduplication
+rapidfuzz>=3.0.0

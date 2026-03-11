@@ -15,11 +15,10 @@ from pathlib import Path
 from typing import Any, AsyncGenerator, Dict, List, Literal, Optional
 
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from ...infrastructure.stores.pipeline_session_store import PipelineSessionStore
-from ..streaming import StreamEvent, wrap_generator
+from ..streaming import StreamEvent, sse_response
 
 router = APIRouter(prefix="/api/agent-board")
 log = logging.getLogger(__name__)
@@ -189,11 +188,7 @@ async def plan_session(session_id: str):
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    return StreamingResponse(
-        wrap_generator(_plan_stream(session), workflow="agent_board_plan"),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
-    )
+    return sse_response(_plan_stream(session), workflow="agent_board_plan")
 
 
 @router.post("/sessions/{session_id}/run")
@@ -211,11 +206,7 @@ async def run_all_tasks(session_id: str, request: RunAllRequest):
         session.workspace_dir = str(_DEFAULT_WORKSPACE_DIR)
     _persist_session(session, checkpoint="run_requested", status="running")
 
-    return StreamingResponse(
-        wrap_generator(_run_all_stream(session), workflow="agent_board_run"),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
-    )
+    return sse_response(_run_all_stream(session), workflow="agent_board_run")
 
 
 @router.get("/sessions/{session_id}/tasks")
@@ -254,11 +245,7 @@ async def execute_task(task_id: str):
     if session and session.workspace_dir:
         session.workspace_dir = str(_sanitize_workspace_dir(session.workspace_dir))
 
-    return StreamingResponse(
-        wrap_generator(_execute_task_stream(task, session), workflow="agent_board_execute"),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
-    )
+    return sse_response(_execute_task_stream(task, session), workflow="agent_board_execute")
 
 
 @router.patch("/tasks/{task_id}")

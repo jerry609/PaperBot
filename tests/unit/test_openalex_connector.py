@@ -1,86 +1,80 @@
 from __future__ import annotations
 
+import pytest
+
 from paperbot.infrastructure.connectors.openalex_connector import OpenAlexConnector
 
 
-class _DummyResponse:
-    def __init__(self, payload):
-        self._payload = payload
+class _FakeRequestLayer:
+    def __init__(self, responses):
+        self.responses = list(responses)
+        self.calls = []
 
-    def raise_for_status(self) -> None:
+    async def get_json(self, url, *, headers=None, params=None):
+        self.calls.append({"url": url, "params": params})
+        response = self.responses.pop(0)
+        if isinstance(response, Exception):
+            raise response
+        return response
+
+    async def close(self):
         return None
 
-    def json(self):
-        return self._payload
 
-
-def test_resolve_work_by_doi(monkeypatch):
-    calls = []
-
-    def _fake_get(url, headers, params=None, timeout=0):
-        calls.append({"url": url, "params": params})
-        if url.endswith("/works"):
-            return _DummyResponse({"results": [{"id": "https://openalex.org/W123", "title": "A"}]})
-        return _DummyResponse({})
-
-    monkeypatch.setattr(
-        "paperbot.infrastructure.connectors.openalex_connector.requests.get", _fake_get
+@pytest.mark.asyncio
+async def test_resolve_work_by_doi():
+    request_layer = _FakeRequestLayer(
+        [{"results": [{"id": "https://openalex.org/W123", "title": "A"}]}]
     )
+    connector = OpenAlexConnector(request_layer=request_layer)
 
-    connector = OpenAlexConnector()
-    row = connector.resolve_work(seed_type="doi", seed_id="10.1000/xyz.1")
+    row = await connector.resolve_work(seed_type="doi", seed_id="10.1000/xyz.1")
+
     assert row is not None
     assert row["id"] == "https://openalex.org/W123"
-    assert calls[0]["params"]["filter"].startswith("doi:")
+    assert request_layer.calls[0]["params"]["filter"].startswith("doi:")
 
 
-def test_related_and_references_load_by_id(monkeypatch):
-    rows = {
-        "W1": {
-            "id": "https://openalex.org/W1",
-            "title": "Seed",
-            "related_works": ["https://openalex.org/W2"],
-            "referenced_works": ["https://openalex.org/W3"],
-        },
-        "W2": {"id": "https://openalex.org/W2", "title": "Related"},
-        "W3": {"id": "https://openalex.org/W3", "title": "Ref"},
+@pytest.mark.asyncio
+async def test_related_and_references_load_by_batched_ids():
+    request_layer = _FakeRequestLayer(
+        [
+            {
+                "results": [
+                    {"id": "https://openalex.org/W2", "title": "Related"},
+                    {"id": "https://openalex.org/W3", "title": "Ref"},
+                ]
+            },
+            {"results": [{"id": "https://openalex.org/W3", "title": "Ref"}]},
+        ]
+    )
+    connector = OpenAlexConnector(request_layer=request_layer)
+    seed = {
+        "id": "https://openalex.org/W1",
+        "title": "Seed",
+        "related_works": ["https://openalex.org/W2", "https://openalex.org/W3"],
+        "referenced_works": ["https://openalex.org/W3"],
     }
 
-    def _fake_get(url, headers, params=None, timeout=0):
-        key = url.split("/")[-1]
-        if key in rows:
-            return _DummyResponse(rows[key])
-        return _DummyResponse({})
+    related = await connector.get_related_works(seed, limit=5)
+    refs = await connector.get_referenced_works(seed, limit=5)
 
-    monkeypatch.setattr(
-        "paperbot.infrastructure.connectors.openalex_connector.requests.get", _fake_get
+    assert [row["title"] for row in related] == ["Related", "Ref"]
+    assert [row["title"] for row in refs] == ["Ref"]
+    assert "openalex_id:W2|W3" in request_layer.calls[0]["params"]["filter"]
+
+
+@pytest.mark.asyncio
+async def test_get_citing_works():
+    request_layer = _FakeRequestLayer(
+        [{"results": [{"id": "https://openalex.org/W9", "title": "Citing"}]}]
+    )
+    connector = OpenAlexConnector(request_layer=request_layer)
+
+    rows = await connector.get_citing_works(
+        {"cited_by_api_url": "https://api.openalex.org/works?filter=cited-by:W1"},
+        limit=10,
     )
 
-    connector = OpenAlexConnector()
-    seed = connector.get_work("W1")
-    assert seed is not None
-    related = connector.get_related_works(seed, limit=5)
-    refs = connector.get_referenced_works(seed, limit=5)
-    assert len(related) == 1
-    assert len(refs) == 1
-    assert related[0]["title"] == "Related"
-    assert refs[0]["title"] == "Ref"
-
-
-def test_get_citing_works(monkeypatch):
-    def _fake_get(url, headers, params=None, timeout=0):
-        if "cited-by" in url:
-            return _DummyResponse(
-                {"results": [{"id": "https://openalex.org/W9", "title": "Citing"}]}
-            )
-        return _DummyResponse({})
-
-    monkeypatch.setattr(
-        "paperbot.infrastructure.connectors.openalex_connector.requests.get", _fake_get
-    )
-    connector = OpenAlexConnector()
-    rows = connector.get_citing_works(
-        {"cited_by_api_url": "https://api.openalex.org/works?filter=cited-by:W1"}, limit=10
-    )
     assert len(rows) == 1
     assert rows[0]["title"] == "Citing"

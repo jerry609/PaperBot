@@ -5,10 +5,9 @@ Chat API Route - Interactive conversation with AI about papers
 from typing import List, Optional
 
 from fastapi import APIRouter
-from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from ..streaming import StreamEvent, wrap_generator
+from ..streaming import StreamEvent, sse_response
 
 router = APIRouter()
 
@@ -124,11 +123,4 @@ async def chat(request: ChatRequest):
 
     Returns Server-Sent Events with streaming text.
     """
-    return StreamingResponse(
-        wrap_generator(chat_stream(request), workflow="chat"),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-        },
-    )
+    return sse_response(chat_stream(request), workflow="chat")

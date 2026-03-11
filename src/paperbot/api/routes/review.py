@@ -3,13 +3,12 @@ Paper Review API Route
 """
 
 from fastapi import APIRouter
-from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from paperbot.application.collaboration.message_schema import new_run_id, new_trace_id
 from paperbot.core.abstractions import AgentRunContext, LegacyMethodRuntime
 
-from ..streaming import StreamEvent, wrap_generator
+from ..streaming import StreamEvent, sse_response
 
 router = APIRouter()
 
@@ -125,16 +124,9 @@ async def review_paper(request: ReviewRequest):
     """
     run_id = new_run_id()
     trace_id = new_trace_id()
-    return StreamingResponse(
-        wrap_generator(
-            review_paper_stream(request, run_id=run_id, trace_id=trace_id),
-            workflow="review",
-            run_id=run_id,
-            trace_id=trace_id,
-        ),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-        },
+    return sse_response(
+        review_paper_stream(request, run_id=run_id, trace_id=trace_id),
+        workflow="review",
+        run_id=run_id,
+        trace_id=trace_id,
     )
