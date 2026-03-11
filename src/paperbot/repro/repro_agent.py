@@ -220,6 +220,10 @@ class ReproAgent:
         ):
             config = OrchestratorConfig(
                 max_repair_loops=self.config.get("max_repair_attempts", 3),
+                timeout_seconds=self.config.get(
+                    "orchestrator_timeout_seconds",
+                    self.config.get("timeout_sec", 300),
+                ),
                 output_dir=output_dir,
                 use_rag=self.config.get("use_rag", True),
                 max_context_tokens=self.config.get("max_context_tokens", 8000),

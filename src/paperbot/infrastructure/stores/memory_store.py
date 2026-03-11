@@ -130,6 +130,15 @@ def _is_evergreen_memory(item: Dict[str, Any]) -> bool:
     return scope_type == "global" or kind == "preference"
 
 
+def _memory_relevance_score(item: Dict[str, Any]) -> float:
+    """Pick the strongest available retrieval relevance score for decay ranking."""
+    for field_name in ("hybrid_score", "vec_score", "confidence"):
+        raw_score = item.get(field_name)
+        if raw_score is not None:
+            return float(raw_score)
+    return 0.5
+
+
 def _decay_score(
     item: Dict[str, Any],
     *,
@@ -151,7 +160,7 @@ def _decay_score(
     if now is None:
         now = datetime.now(timezone.utc)
 
-    relevance = float(item.get("confidence", 0.5))
+    relevance = _memory_relevance_score(item)
 
     # Evergreen memories are immune to time-based decay.
     if _is_evergreen_memory(item):
@@ -947,6 +956,20 @@ class SqlAlchemyMemoryStore:
             if mmr_enabled:
                 grouped[sid] = _apply_mmr_rerank(grouped[sid], lambda_value=mmr_lambda)
             grouped[sid] = grouped[sid][:limit_per_scope]
+
+        hit_ids = sorted(
+            {
+                int(item["id"])
+                for hits in grouped.values()
+                for item in hits
+                if item.get("id")
+            }
+        )
+        if hit_ids:
+            try:
+                self.touch_usage(item_ids=hit_ids, actor_id="search")
+            except Exception:  # noqa: BLE001 — best-effort
+                pass
 
         return grouped
 
