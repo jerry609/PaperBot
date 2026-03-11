@@ -3,12 +3,13 @@ PaperBot API - FastAPI backend for CLI and Web interfaces
 Supports Server-Sent Events (SSE) for streaming responses
 """
 
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-from dotenv import find_dotenv, load_dotenv
-from pathlib import Path
 import os
+from pathlib import Path
 
+from dotenv import find_dotenv, load_dotenv
+from fastapi import FastAPI
+
+from paperbot.api.middleware import install_api_auth, install_cors, install_rate_limiting
 from .routes import (
     track,
     analyze,
@@ -32,6 +33,7 @@ from .routes import (
     push_commands,
     agent_board,
 )
+from paperbot.api.error_handling import install_api_error_handling
 from paperbot.infrastructure.event_log.logging_event_log import LoggingEventLog
 from paperbot.infrastructure.event_log.composite_event_log import CompositeEventLog
 from paperbot.infrastructure.event_log.sqlalchemy_event_log import SqlAlchemyEventLog
@@ -52,14 +54,10 @@ app = FastAPI(
     version="0.1.0",
 )
 
-# CORS for CLI and web clients
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+install_api_error_handling(app)
+install_api_auth(app)
+install_rate_limiting(app)
+install_cors(app)
 
 
 @app.get("/health")

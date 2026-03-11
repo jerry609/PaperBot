@@ -21,8 +21,7 @@ def test_resolve_cli_project_dir_accepts_path_under_cwd(tmp_path: Path, monkeypa
 
 def test_resolve_cli_project_dir_rejects_outside_allowed_prefixes(tmp_path: Path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    disallowed = Path.home().parent / "paperbot-studio-chat-disallowed"
-    disallowed.mkdir(parents=True, exist_ok=True)
+    disallowed = Path.home().resolve()
 
     with pytest.raises(ValueError, match="not allowed"):
         _resolve_cli_project_dir(str(disallowed))
