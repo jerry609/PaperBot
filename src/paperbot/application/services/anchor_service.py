@@ -124,8 +124,13 @@ def _collapse_effective_feedback_actions(rows: list[PaperFeedbackModel]) -> list
 class AnchorService:
     """Discover anchor authors with intrinsic + relevance + network scoring."""
 
-    def __init__(self, db_url: Optional[str] = None):
-        self._provider = SessionProvider(db_url or get_db_url())
+    def __init__(
+        self,
+        db_url: Optional[str] = None,
+        *,
+        provider: Optional[SessionProvider] = None,
+    ):
+        self._provider = provider or SessionProvider(db_url or get_db_url())
 
     def discover(
         self,

@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional
 
 from sqlalchemy import select
 
+from paperbot.application.ports.workflow_metric_port import WorkflowMetricPort
 from paperbot.infrastructure.stores.models import Base, WorkflowEvalMetricModel
 from paperbot.infrastructure.stores.sqlalchemy_db import SessionProvider, get_db_url
 
@@ -15,14 +16,14 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-class WorkflowMetricStore:
+class WorkflowMetricStore(WorkflowMetricPort):
     """Persist and aggregate workflow quality metrics (coverage/latency/status)."""
 
     def __init__(self, db_url: Optional[str] = None, *, auto_create_schema: bool = True):
         self.db_url = db_url or get_db_url()
         self._provider = SessionProvider(self.db_url)
         if auto_create_schema:
-            Base.metadata.create_all(self._provider.engine)
+            self._provider.ensure_tables(Base.metadata)
 
     def record_metric(
         self,

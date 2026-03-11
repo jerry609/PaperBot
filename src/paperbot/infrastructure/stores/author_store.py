@@ -8,6 +8,7 @@ from typing import Any, Iterable, Optional
 
 from sqlalchemy import delete, func, select
 
+from paperbot.application.ports.author_port import AuthorPort
 from paperbot.infrastructure.stores.models import AuthorModel, Base, PaperAuthorModel, PaperModel
 from paperbot.infrastructure.stores.sqlalchemy_db import SessionProvider, get_db_url
 
@@ -30,14 +31,14 @@ def _safe_int(value: Any, default: int = 0) -> int:
         return default
 
 
-class AuthorStore:
+class AuthorStore(AuthorPort):
     """CRUD helpers for `authors` and `paper_authors` tables."""
 
     def __init__(self, db_url: Optional[str] = None, *, auto_create_schema: bool = True):
         self.db_url = db_url or get_db_url()
         self._provider = SessionProvider(self.db_url)
         if auto_create_schema:
-            Base.metadata.create_all(self._provider.engine)
+            self._provider.ensure_tables(Base.metadata)
 
     def upsert_author(
         self,

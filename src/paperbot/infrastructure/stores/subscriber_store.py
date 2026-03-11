@@ -6,7 +6,8 @@ from uuid import uuid4
 
 from sqlalchemy import select
 
-from paperbot.infrastructure.stores.models import NewsletterSubscriberModel
+from paperbot.application.ports.subscriber_port import SubscriberPort
+from paperbot.infrastructure.stores.models import Base, NewsletterSubscriberModel
 from paperbot.infrastructure.stores.sqlalchemy_db import SessionProvider, get_db_url
 
 
@@ -14,14 +15,14 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-class SubscriberStore:
+class SubscriberStore(SubscriberPort):
     """CRUD operations for newsletter subscribers."""
 
     def __init__(self, db_url: Optional[str] = None, *, auto_create_schema: bool = True):
         self.db_url = db_url or get_db_url()
         self._provider = SessionProvider(self.db_url)
         if auto_create_schema:
-            NewsletterSubscriberModel.__table__.create(self._provider.engine, checkfirst=True)
+            self._provider.ensure_tables(Base.metadata)
 
     def add_subscriber(self, email: str) -> Dict[str, Any]:
         email = email.strip().lower()

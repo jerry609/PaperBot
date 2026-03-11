@@ -8,6 +8,7 @@ from loguru import logger
 from sqlalchemy import delete, desc, select
 
 from paperbot.infrastructure.stores.keychain import KeychainStore
+from paperbot.application.ports.model_endpoint_port import ModelEndpointPort
 from paperbot.infrastructure.stores.models import Base, ModelEndpointModel
 from paperbot.infrastructure.stores.sqlalchemy_db import SessionProvider, get_db_url
 from paperbot.utils.secret import decrypt as _decrypt_secret
@@ -38,12 +39,12 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-class ModelEndpointStore:
+class ModelEndpointStore(ModelEndpointPort):
     def __init__(self, db_url: Optional[str] = None, *, auto_create_schema: bool = True):
         self.db_url = db_url or get_db_url()
         self._provider = SessionProvider(self.db_url)
         if auto_create_schema:
-            Base.metadata.create_all(self._provider.engine)
+            self._provider.ensure_tables(Base.metadata)
 
     def list_endpoints(
         self, *, enabled_only: bool = False, include_secrets: bool = False

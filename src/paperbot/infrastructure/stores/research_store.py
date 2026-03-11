@@ -81,7 +81,6 @@ def _parse_datetime(value: Any) -> Optional[datetime]:
     except Exception:
         return None
 
-
 _FEEDBACK_ACTION_ALIASES: Dict[str, str] = {
     "not_relevant": "dislike",
     "not-relevant": "dislike",
@@ -107,8 +106,6 @@ _FEEDBACK_EFFECTIVE_ACTIONS: Dict[str, Optional[str]] = {
     "skip": "skip",
     "cite": "cite",
 }
-
-
 class SqlAlchemyResearchStore(FeedbackPort):
     """
     Track/progress store for personalized paper recommendation.
@@ -124,7 +121,7 @@ class SqlAlchemyResearchStore(FeedbackPort):
         self.db_url = db_url or get_db_url()
         self._provider = SessionProvider(self.db_url)
         if auto_create_schema:
-            Base.metadata.create_all(self._provider.engine)
+            self._provider.ensure_tables(Base.metadata)
         self._identity_resolver = IdentityResolver(db_url=self.db_url)
 
     @staticmethod
@@ -246,7 +243,9 @@ class SqlAlchemyResearchStore(FeedbackPort):
             stmt = select(ResearchTrackModel).where(ResearchTrackModel.user_id == user_id)
             if not include_archived:
                 stmt = stmt.where(ResearchTrackModel.archived_at.is_(None))
-            stmt = stmt.order_by(ResearchTrackModel.id).limit(limit)
+            stmt = stmt.order_by(
+                desc(ResearchTrackModel.is_active), desc(ResearchTrackModel.updated_at)
+            ).limit(limit)
             tracks = session.execute(stmt).scalars().all()
             return [self._track_to_dict(t) for t in tracks]
 

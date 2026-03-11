@@ -14,6 +14,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 from sqlalchemy import bindparam, select, desc, or_, text
 from sqlalchemy.exc import IntegrityError
 
+from paperbot.application.ports.memory_port import MemoryPort
 from paperbot.infrastructure.stores.models import Base, MemoryAuditLogModel, MemoryItemModel, MemorySourceModel
 from paperbot.infrastructure.stores.sqlalchemy_db import SessionProvider, get_db_url
 from paperbot.memory.schema import MemoryCandidate
@@ -289,7 +290,7 @@ def _apply_mmr_rerank(
     return selected
 
 
-class SqlAlchemyMemoryStore:
+class SqlAlchemyMemoryStore(MemoryPort):
     """
     SQLite-backed long-term memory store.
 
@@ -343,16 +344,17 @@ class SqlAlchemyMemoryStore:
 
     def _ensure_schema(self) -> None:
         """
-        Best-effort schema creation + lightweight SQLite column upgrades.
+        Lightweight schema bootstrap for SQLite (dev/test) + column upgrades.
 
         Notes:
-        - `create_all()` doesn't add columns to existing tables.
-        - For local dev (default SQLite), we apply additive `ALTER TABLE ADD COLUMN` migrations.
+        - For production (PostgreSQL), schema is managed exclusively by Alembic.
+        - For SQLite (dev/test), we create tables and apply additive ALTER TABLE
+          ADD COLUMN migrations for new columns not yet in Alembic.
         """
-        Base.metadata.create_all(self._provider.engine)
-
         if not str(self.db_url).startswith("sqlite:"):
             return
+
+        self._provider.ensure_tables(Base.metadata)
 
         desired_columns: Dict[str, str] = {
             "workspace_id": "VARCHAR(64)",

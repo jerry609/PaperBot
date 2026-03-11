@@ -20,6 +20,7 @@ from paperbot.infrastructure.stores.models import (
     PaperJudgeScoreModel,
     PaperModel,
 )
+from paperbot.application.ports.paper_registry_port import RegistryPort
 from paperbot.infrastructure.stores.sqlalchemy_db import SessionProvider, get_db_url
 from paperbot.infrastructure.stores.author_store import AuthorStore
 from paperbot.utils.logging_config import LogFiles, Logger
@@ -85,7 +86,7 @@ class LibraryPaper:
     action: str
 
 
-class PaperStore:
+class PaperStore(RegistryPort):
     """
     Paper storage repository.
 
@@ -100,7 +101,7 @@ class PaperStore:
         self.db_url = db_url or get_db_url()
         self._provider = SessionProvider(self.db_url)
         if auto_create_schema:
-            Base.metadata.create_all(self._provider.engine)
+            self._provider.ensure_tables(Base.metadata)
         self._author_store = AuthorStore(db_url=self.db_url, auto_create_schema=auto_create_schema)
 
     def upsert_paper(

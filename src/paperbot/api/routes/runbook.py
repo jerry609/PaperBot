@@ -9,7 +9,12 @@ Provides file management endpoints for DeepCode Studio:
 
 from __future__ import annotations
 
-import fcntl
+try:
+    import fcntl
+except ImportError:
+    fcntl = None
+    import msvcrt
+
 import hashlib
 import json
 import os
@@ -27,12 +32,39 @@ from paperbot.infrastructure.stores.sqlalchemy_db import SessionProvider
 
 router = APIRouter()
 
-_provider = SessionProvider()
-Base.metadata.create_all(_provider.engine)
+_provider: Optional[SessionProvider] = None
+
+
+def _get_provider() -> SessionProvider:
+    global _provider
+    if _provider is None:
+        _provider = SessionProvider()
+    return _provider
 
 
 def _runtime_allowed_dirs_file() -> Path:
     return Path("data/runbook_allowed_dirs.json")
+
+
+def _acquire_lock(lock_fd) -> None:
+    if fcntl is not None:
+        fcntl.flock(lock_fd, fcntl.LOCK_EX)
+        return
+
+    lock_fd.seek(0)
+    lock_fd.write(b"0")
+    lock_fd.flush()
+    lock_fd.seek(0)
+    msvcrt.locking(lock_fd.fileno(), msvcrt.LK_LOCK, 1)
+
+
+def _release_lock(lock_fd) -> None:
+    if fcntl is not None:
+        fcntl.flock(lock_fd, fcntl.LOCK_UN)
+        return
+
+    lock_fd.seek(0)
+    msvcrt.locking(lock_fd.fileno(), msvcrt.LK_UNLCK, 1)
 
 
 def _load_runtime_allowed_dirs() -> List[Path]:
@@ -55,8 +87,8 @@ def _save_runtime_allowed_dir(dir_path: Path) -> None:
 
     # Use file lock to prevent concurrent read-modify-write races
     lock_path = f.with_suffix(".lock")
-    with open(lock_path, "w") as lock_fd:
-        fcntl.flock(lock_fd, fcntl.LOCK_EX)
+    with open(lock_path, "a+b") as lock_fd:
+        _acquire_lock(lock_fd)
         try:
             existing = _load_runtime_allowed_dirs()
             if resolved not in existing:
@@ -79,7 +111,7 @@ def _save_runtime_allowed_dir(dir_path: Path) -> None:
                     pass
                 raise
         finally:
-            fcntl.flock(lock_fd, fcntl.LOCK_UN)
+            _release_lock(lock_fd)
 
 
 def _allowed_workdir_prefixes() -> List[Path]:
@@ -375,7 +407,7 @@ async def create_snapshot(body: CreateSnapshotRequest):
     }
 
     run_id = new_run_id()
-    with _provider.session() as session:
+    with _get_provider().session() as session:
         run = AgentRunModel(
             run_id=run_id,
             workflow="runbook",
@@ -421,7 +453,7 @@ async def create_snapshot(body: CreateSnapshotRequest):
 
 
 def _load_snapshot(snapshot_id: int) -> Dict[str, Any]:
-    with _provider.session() as session:
+    with _get_provider().session() as session:
         artifact = session.get(ArtifactModel, snapshot_id)
         if artifact is None or artifact.type != "snapshot":
             raise HTTPException(status_code=404, detail="snapshot not found")
