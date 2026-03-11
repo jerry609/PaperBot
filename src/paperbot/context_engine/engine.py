@@ -637,10 +637,6 @@ class ContextEngine:
                 mmr_lambda=self.config.memory_search_mmr_lambda,
                 half_life_days=self.config.memory_search_half_life_days,
             )
-            self.memory_store.touch_usage(
-                item_ids=[int(i["id"]) for i in relevant_memories if i.get("id")],
-                actor_id="context_engine",
-            )
 
         if include_cross_track and track_id is None:
             tracks = self.research_store.list_tracks(
@@ -670,19 +666,12 @@ class ContextEngine:
                     mmr_lambda=self.config.memory_search_mmr_lambda,
                     half_life_days=self.config.memory_search_half_life_days,
                 )
-                cross_hit_ids: List[int] = []
                 for sid, hits in batch_results.items():
                     t = scope_id_to_track.get(sid)
                     for h in hits:
                         h["track_id"] = t.get("id") if t else None
                         h["track_name"] = t.get("name") if t else None
-                        if h.get("id"):
-                            cross_hit_ids.append(int(h["id"]))
                     cross_track_memories.extend(hits)
-                if cross_hit_ids:
-                    self.memory_store.touch_usage(
-                        item_ids=cross_hit_ids, actor_id="context_engine"
-                    )
 
         return {
             "relevant_memories": relevant_memories,

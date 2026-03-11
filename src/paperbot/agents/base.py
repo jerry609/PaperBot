@@ -7,7 +7,6 @@ from typing import Any, Dict, List, Optional
 from abc import ABC, abstractmethod
 import logging
 import os
-from anthropic import AsyncAnthropic
 
 from paperbot.core.abstractions import Executable, ExecutionResult, ensure_execution_result
 from paperbot.core.di import Container
@@ -31,7 +30,14 @@ class BaseAgent(Executable[Dict[str, Any], Dict[str, Any]], ABC, JSONParserMixin
         
         # Initialize Anthropic client
         api_key = self.config.get('anthropic_api_key') or os.getenv('ANTHROPIC_API_KEY')
-        self.client = AsyncAnthropic(api_key=api_key) if api_key else None
+        self.client = None
+        if api_key:
+            try:
+                from anthropic import AsyncAnthropic
+
+                self.client = AsyncAnthropic(api_key=api_key)
+            except Exception as exc:
+                self.logger.warning("Anthropic client unavailable: %s", exc)
 
         # 可选注入的统一 LLMClient（DI）
         try:

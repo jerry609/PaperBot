@@ -1,268 +1,236 @@
-# tests/unit/repro/test_orchestrator.py
-"""
-Unit tests for Orchestrator module.
-"""
+"""Unit tests for the repro orchestrator."""
 
-import sys
-from unittest.mock import MagicMock, patch, AsyncMock
+from __future__ import annotations
 
-# Mock external dependencies
-sys.modules["docker"] = MagicMock()
-sys.modules["docker.errors"] = MagicMock()
-sys.modules["anthropic"] = MagicMock()
-
-import unittest
 import asyncio
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock
 
+import pytest
+
+from repro.agents.base_agent import AgentResult, AgentStatus
+from repro.models import PaperContext, ReproPhase
 from repro.orchestrator import (
     Orchestrator,
     OrchestratorConfig,
+    ParallelOrchestrator,
     PipelineProgress,
     PipelineStage,
-    ParallelOrchestrator,
 )
-from repro.agents.base_agent import AgentResult, AgentStatus
-from repro.models import PaperContext, ReproPhase
 
 
-class TestOrchestratorConfig(unittest.TestCase):
-    """Tests for OrchestratorConfig dataclass."""
+def test_orchestrator_config_defaults():
+    config = OrchestratorConfig()
 
-    def test_default_values(self):
-        config = OrchestratorConfig()
-
-        self.assertEqual(config.max_repair_loops, 3)
-        self.assertTrue(config.parallel_agents)
-        self.assertEqual(config.timeout_seconds, 300)
-        self.assertIsNone(config.output_dir)
-        self.assertTrue(config.use_rag)
-        self.assertEqual(config.max_context_tokens, 8000)
-
-    def test_custom_values(self):
-        config = OrchestratorConfig(
-            max_repair_loops=5,
-            parallel_agents=False,
-            output_dir=Path("/tmp/test"),
-            use_rag=False,
-        )
-
-        self.assertEqual(config.max_repair_loops, 5)
-        self.assertFalse(config.parallel_agents)
-        self.assertEqual(config.output_dir, Path("/tmp/test"))
-        self.assertFalse(config.use_rag)
+    assert config.max_repair_loops == 3
+    assert config.parallel_agents is True
+    assert config.timeout_seconds == 300
+    assert config.output_dir is None
+    assert config.use_rag is True
+    assert config.max_context_tokens == 8000
 
 
-class TestPipelineStage(unittest.TestCase):
-    """Tests for PipelineStage enum."""
+def test_orchestrator_config_custom_values():
+    config = OrchestratorConfig(
+        max_repair_loops=5,
+        parallel_agents=False,
+        output_dir=Path("/tmp/test"),
+        use_rag=False,
+    )
 
-    def test_stage_values(self):
-        self.assertEqual(PipelineStage.PLANNING.value, "planning")
-        self.assertEqual(PipelineStage.CODING.value, "coding")
-        self.assertEqual(PipelineStage.VERIFICATION.value, "verification")
-        self.assertEqual(PipelineStage.DEBUGGING.value, "debugging")
-        self.assertEqual(PipelineStage.COMPLETED.value, "completed")
-        self.assertEqual(PipelineStage.FAILED.value, "failed")
-
-
-class TestPipelineProgress(unittest.TestCase):
-    """Tests for PipelineProgress dataclass."""
-
-    def test_default_values(self):
-        progress = PipelineProgress()
-
-        self.assertEqual(progress.current_stage, PipelineStage.PLANNING)
-        self.assertEqual(progress.stages_completed, [])
-        self.assertEqual(progress.repair_loop_count, 0)
-        self.assertEqual(progress.agent_results, {})
-
-    def test_duration_not_started(self):
-        progress = PipelineProgress()
-
-        self.assertEqual(progress.duration_seconds, 0.0)
-
-    def test_duration_in_progress(self):
-        progress = PipelineProgress()
-        progress.start_time = datetime.now()
-
-        # Should return positive duration
-        self.assertGreaterEqual(progress.duration_seconds, 0.0)
-
-    def test_duration_completed(self):
-        progress = PipelineProgress()
-        progress.start_time = datetime.now()
-        progress.end_time = datetime.now()
-
-        self.assertGreaterEqual(progress.duration_seconds, 0.0)
-
-    def test_to_dict(self):
-        progress = PipelineProgress(
-            current_stage=PipelineStage.CODING,
-            stages_completed=["planning"],
-            repair_loop_count=1,
-        )
-        progress.start_time = datetime.now()
-
-        d = progress.to_dict()
-
-        self.assertEqual(d["current_stage"], "coding")
-        self.assertEqual(d["stages_completed"], ["planning"])
-        self.assertEqual(d["repair_loop_count"], 1)
-        self.assertIn("duration_seconds", d)
+    assert config.max_repair_loops == 5
+    assert config.parallel_agents is False
+    assert config.output_dir == Path("/tmp/test")
+    assert config.use_rag is False
 
 
-class TestOrchestrator(unittest.TestCase):
-    """Tests for Orchestrator class."""
-
-    def setUp(self):
-        self.config = OrchestratorConfig(max_repair_loops=1)
-        self.orchestrator = Orchestrator(config=self.config)
-        self.paper_context = PaperContext(
-            title="Test Paper",
-            abstract="This is a test abstract for testing purposes.",
-        )
-
-    def test_initialization(self):
-        self.assertIsNotNone(self.orchestrator.planning_agent)
-        self.assertIsNotNone(self.orchestrator.coding_agent)
-        self.assertIsNotNone(self.orchestrator.verification_agent)
-        self.assertIsNotNone(self.orchestrator.debugging_agent)
-        self.assertEqual(self.orchestrator.context, {})
-
-    def test_progress_callback(self):
-        progress_updates = []
-
-        def on_progress(progress):
-            progress_updates.append(progress.current_stage)
-
-        orchestrator = Orchestrator(
-            config=self.config,
-            on_progress=on_progress,
-        )
-
-        # Mock agents to return quickly
-        orchestrator.planning_agent.run = AsyncMock(return_value=AgentResult.failure("Skip"))
-
-        asyncio.run(orchestrator.run(self.paper_context))
-
-        # Should have received at least one progress update
-        self.assertGreater(len(progress_updates), 0)
-
-    def test_run_planning_failure(self):
-        # Mock planning to fail
-        self.orchestrator.planning_agent.run = AsyncMock(
-            return_value=AgentResult.failure("Planning failed")
-        )
-
-        result = asyncio.run(self.orchestrator.run(self.paper_context))
-
-        self.assertEqual(result.status, ReproPhase.FAILED)
-        self.assertIn("Planning failed", result.error)
-
-    def test_run_coding_failure(self):
-        # Mock planning to succeed
-        self.orchestrator.planning_agent.run = AsyncMock(
-            return_value=AgentResult.success(data={"plan": {}})
-        )
-        # Mock coding to fail
-        self.orchestrator.coding_agent.run = AsyncMock(
-            return_value=AgentResult.failure("Coding failed")
-        )
-
-        result = asyncio.run(self.orchestrator.run(self.paper_context))
-
-        self.assertEqual(result.status, ReproPhase.FAILED)
-        self.assertIn("Coding failed", result.error)
-
-    def test_context_shared_between_agents(self):
-        # Mock planning to add to context
-        async def planning_run(context):
-            context["plan"] = {"files": ["main.py"]}
-            return AgentResult.success(data={"plan": context["plan"]})
-
-        async def coding_run(context):
-            # Should have access to plan
-            self.assertIn("plan", context)
-            return AgentResult.failure("Stop here")
-
-        self.orchestrator.planning_agent.run = planning_run
-        self.orchestrator.coding_agent.run = coding_run
-
-        asyncio.run(self.orchestrator.run(self.paper_context))
-
-        # Verify context was shared
-        self.assertIn("plan", self.orchestrator.context)
-
-    def test_result_includes_timing(self):
-        # Mock all agents to succeed quickly
-        self.orchestrator.planning_agent.run = AsyncMock(
-            return_value=AgentResult.success(data={})
-        )
-        self.orchestrator.coding_agent.run = AsyncMock(
-            return_value=AgentResult.success(data={"generated_files": {}})
-        )
-
-        # Mock verification to succeed
-        mock_report = MagicMock()
-        mock_report.all_passed = True
-        mock_report.to_dict.return_value = {}
-
-        async def verify_run(context):
-            context["verification_report"] = mock_report
-            return AgentResult.success(data={"report": mock_report})
-
-        self.orchestrator.verification_agent.run = verify_run
-
-        result = asyncio.run(self.orchestrator.run(self.paper_context))
-
-        self.assertIsNotNone(result.total_duration_sec)
-        self.assertGreaterEqual(result.total_duration_sec, 0)
-
-    def test_repair_loop_count(self):
-        # Mock planning and coding to succeed
-        self.orchestrator.planning_agent.run = AsyncMock(
-            return_value=AgentResult.success(data={})
-        )
-        self.orchestrator.coding_agent.run = AsyncMock(
-            return_value=AgentResult.success(data={"generated_files": {}})
-        )
-
-        # Mock verification to fail
-        mock_report = MagicMock()
-        mock_report.all_passed = False
-        mock_report.to_dict.return_value = {}
-
-        async def verify_run(context):
-            context["verification_report"] = mock_report
-            context["error"] = "Verification failed"
-            return AgentResult.success(data={"report": mock_report})
-
-        self.orchestrator.verification_agent.run = verify_run
-        self.orchestrator.debugging_agent.run = AsyncMock(
-            return_value=AgentResult.success(data={})
-        )
-
-        result = asyncio.run(self.orchestrator.run(self.paper_context))
-
-        # Should have attempted repairs
-        self.assertGreater(result.retry_count, 0)
+def test_pipeline_stage_values():
+    assert PipelineStage.PLANNING.value == "planning"
+    assert PipelineStage.CODING.value == "coding"
+    assert PipelineStage.VERIFICATION.value == "verification"
+    assert PipelineStage.DEBUGGING.value == "debugging"
+    assert PipelineStage.COMPLETED.value == "completed"
+    assert PipelineStage.FAILED.value == "failed"
 
 
-class TestParallelOrchestrator(unittest.TestCase):
-    """Tests for ParallelOrchestrator class."""
+def test_pipeline_progress_defaults():
+    progress = PipelineProgress()
 
-    def test_inherits_from_orchestrator(self):
-        orchestrator = ParallelOrchestrator()
-
-        self.assertIsInstance(orchestrator, Orchestrator)
-
-    def test_run_parallel_exists(self):
-        orchestrator = ParallelOrchestrator()
-
-        self.assertTrue(hasattr(orchestrator, "run_parallel"))
-        self.assertTrue(callable(orchestrator.run_parallel))
+    assert progress.current_stage is PipelineStage.PLANNING
+    assert progress.stages_completed == []
+    assert progress.repair_loop_count == 0
+    assert progress.agent_results == {}
+    assert progress.duration_seconds == 0.0
 
 
-if __name__ == "__main__":
-    unittest.main()
+def test_pipeline_progress_duration_and_dict():
+    progress = PipelineProgress(
+        current_stage=PipelineStage.CODING,
+        stages_completed=["planning"],
+        repair_loop_count=1,
+    )
+    progress.start_time = datetime.now()
+    progress.end_time = datetime.now()
+
+    payload = progress.to_dict()
+
+    assert payload["current_stage"] == "coding"
+    assert payload["stages_completed"] == ["planning"]
+    assert payload["repair_loop_count"] == 1
+    assert "duration_seconds" in payload
+
+
+@pytest.fixture
+def paper_context():
+    return PaperContext(
+        title="Test Paper",
+        abstract="This is a test abstract for testing purposes.",
+    )
+
+
+@pytest.fixture
+def orchestrator():
+    return Orchestrator(config=OrchestratorConfig(max_repair_loops=1))
+
+
+def test_orchestrator_initialization(orchestrator):
+    assert orchestrator.planning_agent is not None
+    assert orchestrator.coding_agent is not None
+    assert orchestrator.verification_agent is not None
+    assert orchestrator.debugging_agent is not None
+    assert orchestrator.context == {}
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_progress_callback(paper_context):
+    progress_updates = []
+
+    def on_progress(progress):
+        progress_updates.append(progress.current_stage)
+
+    orchestrator = Orchestrator(config=OrchestratorConfig(max_repair_loops=1), on_progress=on_progress)
+    orchestrator.planning_agent.run = AsyncMock(return_value=AgentResult.failure("Skip"))
+
+    await orchestrator.run(paper_context)
+
+    assert progress_updates
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_run_planning_failure(orchestrator, paper_context):
+    orchestrator.planning_agent.run = AsyncMock(return_value=AgentResult.failure("Planning failed"))
+
+    result = await orchestrator.run(paper_context)
+
+    assert result.status is ReproPhase.FAILED
+    assert "Planning failed" in result.error
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_run_coding_failure(orchestrator, paper_context):
+    orchestrator.planning_agent.run = AsyncMock(return_value=AgentResult.success(data={"plan": {}}))
+    orchestrator.context["plan"] = {"files": []}
+    orchestrator.coding_agent.run = AsyncMock(return_value=AgentResult.failure("Coding failed"))
+
+    result = await orchestrator.run(paper_context)
+
+    assert result.status is ReproPhase.FAILED
+    assert "Coding failed" in result.error
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_context_shared_between_agents(orchestrator, paper_context):
+    async def planning_run(context):
+        context["plan"] = {"files": ["main.py"]}
+        return AgentResult.success(data={"plan": context["plan"]})
+
+    async def coding_run(context):
+        assert "plan" in context
+        context["generated_files"] = {"main.py": "print('hello')"}
+        return AgentResult.success(data={"generated_files": context["generated_files"]})
+
+    report = MagicMock()
+    report.all_passed = True
+    report.to_dict.return_value = {}
+
+    async def verification_run(context):
+        context["verification_report"] = report
+        return AgentResult.success(data={"report": report})
+
+    orchestrator.planning_agent.run = planning_run
+    orchestrator.coding_agent.run = coding_run
+    orchestrator.verification_agent.run = verification_run
+
+    result = await orchestrator.run(paper_context)
+
+    assert "plan" in orchestrator.context
+    assert result.status is ReproPhase.COMPLETED
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_result_includes_timing(orchestrator, paper_context):
+    orchestrator.planning_agent.run = AsyncMock(return_value=AgentResult.success(data={}))
+    orchestrator.coding_agent.run = AsyncMock(return_value=AgentResult.success(data={"generated_files": {}}))
+
+    report = MagicMock()
+    report.all_passed = True
+    report.to_dict.return_value = {}
+
+    async def verify_run(context):
+        context["verification_report"] = report
+        return AgentResult.success(data={"report": report})
+
+    orchestrator.verification_agent.run = verify_run
+
+    result = await orchestrator.run(paper_context)
+
+    assert result.total_duration_sec is not None
+    assert result.total_duration_sec >= 0
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_repair_loop_count(orchestrator, paper_context):
+    orchestrator.planning_agent.run = AsyncMock(return_value=AgentResult.success(data={}))
+    orchestrator.coding_agent.run = AsyncMock(return_value=AgentResult.success(data={"generated_files": {}}))
+
+    report = MagicMock()
+    report.all_passed = False
+    report.to_dict.return_value = {}
+
+    async def verify_run(context):
+        context["verification_report"] = report
+        context["error"] = "Verification failed"
+        return AgentResult.success(data={"report": report})
+
+    orchestrator.verification_agent.run = verify_run
+    orchestrator.debugging_agent.run = AsyncMock(return_value=AgentResult.success(data={}))
+
+    result = await orchestrator.run(paper_context)
+
+    assert result.retry_count > 0
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_timeout_is_enforced(paper_context):
+    orchestrator = Orchestrator(config=OrchestratorConfig(timeout_seconds=0.01))
+
+    async def slow_planning(_context):
+        await asyncio.sleep(0.05)
+        return AgentResult.success(data={})
+
+    orchestrator.planning_agent.run = slow_planning
+
+    result = await orchestrator.run(paper_context)
+
+    assert result.status is ReproPhase.FAILED
+    assert result.error == "Pipeline timed out after 0.01s"
+    assert orchestrator.progress.current_stage is PipelineStage.FAILED
+
+
+def test_parallel_orchestrator_inherits_from_orchestrator():
+    parallel = ParallelOrchestrator()
+
+    assert isinstance(parallel, Orchestrator)
+    assert hasattr(parallel, "run_parallel")
+    assert callable(parallel.run_parallel)
