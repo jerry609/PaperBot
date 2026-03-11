@@ -79,13 +79,14 @@ def test_export_library_snapshot_supports_custom_template_and_related_links(tmp_
         (
             "{{ frontmatter }}\n"
             "# {{ title }}\n"
+            "Summary: {{ abstract }}\n"
             "Track Link: {{ track_link }}\n"
             "{% for link in related_links %}- {{ link }}\n{% endfor %}"
         ),
         encoding="utf-8",
     )
 
-    exporter = ObsidianFilesystemExporter(paper_template_path=template_path)
+    exporter = ObsidianFilesystemExporter()
     result = exporter.export_library_snapshot(
         vault_path=vault,
         saved_items=[
@@ -95,7 +96,7 @@ def test_export_library_snapshot_supports_custom_template_and_related_links(tmp_
                     "id": 1,
                     "title": "UniICL",
                     "authors": ["Alice Smith"],
-                    "abstract": "Compresses in-context examples.",
+                    "abstract": "Contains <script>alert(1)</script> & evidence.",
                     "year": 2026,
                     "venue": "ICLR",
                     "semantic_scholar_id": "S2-UNIICL",
@@ -116,11 +117,13 @@ def test_export_library_snapshot_supports_custom_template_and_related_links(tmp_
             "venues": [],
             "is_active": True,
         },
+        paper_template_path=template_path,
     )
 
     paper_note = Path(result["paper_notes"][0]).read_text(encoding="utf-8")
     assert "related_papers:" in paper_note
     assert "Prompt Compression Survey" in paper_note
+    assert "Contains &lt;script&gt;alert(1)&lt;/script&gt; &amp; evidence." in paper_note
     assert "[[PaperBot/Papers/2025-prompt-compression-survey|Prompt Compression Survey]]" in paper_note
     assert "[[PaperBot/Papers/context-distillation-for-llms|Context Distillation for LLMs]]" in paper_note
     assert "[[PaperBot/Tracks/icl-compression|ICL Compression]]" in paper_note

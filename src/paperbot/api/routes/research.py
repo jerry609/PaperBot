@@ -83,6 +83,28 @@ def _schedule_obsidian_export(
     )
 
 
+def _schedule_obsidian_export_for_track(
+    background_tasks: BackgroundTasks,
+    *,
+    track: Optional[Dict[str, Any]],
+    for_tracks: bool = False,
+) -> None:
+    if track is None:
+        return
+
+    user_id = str(track.get("user_id") or "").strip()
+    track_id = int(track.get("id") or 0)
+    if not user_id or track_id <= 0:
+        return
+
+    _schedule_obsidian_export(
+        background_tasks,
+        user_id=user_id,
+        track_id=track_id,
+        for_tracks=for_tracks,
+    )
+
+
 ENABLE_ANCHOR_AUTHORS = os.getenv("PAPERBOT_ENABLE_ANCHOR_AUTHORS", "true").lower() == "true"
 
 _DISCOVERY_STOPWORDS: Set[str] = {
@@ -325,15 +347,11 @@ def create_track(req: TrackCreateRequest, background_tasks: BackgroundTasks):
         methods=req.methods,
         activate=req.activate,
     )
+    track_user_id = str(track.get("user_id") or req.user_id).strip() or req.user_id
     _schedule_embedding_precompute(
-        background_tasks, user_id=req.user_id, track_ids=[int(track.get("id") or 0)]
+        background_tasks, user_id=track_user_id, track_ids=[int(track.get("id") or 0)]
     )
-    _schedule_obsidian_export(
-        background_tasks,
-        user_id=req.user_id,
-        track_id=int(track.get("id") or 0),
-        for_tracks=True,
-    )
+    _schedule_obsidian_export_for_track(background_tasks, track=track, for_tracks=True)
     return TrackResponse(track=track)
 
 
@@ -478,13 +496,9 @@ def update_track(
         raise HTTPException(status_code=409, detail="Track name already exists") from None
     if not track:
         raise HTTPException(status_code=404, detail="Track not found")
-    _schedule_embedding_precompute(background_tasks, user_id=user_id, track_ids=[track_id])
-    _schedule_obsidian_export(
-        background_tasks,
-        user_id=user_id,
-        track_id=track_id,
-        for_tracks=True,
-    )
+    track_user_id = str(track.get("user_id") or user_id).strip() or user_id
+    _schedule_embedding_precompute(background_tasks, user_id=track_user_id, track_ids=[track_id])
+    _schedule_obsidian_export_for_track(background_tasks, track=track, for_tracks=True)
     return TrackResponse(track=track)
 
 
@@ -1024,13 +1038,14 @@ def add_paper_feedback(req: PaperFeedbackRequest, background_tasks: BackgroundTa
     research_store = _get_research_store()
 
     track_id = req.track_id
+    active_track: Optional[Dict[str, Any]] = None
     if track_id is None:
         Logger.info("No track specified, getting active track", file=LogFiles.HARVEST)
-        active = research_store.get_active_track(user_id=req.user_id)
-        if not active:
+        active_track = research_store.get_active_track(user_id=req.user_id)
+        if not active_track:
             Logger.error("No active track found", file=LogFiles.HARVEST)
             raise HTTPException(status_code=400, detail="track_id missing and no active track")
-        track_id = int(active["id"])
+        track_id = int(active_track["id"])
 
     meta: Dict[str, Any] = dict(req.metadata or {})
     if req.context_run_id is not None:
@@ -1105,10 +1120,13 @@ def add_paper_feedback(req: PaperFeedbackRequest, background_tasks: BackgroundTa
     normalized_action = research_store._normalize_feedback_action(req.action)
     current_action = research_store._effective_feedback_action(normalized_action)
     if normalized_action in {"save", "unsave"}:
-        _schedule_obsidian_export(
-            background_tasks,
+        export_track = active_track or research_store.get_track(
             user_id=req.user_id,
             track_id=int(track_id),
+        )
+        _schedule_obsidian_export_for_track(
+            background_tasks,
+            track=export_track,
             for_tracks=False,
         )
     return PaperFeedbackResponse(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import pytest
@@ -121,3 +122,18 @@ def test_load_environment_variables_overrides_obsidian(monkeypatch: pytest.Monke
     assert settings.obsidian.auto_export_on_save is False
     assert settings.obsidian.auto_sync_tracks is False
     assert settings.obsidian.export_limit == 42
+
+
+def test_load_environment_variables_warns_on_invalid_obsidian_export_limit(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    settings = Settings()
+    monkeypatch.setenv("PAPERBOT_OBSIDIAN_EXPORT_LIMIT", "not-an-int")
+
+    with caplog.at_level(logging.WARNING):
+        settings.load_environment_variables()
+
+    assert settings.obsidian.export_limit == 200
+    assert "PAPERBOT_OBSIDIAN_EXPORT_LIMIT" in caplog.text
+    assert "not-an-int" in caplog.text

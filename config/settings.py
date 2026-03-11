@@ -8,6 +8,7 @@ that supports YAML loading and environment variable overrides.
 
 from __future__ import annotations
 
+import logging
 import os
 from collections.abc import Mapping
 from pathlib import Path
@@ -17,6 +18,8 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
 from config.models import AppConfig, LLMConfig, PipelineConfig, ReproConfig, SemanticScholarConfig
+
+logger = logging.getLogger(__name__)
 
 
 class DatabaseConfig(BaseModel):
@@ -386,7 +389,10 @@ class Settings(BaseModel):
             try:
                 self.obsidian.export_limit = max(1, int(obsidian_export_limit))
             except ValueError:
-                pass
+                logger.warning(
+                    "Ignoring invalid PAPERBOT_OBSIDIAN_EXPORT_LIMIT=%r; expected an integer",
+                    obsidian_export_limit,
+                )
 
         # Collab host LLM
         host_api = os.getenv("PAPERBOT_HOST_API_KEY")

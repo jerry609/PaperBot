@@ -31,14 +31,20 @@ def test_export_track_snapshot_uses_obsidian_settings(monkeypatch, tmp_path: Pat
     vault_dir.mkdir()
 
     class _FakeExporter:
-        def __init__(self, *, paper_template_path=None):
-            captured["template_path"] = paper_template_path
-
-        def export_library_snapshot(self, *, vault_path, saved_items, track, root_dir):
+        def export_library_snapshot(
+            self,
+            *,
+            vault_path,
+            saved_items,
+            track,
+            root_dir,
+            paper_template_path=None,
+        ):
             captured["vault_path"] = Path(vault_path)
             captured["saved_items"] = saved_items
             captured["track"] = track
             captured["root_dir"] = root_dir
+            captured["template_path"] = paper_template_path
             return {"paper_count": len(saved_items)}
 
     monkeypatch.setattr(

@@ -65,12 +65,21 @@ class _FakeResearchStore:
 
 
 class _FakeExporter:
-    def export_library_snapshot(self, *, vault_path, saved_items, track=None, root_dir="PaperBot"):
+    def export_library_snapshot(
+        self,
+        *,
+        vault_path,
+        saved_items,
+        track=None,
+        root_dir="PaperBot",
+        paper_template_path=None,
+    ):
         assert Path(vault_path) == Path("/tmp/my-vault")
         assert len(saved_items) == 1
         assert track is not None
         assert track["name"] == "ICL Compression"
         assert root_dir == "PaperBot"
+        assert paper_template_path is None
         return {
             "vault_path": str(vault_path),
             "root_dir": root_dir,
