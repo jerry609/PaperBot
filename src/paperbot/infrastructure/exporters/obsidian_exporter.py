@@ -5,8 +5,41 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import yaml
+from jinja2 import Environment, FileSystemLoader
 
 from paperbot.application.ports.vault_exporter_port import VaultExporterPort
+
+
+DEFAULT_PAPER_TEMPLATE = """{{ frontmatter }}
+# {{ title }}
+
+## Summary
+{{ abstract }}
+
+## Metadata
+{% for row in metadata_rows -%}
+- {{ row }}
+{% endfor %}
+{% if track_link %}
+
+## Tracks
+- {{ track_link }}
+{% endif %}
+{% if related_links %}
+
+## Related Papers
+{% for link in related_links -%}
+- {{ link }}
+{% endfor %}
+{% endif %}
+{% if external_links %}
+
+## Links
+{% for link in external_links -%}
+- {{ link }}
+{% endfor %}
+{% endif %}
+"""
 
 
 def _slugify(value: str) -> str:
@@ -52,6 +85,9 @@ def _yaml_frontmatter(payload: Dict[str, Any]) -> str:
 class ObsidianFilesystemExporter(VaultExporterPort):
     """Write PaperBot artifacts directly into an Obsidian-compatible vault."""
 
+    def __init__(self, *, paper_template_path: Optional[Path] = None):
+        self._paper_template_path = Path(paper_template_path).expanduser() if paper_template_path else None
+
     def export_library_snapshot(
         self,
         *,
@@ -59,10 +95,12 @@ class ObsidianFilesystemExporter(VaultExporterPort):
         saved_items: List[Dict[str, Any]],
         track: Optional[Dict[str, Any]] = None,
         root_dir: str = "PaperBot",
+        paper_template_path: Optional[Path] = None,
     ) -> Dict[str, Any]:
         vault_dir = Path(vault_path).expanduser().resolve()
         if not vault_dir.exists() or not vault_dir.is_dir():
             raise ValueError("vault_path must be an existing directory")
+        template_path = self._resolve_paper_template_path(paper_template_path)
 
         root_path = vault_dir / root_dir
         papers_dir = root_path / "Papers"
@@ -82,6 +120,7 @@ class ObsidianFilesystemExporter(VaultExporterPort):
                     paper=paper,
                     track=track,
                     saved_at=item.get("saved_at"),
+                    template_path=template_path,
                 )
             )
 
@@ -117,6 +156,7 @@ class ObsidianFilesystemExporter(VaultExporterPort):
         paper: Dict[str, Any],
         track: Optional[Dict[str, Any]],
         saved_at: Optional[str],
+        template_path: Optional[Path],
     ) -> Dict[str, str]:
         note_stem = self._paper_note_stem(paper)
         note_path = papers_dir / f"{note_stem}.md"
@@ -137,6 +177,8 @@ class ObsidianFilesystemExporter(VaultExporterPort):
             if track is not None
             else None
         )
+        related_links = self._paper_related_links(paper=paper, root_dir=root_dir)
+        related_titles = self._paper_related_titles(paper)
 
         frontmatter = _yaml_frontmatter(
             {
@@ -154,31 +196,30 @@ class ObsidianFilesystemExporter(VaultExporterPort):
                 "saved_at": saved_at,
                 "track": track.get("name") if track else None,
                 "tags": self._paper_tags(paper, track),
+                "related_papers": related_titles,
             }
         )
 
-        lines = [
-            frontmatter,
-            f"# {paper.get('title') or 'Untitled Paper'}",
-            "",
-            "## Summary",
-            str(paper.get("abstract") or "_No abstract available._"),
-            "",
-            "## Metadata",
-            f"- Authors: {', '.join(paper.get('authors') or []) or 'Unknown'}",
-            f"- Venue: {paper.get('venue') or 'Unknown'}",
-            f"- Year: {paper.get('year') or 'Unknown'}",
-            f"- Citations: {int(paper.get('citation_count') or 0)}",
-        ]
+        body = self._render_paper_note(
+            template_path=template_path,
+            frontmatter=frontmatter,
+            title=note_title,
+            abstract=str(paper.get("abstract") or "_No abstract available._"),
+            metadata_rows=[
+                f"Authors: {', '.join(paper.get('authors') or []) or 'Unknown'}",
+                f"Venue: {paper.get('venue') or 'Unknown'}",
+                f"Year: {paper.get('year') or 'Unknown'}",
+                f"Citations: {int(paper.get('citation_count') or 0)}",
+            ],
+            track_link=track_link,
+            external_links=self._paper_links(paper),
+            related_links=related_links,
+            paper=paper,
+            track=track,
+            related_titles=related_titles,
+        )
 
-        if track_link:
-            lines.extend(["", "## Tracks", f"- {track_link}"])
-
-        links = self._paper_links(paper)
-        if links:
-            lines.extend(["", "## Links", *[f"- {link}" for link in links]])
-
-        note_path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+        note_path.write_text(body.rstrip() + "\n", encoding="utf-8")
         return {
             "title": note_title,
             "path": str(note_path),
@@ -313,6 +354,125 @@ class ObsidianFilesystemExporter(VaultExporterPort):
         if arxiv_id:
             links.append(f"[arXiv](https://arxiv.org/abs/{arxiv_id})")
         return links
+
+    def _resolve_paper_template_path(self, paper_template_path: Optional[Path]) -> Optional[Path]:
+        if paper_template_path is not None:
+            return Path(paper_template_path).expanduser()
+        return self._paper_template_path
+
+    def _render_paper_note(
+        self,
+        *,
+        template_path: Optional[Path],
+        frontmatter: str,
+        title: str,
+        abstract: str,
+        metadata_rows: List[str],
+        track_link: Optional[str],
+        external_links: List[str],
+        related_links: List[str],
+        paper: Dict[str, Any],
+        track: Optional[Dict[str, Any]],
+        related_titles: List[str],
+    ) -> str:
+        if template_path:
+            resolved = template_path.expanduser().resolve()
+            environment = Environment(
+                loader=FileSystemLoader(str(resolved.parent)),
+                autoescape=False,
+                keep_trailing_newline=True,
+                trim_blocks=False,
+                lstrip_blocks=False,
+            )
+            template = environment.get_template(resolved.name)
+            return template.render(
+                frontmatter=frontmatter,
+                title=title,
+                abstract=abstract,
+                metadata_rows=metadata_rows,
+                track_link=track_link,
+                external_links=external_links,
+                related_links=related_links,
+                paper=paper,
+                track=track,
+                related_titles=related_titles,
+            )
+
+        return Environment(autoescape=False).from_string(DEFAULT_PAPER_TEMPLATE).render(
+            frontmatter=frontmatter,
+            title=title,
+            abstract=abstract,
+            metadata_rows=metadata_rows,
+            track_link=track_link,
+            external_links=external_links,
+            related_links=related_links,
+            paper=paper,
+            track=track,
+            related_titles=related_titles,
+        )
+
+    def _paper_related_links(self, *, paper: Dict[str, Any], root_dir: str) -> List[str]:
+        links: List[str] = []
+        seen: set[str] = set()
+        for entry in self._paper_related_entries(paper):
+            title = str(entry.get("title") or "").strip()
+            if not title or title.casefold() in seen:
+                continue
+            seen.add(title.casefold())
+            note_stem = self._paper_note_stem(entry)
+            links.append(
+                self._wikilink(
+                    root_dir=root_dir,
+                    section="Papers",
+                    note_stem=note_stem,
+                    label=title,
+                )
+            )
+        return links
+
+    def _paper_related_titles(self, paper: Dict[str, Any]) -> List[str]:
+        titles: List[str] = []
+        seen: set[str] = set()
+        for entry in self._paper_related_entries(paper):
+            title = str(entry.get("title") or "").strip()
+            if not title or title.casefold() in seen:
+                continue
+            seen.add(title.casefold())
+            titles.append(title)
+        return titles
+
+    @staticmethod
+    def _paper_related_entries(paper: Dict[str, Any]) -> List[Dict[str, Any]]:
+        related: List[Dict[str, Any]] = []
+        candidates = [
+            paper.get("related_papers"),
+            paper.get("related_titles"),
+            paper.get("references"),
+            (paper.get("metadata") or {}).get("related_papers") if isinstance(paper.get("metadata"), dict) else None,
+            (paper.get("metadata") or {}).get("references") if isinstance(paper.get("metadata"), dict) else None,
+        ]
+        for bucket in candidates:
+            if not isinstance(bucket, list):
+                continue
+            for item in bucket:
+                if isinstance(item, dict):
+                    title = str(item.get("title") or item.get("name") or "").strip()
+                    if title:
+                        related.append(
+                            {
+                                "title": title,
+                                "year": item.get("year"),
+                                "arxiv_id": item.get("arxiv_id"),
+                                "doi": item.get("doi"),
+                                "semantic_scholar_id": item.get("semantic_scholar_id"),
+                                "id": item.get("id"),
+                            }
+                        )
+                else:
+                    title = str(item or "").strip()
+                    if title:
+                        related.append({"title": title})
+        return related
 
     @staticmethod
     def _wikilink(

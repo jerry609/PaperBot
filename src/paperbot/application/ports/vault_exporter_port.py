@@ -17,4 +17,5 @@ class VaultExporterPort(Protocol):
         saved_items: List[Dict[str, Any]],
         track: Optional[Dict[str, Any]] = None,
         root_dir: str = "PaperBot",
+        paper_template_path: Optional[Path] = None,
     ) -> Dict[str, Any]: ...

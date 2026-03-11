@@ -129,6 +129,18 @@ class ReportEngineConf(BaseModel):
     model_tiers: Dict[str, str] = Field(default_factory=dict)
 
 
+class ObsidianConfig(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    enabled: bool = False
+    vault_path: str = ""
+    root_dir: str = "PaperBot"
+    paper_template_path: Optional[str] = None
+    auto_export_on_save: bool = True
+    auto_sync_tracks: bool = True
+    export_limit: int = 200
+
+
 class CollabHostConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -150,6 +162,7 @@ class Settings(BaseModel):
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     api: APIConfig = Field(default_factory=APIConfig)
     report_engine: ReportEngineConf = Field(default_factory=ReportEngineConf)
+    obsidian: ObsidianConfig = Field(default_factory=ObsidianConfig)
     collab: Dict[str, Any] = Field(
         default_factory=lambda: {
             "enabled": False,
@@ -213,6 +226,7 @@ class Settings(BaseModel):
             "output",
             "logging",
             "report_engine",
+            "obsidian",
             "mode",
             "offline",
         ):
@@ -310,6 +324,13 @@ class Settings(BaseModel):
         re_max = os.getenv("PAPERBOT_RE_MAX_WORDS")
         re_scenario = os.getenv("PAPERBOT_RE_SCENARIO")
         re_tiers = os.getenv("PAPERBOT_RE_MODEL_TIERS")
+        obsidian_enabled = os.getenv("PAPERBOT_OBSIDIAN_ENABLED")
+        obsidian_vault = os.getenv("PAPERBOT_OBSIDIAN_VAULT_PATH")
+        obsidian_root = os.getenv("PAPERBOT_OBSIDIAN_ROOT_DIR")
+        obsidian_template = os.getenv("PAPERBOT_OBSIDIAN_PAPER_TEMPLATE")
+        obsidian_auto_export = os.getenv("PAPERBOT_OBSIDIAN_AUTO_EXPORT")
+        obsidian_auto_sync_tracks = os.getenv("PAPERBOT_OBSIDIAN_AUTO_SYNC_TRACKS")
+        obsidian_export_limit = os.getenv("PAPERBOT_OBSIDIAN_EXPORT_LIMIT")
         if re_enabled is not None:
             self.report_engine.enabled = re_enabled.lower() in ("1", "true", "yes", "on")
         if re_api:
@@ -339,6 +360,34 @@ class Settings(BaseModel):
                     tiers[k.strip()] = v.strip()
             self.report_engine.model_tiers = tiers
 
+        if obsidian_enabled is not None:
+            self.obsidian.enabled = obsidian_enabled.lower() in ("1", "true", "yes", "on")
+        if obsidian_vault:
+            self.obsidian.vault_path = obsidian_vault
+        if obsidian_root:
+            self.obsidian.root_dir = obsidian_root
+        if obsidian_template:
+            self.obsidian.paper_template_path = obsidian_template
+        if obsidian_auto_export is not None:
+            self.obsidian.auto_export_on_save = obsidian_auto_export.lower() in (
+                "1",
+                "true",
+                "yes",
+                "on",
+            )
+        if obsidian_auto_sync_tracks is not None:
+            self.obsidian.auto_sync_tracks = obsidian_auto_sync_tracks.lower() in (
+                "1",
+                "true",
+                "yes",
+                "on",
+            )
+        if obsidian_export_limit:
+            try:
+                self.obsidian.export_limit = max(1, int(obsidian_export_limit))
+            except ValueError:
+                pass
+
         # Collab host LLM
         host_api = os.getenv("PAPERBOT_HOST_API_KEY")
         host_model = os.getenv("PAPERBOT_HOST_MODEL")
@@ -366,6 +415,7 @@ class Settings(BaseModel):
             "logging": self.logging.model_dump(),
             "api": self.api.model_dump(),
             "report_engine": self.report_engine.model_dump(),
+            "obsidian": self.obsidian.model_dump(),
             "collab": self.collab,
             "conferences": {name: conf.model_dump() for name, conf in self.conferences.items()},
         }

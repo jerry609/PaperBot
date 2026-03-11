@@ -126,3 +126,44 @@ def test_unsave_clears_feed_saved_flags(tmp_path: Path):
 
     assert item["latest_feedback_action"] is None
     assert item["is_saved"] is False
+
+
+def test_feedback_route_schedules_obsidian_export_for_save_and_unsave(tmp_path: Path, monkeypatch):
+    store, paper, track = _prepare_feedback_state_db(tmp_path)
+    monkeypatch.setattr(research_route, "_research_store", store)
+
+    captured: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        research_route,
+        "_schedule_obsidian_export",
+        lambda background_tasks, *, user_id, track_id, for_tracks=False: captured.append(
+            {"user_id": user_id, "track_id": track_id, "for_tracks": for_tracks}
+        ),
+    )
+
+    with TestClient(api_main.app) as client:
+        saved = client.post(
+            "/api/research/papers/feedback",
+            json={
+                "user_id": "u-feedback",
+                "track_id": int(track["id"]),
+                "paper_id": str(paper["id"]),
+                "action": "save",
+            },
+        )
+        unsaved = client.post(
+            "/api/research/papers/feedback",
+            json={
+                "user_id": "u-feedback",
+                "track_id": int(track["id"]),
+                "paper_id": str(paper["id"]),
+                "action": "unsave",
+            },
+        )
+
+    assert saved.status_code == 200
+    assert unsaved.status_code == 200
+    assert captured == [
+        {"user_id": "u-feedback", "track_id": int(track["id"]), "for_tracks": False},
+        {"user_id": "u-feedback", "track_id": int(track["id"]), "for_tracks": False},
+    ]

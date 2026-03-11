@@ -16,6 +16,7 @@ from typing import Optional
 
 from dotenv import find_dotenv, load_dotenv
 
+from config.settings import create_settings
 from paperbot.application.workflows.dailypaper import (
     DailyPaperReporter,
     apply_judge_scores_to_report,
@@ -218,8 +219,8 @@ def create_parser() -> argparse.ArgumentParser:
     )
     obsidian_parser.add_argument(
         "--vault",
-        required=True,
-        help="Obsidian vault 目录（必须已存在）",
+        default=None,
+        help="Obsidian vault 目录（默认读取 obsidian.vault_path）",
     )
     obsidian_scope = obsidian_parser.add_mutually_exclusive_group()
     obsidian_scope.add_argument("--track-id", type=int, default=None, help="按 track ID 导出")
@@ -232,8 +233,13 @@ def create_parser() -> argparse.ArgumentParser:
     obsidian_parser.add_argument("--limit", type=int, default=200, help="最多导出多少篇论文")
     obsidian_parser.add_argument(
         "--root-dir",
-        default="PaperBot",
-        help="vault 内的输出根目录",
+        default=None,
+        help="vault 内的输出根目录（默认读取 obsidian.root_dir）",
+    )
+    obsidian_parser.add_argument(
+        "--paper-template",
+        default=None,
+        help="自定义论文笔记 Jinja2 模板路径（默认读取 obsidian.paper_template_path）",
     )
     obsidian_parser.add_argument("--json", action="store_true", help="输出 JSON 摘要")
 
@@ -582,6 +588,18 @@ def _run_obsidian_export(parsed: argparse.Namespace) -> int:
     from paperbot.infrastructure.exporters import ObsidianFilesystemExporter
     from paperbot.infrastructure.stores.research_store import SqlAlchemyResearchStore
 
+    settings = create_settings()
+    obsidian_config = settings.obsidian
+    vault_value = parsed.vault or obsidian_config.vault_path
+    if not str(vault_value or "").strip():
+        print(
+            "Error: vault path is required. Pass --vault or configure obsidian.vault_path.",
+            file=sys.stderr,
+        )
+        return 1
+    root_dir = parsed.root_dir or obsidian_config.root_dir or "PaperBot"
+    paper_template_path = parsed.paper_template or obsidian_config.paper_template_path
+
     store = SqlAlchemyResearchStore()
     try:
         track = None
@@ -609,12 +627,17 @@ def _run_obsidian_export(parsed: argparse.Namespace) -> int:
             print(f"Error: no saved papers found{scope}", file=sys.stderr)
             return 1
 
-        exporter = ObsidianFilesystemExporter()
+        if paper_template_path:
+            exporter = ObsidianFilesystemExporter(
+                paper_template_path=Path(paper_template_path).expanduser()
+            )
+        else:
+            exporter = ObsidianFilesystemExporter()
         result = exporter.export_library_snapshot(
-            vault_path=Path(parsed.vault),
+            vault_path=Path(vault_value),
             saved_items=saved_items,
             track=track,
-            root_dir=parsed.root_dir,
+            root_dir=root_dir,
         )
 
         if parsed.json:

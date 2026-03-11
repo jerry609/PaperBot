@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 from paperbot.presentation.cli import main as cli_main
 
@@ -133,3 +134,41 @@ def test_cli_obsidian_export_json_output(monkeypatch, capsys):
     assert payload["paper_count"] == 1
     assert payload["track_note"].endswith("icl-compression.md")
     assert payload["moc_note"].endswith("MOC.md")
+
+
+def test_cli_obsidian_export_uses_settings_defaults(monkeypatch, capsys):
+    import paperbot.infrastructure.exporters as exporters_pkg
+    import paperbot.infrastructure.exporters.obsidian_exporter as exporter_module
+    import paperbot.infrastructure.stores.research_store as research_store_module
+
+    monkeypatch.setattr(research_store_module, "SqlAlchemyResearchStore", _FakeResearchStore)
+    monkeypatch.setattr(exporters_pkg, "ObsidianFilesystemExporter", _FakeExporter)
+    monkeypatch.setattr(exporter_module, "ObsidianFilesystemExporter", _FakeExporter)
+    monkeypatch.setattr(
+        cli_main,
+        "create_settings",
+        lambda: SimpleNamespace(
+            obsidian=SimpleNamespace(
+                vault_path="/tmp/my-vault",
+                root_dir="PaperBot",
+                paper_template_path=None,
+            )
+        ),
+    )
+
+    exit_code = cli_main.run_cli(
+        [
+            "export",
+            "obsidian",
+            "--track-name",
+            "ICL Compression",
+            "--limit",
+            "5",
+            "--json",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    payload = json.loads(captured.out)
+    assert payload["vault_path"] == "/tmp/my-vault"
