@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import desc, select
+from sqlalchemy.exc import IntegrityError
 
 from paperbot.infrastructure.stores.models import Base, IntelligenceEventModel
 from paperbot.infrastructure.stores.sqlalchemy_db import SessionProvider, get_db_url
@@ -128,31 +129,107 @@ class IntelligenceStore:
                     external_id=external_id,
                     created_at=now,
                 )
-
-            row.source = (source or "unknown").strip()[:32]
-            row.source_label = (source_label or row.source).strip()[:64]
-            row.kind = (kind or "signal").strip()[:64]
-            row.title = (title or "Untitled signal").strip()
-            row.summary = (summary or "").strip()
-            row.url = (url or "").strip()
-            row.repo_full_name = (repo_full_name or "").strip()[:128]
-            row.author_name = (author_name or "").strip()[:128]
-            row.keyword_hits_json = _dump_list(keyword_hits)
-            row.author_matches_json = _dump_list(author_matches)
-            row.repo_matches_json = _dump_list(repo_matches)
-            row.metric_name = (metric_name or "").strip()[:64]
-            row.metric_value = int(metric_value or 0)
-            row.metric_delta = int(metric_delta or 0)
-            row.score = float(score or 0.0)
-            row.published_at = _parse_datetime(published_at) or row.published_at or now
-            row.detected_at = now
-            row.updated_at = now
-            row.payload_json = _dump_dict(payload)
+            self._apply_event_fields(
+                row,
+                source=source,
+                source_label=source_label,
+                kind=kind,
+                title=title,
+                summary=summary,
+                url=url,
+                repo_full_name=repo_full_name,
+                author_name=author_name,
+                keyword_hits=keyword_hits,
+                author_matches=author_matches,
+                repo_matches=repo_matches,
+                metric_name=metric_name,
+                metric_value=metric_value,
+                metric_delta=metric_delta,
+                score=score,
+                published_at=published_at,
+                detected_at=now,
+                payload=payload,
+            )
 
             session.add(row)
-            session.commit()
+            try:
+                session.commit()
+            except IntegrityError:
+                session.rollback()
+                row = session.execute(
+                    select(IntelligenceEventModel).where(
+                        IntelligenceEventModel.user_id == user_id,
+                        IntelligenceEventModel.external_id == external_id,
+                    )
+                ).scalar_one()
+                self._apply_event_fields(
+                    row,
+                    source=source,
+                    source_label=source_label,
+                    kind=kind,
+                    title=title,
+                    summary=summary,
+                    url=url,
+                    repo_full_name=repo_full_name,
+                    author_name=author_name,
+                    keyword_hits=keyword_hits,
+                    author_matches=author_matches,
+                    repo_matches=repo_matches,
+                    metric_name=metric_name,
+                    metric_value=metric_value,
+                    metric_delta=metric_delta,
+                    score=score,
+                    published_at=published_at,
+                    detected_at=now,
+                    payload=payload,
+                )
+                session.add(row)
+                session.commit()
             session.refresh(row)
             return self._row_to_dict(row)
+
+    @staticmethod
+    def _apply_event_fields(
+        row: IntelligenceEventModel,
+        *,
+        source: str,
+        source_label: str,
+        kind: str,
+        title: str,
+        summary: str,
+        url: str,
+        repo_full_name: str,
+        author_name: str,
+        keyword_hits: Optional[List[str]],
+        author_matches: Optional[List[str]],
+        repo_matches: Optional[List[str]],
+        metric_name: str,
+        metric_value: int,
+        metric_delta: int,
+        score: float,
+        published_at: Optional[datetime],
+        detected_at: datetime,
+        payload: Optional[Dict[str, Any]],
+    ) -> None:
+        row.source = (source or "unknown").strip()[:32]
+        row.source_label = (source_label or row.source).strip()[:64]
+        row.kind = (kind or "signal").strip()[:64]
+        row.title = (title or "Untitled signal").strip()
+        row.summary = (summary or "").strip()
+        row.url = (url or "").strip()
+        row.repo_full_name = (repo_full_name or "").strip()[:128]
+        row.author_name = (author_name or "").strip()[:128]
+        row.keyword_hits_json = _dump_list(keyword_hits)
+        row.author_matches_json = _dump_list(author_matches)
+        row.repo_matches_json = _dump_list(repo_matches)
+        row.metric_name = (metric_name or "").strip()[:64]
+        row.metric_value = int(metric_value or 0)
+        row.metric_delta = int(metric_delta or 0)
+        row.score = float(score or 0.0)
+        row.published_at = _parse_datetime(published_at) or row.published_at or detected_at
+        row.detected_at = detected_at
+        row.updated_at = detected_at
+        row.payload_json = _dump_dict(payload)
 
     def list_events(
         self,

@@ -27,7 +27,7 @@ def upgrade() -> None:
         op.create_table(
             "intelligence_events",
             sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
-            sa.Column("user_id", sa.String(64), nullable=False, index=True),
+            sa.Column("user_id", sa.String(64), nullable=False, server_default="default", index=True),
             sa.Column("external_id", sa.String(255), nullable=False),
             sa.Column("source", sa.String(32), nullable=False, server_default="unknown", index=True),
             sa.Column("source_label", sa.String(64), nullable=False, server_default=""),

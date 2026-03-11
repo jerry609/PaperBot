@@ -8,9 +8,8 @@ from .semantic_scholar import SemanticScholarClient
 from .x_client import XRecentSearchClient
 
 __all__ = [
-	"APIClient",
-	"GitHubRadarClient",
-	"SemanticScholarClient",
-	"XRecentSearchClient",
+    "APIClient",
+    "GitHubRadarClient",
+    "SemanticScholarClient",
+    "XRecentSearchClient",
 ]
-
