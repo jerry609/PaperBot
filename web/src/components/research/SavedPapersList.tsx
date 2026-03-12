@@ -26,6 +26,11 @@ import {
 import { Input } from "@/components/ui/input"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Textarea } from "@/components/ui/textarea"
+import {
+  currentFeedbackFromRequestAction,
+  toggleSaveFeedbackAction,
+  type PaperFeedbackRequestAction,
+} from "@/lib/paper-feedback"
 
 
 type SavedPaperSort = "saved_at" | "judge_score" | "published_at"
@@ -194,6 +199,7 @@ export default function SavedPapersList() {
   // Track filter state
   const [tracks, setTracks] = useState<Track[]>([])
   const [selectedTrackId, setSelectedTrackId] = useState<number | null>(null)
+  const activeTrackId = selectedTrackId
 
   // Fetch tracks on mount
   useEffect(() => {
@@ -279,30 +285,52 @@ export default function SavedPapersList() {
 
   const isAllSelected = pagedItems.length > 0 && selectedIds.size === pagedItems.length
 
-  const unsavePaper = useCallback(async (paperId: number) => {
-    setUpdatingAction({ paperId, action: "unsave" })
-    setError(null)
-    try {
-      const res = await fetch(`/api/papers/${paperId}/save?user_id=default`, {
-        method: "DELETE",
-      })
-
-      if (!res.ok) {
-        const errorText = await res.text()
-        if (errorText.startsWith("<!DOCTYPE") || errorText.startsWith("<html")) {
-          throw new Error(`Server error: ${res.status} ${res.statusText}`)
+  const unsavePaper = useCallback(
+    async (paperId: number, externalId: string | null) => {
+      const requestAction: PaperFeedbackRequestAction = toggleSaveFeedbackAction(true)
+      setUpdatingAction({ paperId, action: "unsave" })
+      setError(null)
+      try {
+        const payload = {
+          user_id: "default",
+          track_id: activeTrackId,
+          paper_id: externalId || String(paperId),
+          action: requestAction,
+          weight: 0.0,
+          context_run_id: null,
+          context_rank: undefined,
+          metadata: {},
         }
-        throw new Error(errorText)
-      }
 
-      setItems((prev) => prev.filter((row) => row.paper.id !== paperId))
-    } catch (err) {
-      const detail = err instanceof Error ? err.message : String(err)
-      setError(detail)
-    } finally {
-      setUpdatingAction(null)
-    }
-  }, [])
+        const res = await fetch(`/api/research/papers/feedback`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        })
+
+        if (!res.ok) {
+          const errorText = await res.text()
+          if (errorText.startsWith("<!DOCTYPE") || errorText.startsWith("<html")) {
+            throw new Error(`Server error: ${res.status} ${res.statusText}`)
+          }
+          throw new Error(errorText)
+        }
+
+        const data = await res.json()
+        const currentAction = currentFeedbackFromRequestAction(requestAction)
+
+        if (currentAction !== "save") {
+          setItems((prev) => prev.filter((row) => row.paper.id !== paperId))
+        }
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err)
+        setError(detail)
+      } finally {
+        setUpdatingAction(null)
+      }
+    },
+    [activeTrackId],
+  )
 
   const toggleReadStatus = useCallback(
     async (paperId: number, currentStatus: ReadingStatus) => {
@@ -898,7 +926,7 @@ export default function SavedPapersList() {
                             size="sm"
                             variant="ghost"
                             disabled={rowUpdating}
-                            onClick={() => unsavePaper(paper.id)}
+                            onClick={() => unsavePaper(paper.id, paper.external_url || paper.url || null)}
                           >
                             {unsaving ? <Loader2 className="h-3 w-3 animate-spin" /> : "Unsave"}
                           </Button>
