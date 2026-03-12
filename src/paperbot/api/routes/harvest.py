@@ -23,7 +23,7 @@ from paperbot.application.workflows.harvest_pipeline import (
     HarvestPipeline,
     HarvestProgress,
 )
-from paperbot.api.auth.dependencies import get_user_id
+from paperbot.api.auth.dependencies import get_required_user_id
 from paperbot.infrastructure.stores.paper_store import PaperStore, paper_to_dict
 from paperbot.utils.logging_config import LogFiles, Logger, clear_trace_id, set_trace_id
 
@@ -327,7 +327,7 @@ class LibraryResponse(BaseModel):
 
 @router.get("/papers/library", response_model=LibraryResponse)
 def get_user_library(
-    user_id: str = Depends(get_user_id),
+    user_id: str = Depends(get_required_user_id),
     track_id: Optional[int] = Query(None, description="Filter by track"),
     actions: Optional[str] = Query(None, description="Filter by actions (comma-separated)"),
     sort_by: str = Query("saved_at", description="Sort field"),
@@ -397,7 +397,7 @@ class SavePaperRequest(BaseModel):
 def save_paper_to_library(
     paper_id: int,
     request: SavePaperRequest,
-    user_id: str = Depends(get_user_id),
+    user_id: str = Depends(get_required_user_id),
 ):
     """
     Save a paper to user's library.
@@ -425,7 +425,7 @@ def save_paper_to_library(
 @router.delete("/papers/{paper_id}/save")
 def remove_paper_from_library(
     paper_id: int,
-    user_id: str = Depends(get_user_id),
+    user_id: str = Depends(get_required_user_id),
 ):
     """Remove a paper from user's library."""
     store = _get_paper_store()

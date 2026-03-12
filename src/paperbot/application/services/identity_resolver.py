@@ -49,7 +49,15 @@ class IdentityResolver:
         pid = (external_id or "").strip()
         hints = hints or {}
 
-        # 0. Numeric ID → direct lookup
+        # 0a. library_paper_id hint → already-resolved internal ID, use directly
+        lib_id = hints.get("library_paper_id")
+        if lib_id is not None:
+            try:
+                return int(lib_id)
+            except (TypeError, ValueError):
+                pass
+
+        # 0b. Numeric ID → direct lookup
         if pid.isdigit():
             with self._provider.session() as session:
                 row = session.execute(

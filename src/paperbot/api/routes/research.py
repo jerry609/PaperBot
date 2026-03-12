@@ -36,7 +36,7 @@ from paperbot.infrastructure.exporters.obsidian_sync import (
 from paperbot.infrastructure.stores.memory_store import SqlAlchemyMemoryStore
 from paperbot.infrastructure.stores.research_store import SqlAlchemyResearchStore
 from paperbot.infrastructure.stores.workflow_metric_store import WorkflowMetricStore
-from paperbot.api.auth.dependencies import get_user_id, get_required_user_id
+from paperbot.api.auth.dependencies import get_required_user_id
 from paperbot.memory.eval.collector import MemoryMetricCollector
 from paperbot.memory.extractor import extract_memories
 from paperbot.memory.schema import MemoryCandidate, NormalizedMessage

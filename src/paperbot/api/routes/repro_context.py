@@ -21,7 +21,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from paperbot.api.streaming import StreamEvent, wrap_generator, sse_response
-from paperbot.api.auth.dependencies import get_user_id, get_required_user_id
+from paperbot.api.auth.dependencies import get_required_user_id
 from paperbot.application.services.p2c.models import (
     GenerateContextRequest as P2CRequest,
     RawPaperData,
@@ -51,7 +51,6 @@ def _get_store() -> SqlAlchemyReproContextStore:
 
 class GenerateContextPackRequest(BaseModel):
     paper_id: str
-    user_id: str = "default"
     project_id: Optional[str] = None
     track_id: Optional[int] = None
     depth: Literal["fast", "standard", "deep"] = "standard"
@@ -70,7 +69,7 @@ class CreateSessionRequest(BaseModel):
 # POST /generate  (SSE)                                               #
 # ------------------------------------------------------------------ #
 
-async def _generate_stream(request: GenerateContextPackRequest):
+async def _generate_stream(request: GenerateContextPackRequest, user_id: str):
     """SSE generator for context pack generation via Module 1 ExtractionOrchestrator."""
     pack_id = new_context_pack_id()
     Logger.info(
@@ -83,7 +82,7 @@ async def _generate_stream(request: GenerateContextPackRequest):
         await asyncio.to_thread(
             _get_store().save,
             pack_id=pack_id,
-            user_id=request.user_id,
+            user_id=user_id,
             paper_id=request.paper_id,
             depth=request.depth,
             pack_data={},
@@ -169,7 +168,7 @@ async def _generate_stream(request: GenerateContextPackRequest):
 
     p2c_request = P2CRequest(
         paper_id=request.paper_id,
-        user_id=request.user_id,
+        user_id=user_id,
         project_id=request.project_id,
         track_id=request.track_id,
         depth=request.depth,
@@ -265,7 +264,7 @@ async def _generate_stream(request: GenerateContextPackRequest):
     # Write observations to paper-scope memory so future P2C runs can reuse them.
     await _write_paper_scope_memories(
         paper_id=request.paper_id,
-        user_id=request.user_id,
+        user_id=user_id,
         observations=pack.observations,
     )
     Logger.info(
@@ -338,13 +337,12 @@ async def generate_context_pack(
 ):
     """Generate a P2C context pack for the given paper. Returns SSE stream."""
     trace_id = set_trace_id()
-    request.user_id = user_id
 
     Logger.info(
         f"[M2] generate_request trace_id={trace_id} paper_id={request.paper_id} user_id={user_id}",
         file=LogFiles.API,
     )
-    return sse_response(_generate_stream(request), workflow="p2c_generate")
+    return sse_response(_generate_stream(request, user_id), workflow="p2c_generate")
 
 
 # ------------------------------------------------------------------ #

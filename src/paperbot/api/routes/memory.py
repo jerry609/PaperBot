@@ -160,7 +160,6 @@ def list_memories(
 
 
 class ContextRequest(BaseModel):
-    user_id: str = "default"
     workspace_id: Optional[str] = None
     query: str = Field(..., min_length=1)
     limit: int = 8
