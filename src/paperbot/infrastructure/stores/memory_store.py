@@ -453,8 +453,9 @@ class SqlAlchemyMemoryStore(MemoryPort):
                         " END"
                     )
                 )
-        except Exception:
-            pass  # FTS5 not available or already set up — degrade silently
+        except Exception as exc:
+            # FTS5 not available or already set up — degrade silently but log for debugging.
+            logger.warning("Failed to ensure FTS5 tables/triggers: %s", exc)
 
     @staticmethod
     def _ensure_vec_table(conn, dim: int = _EMBEDDING_DIM) -> None:

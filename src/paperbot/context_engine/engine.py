@@ -1191,14 +1191,20 @@ class ContextEngine:
                     maybe_coro = close_fn()
                     if asyncio.iscoroutine(maybe_coro):
                         await maybe_coro
-                except Exception:
-                    pass
+                except Exception as exc:  # pragma: no cover - best-effort cleanup
+                    Logger.warning(
+                        f"Failed to close search_service: {exc}",
+                        file=LogFiles.HARVEST,
+                    )
 
         if self.paper_store is not None:
             close_fn = getattr(self.paper_store, "close", None)
             if callable(close_fn):
                 try:
                     close_fn()
-                except Exception:
-                    pass
+                except Exception as exc:  # pragma: no cover - best-effort cleanup
+                    Logger.warning(
+                        f"Failed to close paper_store: {exc}",
+                        file=LogFiles.HARVEST,
+                    )
         return None
