@@ -369,27 +369,48 @@ class DocumentIndexStore(EvidenceRetrieverPort):
         if paper_ids is not None and not scoped_paper_ids:
             return []
 
-        candidate_ids = self._search_chunk_ids_with_fts(
+        fts_candidate_ids = self._search_chunk_ids_with_fts(
             query=query,
             paper_ids=scoped_paper_ids or None,
             limit=max(max_hits * 8, 24),
         )
-        if candidate_ids is None:
-            candidate_ids = self._search_chunk_ids_with_like(
+        if fts_candidate_ids is None:
+            fts_candidate_ids = self._search_chunk_ids_with_like(
                 query=query,
                 paper_ids=scoped_paper_ids or None,
                 limit=max(max_hits * 8, 24),
             )
-        if not candidate_ids:
-            return []
-
-        order_map = {chunk_id: index for index, chunk_id in enumerate(candidate_ids)}
         query_embedding = None
         if self.embedding_provider is not None:
             try:
                 query_embedding = self.embedding_provider.embed(query[:500])
             except Exception:
                 query_embedding = None
+
+        embedding_ranked: List[Dict[str, Any]] = []
+        if query_embedding:
+            embedding_ranked = self._search_chunks_with_embedding(
+                query_embedding=query_embedding,
+                paper_ids=scoped_paper_ids or None,
+                limit=max(max_hits * 8, 24),
+            )
+
+        candidate_ids: List[int] = []
+        seen_ids: set[int] = set()
+        for chunk_id in fts_candidate_ids or []:
+            chunk_int = int(chunk_id)
+            if chunk_int in seen_ids:
+                continue
+            seen_ids.add(chunk_int)
+            candidate_ids.append(chunk_int)
+        for row in embedding_ranked:
+            chunk_int = int(row["chunk_id"])
+            if chunk_int in seen_ids:
+                continue
+            seen_ids.add(chunk_int)
+            candidate_ids.append(chunk_int)
+        if not candidate_ids:
+            return []
 
         with self._provider.session() as session:
             rows = session.execute(
@@ -400,20 +421,27 @@ class DocumentIndexStore(EvidenceRetrieverPort):
             ).all()
 
         hits: List[EvidenceHit] = []
+        order_map = {chunk_id: index for index, chunk_id in enumerate(candidate_ids)}
+        fts_rank_map = {
+            int(chunk_id): index for index, chunk_id in enumerate(fts_candidate_ids or [])
+        }
+        embedding_score_map = {
+            int(row["chunk_id"]): float(row.get("score", 0.0)) for row in embedding_ranked
+        }
         for chunk_row, asset_row, paper_row in sorted(
             rows,
             key=lambda row: order_map.get(int(row[0].id), len(order_map) + 1),
         ):
-            rank_index = order_map.get(int(chunk_row.id), len(order_map) + 1)
-            score = 1.0 / (1.0 + float(rank_index))
-            if query_embedding:
-                chunk_embedding = _deserialize_embedding(chunk_row.embedding_json)
-                if chunk_embedding:
-                    score += 0.35 * max(0.0, _cosine_similarity(query_embedding, chunk_embedding))
+            chunk_id = int(chunk_row.id)
+            score = 0.0
+            if chunk_id in fts_rank_map:
+                score += 1.0 / (1.0 + float(fts_rank_map[chunk_id]))
+            if chunk_id in embedding_score_map:
+                score += 0.5 * max(0.0, float(embedding_score_map[chunk_id]))
             hits.append(
                 EvidenceHit(
                     paper_id=int(chunk_row.paper_id),
-                    chunk_id=int(chunk_row.id),
+                    chunk_id=chunk_id,
                     chunk_index=int(chunk_row.chunk_index),
                     paper_title=str(paper_row.title or ""),
                     section=str(chunk_row.section or ""),
@@ -428,6 +456,42 @@ class DocumentIndexStore(EvidenceRetrieverPort):
 
         hits.sort(key=lambda hit: float(hit.score), reverse=True)
         return hits[:max_hits]
+
+    def list_chunks(self, *, paper_ids: Optional[Sequence[int]] = None) -> List[Dict[str, Any]]:
+        scoped_paper_ids = _normalize_paper_ids(paper_ids)
+        stmt = (
+            select(DocumentChunkModel, DocumentAssetModel, PaperModel)
+            .join(DocumentAssetModel, DocumentAssetModel.id == DocumentChunkModel.asset_id)
+            .join(PaperModel, PaperModel.id == DocumentChunkModel.paper_id)
+            .order_by(DocumentChunkModel.paper_id, DocumentChunkModel.chunk_index)
+        )
+        if scoped_paper_ids:
+            stmt = stmt.where(DocumentChunkModel.paper_id.in_(scoped_paper_ids))
+
+        with self._provider.session() as session:
+            rows = session.execute(stmt).all()
+
+        chunks: List[Dict[str, Any]] = []
+        for chunk_row, asset_row, paper_row in rows:
+            metadata = chunk_row.get_metadata()
+            section_chunk_index = int(metadata.get("section_chunk_index") or 0)
+            chunks.append(
+                {
+                    "chunk_id": int(chunk_row.id),
+                    "paper_id": int(chunk_row.paper_id),
+                    "paper_title": str(paper_row.title or ""),
+                    "chunk_index": int(chunk_row.chunk_index),
+                    "section": str(chunk_row.section or ""),
+                    "heading": str(chunk_row.heading or ""),
+                    "content": str(chunk_row.content or ""),
+                    "source_type": str(asset_row.source_type or "paper_metadata"),
+                    "locator_url": asset_row.locator_url,
+                    "embedding": _deserialize_embedding(chunk_row.embedding_json),
+                    "metadata": metadata,
+                    "chunk_ref": f"{int(chunk_row.paper_id)}:{str(chunk_row.section or '')}:{section_chunk_index}",
+                }
+            )
+        return chunks
 
     def _search_chunk_ids_with_fts(
         self,
@@ -512,3 +576,24 @@ class DocumentIndexStore(EvidenceRetrieverPort):
         with self._provider.session() as session:
             rows = session.execute(stmt).all()
         return [int(row[0]) for row in rows]
+
+    def _search_chunks_with_embedding(
+        self,
+        *,
+        query_embedding: Sequence[float],
+        paper_ids: Optional[Sequence[int]],
+        limit: int,
+    ) -> List[Dict[str, Any]]:
+        ranked: List[Dict[str, Any]] = []
+        for chunk in self.list_chunks(paper_ids=paper_ids):
+            embedding = chunk.get("embedding")
+            if not embedding:
+                continue
+            ranked.append(
+                {
+                    **chunk,
+                    "score": float(_cosine_similarity(query_embedding, embedding)),
+                }
+            )
+        ranked.sort(key=lambda row: float(row.get("score", 0.0)), reverse=True)
+        return ranked[: max(1, int(limit))]

@@ -27,11 +27,14 @@ fixture and scorer contract stay stable.
 ## Files
 
 - Seed fixture: `evals/fixtures/document_evidence/bench_v1.json`
+- Benchmark library: `src/paperbot/application/services/document_evidence_benchmark.py`
+- CLI: `scripts/eval_document_evidence.py`
+- Smoke runner: `evals/runners/run_document_evidence_benchmark_smoke.py`
 - Benchmark report target: `output/reports/document_evidence_bench_v1.json`
 - Context sampling target: `/research/context`
 
-This document intentionally fixes the evaluation contract before the first full
-benchmark runner lands, so later implementation work does not drift in scope.
+The seed benchmark is intentionally deterministic and offline-capable so it can
+run without an embedding API in CI and local regression checks.
 
 ## Retrieval modes
 
@@ -196,11 +199,20 @@ Before enabling embedding retrieval by default for document evidence, require:
 - one manual `/research/context` sampling pass confirming hits are more grounded
 - a documented rollback decision if the numbers do not improve
 
+## Run locally
+
+```bash
+PYTHONPATH=src python scripts/eval_document_evidence.py \
+  --fixtures evals/fixtures/document_evidence/bench_v1.json \
+  --output output/reports/document_evidence_bench_v1.json \
+  --fail-under-hybrid-recall 0.5 \
+  --fail-under-hybrid-hit-rate 0.5
+```
+
 ## Next implementation steps
 
-1. Add a benchmark library under `src/paperbot/document_intelligence/` or a
-   similarly scoped module.
-2. Seed the fixture into a temporary document index store during benchmark runs.
-3. Run all three retrieval modes against the same cases.
-4. Emit a versioned JSON report to `output/reports/`.
-5. Add a smoke runner once the seed set is stable enough for CI.
+1. Expand the judged fixture beyond metadata-only examples.
+2. Add a manual sampling report template for `/research/context evidence_hits`.
+3. Introduce a live shadow mode with a real embedding provider for optional
+   provider-vs-hash comparisons.
+4. Add PDF-derived evidence cases once fulltext indexing lands.
