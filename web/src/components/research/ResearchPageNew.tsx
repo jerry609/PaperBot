@@ -658,7 +658,11 @@ export default function ResearchPageNew() {
               <div className="flex min-h-0 flex-1 flex-col px-5 pb-5 pt-4">
                 <Tabs
                   value={workspaceTab}
-                  onValueChange={(value) => setWorkspaceTab(value as "saved" | "memory")}
+                  onValueChange={(value) => {
+                    if (value === "saved" || value === "memory") {
+                      setWorkspaceTab(value)
+                    }
+                  }}
                   className="flex min-h-0 flex-1 flex-col"
                 >
                   <TabsList className="grid h-auto w-full grid-cols-2 rounded-2xl bg-slate-100 p-1">

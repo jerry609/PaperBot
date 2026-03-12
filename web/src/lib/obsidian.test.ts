@@ -23,6 +23,15 @@ describe("buildObsidianExportCommand", () => {
       })
     ).toBe("paperbot export obsidian --user-id 'default' --vault '/path/to/your/vault'")
   })
+
+  it("keeps zero track ids instead of dropping them as falsy", () => {
+    expect(
+      buildObsidianExportCommand({
+        vaultPath: "~/vaults/research",
+        trackId: 0,
+      })
+    ).toBe("paperbot export obsidian --user-id 'default' --track-id 0 --vault '~/vaults/research'")
+  })
 })
 
 describe("describeObsidianScope", () => {
@@ -32,5 +41,9 @@ describe("describeObsidianScope", () => {
 
   it("falls back to global scope text without a track", () => {
     expect(describeObsidianScope(null, null)).toBe("Global saved library")
+  })
+
+  it("renders zero track ids as track scope", () => {
+    expect(describeObsidianScope(0, null)).toBe("Track #0")
   })
 })

@@ -19,7 +19,7 @@ export function buildObsidianExportCommand({
   const trimmedRootDir = rootDir.trim() || "PaperBot"
   const args = ["paperbot", "export", "obsidian", "--user-id", shellQuote(userId)]
 
-  if (trackId) {
+  if (trackId != null) {
     args.push("--track-id", String(trackId))
   }
 
@@ -37,7 +37,7 @@ export function buildObsidianExportCommand({
 }
 
 export function describeObsidianScope(trackId: number | null, trackName?: string | null): string {
-  if (trackId) {
+  if (trackId != null) {
     return trackName?.trim() ? `Track: ${trackName.trim()}` : `Track #${trackId}`
   }
   return "Global saved library"

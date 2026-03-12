@@ -80,6 +80,7 @@ export function SavedTab({ userId, trackId, trackName = null }: SavedTabProps) {
   const [obsidianVaultPath, setObsidianVaultPath] = useState("~/Obsidian/MyVault")
   const [obsidianRootDir, setObsidianRootDir] = useState("PaperBot")
   const [obsidianCopied, setObsidianCopied] = useState(false)
+  const [obsidianCopyError, setObsidianCopyError] = useState<string | null>(null)
 
   const papers = useMemo(() => items.map(toPaper), [items])
   const obsidianCommand = useMemo(
@@ -99,7 +100,7 @@ export function SavedTab({ userId, trackId, trackName = null }: SavedTabProps) {
 
   const handleExport = async (format: "bibtex" | "ris" | "markdown" | "csl_json") => {
     const qs = new URLSearchParams({ format, user_id: userId })
-    if (trackId) qs.set("track_id", String(trackId))
+    if (trackId != null) qs.set("track_id", String(trackId))
     try {
       const res = await fetch(`/api/papers/export?${qs.toString()}`)
       if (!res.ok) throw new Error(`${res.status}`)
@@ -149,9 +150,16 @@ export function SavedTab({ userId, trackId, trackName = null }: SavedTabProps) {
   }
 
   const handleCopyObsidianCommand = async () => {
-    await navigator.clipboard.writeText(obsidianCommand)
-    setObsidianCopied(true)
-    setTimeout(() => setObsidianCopied(false), 2000)
+    try {
+      await navigator.clipboard.writeText(obsidianCommand)
+      setObsidianCopyError(null)
+      setObsidianCopied(true)
+      setTimeout(() => setObsidianCopied(false), 2000)
+    } catch {
+      setObsidianCopied(false)
+      setObsidianCopyError("Clipboard access failed. Copy the command manually.")
+      setTimeout(() => setObsidianCopyError(null), 3000)
+    }
   }
 
   const load = async () => {
@@ -163,7 +171,7 @@ export function SavedTab({ userId, trackId, trackName = null }: SavedTabProps) {
         sort_by: "saved_at",
         limit: "100",
       })
-      if (trackId) {
+      if (trackId != null) {
         qs.set("track_id", String(trackId))
       }
       const res = await fetch(`/api/research/papers/saved?${qs.toString()}`)
@@ -195,7 +203,7 @@ export function SavedTab({ userId, trackId, trackName = null }: SavedTabProps) {
               <Badge variant="outline">{papers.length} saved</Badge>
             </div>
             <p className="text-sm text-muted-foreground">
-              {trackId
+              {trackId != null
                 ? "Saved papers scoped to the current track."
                 : "Saved papers across your library."}
             </p>
@@ -209,37 +217,37 @@ export function SavedTab({ userId, trackId, trackName = null }: SavedTabProps) {
             >
               <FolderSync className="h-3.5 w-3.5" /> Obsidian
             </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={loading || !papers.length}
-            onClick={() => {
-              setRwOpen(true)
-              setRwMarkdown(null)
-              setRwTopic("")
-            }}
-          >
-            <FileText className="h-3.5 w-3.5" /> Related Work
-          </Button>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm" disabled={loading || !papers.length}>
-                <Download className="h-3.5 w-3.5" /> Export
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => handleExport("bibtex")}>BibTeX</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => handleExport("ris")}>RIS</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => handleExport("markdown")}>Markdown</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => handleExport("csl_json")}>Zotero (CSL-JSON)</DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-          <Button variant="outline" size="sm" onClick={() => load().catch(() => {})} disabled={loading}>
-            {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-            Refresh
-          </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={loading || !papers.length}
+              onClick={() => {
+                setRwOpen(true)
+                setRwMarkdown(null)
+                setRwTopic("")
+              }}
+            >
+              <FileText className="h-3.5 w-3.5" /> Related Work
+            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" disabled={loading || !papers.length}>
+                  <Download className="h-3.5 w-3.5" /> Export
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => handleExport("bibtex")}>BibTeX</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => handleExport("ris")}>RIS</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => handleExport("markdown")}>Markdown</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => handleExport("csl_json")}>Zotero (CSL-JSON)</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <Button variant="outline" size="sm" onClick={() => load().catch(() => {})} disabled={loading}>
+              {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+              Refresh
+            </Button>
+          </div>
         </div>
-      </div>
       </div>
 
       {error && (
@@ -252,7 +260,7 @@ export function SavedTab({ userId, trackId, trackName = null }: SavedTabProps) {
         <div className="py-8 text-sm text-muted-foreground">Loading saved papers...</div>
       ) : !papers.length ? (
         <div className="rounded-2xl border border-dashed bg-muted/20 py-10 text-center text-sm text-muted-foreground">
-          {trackId ? "No saved papers in this track yet." : "No saved papers in your library yet."}
+          {trackId != null ? "No saved papers in this track yet." : "No saved papers in your library yet."}
         </div>
       ) : (
         <div className="space-y-3">
@@ -349,6 +357,9 @@ export function SavedTab({ userId, trackId, trackName = null }: SavedTabProps) {
               <div className="rounded-2xl border bg-slate-950 p-4 text-sm text-slate-50 shadow-inner">
                 <pre className="whitespace-pre-wrap break-all font-mono">{obsidianCommand}</pre>
               </div>
+              {obsidianCopyError ? (
+                <p className="text-xs text-red-600">{obsidianCopyError}</p>
+              ) : null}
 
               <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
                 <ExternalLink className="mt-0.5 h-3.5 w-3.5 shrink-0" />
