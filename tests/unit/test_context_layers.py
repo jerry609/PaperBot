@@ -1,4 +1,5 @@
 """Tests for #165 — context layered loading."""
+
 from __future__ import annotations
 
 import time
@@ -6,12 +7,14 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from paperbot.application.ports.document_intelligence_port import EvidenceHit
+from paperbot.context_engine import engine as engine_module
 from paperbot.context_engine.engine import ContextEngine, ContextEngineConfig
 from paperbot.infrastructure.stores.memory_store import SqlAlchemyMemoryStore
 from paperbot.memory.schema import MemoryCandidate
 
 
-def _make_engine(*, memory_store=None, research_store=None, config=None):
+def _make_engine(*, memory_store=None, research_store=None, config=None, evidence_retriever=None):
     """Create a ContextEngine with faked stores."""
     rs = research_store or MagicMock()
     ms = memory_store or MagicMock()
@@ -48,6 +51,7 @@ def _make_engine(*, memory_store=None, research_store=None, config=None):
     engine = ContextEngine(
         research_store=rs,
         memory_store=ms,
+        evidence_retriever=evidence_retriever,
         config=config,
         track_router=MagicMock(),
     )
@@ -142,6 +146,72 @@ class TestBuildContextPackLayers:
         assert "layer1_track_tokens" in layers
         assert "layer2_query_tokens" in layers
         assert "layer3_paper_tokens" in layers
+
+    @pytest.mark.asyncio
+    async def test_context_pack_includes_evidence_hits_when_retriever_available(self):
+        class _FakeEvidenceRetriever:
+            def retrieve_evidence(self, *, query, paper_ids=None, limit=6):
+                return [
+                    EvidenceHit(
+                        paper_id=1,
+                        chunk_id=10,
+                        chunk_index=0,
+                        paper_title="Transformer Paper",
+                        section="abstract",
+                        heading="Abstract",
+                        snippet="Transformer retrieval evidence",
+                        score=0.9,
+                        source_type="paper_metadata",
+                        locator_url="https://example.com/paper",
+                        metadata={},
+                    )
+                ]
+
+        async def _fake_search_candidate_papers(*args, **kwargs):
+            return object()
+
+        def _fake_search_result_to_candidate_dicts(*args, **kwargs):
+            return [
+                {
+                    "paper_id": "1",
+                    "canonical_id": 1,
+                    "title": "Transformer Paper",
+                    "abstract": (
+                        "Transformer retrieval evidence is described in enough detail "
+                        "to pass the academic paper filter."
+                    ),
+                    "year": 2026,
+                    "citation_count": 5,
+                    "url": "https://example.com/paper",
+                }
+            ]
+
+        monkeypatch = pytest.MonkeyPatch()
+        try:
+            monkeypatch.setattr(
+                engine_module, "search_candidate_papers", _fake_search_candidate_papers
+            )
+            monkeypatch.setattr(
+                engine_module,
+                "search_result_to_candidate_dicts",
+                _fake_search_result_to_candidate_dicts,
+            )
+            engine, rs, ms = _make_engine(
+                evidence_retriever=_FakeEvidenceRetriever(),
+                config=ContextEngineConfig(offline=False, paper_limit=2, evidence_limit=3),
+            )
+            engine.search_service = MagicMock()
+
+            result = await engine.build_context_pack(
+                user_id="u1",
+                query="transformer retrieval",
+            )
+        finally:
+            monkeypatch.undo()
+
+        assert len(result["evidence_hits"]) == 1
+        assert result["evidence_hits"][0]["paper_id"] == 1
+        assert result["routing"]["evidence_hit_count"] == 1
 
     @pytest.mark.asyncio
     async def test_no_paper_id_layer3_is_zero(self):

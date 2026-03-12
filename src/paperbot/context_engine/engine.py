@@ -6,9 +6,10 @@ import math
 import random
 import re
 import time
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
+from paperbot.application.ports.document_intelligence_port import EvidenceRetrieverPort
 from paperbot.context_engine.track_router import TrackRouter, TrackRouterConfig
 from paperbot.infrastructure.stores.memory_store import SqlAlchemyMemoryStore
 from paperbot.infrastructure.stores.research_store import SqlAlchemyResearchStore
@@ -505,6 +506,7 @@ class ContextEngineConfig:
     personalized: bool = True
     year_from: Optional[int] = None
     year_to: Optional[int] = None
+    evidence_limit: int = 6
     track_router: TrackRouterConfig = field(default_factory=TrackRouterConfig)
 
 
@@ -516,6 +518,7 @@ class ContextEngine:
         memory_store: Optional[SqlAlchemyMemoryStore] = None,
         paper_store: Optional[Any] = None,
         search_service: Optional[Any] = None,
+        evidence_retriever: Optional[EvidenceRetrieverPort] = None,
         track_router: Optional[TrackRouter] = None,
         config: Optional[ContextEngineConfig] = None,
     ):
@@ -523,6 +526,7 @@ class ContextEngine:
         self.memory_store = memory_store or SqlAlchemyMemoryStore()
         self.paper_store = paper_store
         self.search_service = search_service
+        self.evidence_retriever = evidence_retriever
         self.config = config or ContextEngineConfig()
         self.track_router = track_router or TrackRouter(
             research_store=self.research_store,
@@ -1167,6 +1171,46 @@ class ContextEngine:
                 "post_guard_total_tokens": sum(context_layers.values()),
             }
 
+        evidence_hits: List[Dict[str, Any]] = []
+        if self.evidence_retriever is not None and self.config.evidence_limit > 0:
+            indexed_paper_ids: List[int] = []
+            for paper in papers:
+                candidate_ids = (
+                    paper.get("canonical_paper_id"),
+                    paper.get("canonical_id"),
+                    paper.get("paper_id"),
+                )
+                for candidate_id in candidate_ids:
+                    try:
+                        paper_id_value = int(candidate_id)
+                    except (TypeError, ValueError):
+                        continue
+                    if paper_id_value > 0 and paper_id_value not in indexed_paper_ids:
+                        indexed_paper_ids.append(paper_id_value)
+                        break
+
+            if indexed_paper_ids:
+                try:
+                    raw_hits = self.evidence_retriever.retrieve_evidence(
+                        query=merged_query,
+                        paper_ids=indexed_paper_ids,
+                        limit=int(self.config.evidence_limit),
+                    )
+                    evidence_hits = []
+                    for hit in raw_hits:
+                        if isinstance(hit, dict):
+                            evidence_hits.append(dict(hit))
+                            continue
+                        evidence_hits.append(asdict(hit))
+                except Exception as exc:
+                    Logger.warning(
+                        f"Failed to retrieve indexed evidence: {exc}",
+                        file=LogFiles.HARVEST,
+                    )
+                    evidence_hits = []
+            routing["evidence_hit_count"] = len(evidence_hits)
+            routing["indexed_evidence_paper_count"] = len(indexed_paper_ids)
+
         return {
             "user_id": user_id,
             "context_run_id": context_run_id,
@@ -1180,6 +1224,7 @@ class ContextEngine:
             "paper_recommendations": papers,
             "paper_recommendation_scores": paper_scores,
             "paper_recommendation_reasons": paper_reasons,
+            "evidence_hits": evidence_hits,
             "context_layers": context_layers,
         }
 
@@ -1196,6 +1241,13 @@ class ContextEngine:
 
         if self.paper_store is not None:
             close_fn = getattr(self.paper_store, "close", None)
+            if callable(close_fn):
+                try:
+                    close_fn()
+                except Exception:
+                    pass
+        if self.evidence_retriever is not None and self.evidence_retriever is not self.paper_store:
+            close_fn = getattr(self.evidence_retriever, "close", None)
             if callable(close_fn):
                 try:
                     close_fn()

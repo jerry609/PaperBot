@@ -1001,6 +1001,109 @@ class PaperModel(Base):
         self.structured_card_json = json.dumps(card or {}, ensure_ascii=False)
 
 
+class DocumentAssetModel(Base):
+    """Indexed document source bound to a canonical paper."""
+
+    __tablename__ = "document_assets"
+    __table_args__ = (
+        UniqueConstraint("paper_id", "source_type", name="uq_document_assets_paper_source"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    paper_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("papers.id", ondelete="CASCADE"), index=True
+    )
+    source_type: Mapped[str] = mapped_column(String(32), default="paper_metadata", index=True)
+    title: Mapped[str] = mapped_column(Text, default="")
+    locator_url: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    checksum: Mapped[str] = mapped_column(String(64), default="", index=True)
+    metadata_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+    paper = relationship("PaperModel")
+
+    def set_metadata(self, data: Dict[str, Any]) -> None:
+        self.metadata_json = json.dumps(data or {}, ensure_ascii=False)
+
+    def get_metadata(self) -> Dict[str, Any]:
+        try:
+            return json.loads(self.metadata_json or "{}")
+        except Exception:
+            return {}
+
+
+class DocumentIndexJobModel(Base):
+    """Best-effort async indexing queue for canonical papers."""
+
+    __tablename__ = "document_index_jobs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    paper_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("papers.id", ondelete="CASCADE"), index=True
+    )
+    asset_id: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        ForeignKey("document_assets.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    trigger_source: Mapped[str] = mapped_column(String(64), default="manual", index=True)
+    status: Mapped[str] = mapped_column(String(16), default="queued", index=True)
+    chunk_count: Mapped[int] = mapped_column(Integer, default=0)
+    attempt_count: Mapped[int] = mapped_column(Integer, default=0)
+    error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    enqueued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+    paper = relationship("PaperModel")
+    asset = relationship("DocumentAssetModel")
+
+
+class DocumentChunkModel(Base):
+    """Searchable retrieval chunk for indexed paper evidence."""
+
+    __tablename__ = "document_chunks"
+    __table_args__ = (
+        UniqueConstraint("asset_id", "chunk_index", name="uq_document_chunks_asset_index"),
+        Index("ix_document_chunks_paper_section", "paper_id", "section"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    paper_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("papers.id", ondelete="CASCADE"), index=True
+    )
+    asset_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("document_assets.id", ondelete="CASCADE"), index=True
+    )
+    chunk_index: Mapped[int] = mapped_column(Integer, index=True)
+    section: Mapped[str] = mapped_column(String(128), default="", index=True)
+    heading: Mapped[str] = mapped_column(String(255), default="")
+    content: Mapped[str] = mapped_column(Text, default="")
+    content_hash: Mapped[str] = mapped_column(String(64), index=True)
+    token_count: Mapped[int] = mapped_column(Integer, default=0)
+    embedding_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    metadata_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+    paper = relationship("PaperModel")
+    asset = relationship("DocumentAssetModel")
+
+    def set_metadata(self, data: Dict[str, Any]) -> None:
+        self.metadata_json = json.dumps(data or {}, ensure_ascii=False)
+
+    def get_metadata(self) -> Dict[str, Any]:
+        try:
+            return json.loads(self.metadata_json or "{}")
+        except Exception:
+            return {}
+
+
 class PaperIdentifierModel(Base):
     """Maps (source, external_id) → papers.id for unified identity resolution."""
 
