@@ -3,9 +3,16 @@ import { defineConfig, devices } from "@playwright/test";
 
 const e2ePort = process.env.E2E_PORT || "3100";
 const e2eBaseUrl = process.env.E2E_BASE_URL || `http://127.0.0.1:${e2ePort}`;
+const vercelBypassSecret = process.env.VERCEL_AUTOMATION_BYPASS_SECRET?.trim() || "";
 const useChromeChannel =
   process.platform === "darwin" &&
   existsSync("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome");
+const extraHTTPHeaders = vercelBypassSecret
+  ? {
+      "x-vercel-protection-bypass": vercelBypassSecret,
+      "x-vercel-set-bypass-cookie": "true",
+    }
+  : undefined;
 
 export default defineConfig({
   testDir: "./e2e",
@@ -19,6 +26,7 @@ export default defineConfig({
     baseURL: e2eBaseUrl,
     trace: "on-first-retry",
     screenshot: "only-on-failure",
+    ...(extraHTTPHeaders ? { extraHTTPHeaders } : {}),
   },
 
   projects: [
