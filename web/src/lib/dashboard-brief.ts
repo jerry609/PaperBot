@@ -17,6 +17,7 @@ type DailyReportItem = {
   snippet?: string
   subject_or_venue?: string
   venue?: string
+  year?: number
   authors?: string[]
   matched_queries?: string[]
   matched_keywords?: string[]
@@ -54,6 +55,7 @@ type DailyReport = {
 
 export type DashboardBriefRecommendation = {
   id: string
+  paperId?: string | null
   title: string
   href: string
   meta: string
@@ -61,6 +63,9 @@ export type DashboardBriefRecommendation = {
   tags: string[]
   metric: string
   recommendation?: string | null
+  authors: string[]
+  year?: number | null
+  paperSource?: "arxiv" | "semantic_scholar" | "openalex" | null
 }
 
 export type DashboardBriefTrend = {
@@ -127,6 +132,21 @@ function buildHref(item: DailyReportItem): string {
   return href?.trim() || "/workflows"
 }
 
+function inferPaperSource(item: DailyReportItem): "arxiv" | "semantic_scholar" | "openalex" | null {
+  const rawUrls = [item.external_url, item.url, item.pdf_url]
+    .map((value) => String(value || "").trim().toLowerCase())
+    .filter(Boolean)
+
+  if (rawUrls.some((value) => value.includes("arxiv.org"))) return "arxiv"
+  if (rawUrls.some((value) => value.includes("semanticscholar.org"))) return "semantic_scholar"
+  if (rawUrls.some((value) => value.includes("openalex.org"))) return "openalex"
+
+  const paperId = String(item.paper_id || "").trim()
+  if (/^\d{4}\.\d{4,5}(v\d+)?$/i.test(paperId)) return "arxiv"
+
+  return null
+}
+
 function buildSummary(item: DailyReportItem, recommendation: string | null): string {
   const highlight = String(item.digest_card?.highlight || "").trim()
   if (highlight) return highlight
@@ -173,6 +193,7 @@ export function buildDashboardBrief(report: DailyReport): DashboardBriefSnapshot
 
       return {
         id: buildKey(item, index),
+        paperId: String(item.paper_id || "").trim() || null,
         title: String(item.title || "Untitled paper"),
         href: buildHref(item),
         meta: String(item.subject_or_venue || item.venue || "Daily Brief"),
@@ -186,6 +207,9 @@ export function buildDashboardBrief(report: DailyReport): DashboardBriefSnapshot
         ).slice(0, 3),
         metric: buildMetric(item),
         recommendation,
+        authors: (item.authors || []).map((value) => String(value || "").trim()).filter(Boolean),
+        year: typeof item.year === "number" ? item.year : null,
+        paperSource: inferPaperSource(item),
       }
     }),
     trendRows: (report.llm_analysis?.query_trends || [])
