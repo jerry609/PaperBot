@@ -140,13 +140,23 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
-      - name: Check required preview smoke secrets
+      - name: Detect preview smoke bypass secret
+        id: bypass_secret
         shell: bash
+        env:
+          VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
         run: |
           set -euo pipefail
-          test -n "${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}"
+          if [ -n "${VERCEL_AUTOMATION_BYPASS_SECRET}" ]; then
+            echo "enabled=true" >> "${GITHUB_OUTPUT}"
+            echo "Automation bypass secret detected; running protected preview smoke."
+          else
+            echo "enabled=false" >> "${GITHUB_OUTPUT}"
+            echo "VERCEL_AUTOMATION_BYPASS_SECRET is not configured; skipping protected preview smoke."
+          fi
 
       - name: Setup Node.js
+        if: steps.bypass_secret.outputs.enabled == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -154,12 +164,15 @@ jobs:
           cache-dependency-path: web/package-lock.json
 
       - name: Install web dependencies
+        if: steps.bypass_secret.outputs.enabled == 'true'
         run: npm ci
 
       - name: Install Playwright browser
+        if: steps.bypass_secret.outputs.enabled == 'true'
         run: npx playwright install --with-deps chromium
 
       - name: Wait for preview readiness
+        if: steps.bypass_secret.outputs.enabled == 'true'
         shell: bash
         env:
           PREVIEW_URL: ${{ needs.deploy_preview.outputs.preview_url }}
@@ -182,6 +195,7 @@ jobs:
           exit 1
 
       - name: Run Playwright smoke against preview
+        if: steps.bypass_secret.outputs.enabled == 'true'
         env:
           E2E_BASE_URL: ${{ needs.deploy_preview.outputs.preview_url }}
           VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
