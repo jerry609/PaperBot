@@ -4,9 +4,13 @@ import {
   FileText,
   FlaskConical,
   Settings,
-  type LucideIcon,
 } from "lucide-react"
 
+import DashboardActionBands, {
+  type DashboardDestinationCard,
+  type DashboardLaneItem,
+  type DashboardQueuePreview,
+} from "@/components/dashboard/DashboardActionBands"
 import TopicWorkflowDashboard from "@/components/research/TopicWorkflowDashboard"
 import { fetchDeadlineRadar, fetchLLMUsage, fetchPapers, fetchPipelineTasks } from "@/lib/api"
 import {
@@ -33,41 +37,6 @@ type DashboardPageProps = {
 }
 
 type PriorityLevel = "high" | "medium" | "low"
-type Tone = "good" | "warn" | "bad" | "info"
-
-type QueuePreview = {
-  id: string
-  title: string
-  venue: string
-  tags: string[]
-  time: string
-  priority: PriorityLevel
-  href: string
-}
-
-type LaneItemData = {
-  title: string
-  copy: string
-  metaLeft: string
-  metaRight: string
-  tone: Tone
-  href?: string
-}
-
-type DestinationCardData = {
-  title: string
-  description: string
-  metric: string
-  href: string
-  icon: LucideIcon
-}
-
-const TONE_PILL_CLASSES: Record<Tone, string> = {
-  good: "border-emerald-200 bg-emerald-50 text-emerald-700",
-  warn: "border-amber-200 bg-amber-50 text-amber-700",
-  bad: "border-rose-200 bg-rose-50 text-rose-700",
-  info: "border-indigo-200 bg-indigo-50 text-indigo-700",
-}
 
 function getGreeting(): string {
   const hour = new Date().getHours()
@@ -120,7 +89,7 @@ function buildQueuePreviewItems(
   readingQueue: ReadingQueueItem[],
   paperMap: Map<string, Paper>,
   activeTrack: ResearchTrackSummary | null,
-): QueuePreview[] {
+): DashboardQueuePreview[] {
   const fallbackTags = (activeTrack?.keywords || []).slice(0, 2)
 
   return readingQueue.slice(0, 3).map((item, index) => {
@@ -152,18 +121,18 @@ function buildQueuePreviewItems(
 function buildActionLanes(args: {
   tasks: PipelineTask[]
   deadlines: DeadlineRadarItem[]
-  queueItems: QueuePreview[]
+  queueItems: DashboardQueuePreview[]
   usageSummary: LLMUsageSummary
   signalCount: number
   tracks: ResearchTrackSummary[]
-}): { now: LaneItemData[]; later: LaneItemData[] } {
+}): { now: DashboardLaneItem[]; later: DashboardLaneItem[] } {
   const { tasks, deadlines, queueItems, usageSummary, signalCount, tracks } = args
   const failedTask = tasks.find((task) => task.status === "failed")
   const urgentDeadline = deadlines.find((deadline) => deadline.days_left <= 14)
   const highPriorityItem = queueItems.find((item) => item.priority === "high")
 
-  const now: LaneItemData[] = []
-  const later: LaneItemData[] = []
+  const now: DashboardLaneItem[] = []
+  const later: DashboardLaneItem[] = []
 
   if (failedTask) {
     now.push({
@@ -261,13 +230,6 @@ function buildActionLanes(args: {
   }
 }
 
-function getLaneTone(items: LaneItemData[]): Tone {
-  if (items.some((item) => item.tone === "bad")) return "bad"
-  if (items.some((item) => item.tone === "warn")) return "warn"
-  if (items.some((item) => item.tone === "good")) return "good"
-  return "info"
-}
-
 function getEvidenceStyles(source: string): {
   badgeClassName: string
   chipClassName: string
@@ -329,16 +291,6 @@ function SectionIntro({
         </Link>
       ) : null}
     </div>
-  )
-}
-
-function TonePill({ tone, children }: { tone: Tone; children: React.ReactNode }) {
-  return (
-    <span
-      className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold ${TONE_PILL_CLASSES[tone]}`}
-    >
-      {children}
-    </span>
   )
 }
 
@@ -406,152 +358,6 @@ function EvidencePreviewCard({
   )
 }
 
-function TodayRail({
-  nowItems,
-  laterItems,
-  destinations,
-  queueItems,
-  highPriorityQueue,
-}: {
-  nowItems: LaneItemData[]
-  laterItems: LaneItemData[]
-  destinations: DestinationCardData[]
-  queueItems: QueuePreview[]
-  highPriorityQueue: number
-}) {
-  function renderLaneItem(item: LaneItemData, key: string) {
-    const content = (
-      <div className="rounded-xl bg-slate-50 px-3.5 py-3 transition-colors hover:bg-slate-100">
-        <div className="flex items-center justify-between gap-3">
-          <TonePill tone={item.tone}>
-            {item.tone === "bad"
-              ? "阻塞"
-              : item.tone === "warn"
-                ? "注意"
-                : item.tone === "good"
-                  ? "清爽"
-                  : "信息"}
-          </TonePill>
-          <span className="text-xs text-slate-500">{item.metaRight}</span>
-        </div>
-        <h4 className="mt-3 text-sm font-semibold leading-6 text-slate-900">{item.title}</h4>
-        <p className="mt-1 text-sm leading-6 text-slate-600">{item.copy}</p>
-        <div className="mt-3 flex items-center justify-between gap-3 text-xs text-slate-500">
-          <span>{item.metaLeft}</span>
-          {item.href ? (
-            <span className="inline-flex items-center gap-1 font-semibold text-indigo-600">
-              打开
-              <ArrowRight size={13} />
-            </span>
-          ) : null}
-        </div>
-      </div>
-    )
-
-    return item.href ? (
-      <Link key={key} href={item.href} className="block">
-        {content}
-      </Link>
-    ) : (
-      <div key={key}>{content}</div>
-    )
-  }
-
-  return (
-    <aside className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-      <div>
-        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-indigo-600">Sidebar</p>
-        <h3 className="mt-2 text-xl font-bold tracking-tight text-slate-900">Today rail</h3>
-        <p className="mt-1 text-sm leading-6 text-slate-600">把提醒、交接入口和候选队列压进同一条侧栏，首页主区只保留简报和信号。</p>
-      </div>
-
-      <div className="mt-5 space-y-5">
-        <section>
-          <div className="flex items-center justify-between gap-3">
-            <h4 className="text-sm font-semibold text-slate-900">现在要处理</h4>
-            <TonePill tone={getLaneTone(nowItems)}>{nowItems.length} 项</TonePill>
-          </div>
-          <div className="mt-3 space-y-2">
-            {nowItems.map((item, index) => renderLaneItem(item, `now-${index}`))}
-          </div>
-        </section>
-
-        <section className="border-t border-slate-100 pt-5">
-          <div className="flex items-center justify-between gap-3">
-            <h4 className="text-sm font-semibold text-slate-900">稍后处理</h4>
-            <TonePill tone={getLaneTone(laterItems)}>{laterItems.length} 项</TonePill>
-          </div>
-          <div className="mt-3 space-y-2">
-            {laterItems.map((item, index) => renderLaneItem(item, `later-${index}`))}
-          </div>
-        </section>
-
-        <section className="border-t border-slate-100 pt-5">
-          <div className="flex items-center justify-between gap-3">
-            <h4 className="text-sm font-semibold text-slate-900">交接入口</h4>
-            <span className="text-xs text-slate-500">{destinations.length} 个空间</span>
-          </div>
-          <div className="mt-3 space-y-2">
-            {destinations.map((item) => {
-              const Icon = item.icon
-
-              return (
-                <Link
-                  key={item.title}
-                  href={item.href}
-                  className="flex items-start justify-between gap-3 rounded-xl bg-slate-50 px-3.5 py-3 transition-colors hover:bg-slate-100"
-                >
-                  <div className="flex items-start gap-3">
-                    <span className="mt-0.5 flex size-8 items-center justify-center rounded-xl bg-white text-indigo-600 shadow-sm">
-                      <Icon size={16} />
-                    </span>
-                    <div>
-                      <p className="text-sm font-semibold text-slate-900">{item.title}</p>
-                      <p className="mt-1 text-sm leading-6 text-slate-600">{item.description}</p>
-                    </div>
-                  </div>
-                  <span className="text-xs font-semibold text-slate-500">{item.metric}</span>
-                </Link>
-              )
-            })}
-          </div>
-        </section>
-
-        <section className="border-t border-slate-100 pt-5">
-          <div className="flex items-center justify-between gap-3">
-            <h4 className="text-sm font-semibold text-slate-900">今日队列</h4>
-            <TonePill tone={highPriorityQueue > 0 ? "warn" : "good"}>{highPriorityQueue} 篇高优</TonePill>
-          </div>
-          <div className="mt-3 space-y-2">
-            {queueItems.length > 0 ? (
-              queueItems.map((item) => (
-                <Link
-                  key={item.id}
-                  href={item.href}
-                  className="block rounded-xl bg-slate-50 px-3.5 py-3 transition-colors hover:bg-slate-100"
-                >
-                  <div className="flex items-center justify-between gap-3">
-                    <TonePill tone={item.priority === "high" ? "warn" : item.priority === "medium" ? "info" : "good"}>
-                      {item.priority === "high" ? "高优" : item.priority === "medium" ? "中优" : "低优"}
-                    </TonePill>
-                    <span className="text-xs text-slate-500">{item.time}</span>
-                  </div>
-                  <h4 className="mt-3 text-sm font-semibold leading-6 text-slate-900">{item.title}</h4>
-                  <p className="mt-1 text-sm leading-6 text-slate-600">{item.venue}</p>
-                </Link>
-              ))
-            ) : (
-              <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50/70 p-4 text-sm leading-6 text-slate-600">
-                队列里还没有候选。先从主工作台运行 Search，把今天的候选池建立起来。
-              </div>
-            )}
-          </div>
-        </section>
-      </div>
-    </aside>
-  )
-}
-
 export default async function DashboardPage({ searchParams }: DashboardPageProps) {
   const params = searchParams ? await searchParams : {}
   const queryValue = Array.isArray(params?.query) ? params.query[0] : params?.query
@@ -604,8 +410,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
     : { items: [], total: 0 }
   const activeTrackFeedTotal = activeTrackFeedResult.total || 0
   const intelligenceCards = buildDashboardIntelligenceCards(intelligenceFeed.items)
-  const featuredSignal = intelligenceCards[0] || null
-  const secondarySignals = intelligenceCards.slice(1, 4)
+  const signalCards = intelligenceCards.slice(0, 6)
   const queueItems = buildQueuePreviewItems(
     readingQueue,
     new Map(papers.map((paper) => [String(paper.id), paper])),
@@ -628,7 +433,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
     signalCount,
     tracks,
   })
-  const destinationCards: DestinationCardData[] = [
+  const destinationCards: DashboardDestinationCard[] = [
     {
       title: "Research Workspace",
       description: activeTrack
@@ -665,7 +470,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
                 {greeting}，把今天最重要的问题先推进到可决策状态。
               </h1>
               <p className="mt-3 text-sm leading-6 text-slate-600">
-                首页只保留一份今日研究简报、一段 Signals 和一条侧栏。完整 workflow、Research 深潜和文献管理都回到各自页面。
+                首页只保留一份今日研究简报、一段 Signals 和一组扁平行动带。完整 workflow、Research 深潜和文献管理都回到各自页面。
               </p>
             </div>
 
@@ -682,79 +487,63 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
             </div>
           </header>
 
-          <section className="mt-4 grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_360px]" id="workflow">
-            <div className="space-y-4">
-              <TopicWorkflowDashboard
-                initialQueries={initialQueries}
-                compact
-                dashboardContext={{
-                  activeTrackName: activeTrack?.name ?? null,
-                  activeTrackHref: activeTrack ? `/research?track_id=${activeTrack.id}` : "/research",
-                  readingQueueCount: readingQueue.length,
-                  urgentDeadlineCount: urgentDeadlines.length,
-                  signalCount,
-                }}
-              />
-            </div>
-
-            <TodayRail
-              nowItems={lanes.now}
-              laterItems={lanes.later}
-              destinations={destinationCards}
-              queueItems={queueItems}
-              highPriorityQueue={highPriorityQueue}
+          <section className="mt-4" id="workflow">
+            <TopicWorkflowDashboard
+              initialQueries={initialQueries}
+              compact
+              dashboardContext={{
+                activeTrackName: activeTrack?.name ?? null,
+                activeTrackHref: activeTrack ? `/research?track_id=${activeTrack.id}` : "/research",
+                readingQueueCount: readingQueue.length,
+                urgentDeadlineCount: urgentDeadlines.length,
+                signalCount,
+              }}
             />
           </section>
 
           <section className="mt-4" id="signals">
             <article className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-              <div className="grid gap-4 xl:grid-cols-[220px_minmax(0,1.15fr)_320px] xl:items-start">
-                <div>
-                  <SectionIntro
-                    eyebrow="Signals"
-                    title="证据快照"
-                    copy="只保留会影响当前判断的几条信号，让这一段更像工作流后的连续证据带。"
-                    actionHref="/research"
-                    actionLabel="查看完整动态"
-                  />
+              <SectionIntro
+                eyebrow="Signals"
+                title="证据快照"
+                copy="Signals 也拉平成同一层级的证据卡片，减少主卡和次卡之间的人为等级差，让你只按内容重要性判断。"
+                actionHref="/research"
+                actionLabel="查看完整动态"
+              />
 
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-600">
-                      {signalCount} 条信号
-                    </span>
-                    <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-600">
-                      {intelligenceCards.filter((item) => item.source === "github").length} 条 GitHub
-                    </span>
-                    <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-600">
-                      最近刷新 {formatRelativeTime(intelligenceFeed.refreshed_at)}
-                    </span>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-600">
+                  {signalCount} 条信号
+                </span>
+                <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-600">
+                  {intelligenceCards.filter((item) => item.source === "github").length} 条 GitHub
+                </span>
+                <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-600">
+                  最近刷新 {formatRelativeTime(intelligenceFeed.refreshed_at)}
+                </span>
+              </div>
+
+              <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                {signalCards.length > 0 ? (
+                  signalCards.map((item) => (
+                    <EvidencePreviewCard key={item.id} item={item} />
+                  ))
+                ) : (
+                  <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50/50 p-5 text-sm leading-6 text-slate-600 md:col-span-2 xl:col-span-3">
+                    当前没有需要上浮到首页的社区信号。可以直接在主工作台继续推进当前问题。
                   </div>
-                </div>
-
-                <div>
-                  {featuredSignal ? (
-                    <EvidencePreviewCard item={featuredSignal} />
-                  ) : (
-                    <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50/50 p-5 text-sm leading-6 text-slate-600">
-                      当前没有需要上浮到首页的社区信号。可以直接在主工作台继续推进当前问题。
-                    </div>
-                  )}
-                </div>
-
-                <div className="space-y-3">
-                  {secondarySignals.length > 0 ? (
-                    secondarySignals.map((item) => (
-                      <EvidencePreviewCard key={item.id} item={item} compact />
-                    ))
-                  ) : (
-                    <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50/50 p-5 text-sm leading-6 text-slate-600">
-                      目前还没有次级信号需要占据首页侧栏。等新的 repo、社区或论文动态上浮后，这里会补齐辅助证据流。
-                    </div>
-                  )}
-                </div>
+                )}
               </div>
             </article>
           </section>
+
+          <DashboardActionBands
+            nowItems={lanes.now}
+            laterItems={lanes.later}
+            destinations={destinationCards}
+            queueItems={queueItems}
+            highPriorityQueue={highPriorityQueue}
+          />
         </div>
       </main>
     </div>
