@@ -142,6 +142,8 @@ class ObsidianConfig(BaseModel):
     auto_export_on_save: bool = True
     auto_sync_tracks: bool = True
     export_limit: int = 200
+    track_moc_filename: str = "_MOC.md"
+    group_tracks_in_folders: bool = True
 
 
 class CollabHostConfig(BaseModel):
@@ -334,6 +336,8 @@ class Settings(BaseModel):
         obsidian_auto_export = os.getenv("PAPERBOT_OBSIDIAN_AUTO_EXPORT")
         obsidian_auto_sync_tracks = os.getenv("PAPERBOT_OBSIDIAN_AUTO_SYNC_TRACKS")
         obsidian_export_limit = os.getenv("PAPERBOT_OBSIDIAN_EXPORT_LIMIT")
+        obsidian_track_moc_filename = os.getenv("PAPERBOT_OBSIDIAN_TRACK_MOC_FILENAME")
+        obsidian_group_tracks = os.getenv("PAPERBOT_OBSIDIAN_GROUP_TRACKS_IN_FOLDERS")
         if re_enabled is not None:
             self.report_engine.enabled = re_enabled.lower() in ("1", "true", "yes", "on")
         if re_api:
@@ -393,6 +397,15 @@ class Settings(BaseModel):
                     "Ignoring invalid PAPERBOT_OBSIDIAN_EXPORT_LIMIT=%r; expected an integer",
                     obsidian_export_limit,
                 )
+        if obsidian_track_moc_filename:
+            self.obsidian.track_moc_filename = obsidian_track_moc_filename
+        if obsidian_group_tracks is not None:
+            self.obsidian.group_tracks_in_folders = obsidian_group_tracks.lower() in (
+                "1",
+                "true",
+                "yes",
+                "on",
+            )
 
         # Collab host LLM
         host_api = os.getenv("PAPERBOT_HOST_API_KEY")

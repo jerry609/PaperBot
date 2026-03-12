@@ -126,3 +126,5 @@ obsidian:
   auto_export_on_save: true
   auto_sync_tracks: true
   export_limit: 200
+  track_moc_filename: "_MOC.md"
+  group_tracks_in_folders: true

@@ -637,6 +637,8 @@ def _run_obsidian_export(parsed: argparse.Namespace) -> int:
             track=track,
             root_dir=root_dir,
             paper_template_path=template_path,
+            track_moc_filename=getattr(obsidian_config, "track_moc_filename", "_MOC.md"),
+            group_tracks_in_folders=getattr(obsidian_config, "group_tracks_in_folders", True),
         )
 
         if parsed.json:
