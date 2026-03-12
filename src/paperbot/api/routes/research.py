@@ -12,6 +12,15 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy.exc import IntegrityError
 
+from paperbot.application.services.research_track_context_service import (
+    ResearchTrackContextService,
+    TrackContextSnapshot,
+)
+from paperbot.application.services.track_memory_service import (
+    TrackMemoryScopeError,
+    TrackMemoryService,
+    TrackMemoryValidationError,
+)
 from paperbot.context_engine import ContextEngine, ContextEngineConfig
 from paperbot.context_engine.track_router import TrackRouter
 from paperbot.domain.paper_identity import normalize_arxiv_id, normalize_doi
@@ -63,6 +72,20 @@ def _get_track_router() -> TrackRouter:
             memory_store=_get_memory_store(),
         )
     return _track_router
+
+
+def _build_track_context_service() -> ResearchTrackContextService:
+    return ResearchTrackContextService(
+        track_reader=_get_research_store(),
+        memory_store=_get_memory_store(),
+    )
+
+
+def _build_track_memory_service() -> TrackMemoryService:
+    return TrackMemoryService(
+        track_reader=_get_research_store(),
+        memory_store=_get_memory_store(),
+    )
 
 
 def _schedule_obsidian_export(
@@ -343,6 +366,52 @@ class TrackResponse(BaseModel):
     track: Dict[str, Any]
 
 
+class TrackContextMemorySummaryResponse(BaseModel):
+    total_items: int
+    approved_items: int
+    pending_items: int
+    top_tags: List[str]
+    latest_memory_at: Optional[str] = None
+
+
+class TrackContextFeedbackSummaryResponse(BaseModel):
+    total_items: int
+    actions: Dict[str, int]
+    latest_feedback_at: Optional[str] = None
+    recent_items: List[Dict[str, Any]]
+
+
+class TrackContextSavedPapersResponse(BaseModel):
+    total_items: int
+    latest_saved_at: Optional[str] = None
+    recent_items: List[Dict[str, Any]]
+
+
+class TrackContextResponse(BaseModel):
+    user_id: str
+    track_id: int
+    track: Dict[str, Any]
+    tasks: List[Dict[str, Any]]
+    milestones: List[Dict[str, Any]]
+    memory: TrackContextMemorySummaryResponse
+    feedback: TrackContextFeedbackSummaryResponse
+    saved_papers: TrackContextSavedPapersResponse
+    eval_summary: Dict[str, Any]
+
+
+def _serialize_track_context_response(
+    *,
+    user_id: str,
+    snapshot: TrackContextSnapshot,
+) -> TrackContextResponse:
+    track_id = int(snapshot.track.get("id") or 0)
+    return TrackContextResponse(
+        user_id=user_id,
+        track_id=track_id,
+        **snapshot.to_dict(),
+    )
+
+
 @router.post("/research/tracks", response_model=TrackResponse)
 def create_track(req: TrackCreateRequest, background_tasks: BackgroundTasks):
     track = _get_research_store().create_track(
@@ -484,6 +553,17 @@ def get_active_track(user_id: str = "default"):
     return TrackResponse(track=track)
 
 
+@router.get("/research/tracks/{track_id}/context", response_model=TrackContextResponse)
+def get_track_context(track_id: int, user_id: str = "default"):
+    snapshot = _build_track_context_service().get_track_context(
+        user_id=user_id,
+        track_id=track_id,
+    )
+    if snapshot is None:
+        raise HTTPException(status_code=404, detail="Track not found")
+    return _serialize_track_context_response(user_id=user_id, snapshot=snapshot)
+
+
 @router.patch("/research/tracks/{track_id}", response_model=TrackResponse)
 def update_track(
     track_id: int,
@@ -590,14 +670,11 @@ class MemoryItemResponse(BaseModel):
 def _resolve_track_scope_id(
     user_id: str, scope_type: str, scope_id: Optional[str]
 ) -> Optional[str]:
-    if scope_type != "track":
-        return scope_id
-    if scope_id:
-        return scope_id
-    active = _get_research_store().get_active_track(user_id=user_id)
-    if not active:
-        return None
-    return str(active["id"])
+    return _build_track_memory_service().resolve_scope_id(
+        user_id=user_id,
+        scope_type=scope_type,
+        scope_id=scope_id,
+    )
 
 
 @router.post("/research/memory/items", response_model=MemoryItemResponse)
@@ -605,7 +682,10 @@ def create_memory_item(req: MemoryItemCreateRequest, background_tasks: Backgroun
     scope_type = (req.scope_type or "global").strip() or "global"
     scope_id = _resolve_track_scope_id(req.user_id, scope_type, req.scope_id)
     if scope_type == "track" and not scope_id:
-        raise HTTPException(status_code=400, detail="scope_id missing and no active track")
+        raise HTTPException(
+            status_code=400,
+            detail="track scope requires an existing track or an active track",
+        )
 
     cand = MemoryCandidate(
         kind=req.kind,  # type: ignore[arg-type]
@@ -662,21 +742,14 @@ def list_memory_inbox(
     track_id: Optional[int] = None,
     limit: int = Query(100, ge=1, le=500),
 ):
-    if track_id is None:
-        active = _get_research_store().get_active_track(user_id=user_id)
-        if not active:
-            raise HTTPException(status_code=404, detail="No active track for user")
-        track_id = int(active["id"])
-
-    items = _get_memory_store().list_memories(
-        user_id=user_id,
-        limit=limit,
-        scope_type="track",
-        scope_id=str(track_id),
-        status="pending",
-        include_deleted=False,
-        include_pending=True,
-    )
+    try:
+        items = _build_track_memory_service().list_inbox(
+            user_id=user_id,
+            track_id=track_id,
+            limit=limit,
+        )
+    except TrackMemoryScopeError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     return MemoryItemListResponse(user_id=user_id, items=items)
 
 
@@ -702,7 +775,10 @@ def suggest_memories(req: MemorySuggestRequest, background_tasks: BackgroundTask
     scope_type = (req.scope_type or "global").strip() or "global"
     scope_id = _resolve_track_scope_id(req.user_id, scope_type, req.scope_id)
     if scope_type == "track" and not scope_id:
-        raise HTTPException(status_code=400, detail="scope_id missing and no active track")
+        raise HTTPException(
+            status_code=400,
+            detail="track scope requires an existing track or an active track",
+        )
 
     msgs = [NormalizedMessage(role="user", content=req.text)]
     extracted = extract_memories(
@@ -775,21 +851,18 @@ class BulkModerateResponse(BaseModel):
 
 @router.post("/research/memory/bulk_moderate", response_model=BulkModerateResponse)
 def bulk_moderate(req: BulkModerateRequest, background_tasks: BackgroundTasks):
-    # Get items before update to check their confidence for P0 metrics
-    items_before = _get_memory_store().get_items_by_ids(user_id=req.user_id, item_ids=req.item_ids)
-
-    updated = _get_memory_store().bulk_update_items(
+    result = _build_track_memory_service().bulk_moderate(
         user_id=req.user_id,
         item_ids=req.item_ids,
         status=req.status,
-        actor_id="user",
     )
-    affected_tracks = [
-        int(i.get("scope_id") or 0)
-        for i in updated
-        if i.get("scope_type") == "track" and i.get("scope_id")
-    ]
-    _schedule_embedding_precompute(background_tasks, user_id=req.user_id, track_ids=affected_tracks)
+    items_before = result.items_before
+    updated = result.updated_items
+    _schedule_embedding_precompute(
+        background_tasks,
+        user_id=req.user_id,
+        track_ids=result.affected_track_ids,
+    )
 
     # P0 Hook: Record false positive rate when user rejects high-confidence items
     # A rejection of an auto-approved (confidence >= 0.60) item is a false positive
@@ -828,24 +901,22 @@ class BulkMoveResponse(BaseModel):
 
 @router.post("/research/memory/bulk_move", response_model=BulkMoveResponse)
 def bulk_move(req: BulkMoveRequest, background_tasks: BackgroundTasks):
-    scope_type = (req.scope_type or "global").strip() or "global"
-    scope_id = _resolve_track_scope_id(req.user_id, scope_type, req.scope_id)
-    if scope_type == "track" and not scope_id:
-        raise HTTPException(status_code=400, detail="scope_id missing and no active track")
-    updated = _get_memory_store().bulk_update_items(
+    try:
+        result = _build_track_memory_service().bulk_move(
+            user_id=req.user_id,
+            item_ids=req.item_ids,
+            scope_type=req.scope_type,
+            scope_id=req.scope_id,
+        )
+    except TrackMemoryValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    _schedule_embedding_precompute(
+        background_tasks,
         user_id=req.user_id,
-        item_ids=req.item_ids,
-        scope_type=scope_type,
-        scope_id=scope_id,
-        actor_id="user",
+        track_ids=result.affected_track_ids,
     )
-    affected_tracks = [
-        int(i.get("scope_id") or 0)
-        for i in updated
-        if i.get("scope_type") == "track" and i.get("scope_id")
-    ]
-    _schedule_embedding_precompute(background_tasks, user_id=req.user_id, track_ids=affected_tracks)
-    return BulkMoveResponse(user_id=req.user_id, updated=updated)
+    return BulkMoveResponse(user_id=req.user_id, updated=result.updated_items)
 
 
 class MemoryFeedbackRequest(BaseModel):
@@ -934,45 +1005,28 @@ def clear_track_memory(
 ):
     if not confirm:
         raise HTTPException(status_code=400, detail="confirm=true required")
-    deleted = _get_memory_store().soft_delete_by_scope(
-        user_id=user_id,
-        scope_type="track",
-        scope_id=str(track_id),
-        actor_id="user",
-        reason="clear_track_memory",
-    )
+    try:
+        result = _build_track_memory_service().clear_track_memory(
+            user_id=user_id,
+            track_id=track_id,
+        )
+    except TrackMemoryScopeError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    deleted = result.deleted_count
     _schedule_embedding_precompute(background_tasks, user_id=user_id, track_ids=[track_id])
 
     # P0 Hook: Verify deletion compliance - deleted items should not be retrievable
     if deleted > 0:
-        # Try to retrieve items from the cleared scope (should return empty)
-        retrieved_after_delete = _get_memory_store().list_memories(
-            user_id=user_id,
-            scope_type="track",
-            scope_id=str(track_id),
-            include_deleted=False,
-            include_pending=True,
-            limit=100,
-        )
-        # Also try searching
-        search_results = _get_memory_store().search_memories(
-            user_id=user_id,
-            query="*",  # broad query
-            scope_type="track",
-            scope_id=str(track_id),
-            limit=100,
-        )
-        retrieved_count = len(retrieved_after_delete) + len(search_results)
-
         collector = _get_metric_collector()
         collector.record_deletion_compliance(
-            deleted_retrieved_count=retrieved_count,
+            deleted_retrieved_count=result.retrieved_after_delete_count,
             deleted_total_count=deleted,
             evaluator_id=f"user:{user_id}",
             detail={
                 "track_id": track_id,
                 "deleted_count": deleted,
-                "retrieved_after_delete": retrieved_count,
+                "retrieved_after_delete": result.retrieved_after_delete_count,
                 "action": "clear_track_memory",
             },
         )

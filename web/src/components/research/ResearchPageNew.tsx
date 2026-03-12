@@ -41,8 +41,10 @@ import { SavedTab } from "./SavedTab"
 import { CreateTrackModal } from "./CreateTrackModal"
 import { EditTrackModal } from "./EditTrackModal"
 import { ManageTracksModal } from "./ManageTracksModal"
+import { ResearchTrackContextPanel } from "./ResearchTrackContextPanel"
 import type { Track } from "./TrackSelector"
 import type { Paper } from "./PaperCard"
+import type { ResearchTrackContextResponse } from "@/lib/types"
 
 type ContextPack = {
   context_run_id?: number | null
@@ -71,6 +73,8 @@ export default function ResearchPageNew() {
   // Track state
   const [tracks, setTracks] = useState<Track[]>([])
   const [activeTrackId, setActiveTrackId] = useState<number | null>(null)
+  const [trackContext, setTrackContext] = useState<ResearchTrackContextResponse | null>(null)
+  const [trackContextLoading, setTrackContextLoading] = useState(false)
 
   // All available sources
   const ALL_SOURCES = ["semantic_scholar", "arxiv", "openalex", "papers_cool", "hf_daily"]
@@ -105,8 +109,13 @@ export default function ResearchPageNew() {
 
   // Derived state
   const activeTrack = useMemo(
-    () => tracks.find((t) => t.id === activeTrackId) || null,
-    [tracks, activeTrackId]
+    () => {
+      if (trackContext?.track && trackContext.track.id === activeTrackId) {
+        return trackContext.track as Track
+      }
+      return tracks.find((t) => t.id === activeTrackId) || null
+    },
+    [trackContext, tracks, activeTrackId]
   )
 
   const papers = contextPack?.paper_recommendations || []
@@ -133,6 +142,51 @@ export default function ResearchPageNew() {
     if (query === routeQuery) return
     setQuery(routeQuery)
   }, [routeQuery, query, hasSearched])
+
+  async function refreshTrackContext(trackId: number): Promise<void> {
+    const data = await fetchJson<ResearchTrackContextResponse>(
+      `/api/research/tracks/${trackId}/context?user_id=${encodeURIComponent(userId)}`
+    )
+    setTrackContext(data)
+  }
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadTrackContext(trackId: number) {
+      setTrackContextLoading(true)
+      try {
+        const data = await fetchJson<ResearchTrackContextResponse>(
+          `/api/research/tracks/${trackId}/context?user_id=${encodeURIComponent(userId)}`
+        )
+        if (!cancelled) {
+          setTrackContext(data)
+        }
+      } catch (e) {
+        if (!cancelled) {
+          setTrackContext(null)
+          setError(getErrorMessage(e))
+        }
+      } finally {
+        if (!cancelled) {
+          setTrackContextLoading(false)
+        }
+      }
+    }
+
+    if (!activeTrackId) {
+      setTrackContext(null)
+      setTrackContextLoading(false)
+      return () => {
+        cancelled = true
+      }
+    }
+
+    loadTrackContext(activeTrackId).catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [activeTrackId, userId])
 
   async function refreshTracks(): Promise<number | null> {
     const data = await fetchJson<{ tracks: Track[] }>(
@@ -186,6 +240,7 @@ export default function ResearchPageNew() {
       const body = {
         user_id: userId,
         query,
+        track_id: activeTrackId ?? undefined,
         paper_limit: 10,
         memory_limit: 8,
         sources: searchSources,
@@ -323,6 +378,9 @@ export default function ResearchPageNew() {
         headers: { "Content-Type": "application/json" },
       })
       await refreshTracks()
+      if (trackId === activeTrackId) {
+        await refreshTrackContext(trackId)
+      }
       return true
     } catch (e) {
       const message = getErrorMessage(e)
@@ -356,6 +414,9 @@ export default function ResearchPageNew() {
           headers: { "Content-Type": "application/json" },
         }
       )
+      if (trackToClear === activeTrackId) {
+        await refreshTrackContext(trackToClear)
+      }
       setConfirmClearOpen(false)
       setTrackToClear(null)
     } catch (e) {
@@ -577,6 +638,15 @@ export default function ResearchPageNew() {
           />
         </div>
 
+        {trackContext ? (
+          <div className="mb-6 animate-in fade-in slide-in-from-bottom-2 duration-500">
+            <ResearchTrackContextPanel
+              context={trackContext}
+              onOpenMemory={() => setMemoryOpen(true)}
+            />
+          </div>
+        ) : null}
+
         {/* Track Pills - only show before search */}
         {!hasSearched && tracks.length > 0 && (
           <div className="mb-8 flex justify-center animate-in fade-in slide-in-from-bottom-2 duration-500 delay-150">
@@ -612,6 +682,13 @@ export default function ResearchPageNew() {
                     <Badge variant="outline">
                       Track: {activeTrack?.name || "Global"}
                     </Badge>
+                    {trackContextLoading ? (
+                      <Badge variant="outline">Track snapshot: loading</Badge>
+                    ) : trackContext ? (
+                      <Badge variant="outline">
+                        Pending memory: {trackContext.memory.pending_items}
+                      </Badge>
+                    ) : null}
                     <Badge variant="outline">
                       Mode: {anchorPersonalized ? "Personalized" : "Global"}
                     </Badge>
