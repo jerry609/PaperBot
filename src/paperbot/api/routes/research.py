@@ -583,7 +583,7 @@ def get_active_track(user_id: str = Depends(get_user_id)):
 
 
 @router.get("/research/tracks/{track_id}/context", response_model=TrackContextResponse)
-def get_track_context(track_id: int, user_id: str = "default"):
+def get_track_context(track_id: int, user_id: str = Depends(get_user_id)):
     snapshot = _build_track_context_service().get_track_context(
         user_id=user_id,
         track_id=track_id,
@@ -842,7 +842,7 @@ def suggest_memories(
         )
         for m in extracted
     ]
-    created, skipped, rows = _memory_store.add_memories(user_id=user_id, memories=pending)
+    created, skipped, rows = _get_memory_store().add_memories(user_id=user_id, memories=pending)
     if scope_type == "track":
         _schedule_embedding_precompute(
             background_tasks, user_id=user_id, track_ids=[int(scope_id or 0)]
@@ -870,7 +870,7 @@ def moderate_memory_item(
     req: MemoryModerateRequest,
     user_id: str = Depends(get_user_id),
 ):
-    updated = _memory_store.update_item(
+    updated = _get_memory_store().update_item(
         user_id=user_id,
         item_id=item_id,
         status=req.status,
@@ -1104,7 +1104,7 @@ def precompute_embeddings(
     req: PrecomputeEmbeddingsRequest,
     user_id: str = Depends(get_user_id),
 ):
-    result = _track_router.precompute_track_embeddings(
+    result = _get_track_router().precompute_track_embeddings(
         user_id=user_id, track_ids=req.track_ids or None
     )
     return PrecomputeEmbeddingsResponse(user_id=user_id, result=result)
@@ -1229,7 +1229,7 @@ def add_paper_feedback(
             Logger.warning(f"Failed to save paper to library: {e}", file=LogFiles.HARVEST)
 
     Logger.info("Recording paper feedback to research store", file=LogFiles.HARVEST)
-    fb = _research_store.add_paper_feedback(
+    fb = _get_research_store().add_paper_feedback(
         user_id=user_id,
         track_id=track_id,
         paper_id=req.paper_id,  # Always use external ID for consistency
@@ -1398,7 +1398,7 @@ def update_paper_status(
     req: PaperReadingStatusRequest,
     user_id: str = Depends(get_user_id),
 ):
-    status = _research_store.set_paper_reading_status(
+    status = _get_research_store().set_paper_reading_status(
         user_id=user_id,
         paper_id=paper_id,
         status=req.status,
@@ -1682,7 +1682,7 @@ async def discover_from_seed(req: DiscoverySeedRequest, user_id: str = Depends(g
 @router.post("/research/collections", response_model=PaperCollectionResponse)
 def create_collection(req: PaperCollectionCreateRequest, user_id: str = Depends(get_user_id)):
     try:
-        collection = _research_store.create_collection(
+        collection = _get_research_store().create_collection(
             user_id=user_id,
             name=req.name,
             description=req.description,
@@ -1712,7 +1712,7 @@ def list_collections(
 @router.patch("/research/collections/{collection_id}", response_model=PaperCollectionResponse)
 def update_collection(collection_id: int, req: PaperCollectionUpdateRequest, user_id: str = Depends(get_user_id)):
     try:
-        collection = _research_store.update_collection(
+        collection = _get_research_store().update_collection(
             user_id=user_id,
             collection_id=collection_id,
             name=req.name,
@@ -1748,7 +1748,7 @@ def list_collection_items(
     response_model=PaperCollectionItemsResponse,
 )
 def upsert_collection_item(collection_id: int, req: PaperCollectionItemUpsertRequest, user_id: str = Depends(get_user_id)):
-    item = _research_store.upsert_collection_item(
+    item = _get_research_store().upsert_collection_item(
         user_id=user_id,
         collection_id=collection_id,
         paper_id=req.paper_id,
@@ -1757,7 +1757,7 @@ def upsert_collection_item(collection_id: int, req: PaperCollectionItemUpsertReq
     )
     if item is None:
         raise HTTPException(status_code=404, detail="Collection or paper not found")
-    items = _research_store.list_collection_items(user_id=user_id, collection_id=collection_id)
+    items = _get_research_store().list_collection_items(user_id=user_id, collection_id=collection_id)
     return PaperCollectionItemsResponse(
         user_id=user_id, collection_id=collection_id, items=items
     )
@@ -1768,7 +1768,7 @@ def upsert_collection_item(collection_id: int, req: PaperCollectionItemUpsertReq
     response_model=PaperCollectionItemsResponse,
 )
 def patch_collection_item(collection_id: int, paper_id: str, req: PaperCollectionItemPatchRequest, user_id: str = Depends(get_user_id)):
-    item = _research_store.upsert_collection_item(
+    item = _get_research_store().upsert_collection_item(
         user_id=user_id,
         collection_id=collection_id,
         paper_id=paper_id,
@@ -1777,7 +1777,7 @@ def patch_collection_item(collection_id: int, paper_id: str, req: PaperCollectio
     )
     if item is None:
         raise HTTPException(status_code=404, detail="Collection or paper not found")
-    items = _research_store.list_collection_items(user_id=user_id, collection_id=collection_id)
+    items = _get_research_store().list_collection_items(user_id=user_id, collection_id=collection_id)
     return PaperCollectionItemsResponse(
         user_id=user_id, collection_id=collection_id, items=items
     )
@@ -1785,7 +1785,7 @@ def patch_collection_item(collection_id: int, paper_id: str, req: PaperCollectio
 
 @router.delete("/research/collections/{collection_id}/items/{paper_id}")
 def delete_collection_item(collection_id: int, paper_id: str, user_id: str = Depends(get_user_id)):
-    ok = _research_store.remove_collection_item(
+    ok = _get_research_store().remove_collection_item(
         user_id=user_id,
         collection_id=collection_id,
         paper_id=paper_id,
@@ -1908,7 +1908,7 @@ def import_bibtex(req: BibtexImportRequest, user_id: str = Depends(get_user_id))
     track_pk = int(track["id"])
 
     paper_store = _get_paper_store()
-    existing_saved_ids = _research_store.list_paper_feedback_ids(
+    existing_saved_ids = _get_research_store().list_paper_feedback_ids(
         user_id=user_id,
         track_id=track_pk,
         action="save",
@@ -1949,7 +1949,7 @@ def import_bibtex(req: BibtexImportRequest, user_id: str = Depends(get_user_id))
                     "citation_key": str(entry.get("key") or ""),
                     "entry_type": str(entry.get("entry_type") or ""),
                 }
-                _research_store.add_paper_feedback(
+                _get_research_store().add_paper_feedback(
                     user_id=user_id,
                     track_id=track_pk,
                     paper_id=paper_ref,
@@ -2020,7 +2020,7 @@ def pull_from_zotero(req: ZoteroSyncRequest, user_id: str = Depends(get_user_id)
         raise HTTPException(status_code=502, detail=f"Failed to pull from Zotero: {exc}") from exc
 
     paper_store = _get_paper_store()
-    existing_saved_ids = _research_store.list_paper_feedback_ids(
+    existing_saved_ids = _get_research_store().list_paper_feedback_ids(
         user_id=user_id,
         track_id=track_pk,
         action="save",
@@ -2061,7 +2061,7 @@ def pull_from_zotero(req: ZoteroSyncRequest, user_id: str = Depends(get_user_id)
                     "zotero_library_type": req.library_type,
                     "zotero_library_id": req.library_id,
                 }
-                _research_store.add_paper_feedback(
+                _get_research_store().add_paper_feedback(
                     user_id=user_id,
                     track_id=track_pk,
                     paper_id=paper_ref,
@@ -2108,12 +2108,12 @@ def push_to_zotero(req: ZoteroPushRequest, user_id: str = Depends(get_user_id)):
     from paperbot.infrastructure.connectors.zotero_connector import ZoteroConnector
 
     if req.track_id is not None:
-        track = _research_store.get_track(user_id=user_id, track_id=req.track_id)
+        track = _get_research_store().get_track(user_id=user_id, track_id=req.track_id)
         if not track:
             raise HTTPException(status_code=404, detail="Track not found")
 
     connector = ZoteroConnector()
-    local_items = _research_store.list_saved_papers(
+    local_items = _get_research_store().list_saved_papers(
         user_id=user_id,
         track_id=req.track_id,
         sort_by="saved_at",
@@ -2226,7 +2226,7 @@ def discover_track_anchors(
 def set_anchor_action(track_id: int, author_id: int, req: AnchorActionRequest, user_id: str = Depends(get_user_id)):
     _ensure_anchor_feature_enabled()
 
-    track = _research_store.get_track(user_id=user_id, track_id=track_id)
+    track = _get_research_store().get_track(user_id=user_id, track_id=track_id)
     if not track:
         raise HTTPException(status_code=404, detail="Track not found")
 
@@ -2272,7 +2272,7 @@ def list_anchor_actions(track_id: int, user_id: str = Depends(get_user_id)):
 
 @router.get("/research/papers/{paper_id}", response_model=PaperDetailResponse)
 def get_paper_detail(paper_id: str, user_id: str = Depends(get_user_id)):
-    detail = _research_store.get_paper_detail(paper_id=paper_id, user_id=user_id)
+    detail = _get_research_store().get_paper_detail(paper_id=paper_id, user_id=user_id)
     if not detail:
         raise HTTPException(status_code=404, detail="Paper not found in registry")
     return PaperDetailResponse(detail=detail)
@@ -2296,7 +2296,7 @@ class RouterSuggestResponse(BaseModel):
 
 @router.post("/research/router/suggest", response_model=RouterSuggestResponse)
 def suggest_track(req: RouterSuggestRequest, user_id: str = Depends(get_user_id)):
-    active = _research_store.get_active_track(user_id=user_id)
+    active = _get_research_store().get_active_track(user_id=user_id)
     if not active:
         return RouterSuggestResponse(suggestion=None)
     grounded_query = _get_workflow_query_grounder().ground_query(
@@ -2411,7 +2411,7 @@ async def build_context(req: ContextRequest, user_id: str = Depends(get_user_id)
 
     if req.activate_track_id is not None:
         Logger.info("Activating research track", file=LogFiles.HARVEST)
-        activated = _research_store.activate_track(
+        activated = _get_research_store().activate_track(
             user_id=user_id, track_id=req.activate_track_id
         )
         if not activated:
@@ -3982,7 +3982,7 @@ class StructuredCardResponse(BaseModel):
 
 @router.get("/research/papers/{paper_id}/card", response_model=StructuredCardResponse)
 def get_structured_card(paper_id: str, user_id: str = Depends(get_user_id)):
-    detail = _research_store.get_paper_detail(paper_id=paper_id, user_id=user_id)
+    detail = _get_research_store().get_paper_detail(paper_id=paper_id, user_id=user_id)
     if not detail:
         raise HTTPException(status_code=404, detail="Paper not found")
 
@@ -4046,7 +4046,7 @@ class RelatedWorkResponse(BaseModel):
 
 @router.post("/research/papers/related-work", response_model=RelatedWorkResponse)
 def generate_related_work(req: RelatedWorkRequest, user_id: str = Depends(get_user_id)):
-    items = _research_store.list_saved_papers(
+    items = _get_research_store().list_saved_papers(
         user_id=user_id, track_id=req.track_id, limit=req.limit
     )
     papers = [item["paper"] for item in items if item.get("paper")]

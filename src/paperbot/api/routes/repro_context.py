@@ -353,11 +353,11 @@ async def generate_context_pack(
 
 @router.get("")
 async def list_context_packs(
-    user_id: str = "default",
     paper_id: Optional[str] = None,
     project_id: Optional[str] = None,
     limit: int = 20,
     offset: int = 0,
+    user_id: str = Depends(get_user_id),
 ):
     """List context packs for a user, with optional filters."""
     set_trace_id()
@@ -381,7 +381,7 @@ async def list_context_packs(
 # ------------------------------------------------------------------ #
 
 @router.get("/{pack_id}")
-async def get_context_pack(pack_id: str):
+async def get_context_pack(pack_id: str, user_id: str = Depends(get_user_id)):
     """Return the full context pack detail."""
     set_trace_id()
     Logger.info(f"[M2] get_pack pack_id={pack_id}", file=LogFiles.API)
@@ -389,17 +389,22 @@ async def get_context_pack(pack_id: str):
     if pack is None:
         Logger.warning(f"[M2] pack_not_found pack_id={pack_id}", file=LogFiles.API)
         raise HTTPException(status_code=404, detail="Context pack not found.")
+    if pack.get("user_id") != user_id:
+        raise HTTPException(status_code=403, detail="Access denied.")
     return pack
 
 
 @router.get("/{pack_id}/observation/{observation_id}")
-async def get_observation_detail(pack_id: str, observation_id: str):
+async def get_observation_detail(pack_id: str, observation_id: str, user_id: str = Depends(get_user_id)):
     """Return a single observation detail by ID."""
     set_trace_id()
     Logger.info(
         f"[M2] get_observation pack_id={pack_id} observation_id={observation_id}",
         file=LogFiles.API,
     )
+    pack = await asyncio.to_thread(_get_store().get, pack_id)
+    if pack is None or pack.get("user_id") != user_id:
+        raise HTTPException(status_code=404, detail="Context pack not found.")
     observation = await asyncio.to_thread(_get_store().get_observation, pack_id, observation_id)
     if observation is None:
         Logger.warning(
@@ -415,7 +420,7 @@ async def get_observation_detail(pack_id: str, observation_id: str):
 # ------------------------------------------------------------------ #
 
 @router.post("/{pack_id}/session")
-async def create_repro_session(pack_id: str, request: CreateSessionRequest):
+async def create_repro_session(pack_id: str, request: CreateSessionRequest, user_id: str = Depends(get_user_id)):
     """
     Convert a context pack into a runbook session.
 
@@ -425,6 +430,8 @@ async def create_repro_session(pack_id: str, request: CreateSessionRequest):
     if pack is None:
         Logger.warning(f"[M2] session_pack_not_found pack_id={pack_id}", file=LogFiles.API)
         raise HTTPException(status_code=404, detail="Context pack not found.")
+    if pack.get("user_id") != user_id:
+        raise HTTPException(status_code=403, detail="Access denied.")
     Logger.info(
         f"[M2] create_session pack_id={pack_id} executor={request.executor_preference}",
         file=LogFiles.API,
@@ -460,12 +467,15 @@ async def create_repro_session(pack_id: str, request: CreateSessionRequest):
 # ------------------------------------------------------------------ #
 
 @router.delete("/{pack_id}")
-async def delete_context_pack(pack_id: str):
+async def delete_context_pack(pack_id: str, user_id: str = Depends(get_user_id)):
     """Soft-delete a context pack."""
     set_trace_id()
     Logger.info(f"[M2] delete_pack pack_id={pack_id}", file=LogFiles.API)
-    deleted = await asyncio.to_thread(_get_store().soft_delete, pack_id)
-    if not deleted:
+    pack = await asyncio.to_thread(_get_store().get, pack_id)
+    if pack is None:
         Logger.warning(f"[M2] delete_pack_not_found pack_id={pack_id}", file=LogFiles.API)
         raise HTTPException(status_code=404, detail="Context pack not found.")
+    if pack.get("user_id") != user_id:
+        raise HTTPException(status_code=403, detail="Access denied.")
+    await asyncio.to_thread(_get_store().soft_delete, pack_id)
     return {"status": "deleted", "context_pack_id": pack_id}
