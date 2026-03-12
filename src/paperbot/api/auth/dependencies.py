@@ -1,5 +1,8 @@
+from __future__ import annotations
+
 import logging
 import os
+from typing import Optional
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -17,7 +20,7 @@ AUTH_OPTIONAL = os.getenv("AUTH_OPTIONAL", "false").lower() in {"1", "true", "ye
 _user_store = SqlAlchemyUserStore()
 
 
-def _resolve_user(credentials: HTTPAuthorizationCredentials | None):
+def _resolve_user(credentials: Optional[HTTPAuthorizationCredentials]):
     if not credentials or not credentials.credentials:
         logger.warning("[auth] Missing token — no credentials provided")
         if AUTH_OPTIONAL:
@@ -42,7 +45,9 @@ def _resolve_user(credentials: HTTPAuthorizationCredentials | None):
     return user
 
 
-def get_current_user(credentials: HTTPAuthorizationCredentials | None = Depends(bearer)):
+def get_current_user(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer),
+):
     """Strict user dependency: always requires a valid user.
 
     Use this for endpoints that must not fall back to the legacy "default" namespace.
@@ -55,7 +60,9 @@ def get_current_user(credentials: HTTPAuthorizationCredentials | None = Depends(
     return user
 
 
-def get_user_id(credentials: HTTPAuthorizationCredentials | None = Depends(bearer)) -> str:
+def get_user_id(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer),
+) -> str:
     """Return the authenticated user id as a string.
 
     When AUTH_OPTIONAL=true, missing/invalid tokens fall back to "default" so
