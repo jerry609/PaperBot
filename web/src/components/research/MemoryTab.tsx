@@ -22,11 +22,10 @@ type MemoryResponse = {
 }
 
 interface MemoryTabProps {
-  userId: string
   trackId: number | null
 }
 
-export function MemoryTab({ userId, trackId }: MemoryTabProps) {
+export function MemoryTab({ trackId }: MemoryTabProps) {
   const [items, setItems] = useState<MemoryItem[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -40,11 +39,10 @@ export function MemoryTab({ userId, trackId }: MemoryTabProps) {
     setError(null)
     try {
       const qs = new URLSearchParams({
-        user_id: userId,
         track_id: String(trackId),
         limit: "100",
       })
-      const res = await fetch(`/api/research/memory/inbox?${qs.toString()}`)
+      const res = await fetch(`/api/research/memory/inbox`)
       if (!res.ok) {
         throw new Error(`${res.status} ${res.statusText}`)
       }
@@ -61,7 +59,7 @@ export function MemoryTab({ userId, trackId }: MemoryTabProps) {
   useEffect(() => {
     load().catch(() => {})
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userId, trackId])
+  }, [trackId])
 
   if (!trackId) {
     return <div className="py-8 text-sm text-muted-foreground">Select a track to view memory items.</div>

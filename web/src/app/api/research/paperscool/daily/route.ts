@@ -3,6 +3,7 @@ export const runtime = "nodejs"
 import { Agent } from "undici"
 
 import { apiBaseUrl } from "../../_base"
+import { withBackendAuth } from "../../../_utils/auth-headers"
 
 // Keep SSE proxy streams alive during long backend phases (LLM/Judge).
 const sseDispatcher = new Agent({
@@ -18,10 +19,10 @@ export async function POST(req: Request) {
   try {
     upstream = await fetch(`${apiBaseUrl()}/api/research/paperscool/daily`, {
       method: "POST",
-      headers: {
+      headers: await withBackendAuth(req, {
         "Content-Type": contentType,
         Accept: "text/event-stream, application/json",
-      },
+      }),
       body,
       dispatcher: sseDispatcher,
     } as RequestInit & { dispatcher: Agent })

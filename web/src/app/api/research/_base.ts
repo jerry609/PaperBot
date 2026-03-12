@@ -8,12 +8,16 @@ export async function proxyJson(req: Request, upstreamUrl: string, method: strin
   const timeout = setTimeout(() => controller.abort(), 120_000) // 2 min timeout
 
   try {
+    const baseHeaders = {
+      method,
+      Accept: "application/json",
+      "Content-Type": req.headers.get("content-type") || "application/json",
+    } as Record<string, string>
+    const { withBackendAuth } = await import("../_utils/auth-headers")
+    const headers = await withBackendAuth(req, baseHeaders)
     const upstream = await fetch(upstreamUrl, {
       method,
-      headers: {
-        Accept: "application/json",
-        "Content-Type": req.headers.get("content-type") || "application/json",
-      },
+      headers,
       body,
       signal: controller.signal,
     })

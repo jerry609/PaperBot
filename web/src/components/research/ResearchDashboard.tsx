@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
+import { useSession } from "next-auth/react"
 
 import { fetchJson, getErrorMessage } from "@/lib/fetch"
 import { Badge } from "@/components/ui/badge"
@@ -96,7 +97,7 @@ function clampNumber(value: number, min: number, max: number, fallback: number) 
 }
 
 export default function ResearchDashboard() {
-  const [userId, setUserId] = useState("default")
+  const { data: session } = useSession()
   const [tracks, setTracks] = useState<Track[]>([])
   const [activeTrackId, setActiveTrackId] = useState<number | null>(null)
   const [query, setQuery] = useState("")
@@ -183,7 +184,7 @@ export default function ResearchDashboard() {
   }
 
   async function refreshTracks(): Promise<number | null> {
-    const data = await fetchJson<{ tracks: Track[] }>(`/api/research/tracks?user_id=${encodeURIComponent(userId)}`)
+    const data = await fetchJson<{ tracks: Track[] }>(`/api/research/tracks`)
     setTracks(data.tracks || [])
     const active = data.tracks.find((t) => t.is_active)
     const activeId = active?.id ?? null
@@ -194,17 +195,16 @@ export default function ResearchDashboard() {
 
   async function refreshInbox(trackId?: number | null) {
     const tid = trackId ?? activeTrackId
-    const qs = new URLSearchParams({ user_id: userId })
     if (tid) qs.set("track_id", String(tid))
-    const data = await fetchJson<{ items: MemoryItem[] }>(`/api/research/memory/inbox?${qs.toString()}`)
+    const data = await fetchJson<{ items: MemoryItem[] }>(`/api/research/memory/inbox`)
     setInbox(data.items || [])
     setSelectedInboxIds(new Set())
   }
 
   async function refreshEval() {
-    const qs = new URLSearchParams({ user_id: userId, days: String(evalDays) })
+    const qs = new URLSearchParams({ days: String(evalDays) })
     if (activeTrackId) qs.set("track_id", String(activeTrackId))
-    const data = await fetchJson<{ summary: EvalSummary }>(`/api/research/evals/summary?${qs.toString()}`)
+    const data = await fetchJson<{ summary: EvalSummary }>(`/api/research/evals/summary`)
     setEvalSummary(data.summary)
   }
 
@@ -219,10 +219,10 @@ export default function ResearchDashboard() {
       refreshInbox(activeTrackId).catch(() => {})
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTrackId, userId])
+  }, [activeTrackId])
 
   async function activateTrack(trackId: number) {
-    await fetchJson(`/api/research/tracks/${trackId}/activate?user_id=${encodeURIComponent(userId)}`, {
+    await fetchJson(`/api/research/tracks/${trackId}/activate`, {
       method: "POST",
       body: "{}",
       headers: { "Content-Type": "application/json" },
@@ -238,7 +238,6 @@ export default function ResearchDashboard() {
       const suggestion = contextPack?.routing?.suggestion
       const activateTrackId = activateSuggestion ? suggestion?.track_id : null
       const body: Record<string, unknown> = {
-        user_id: userId,
         query,
         paper_limit: 8,
         memory_limit: 8,
@@ -276,7 +275,6 @@ export default function ResearchDashboard() {
       await fetchJson(`/api/research/memory/suggest`, {
         method: "POST",
         body: JSON.stringify({
-          user_id: userId,
           text: suggestText,
           scope_type: "track",
           scope_id: activeTrackId ? String(activeTrackId) : undefined,
@@ -303,7 +301,6 @@ export default function ResearchDashboard() {
       await fetchJson(`/api/research/memory/bulk_moderate`, {
         method: "POST",
         body: JSON.stringify({
-          user_id: userId,
           item_ids: ids,
           status,
         }),
@@ -326,7 +323,6 @@ export default function ResearchDashboard() {
       await fetchJson(`/api/research/memory/bulk_move`, {
         method: "POST",
         body: JSON.stringify({
-          user_id: userId,
           item_ids: ids,
           scope_type: "track",
           scope_id: String(targetTrackId),
@@ -359,7 +355,6 @@ export default function ResearchDashboard() {
       await fetchJson(`/api/research/tracks`, {
         method: "POST",
         body: JSON.stringify({
-          user_id: userId,
           name,
           description: newTrackDescription.trim(),
           keywords,
@@ -386,7 +381,6 @@ export default function ResearchDashboard() {
     try {
       const contextRunId = contextPack?.context_run_id ?? null
       const body: Record<string, unknown> = {
-        user_id: userId,
         track_id: activeTrackId,
         paper_id: paperId,
         action,
@@ -423,7 +417,7 @@ export default function ResearchDashboard() {
     setError(null)
     try {
       await fetchJson(
-        `/api/research/tracks/${trackId}/memory/clear?user_id=${encodeURIComponent(userId)}&confirm=true`,
+        `/api/research/tracks/${trackId}/memory/clear?confirm=true`,
         { method: "POST", body: "{}", headers: { "Content-Type": "application/json" } },
       )
       await refreshInbox(trackId)

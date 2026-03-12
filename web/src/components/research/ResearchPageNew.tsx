@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
+import { useSession } from "next-auth/react"
 import Link from "next/link"
 import { useSearchParams } from "next/navigation"
 
@@ -65,10 +66,10 @@ function getGreeting(): string {
 }
 
 export default function ResearchPageNew() {
+  const { data: session } = useSession()
   const searchParams = useSearchParams()
 
   // User state
-  const [userId] = useState("default")
 
   // Track state
   const [tracks, setTracks] = useState<Track[]>([])
@@ -145,7 +146,7 @@ export default function ResearchPageNew() {
 
   async function refreshTrackContext(trackId: number): Promise<void> {
     const data = await fetchJson<ResearchTrackContextResponse>(
-      `/api/research/tracks/${trackId}/context?user_id=${encodeURIComponent(userId)}`
+      `/api/research/tracks/${trackId}/context`
     )
     setTrackContext(data)
   }
@@ -157,7 +158,7 @@ export default function ResearchPageNew() {
       setTrackContextLoading(true)
       try {
         const data = await fetchJson<ResearchTrackContextResponse>(
-          `/api/research/tracks/${trackId}/context?user_id=${encodeURIComponent(userId)}`
+          `/api/research/tracks/${trackId}/context`
         )
         if (!cancelled) {
           setTrackContext(data)
@@ -186,11 +187,11 @@ export default function ResearchPageNew() {
     return () => {
       cancelled = true
     }
-  }, [activeTrackId, userId])
+  }, [activeTrackId])
 
   async function refreshTracks(): Promise<number | null> {
     const data = await fetchJson<{ tracks: Track[] }>(
-      `/api/research/tracks?user_id=${encodeURIComponent(userId)}`
+      `/api/research/tracks`
     )
     setTracks(data.tracks || [])
     const active = data.tracks.find((t) => t.is_active)
@@ -203,7 +204,7 @@ export default function ResearchPageNew() {
     setLoading(true)
     try {
       await fetchJson(
-        `/api/research/tracks/${trackId}/activate?user_id=${encodeURIComponent(userId)}`,
+        `/api/research/tracks/${trackId}/activate`,
         {
           method: "POST",
           body: "{}",
@@ -238,7 +239,6 @@ export default function ResearchPageNew() {
       const parsedYearTo = parseYear(yearTo)
 
       const body = {
-        user_id: userId,
         query,
         track_id: activeTrackId ?? undefined,
         paper_limit: 10,
@@ -321,7 +321,6 @@ export default function ResearchPageNew() {
       await fetchJson(`/api/research/tracks`, {
         method: "POST",
         body: JSON.stringify({
-          user_id: userId,
           name,
           description: data.description,
           keywords: data.keywords,
@@ -368,7 +367,7 @@ export default function ResearchPageNew() {
     setError(null)
     setEditError(null)
     try {
-      await fetchJson(`/api/research/tracks/${trackId}?user_id=${encodeURIComponent(userId)}`, {
+      await fetchJson(`/api/research/tracks/${trackId}`, {
         method: "PATCH",
         body: JSON.stringify({
           name,
@@ -407,7 +406,7 @@ export default function ResearchPageNew() {
     setError(null)
     try {
       await fetchJson(
-        `/api/research/tracks/${trackToClear}/memory/clear?user_id=${encodeURIComponent(userId)}&confirm=true`,
+        `/api/research/tracks/${trackToClear}/memory/clear?confirm=true`,
         {
           method: "POST",
           body: "{}",
@@ -435,7 +434,6 @@ export default function ResearchPageNew() {
     // Don't set global loading - PaperCard handles its own loading state
     setError(null)
     const body: Record<string, unknown> = {
-      user_id: userId,
       track_id: activeTrackId,
       paper_id: paperId,
       action,
@@ -784,13 +782,12 @@ export default function ResearchPageNew() {
                   </TabsList>
                   <TabsContent value="saved" className="mt-4 min-h-0 flex-1 overflow-y-auto pr-1">
                     <SavedTab
-                      userId={userId}
                       trackId={activeTrackId}
                       trackName={activeTrack?.name ?? null}
                     />
                   </TabsContent>
                   <TabsContent value="memory" className="mt-4 min-h-0 flex-1 overflow-y-auto pr-1">
-                    <MemoryTab userId={userId} trackId={activeTrackId} />
+                    <MemoryTab trackId={activeTrackId} />
                   </TabsContent>
                 </Tabs>
               </div>

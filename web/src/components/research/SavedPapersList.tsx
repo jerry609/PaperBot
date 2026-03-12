@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState } from "react"
+import { useSession } from "next-auth/react"
 import Link from "next/link"
 import { Check, ChevronDown, Copy, Download, FileText, Filter, Loader2 } from "lucide-react"
 
@@ -308,6 +309,7 @@ function SavedPaperListItem({
 }
 
 export default function SavedPapersList() {
+  const { data: session } = useSession()
   const [items, setItems] = useState<SavedPaperItem[]>([])
   const [sortBy, setSortBy] = useState<SavedPaperSort>("saved_at")
   const [page, setPage] = useState<number>(1)
@@ -363,7 +365,7 @@ export default function SavedPapersList() {
 
   // Fetch tracks on mount
   useEffect(() => {
-    fetch("/api/research/tracks?user_id=default", { cache: "no-store" })
+    fetch(`/api/research/tracks`, { cache: "no-store" })
       .then((res) => res.json())
       .then((data) => setTracks(data.tracks || []))
       .catch(() => setTracks([]))
@@ -376,7 +378,6 @@ export default function SavedPapersList() {
       const qs = new URLSearchParams({
         sort_by: sortBy,
         limit: "500",
-        user_id: "default",
       })
       if (selectedTrackId) {
         qs.set("track_id", String(selectedTrackId))
@@ -452,7 +453,6 @@ export default function SavedPapersList() {
       setError(null)
       try {
         const payload = {
-          user_id: "default",
           track_id: activeTrackId,
           paper_id: externalId || String(paperId),
           action: requestAction,
@@ -500,7 +500,6 @@ export default function SavedPapersList() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            user_id: "default",
             status: nextStatus,
           }),
         })
@@ -537,7 +536,7 @@ export default function SavedPapersList() {
   )
 
   const handleExport = useCallback(async (format: "bibtex" | "ris" | "markdown" | "csl_json") => {
-    const qs = new URLSearchParams({ format, user_id: "default" })
+    const qs = new URLSearchParams({ format })
     // Add selected paper IDs
     selectedIds.forEach((id) => qs.append("paper_id", String(id)))
     try {
@@ -566,7 +565,6 @@ export default function SavedPapersList() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          user_id: "default",
           topic: rwTopic.trim(),
         }),
       })
@@ -597,7 +595,6 @@ export default function SavedPapersList() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          user_id: "default",
           content: importBibtex,
           track_id: selectedTrackId ?? undefined,
           track_name: selectedTrackId ? undefined : (importTrackName.trim() || undefined),
@@ -635,7 +632,6 @@ export default function SavedPapersList() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          user_id: "default",
           track_id: selectedTrackId ?? undefined,
           track_name: selectedTrackId ? undefined : (zoteroTrackName.trim() || undefined),
           library_type: zoteroLibraryType,
@@ -683,7 +679,7 @@ export default function SavedPapersList() {
     setCollectionsLoading(true)
     setCollectionsMessage(null)
     try {
-      const qs = new URLSearchParams({ user_id: "default", limit: "200" })
+      const qs = new URLSearchParams({ limit: "200" })
       if (selectedTrackId) qs.set("track_id", String(selectedTrackId))
       const res = await fetch(`/api/research/collections?${qs.toString()}`, { cache: "no-store" })
       if (!res.ok) throw new Error(`${res.status}`)
@@ -708,7 +704,7 @@ export default function SavedPapersList() {
     setCollectionsLoading(true)
     setCollectionsMessage(null)
     try {
-      const qs = new URLSearchParams({ user_id: "default", limit: "500" })
+      const qs = new URLSearchParams({ limit: "500" })
       const res = await fetch(`/api/research/collections/${collectionId}/items?${qs.toString()}`, {
         cache: "no-store",
       })
@@ -733,7 +729,6 @@ export default function SavedPapersList() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          user_id: "default",
           name: newCollectionName.trim(),
           description: newCollectionDesc.trim(),
           track_id: selectedTrackId ?? undefined,
@@ -762,7 +757,6 @@ export default function SavedPapersList() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            user_id: "default",
             paper_id: String(paperId),
             note: "",
             tags: [],
@@ -793,7 +787,6 @@ export default function SavedPapersList() {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              user_id: "default",
               note,
               tags,
             }),
@@ -845,9 +838,8 @@ export default function SavedPapersList() {
       setCollectionsLoading(true)
       setCollectionsMessage(null)
       try {
-        const qs = new URLSearchParams({ user_id: "default" })
         const res = await fetch(
-          `/api/research/collections/${selectedCollectionId}/items/${paperId}?${qs.toString()}`,
+          `/api/research/collections/${selectedCollectionId}/items/${paperId}`,
           { method: "DELETE" },
         )
         if (!res.ok) throw new Error(`${res.status}`)

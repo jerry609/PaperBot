@@ -163,7 +163,7 @@ export function ScholarsWatchlist({ scholars }: ScholarsWatchlistProps) {
   useEffect(() => {
     const loadTracks = async () => {
       try {
-        const res = await fetch("/api/research/tracks?user_id=default", { cache: "no-store" })
+        const res = await fetch("/api/research/tracks", { cache: "no-store" })
         if (!res.ok) return
         const payload = (await res.json()) as { tracks?: ResearchTrackSummary[] }
         setTracks(payload.tracks || [])
@@ -395,7 +395,6 @@ export function ScholarsWatchlist({ scholars }: ScholarsWatchlistProps) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          user_id: "default",
           name: trackName,
           description: `Auto-generated from scholar ${scholar.name}`,
           keywords,

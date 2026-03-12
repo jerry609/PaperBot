@@ -4,13 +4,15 @@ function apiBaseUrl() {
   return process.env.PAPERBOT_API_BASE_URL || "http://127.0.0.1:8000"
 }
 
+import { withBackendAuth } from "../_utils/auth-headers"
+
 export async function POST(req: Request) {
   const body = await req.text()
   const upstream = await fetch(`${apiBaseUrl()}/api/gen-code`, {
     method: "POST",
-    headers: {
+    headers: await withBackendAuth(req, {
       "Content-Type": req.headers.get("content-type") || "application/json",
-    },
+    }),
     body,
   })
 
@@ -24,4 +26,3 @@ export async function POST(req: Request) {
     headers,
   })
 }
-

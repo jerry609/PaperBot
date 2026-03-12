@@ -40,7 +40,6 @@ type FeedResponse = {
 }
 
 interface FeedTabProps {
-  userId: string
   trackId: number | null
   onFeedbackAction?: (
     paperId: string,
@@ -72,7 +71,7 @@ function toPaper(item: FeedItem): Paper {
   }
 }
 
-export function FeedTab({ userId, trackId, onFeedbackAction }: FeedTabProps) {
+export function FeedTab({ trackId, onFeedbackAction }: FeedTabProps) {
   const [items, setItems] = useState<FeedItem[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -88,11 +87,10 @@ export function FeedTab({ userId, trackId, onFeedbackAction }: FeedTabProps) {
     setError(null)
     try {
       const qs = new URLSearchParams({
-        user_id: userId,
         limit: "20",
         offset: "0",
       })
-      const res = await fetch(`/api/research/tracks/${trackId}/feed?${qs.toString()}`)
+      const res = await fetch(`/api/research/tracks/${trackId}/feed`)
       if (!res.ok) {
         throw new Error(`${res.status} ${res.statusText}`)
       }
@@ -109,7 +107,7 @@ export function FeedTab({ userId, trackId, onFeedbackAction }: FeedTabProps) {
   useEffect(() => {
     load().catch(() => {})
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userId, trackId])
+  }, [trackId])
 
   if (!trackId) {
     return <div className="py-8 text-sm text-muted-foreground">Select a track to view feed.</div>

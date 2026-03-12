@@ -48,7 +48,6 @@ export function useContextPackGeneration() {
     try {
       const payload: Record<string, unknown> = {
         paper_id: params.paperId,
-        user_id: params.userId ?? "default",
         depth: params.depth ?? "standard",
       }
       if (params.title !== undefined) payload.title = params.title

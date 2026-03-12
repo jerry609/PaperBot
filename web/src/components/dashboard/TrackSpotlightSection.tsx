@@ -11,7 +11,6 @@ interface TrackSpotlightSectionProps {
   initialFeedItems: TrackFeedItem[]
   initialFeedTotal: number
   initialAnchors: AnchorPreviewItem[]
-  userId?: string
 }
 
 export function TrackSpotlightSection({
@@ -19,8 +18,7 @@ export function TrackSpotlightSection({
   initialActiveTrack,
   initialFeedItems,
   initialFeedTotal,
-  initialAnchors,
-  userId = "default",
+  initialAnchors = "default",
 }: TrackSpotlightSectionProps) {
   const [tracks] = useState(initialTracks)
   const [activeTrack, setActiveTrack] = useState(initialActiveTrack)
@@ -40,8 +38,8 @@ export function TrackSpotlightSection({
       try {
         // Fetch feed and anchors for the new track
         const [feedRes, anchorsRes] = await Promise.all([
-          fetch(`/api/research/tracks/${trackId}/feed?user_id=${encodeURIComponent(userId)}&limit=6`),
-          fetch(`/api/research/tracks/${trackId}/anchors/discover?user_id=${encodeURIComponent(userId)}&limit=4`),
+          fetch(`/api/research/tracks/${trackId}/feed?limit=6`),
+          fetch(`/api/research/tracks/${trackId}/anchors/discover?limit=4`),
         ])
 
         if (feedRes.ok) {
@@ -61,7 +59,7 @@ export function TrackSpotlightSection({
         }
 
         // Optionally activate the track on the backend
-        await fetch(`/api/research/tracks/${trackId}/activate?user_id=${encodeURIComponent(userId)}`, {
+        await fetch(`/api/research/tracks/${trackId}/activate`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: "{}",
@@ -75,7 +73,7 @@ export function TrackSpotlightSection({
         setIsLoading(false)
       }
     },
-    [tracks, activeTrack?.id, userId]
+    [tracks, activeTrack?.id]
   )
 
   return (
