@@ -79,9 +79,14 @@ def test_export_library_snapshot_writes_paper_track_and_moc_notes(tmp_path: Path
     assert "cites:" in paper_body
     assert "cited_by:" in paper_body
     assert "## References" in paper_body
-    assert "[[PaperBot/Papers/2025-prior-compression-work-prior|Prior Compression Work]]" in paper_body
+    assert (
+        "[[PaperBot/Papers/2025-prior-compression-work-prior|Prior Compression Work]]" in paper_body
+    )
     assert "## Cited By" in paper_body
-    assert "[[PaperBot/Papers/2027-future-compression-follow-up-future|Future Compression Follow-up]]" in paper_body
+    assert (
+        "[[PaperBot/Papers/2027-future-compression-follow-up-future|Future Compression Follow-up]]"
+        in paper_body
+    )
 
     track_body = track_note.read_text(encoding="utf-8")
     assert "paperbot_type: track" in track_body
@@ -154,8 +159,13 @@ def test_export_library_snapshot_supports_custom_template_and_related_links(tmp_
     assert "related_papers:" in paper_note
     assert "Prompt Compression Survey" in paper_note
     assert "Contains &lt;script&gt;alert(1)&lt;/script&gt; &amp; evidence." in paper_note
-    assert "[[PaperBot/Papers/2025-prompt-compression-survey|Prompt Compression Survey]]" in paper_note
-    assert "[[PaperBot/Papers/context-distillation-for-llms|Context Distillation for LLMs]]" in paper_note
+    assert (
+        "[[PaperBot/Papers/2025-prompt-compression-survey|Prompt Compression Survey]]" in paper_note
+    )
+    assert (
+        "[[PaperBot/Papers/context-distillation-for-llms|Context Distillation for LLMs]]"
+        in paper_note
+    )
     assert "[[PaperBot/Tracks/icl-compression/_MOC|ICL Compression]]" in paper_note
     assert paper_note.count("paperbot_type: paper") == 1
 
@@ -198,12 +208,9 @@ def test_export_library_snapshot_backfills_existing_cited_by_links(tmp_path: Pat
         ],
     )
 
-    prior_note = (
-        vault
-        / "PaperBot"
-        / "Papers"
-        / "2025-prior-compression-work-prior.md"
-    ).read_text(encoding="utf-8")
+    prior_note = (vault / "PaperBot" / "Papers" / "2025-prior-compression-work-prior.md").read_text(
+        encoding="utf-8"
+    )
     assert "cited_by:" in prior_note
     assert "## Cited By" in prior_note
     assert "[[PaperBot/Papers/2026-uniicl-1|UniICL]]" in prior_note
@@ -222,3 +229,102 @@ def test_export_library_snapshot_requires_existing_vault_directory(tmp_path: Pat
         assert "vault_path must be an existing directory" in str(exc)
     else:
         raise AssertionError("expected exporter to reject a missing vault directory")
+
+
+def test_export_library_snapshot_preserves_existing_personal_notes(tmp_path: Path):
+    exporter = ObsidianFilesystemExporter()
+    vault = tmp_path / "vault"
+    vault.mkdir()
+
+    result = exporter.export_library_snapshot(
+        vault_path=vault,
+        saved_items=[
+            {
+                "paper": {
+                    "id": "paper-1",
+                    "title": "UniICL",
+                    "abstract": "Initial summary.",
+                    "year": 2026,
+                }
+            }
+        ],
+    )
+    note_path = Path(result["paper_notes"][0])
+    note_path.write_text(
+        note_path.read_text(encoding="utf-8").rstrip()
+        + "\n\n## Personal Notes\nKeep this observation.\n",
+        encoding="utf-8",
+    )
+
+    exporter.export_library_snapshot(
+        vault_path=vault,
+        saved_items=[
+            {
+                "paper": {
+                    "id": "paper-1",
+                    "title": "UniICL",
+                    "abstract": "Updated generated summary.",
+                    "year": 2026,
+                }
+            }
+        ],
+    )
+
+    body = note_path.read_text(encoding="utf-8")
+    assert "Updated generated summary." in body
+    assert "## Personal Notes" in body
+    assert "Keep this observation." in body
+    assert "paperbot_managed_hash:" in body
+    assert "paperbot_exported_at:" in body
+
+
+def test_export_library_snapshot_writes_pending_note_when_user_edits_managed_section(
+    tmp_path: Path,
+):
+    exporter = ObsidianFilesystemExporter()
+    vault = tmp_path / "vault"
+    vault.mkdir()
+
+    result = exporter.export_library_snapshot(
+        vault_path=vault,
+        saved_items=[
+            {
+                "paper": {
+                    "id": "paper-1",
+                    "title": "UniICL",
+                    "abstract": "Initial summary.",
+                    "year": 2026,
+                }
+            }
+        ],
+    )
+    note_path = Path(result["paper_notes"][0])
+    original_body = note_path.read_text(encoding="utf-8")
+    note_path.write_text(
+        original_body.replace("Initial summary.", "User-edited managed summary."),
+        encoding="utf-8",
+    )
+
+    exporter.export_library_snapshot(
+        vault_path=vault,
+        saved_items=[
+            {
+                "paper": {
+                    "id": "paper-1",
+                    "title": "UniICL",
+                    "abstract": "New PaperBot summary.",
+                    "year": 2026,
+                }
+            }
+        ],
+    )
+
+    current_body = note_path.read_text(encoding="utf-8")
+    pending_path = vault / "PaperBot" / ".paperbot-pending" / "Papers" / note_path.name
+    pending_body = pending_path.read_text(encoding="utf-8")
+
+    assert "User-edited managed summary." in current_body
+    assert "New PaperBot summary." not in current_body
+    assert pending_path.exists()
+    assert "paperbot_status: pending" in pending_body
+    assert "New PaperBot summary." in pending_body

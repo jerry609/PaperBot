@@ -3,13 +3,64 @@ from __future__ import annotations
 from pathlib import Path
 from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from config.settings import create_settings
+from config.settings import ObsidianConfig, create_settings
+from paperbot.application.ports.event_log_port import EventLogPort
+from paperbot.infrastructure.event_log.memory_event_log import InMemoryEventLog
 from paperbot.infrastructure.exporters import ObsidianReportExporter
+from paperbot.infrastructure.obsidian import (
+    ObsidianBidirectionalSync,
+    ObsidianVaultWatcher,
+    WATCHDOG_AVAILABLE,
+)
+from paperbot.infrastructure.stores.memory_store import SqlAlchemyMemoryStore
 
 router = APIRouter()
+
+_memory_store: Optional[SqlAlchemyMemoryStore] = None
+_vault_watcher: Optional[ObsidianVaultWatcher] = None
+
+
+def _get_memory_store() -> SqlAlchemyMemoryStore:
+    global _memory_store
+    if _memory_store is None:
+        _memory_store = SqlAlchemyMemoryStore()
+    return _memory_store
+
+
+def _get_obsidian_config() -> ObsidianConfig:
+    return create_settings().obsidian
+
+
+def _get_event_log(request: Optional[Request]) -> EventLogPort:
+    if request is None:
+        return InMemoryEventLog()
+    event_log = getattr(request.app.state, "event_log", None)
+    return event_log if isinstance(event_log, EventLogPort) else InMemoryEventLog()
+
+
+def _build_obsidian_sync_service(request: Optional[Request] = None) -> ObsidianBidirectionalSync:
+    obsidian_config = _get_obsidian_config()
+    vault_value = str(obsidian_config.vault_path or "").strip()
+    if not vault_value:
+        raise ValueError(
+            "vault_path is required. Configure obsidian.vault_path before using Obsidian sync."
+        )
+
+    return ObsidianBidirectionalSync(
+        vault_path=Path(vault_value),
+        root_dir=str(obsidian_config.root_dir or "PaperBot"),
+        memory_store=_get_memory_store(),
+        event_log=_get_event_log(request),
+        sync_state_filename=getattr(
+            obsidian_config,
+            "sync_state_filename",
+            ".paperbot-sync-state.json",
+        ),
+        pending_dirname=getattr(obsidian_config, "pending_dirname", ".paperbot-pending"),
+    )
 
 
 class ObsidianReportCitationRequest(BaseModel):
@@ -59,10 +110,40 @@ class ObsidianExportReportResponse(BaseModel):
     note_path: str
 
 
+class ObsidianSyncStatusResponse(BaseModel):
+    last_synced_at: Optional[str] = None
+    pending_count: int
+    tracked_note_count: int
+    conflict_count: int
+    state_path: str
+    pending_dir: str
+    watchdog_available: bool
+    watching: bool
+
+
+class ObsidianSyncScanResponse(BaseModel):
+    last_synced_at: str
+    scanned_notes: int
+    changed_notes: int
+    memories_created: int
+    memories_skipped: int
+    tag_updates: int
+    wikilink_updates: int
+    note_updates: int
+    conflicts_detected: int
+    pending_count: int
+
+
+class ObsidianWatchResponse(BaseModel):
+    watching: bool
+    watchdog_available: bool
+    mode: str
+    root_path: str
+
+
 @router.post("/obsidian/export-report", response_model=ObsidianExportReportResponse)
 def export_obsidian_report(req: ObsidianExportReportRequest) -> ObsidianExportReportResponse:
-    settings = create_settings()
-    obsidian_config = settings.obsidian
+    obsidian_config = _get_obsidian_config()
 
     vault_value = str(req.vault_path or obsidian_config.vault_path or "").strip()
     if not vault_value:
@@ -84,3 +165,76 @@ def export_obsidian_report(req: ObsidianExportReportRequest) -> ObsidianExportRe
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     return ObsidianExportReportResponse(**result)
+
+
+@router.get("/obsidian/sync/status", response_model=ObsidianSyncStatusResponse)
+def get_obsidian_sync_status(request: Request) -> ObsidianSyncStatusResponse:
+    try:
+        status = _build_obsidian_sync_service(request).get_status().to_dict()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    status["watchdog_available"] = WATCHDOG_AVAILABLE
+    status["watching"] = _vault_watcher.is_running if _vault_watcher is not None else False
+    return ObsidianSyncStatusResponse(**status)
+
+
+@router.post("/obsidian/sync/scan", response_model=ObsidianSyncScanResponse)
+def scan_obsidian_sync(request: Request) -> ObsidianSyncScanResponse:
+    try:
+        result = _build_obsidian_sync_service(request).scan().to_dict()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return ObsidianSyncScanResponse(**result)
+
+
+@router.post("/obsidian/sync/watch/start", response_model=ObsidianWatchResponse)
+def start_obsidian_sync_watch(request: Request) -> ObsidianWatchResponse:
+    global _vault_watcher
+    obsidian_config = _get_obsidian_config()
+
+    try:
+        sync_service = _build_obsidian_sync_service(request)
+        sync_service.scan()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if _vault_watcher is not None and _vault_watcher.root_path != sync_service.root_path:
+        _vault_watcher.stop()
+        _vault_watcher = None
+
+    if _vault_watcher is None:
+        _vault_watcher = ObsidianVaultWatcher(
+            root_path=sync_service.root_path,
+            on_paths_changed=sync_service.sync_paths,
+            debounce_seconds=float(getattr(obsidian_config, "sync_debounce_seconds", 1.0)),
+        )
+
+    watching = _vault_watcher.start()
+    return ObsidianWatchResponse(
+        watching=watching,
+        watchdog_available=WATCHDOG_AVAILABLE,
+        mode="watchdog" if watching else "scan-only",
+        root_path=str(sync_service.root_path),
+    )
+
+
+@router.post("/obsidian/sync/watch/stop", response_model=ObsidianWatchResponse)
+def stop_obsidian_sync_watch(request: Request) -> ObsidianWatchResponse:
+    global _vault_watcher
+    try:
+        sync_service = _build_obsidian_sync_service(request)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if _vault_watcher is not None:
+        _vault_watcher.stop()
+        _vault_watcher = None
+
+    return ObsidianWatchResponse(
+        watching=False,
+        watchdog_available=WATCHDOG_AVAILABLE,
+        mode="scan-only",
+        root_path=str(sync_service.root_path),
+    )
