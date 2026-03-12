@@ -11,7 +11,6 @@ import DashboardActionBands, {
   type DashboardLaneItem,
   type DashboardQueuePreview,
 } from "@/components/dashboard/DashboardActionBands"
-import TopicWorkflowDashboard from "@/components/research/TopicWorkflowDashboard"
 import { fetchDeadlineRadar, fetchLLMUsage, fetchPapers, fetchPipelineTasks } from "@/lib/api"
 import {
   buildDashboardIntelligenceCards,
@@ -30,10 +29,18 @@ import type {
   PipelineTask,
   ReadingQueueItem,
   ResearchTrackSummary,
+  TrackFeedItem,
 } from "@/lib/types"
 
-type DashboardPageProps = {
-  searchParams?: Promise<Record<string, string | string[] | undefined>>
+type DashboardRecommendationCardData = {
+  id: string
+  title: string
+  href: string
+  meta: string
+  summary: string
+  tags: string[]
+  metric: string
+  recommendation?: string | null
 }
 
 type PriorityLevel = "high" | "medium" | "low"
@@ -83,6 +90,24 @@ function formatCurrency(value: number): string {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(value)
+}
+
+function formatRecommendationLabel(value?: string | null): string | null {
+  const normalized = String(value || "").trim()
+  if (!normalized) return null
+
+  switch (normalized) {
+    case "must_read":
+      return "Must Read"
+    case "worth_reading":
+      return "Worth Reading"
+    case "skim":
+      return "Skim"
+    case "skip":
+      return "Skip"
+    default:
+      return normalized
+  }
 }
 
 function buildQueuePreviewItems(
@@ -141,7 +166,7 @@ function buildActionLanes(args: {
       metaLeft: failedTask.started_at,
       metaRight: "阻塞主流程",
       tone: "bad",
-      href: "#workflow",
+      href: "/workflows",
     })
   }
 
@@ -176,7 +201,7 @@ function buildActionLanes(args: {
       metaLeft: "Calm mode",
       metaRight: "继续工作",
       tone: "good",
-      href: "#workflow",
+      href: "/workflows",
     })
   }
 
@@ -228,6 +253,34 @@ function buildActionLanes(args: {
     now: now.slice(0, 3),
     later: later.slice(0, 3),
   }
+}
+
+function buildRecommendationCards(args: {
+  trackFeedItems: TrackFeedItem[]
+  activeTrack: ResearchTrackSummary | null
+}): DashboardRecommendationCardData[] {
+  const { trackFeedItems, activeTrack } = args
+
+  return trackFeedItems.slice(0, 4).map((item) => {
+    const recommendation = formatRecommendationLabel(item.latest_judge?.recommendation)
+    const judgeScore = item.latest_judge?.overall
+    const metric = judgeScore != null
+      ? `Judge ${Number(judgeScore).toFixed(1)}`
+      : `Feed ${item.feed_score.toFixed(1)}`
+
+    return {
+      id: String(item.paper.id),
+      title: item.paper.title,
+      href: `/papers/${item.paper.id}`,
+      meta: item.paper.venue || activeTrack?.name || "Recommendation",
+      summary: recommendation
+        ? `当前推荐等级为 ${recommendation}，已经进入今日优先判断列表。`
+        : "这篇论文已进入今日候选池，建议先快速判断是否值得继续深入。",
+      tags: item.matched_terms.slice(0, 3),
+      metric,
+      recommendation,
+    }
+  })
 }
 
 function getEvidenceStyles(source: string): {
@@ -291,6 +344,71 @@ function SectionIntro({
         </Link>
       ) : null}
     </div>
+  )
+}
+
+function HeroStat({
+  label,
+  value,
+  helper,
+}: {
+  label: string
+  value: string | number
+  helper: string
+}) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4 shadow-sm">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">{label}</p>
+      <p className="mt-2 text-2xl font-bold tracking-tight text-slate-900">{value}</p>
+      <p className="mt-1 text-xs text-slate-500">{helper}</p>
+    </div>
+  )
+}
+
+function RecommendationCard({ item }: { item: DashboardRecommendationCardData }) {
+  return (
+    <Link
+      href={item.href}
+      className="block rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition-colors hover:bg-slate-50"
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-700">
+          {item.meta}
+        </span>
+        <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-medium text-slate-600">
+          {item.metric}
+        </span>
+        {item.recommendation ? (
+          <span className="rounded-full bg-slate-900 px-2.5 py-1 text-[11px] font-medium text-white">
+            {item.recommendation}
+          </span>
+        ) : null}
+      </div>
+
+      <h3 className="mt-4 text-lg font-semibold leading-7 text-slate-900">{item.title}</h3>
+      <p className="mt-2 text-sm leading-6 text-slate-600">{item.summary}</p>
+
+      {item.tags.length > 0 ? (
+        <div className="mt-4 flex flex-wrap gap-2">
+          {item.tags.map((tag) => (
+            <span
+              key={`${item.id}-${tag}`}
+              className="rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-[11px] font-medium text-sky-700"
+            >
+              {tag}
+            </span>
+          ))}
+        </div>
+      ) : null}
+
+      <div className="mt-4 flex items-center justify-between gap-3 border-t border-slate-100 pt-4">
+        <span className="text-xs text-slate-500">打开论文</span>
+        <span className="inline-flex items-center gap-1 text-sm font-semibold text-slate-900">
+          查看
+          <ArrowRight size={15} />
+        </span>
+      </div>
+    </Link>
   )
 }
 
@@ -358,16 +476,7 @@ function EvidencePreviewCard({
   )
 }
 
-export default async function DashboardPage({ searchParams }: DashboardPageProps) {
-  const params = searchParams ? await searchParams : {}
-  const queryValue = Array.isArray(params?.query) ? params.query[0] : params?.query
-  const initialQueries = typeof queryValue === "string"
-    ? queryValue
-        .split(",")
-        .map((value) => value.trim())
-        .filter(Boolean)
-    : undefined
-
+export default async function DashboardPage() {
   const [
     tracksResult,
     tasksResult,
@@ -409,8 +518,12 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
     ? await fetchDashboardTrackFeed(activeTrack.id, "default", 4).catch(() => ({ items: [], total: 0 }))
     : { items: [], total: 0 }
   const activeTrackFeedTotal = activeTrackFeedResult.total || 0
+  const recommendationCards = buildRecommendationCards({
+    trackFeedItems: activeTrackFeedResult.items || [],
+    activeTrack,
+  })
   const intelligenceCards = buildDashboardIntelligenceCards(intelligenceFeed.items)
-  const signalCards = intelligenceCards.slice(0, 6)
+  const signalCards = intelligenceCards.slice(0, 4)
   const queueItems = buildQueuePreviewItems(
     readingQueue,
     new Map(papers.map((paper) => [String(paper.id), paper])),
@@ -467,46 +580,84 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
             <div className="max-w-3xl">
               <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-indigo-600">Dashboard</p>
               <h1 className="mt-2 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">
-                {greeting}，把今天最重要的问题先推进到可决策状态。
+                {greeting}，今天先看推荐，再看趋势。
               </h1>
               <p className="mt-3 text-sm leading-6 text-slate-600">
-                首页只保留一份今日研究简报、一段 Signals 和一组扁平行动带。完整 workflow、Research 深潜和文献管理都回到各自页面。
+                借鉴 PaperMind 的首页思路，Dashboard 只回答三个问题：今天该看什么、最近在变什么、接下来去哪继续做。复杂控制全部留给 `/workflows` 和其他专业页面。
               </p>
             </div>
 
             <div className="flex flex-wrap gap-2">
-              <span className="inline-flex min-h-10 items-center rounded-full border border-slate-200 bg-white px-4 text-xs font-medium text-slate-600">
-                Workspace / default
-              </span>
-              <span className="inline-flex min-h-10 items-center rounded-full border border-slate-200 bg-white px-4 text-xs font-medium text-slate-600">
-                {activeTrack ? activeTrack.name : "Focus 未设置"}
-              </span>
-              <span className="inline-flex min-h-10 items-center rounded-full border border-slate-200 bg-white px-4 text-xs font-medium text-slate-600">
-                {alertCount} 项提醒
-              </span>
+              <Link
+                href="/workflows"
+                className="inline-flex min-h-11 items-center gap-2 rounded-full bg-slate-900 px-5 text-sm font-semibold text-white transition-colors hover:bg-slate-800"
+              >
+                打开完整工作台
+                <ArrowRight size={15} />
+              </Link>
+              <Link
+                href={activeTrack ? `/research?track_id=${activeTrack.id}` : "/research"}
+                className="inline-flex min-h-11 items-center gap-2 rounded-full border border-slate-200 bg-white px-5 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50"
+              >
+                进入 Research
+                <ArrowRight size={15} />
+              </Link>
             </div>
           </header>
 
-          <section className="mt-4" id="workflow">
-            <TopicWorkflowDashboard
-              initialQueries={initialQueries}
-              compact
-              dashboardContext={{
-                activeTrackName: activeTrack?.name ?? null,
-                activeTrackHref: activeTrack ? `/research?track_id=${activeTrack.id}` : "/research",
-                readingQueueCount: readingQueue.length,
-                urgentDeadlineCount: urgentDeadlines.length,
-                signalCount,
-              }}
+          <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <HeroStat
+              label="Focus"
+              value={activeTrack?.name || "未设置"}
+              helper={activeTrack ? `${activeTrackFeedTotal} 条相关更新` : "先建立一个 Research Track"}
             />
+            <HeroStat
+              label="Recommendations"
+              value={recommendationCards.length}
+              helper={recommendationCards.length > 0 ? "今日推荐已经准备好" : "等待新的候选进入推荐池"}
+            />
+            <HeroStat
+              label="Signals"
+              value={signalCount}
+              helper={signalCount > 0 ? `最近刷新 ${formatRelativeTime(intelligenceFeed.refreshed_at)}` : "当前没有上浮信号"}
+            />
+            <HeroStat
+              label="Alerts"
+              value={alertCount}
+              helper={`${highPriorityQueue} 篇高优候选 · ${urgentDeadlines.length} 个临近 deadline`}
+            />
+          </section>
+
+          <section className="mt-4" id="recommendations">
+            <article className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+              <SectionIntro
+                eyebrow="Daily Recommendations"
+                title="今日推荐"
+                copy="优先展示当前焦点 Track 里最值得看的几篇论文，让首页先给出答案，而不是先给控制台。"
+                actionHref={activeTrack ? `/research?track_id=${activeTrack.id}` : "/research"}
+                actionLabel="查看完整候选"
+              />
+
+              <div className="mt-5 grid gap-3 lg:grid-cols-2">
+                {recommendationCards.length > 0 ? (
+                  recommendationCards.map((item) => (
+                    <RecommendationCard key={item.id} item={item} />
+                  ))
+                ) : (
+                  <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50/50 p-5 text-sm leading-6 text-slate-600 lg:col-span-2">
+                    当前还没有可展示的推荐。去 `/workflows` 跑一轮 Search / DailyPaper，或者在 Research 里先建立焦点 Track，首页会自动回填新的推荐。
+                  </div>
+                )}
+              </div>
+            </article>
           </section>
 
           <section className="mt-4" id="signals">
             <article className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
               <SectionIntro
-                eyebrow="Signals"
-                title="证据快照"
-                copy="Signals 也拉平成同一层级的证据卡片，减少主卡和次卡之间的人为等级差，让你只按内容重要性判断。"
+                eyebrow="Daily Trends"
+                title="每日趋势"
+                copy="趋势模块只保留最近真正会影响判断的变化。复杂分析继续放在 Research 和 Workflows，首页只展示结果。"
                 actionHref="/research"
                 actionLabel="查看完整动态"
               />
