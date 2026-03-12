@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
+import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Textarea } from "@/components/ui/textarea"
@@ -10,8 +11,7 @@ import { readSSE } from "@/lib/sse"
 import { CodeBlock } from "@/components/ai-elements"
 import { DiffModal } from "./DiffViewer"
 import { WorkspaceSetupDialog } from "./WorkspaceSetupDialog"
-import { ContextPackPanel } from "./ContextPackPanel"
-import { GenerationProgressPanel } from "./GenerationProgressPanel"
+import { ContextDialogPanel } from "./ContextDialogPanel"
 import { AgentBoard } from "./AgentBoard"
 import { useContextPackGeneration } from "@/hooks/useContextPackGeneration"
 import { cn } from "@/lib/utils"
@@ -32,9 +32,7 @@ import {
     Send,
     Code,
     Activity,
-    Package,
     MessageSquare,
-    Play,
     LayoutDashboard,
 } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -44,7 +42,7 @@ import type { ContextPackSession } from "@/lib/types/p2c"
 
 type StepStatus = "idle" | "running" | "success" | "error"
 type Mode = "Code" | "Plan" | "Ask"
-export type ReproductionViewMode = "log" | "generating" | "context_pack" | "agent_board"
+export type ReproductionViewMode = "log" | "context" | "agent_board"
 
 interface ReproductionLogProps {
     viewMode: ReproductionViewMode
@@ -170,6 +168,7 @@ function ActionItem({ action, onViewDiff, isLast }: ActionItemProps) {
 }
 
 export function ReproductionLog({ viewMode, onViewModeChange }: ReproductionLogProps) {
+    const router = useRouter()
     const { theme } = useTheme()
     const {
         papers,
@@ -207,14 +206,14 @@ export function ReproductionLog({ viewMode, onViewModeChange }: ReproductionLogP
     const [messageInput, setMessageInput] = useState("")
     const [showWorkspaceSetup, setShowWorkspaceSetup] = useState(false)
     const [pendingAction, setPendingAction] = useState<"chat" | null>(null)
-    // Switch to "generating" view when generation starts
+    // Switch to context dialog when generation starts.
     useEffect(() => {
-        if (contextPackLoading && viewMode !== "generating") {
-            onViewModeChange("generating")
+        if (contextPackLoading && viewMode !== "context") {
+            onViewModeChange("context")
         }
     }, [contextPackLoading, onViewModeChange, viewMode])
 
-    // Do not auto-switch away from "generating"; keep it open until the user changes tabs.
+    // Do not auto-switch away from "context"; keep it open until the user changes tabs.
 
     const activeTask = tasks.find(t => t.id === activeTaskId)
     const projectDir = selectedPaper?.outputDir || lastGenCodeResult?.outputDir || null
@@ -404,19 +403,32 @@ export function ReproductionLog({ viewMode, onViewModeChange }: ReproductionLogP
         }
     }
 
+    const openAgentBoardFocusPage = () => {
+        if (selectedPaperId) {
+            router.push(`/studio/agent-board/${selectedPaperId}`)
+            return
+        }
+        onViewModeChange("agent_board")
+    }
+
     return (
-        <div className="h-full flex flex-col min-w-0 min-h-0 bg-background">
+        <div className="h-full w-full flex-1 flex flex-col min-w-0 min-h-0 bg-background">
             {/* Tab Navigation */}
             <div className="flex items-center shrink-0 border-b">
                 {([
-                    { key: "generating" as const, label: "Progress", icon: Activity },
-                    { key: "context_pack" as const, label: "Context Pack", icon: Package },
+                    { key: "context" as const, label: "Context", icon: Activity },
                     { key: "log" as const, label: "Chat", icon: MessageSquare },
                     { key: "agent_board" as const, label: "Agent Board", icon: LayoutDashboard },
                 ]).map(({ key, label, icon: TabIcon }) => (
                     <button
                         key={key}
-                        onClick={() => onViewModeChange(key)}
+                        onClick={() => {
+                            if (key === "agent_board") {
+                                openAgentBoardFocusPage()
+                                return
+                            }
+                            onViewModeChange(key)
+                        }}
                         className={cn(
                             "flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium transition-colors relative",
                             viewMode === key
@@ -443,52 +455,33 @@ export function ReproductionLog({ viewMode, onViewModeChange }: ReproductionLogP
 
             {/* Main content area */}
             <div className="flex-1 min-h-0 overflow-hidden">
-                {viewMode === "generating" ? (
-                    generationProgress.length === 0 && !contextPackLoading ? (
-                        /* Idle state — show generate button */
-                        <div className="flex flex-col items-center justify-center text-muted-foreground py-20 space-y-4">
-                            <Activity className="h-8 w-8 opacity-30" />
-                            <p className="text-sm">No generation in progress</p>
-                            {selectedPaper && (
-                                <Button
-                                    size="sm"
-                                    onClick={() => generateContextPack({
-                                        paperId: selectedPaper.id,
-                                        title: selectedPaper.title,
-                                        abstract: selectedPaper.abstract,
-                                    })}
-                                    disabled={genStatus === "generating"}
-                                >
-                                    {genStatus === "generating" ? (
-                                        <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
-                                    ) : (
-                                        <Play className="h-4 w-4 mr-1.5" />
-                                    )}
-                                    Generate Context Pack
-                                </Button>
-                            )}
-                        </div>
-                    ) : (
-                        <GenerationProgressPanel
-                            stages={generationProgress}
-                            liveObservations={liveObservations}
-                            error={contextPackError}
-                        />
-                    )
-                ) : viewMode === "context_pack" ? (
-                    contextPack ? (
-                        <ContextPackPanel
-                            pack={contextPack}
-                            onSessionCreated={handleSessionCreated}
-                            onDeployToBoard={() => onViewModeChange("agent_board")}
-                        />
-                    ) : (
-                        <div className="flex flex-col items-center justify-center text-muted-foreground py-20 space-y-4">
-                            <Package className="h-8 w-8 opacity-30" />
-                            <p className="text-sm">No context pack available yet</p>
-                            <p className="text-xs">Please start in the &ldquo;Progress&rdquo; section.</p>
-                        </div>
-                    )
+                {viewMode === "context" ? (
+                    <ContextDialogPanel
+                        selectedPaper={
+                            selectedPaper
+                                ? {
+                                    id: selectedPaper.id,
+                                    title: selectedPaper.title,
+                                    abstract: selectedPaper.abstract,
+                                }
+                                : null
+                        }
+                        generationStatus={genStatus}
+                        generationProgress={generationProgress}
+                        liveObservations={liveObservations}
+                        contextPack={contextPack}
+                        contextPackLoading={contextPackLoading}
+                        contextPackError={contextPackError}
+                        onGenerate={(paper) =>
+                            generateContextPack({
+                                paperId: paper.id,
+                                title: paper.title,
+                                abstract: paper.abstract,
+                            })
+                        }
+                        onSessionCreated={handleSessionCreated}
+                        onDeployToBoard={openAgentBoardFocusPage}
+                    />
                 ) : viewMode === "agent_board" ? (
                     <AgentBoard paperId={selectedPaperId} />
                 ) : activeFileData ? (
@@ -573,68 +566,70 @@ export function ReproductionLog({ viewMode, onViewModeChange }: ReproductionLogP
                 )}
             </div>
 
-            {/* Rich Input Area - CodePilot Style */}
-            <div className="border-t p-4 shrink-0">
-                <div className="border rounded-xl bg-muted/30 overflow-hidden">
-                    <Textarea
-                        value={messageInput}
-                        onChange={(e) => setMessageInput(e.target.value)}
-                        placeholder="Message Claude..."
-                        className="border-0 bg-transparent resize-none min-h-[60px] focus-visible:ring-0 px-4 py-3"
-                        onKeyDown={(e) => {
-                            if (e.key === 'Enter' && !e.shiftKey) {
-                                e.preventDefault()
-                                handleSendMessage()
-                            }
-                        }}
-                    />
-                    <div className="px-3 py-2 flex items-center justify-between border-t bg-background/50">
-                        <div className="flex items-center gap-2">
-                            {/* Paper attachment indicator */}
-                            {selectedPaper && (
-                                <div className="flex items-center gap-1.5 px-2 py-1 bg-muted rounded-md text-xs text-muted-foreground">
-                                    <FileText className="h-3.5 w-3.5" />
-                                    <span className="max-w-[150px] truncate">{selectedPaper.title}</span>
-                                </div>
-                            )}
-                            {/* Mode selector */}
-                            <Select value={mode} onValueChange={(v) => setMode(v as Mode)}>
-                                <SelectTrigger className="h-7 w-[90px] text-xs border-0 bg-muted">
-                                    <Code className="h-3.5 w-3.5 mr-1" />
-                                    <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="Code">Code</SelectItem>
-                                    <SelectItem value="Plan">Plan</SelectItem>
-                                    <SelectItem value="Ask">Ask</SelectItem>
-                                </SelectContent>
-                            </Select>
-                        </div>
-                        <div className="flex items-center gap-2">
-                            {/* Model selector */}
-                            <Select value={model} onValueChange={setModel}>
-                                <SelectTrigger className="h-7 w-[130px] text-xs border-0 bg-muted">
-                                    <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="claude-sonnet-4-5">Sonnet 4.5</SelectItem>
-                                    <SelectItem value="claude-opus-4-5">Opus 4.5</SelectItem>
-                                    <SelectItem value="claude-haiku-4-5">Haiku 4.5</SelectItem>
-                                </SelectContent>
-                            </Select>
-                            {/* Send button */}
-                            <Button
-                                size="icon"
-                                className="h-8 w-8 rounded-full"
-                                onClick={handleSendMessage}
-                                disabled={!messageInput.trim() || isBusy}
-                            >
-                                <Send className="h-4 w-4" />
-                            </Button>
+            {viewMode === "log" && (
+                /* Rich Input Area - CodePilot Style */
+                <div className="border-t p-4 shrink-0">
+                    <div className="border rounded-xl bg-muted/30 overflow-hidden">
+                        <Textarea
+                            value={messageInput}
+                            onChange={(e) => setMessageInput(e.target.value)}
+                            placeholder="Message Claude..."
+                            className="border-0 bg-transparent resize-none min-h-[60px] focus-visible:ring-0 px-4 py-3"
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter' && !e.shiftKey) {
+                                    e.preventDefault()
+                                    handleSendMessage()
+                                }
+                            }}
+                        />
+                        <div className="px-3 py-2 flex items-center justify-between border-t bg-background/50">
+                            <div className="flex items-center gap-2">
+                                {/* Paper attachment indicator */}
+                                {selectedPaper && (
+                                    <div className="flex items-center gap-1.5 px-2 py-1 bg-muted rounded-md text-xs text-muted-foreground">
+                                        <FileText className="h-3.5 w-3.5" />
+                                        <span className="max-w-[150px] truncate">{selectedPaper.title}</span>
+                                    </div>
+                                )}
+                                {/* Mode selector */}
+                                <Select value={mode} onValueChange={(v) => setMode(v as Mode)}>
+                                    <SelectTrigger className="h-7 w-[90px] text-xs border-0 bg-muted">
+                                        <Code className="h-3.5 w-3.5 mr-1" />
+                                        <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="Code">Code</SelectItem>
+                                        <SelectItem value="Plan">Plan</SelectItem>
+                                        <SelectItem value="Ask">Ask</SelectItem>
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                {/* Model selector */}
+                                <Select value={model} onValueChange={setModel}>
+                                    <SelectTrigger className="h-7 w-[130px] text-xs border-0 bg-muted">
+                                        <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="claude-sonnet-4-5">Sonnet 4.5</SelectItem>
+                                        <SelectItem value="claude-opus-4-5">Opus 4.5</SelectItem>
+                                        <SelectItem value="claude-haiku-4-5">Haiku 4.5</SelectItem>
+                                    </SelectContent>
+                                </Select>
+                                {/* Send button */}
+                                <Button
+                                    size="icon"
+                                    className="h-8 w-8 rounded-full"
+                                    onClick={handleSendMessage}
+                                    disabled={!messageInput.trim() || isBusy}
+                                >
+                                    <Send className="h-4 w-4" />
+                                </Button>
+                            </div>
                         </div>
                     </div>
                 </div>
-            </div>
+            )}
 
             {/* Diff Modal */}
             <DiffModal

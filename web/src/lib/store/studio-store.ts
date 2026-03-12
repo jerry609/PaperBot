@@ -37,7 +37,9 @@ export interface Task {
     paperId?: string  // Link task to a paper
 }
 
-export type AgentTaskStatus = 'planning' | 'in_progress' | 'ai_review' | 'human_review' | 'done'
+export type AgentTaskStatus = 'planning' | 'in_progress' | 'repairing' | 'done'
+
+export type BlockType = "think" | "tool" | "diff" | "info" | "result"
 
 export interface AgentTaskLog {
     id: string
@@ -46,14 +48,50 @@ export interface AgentTaskLog {
     phase: string
     level: "info" | "warning" | "error" | "success"
     message: string
+    blockType?: BlockType
     details?: Record<string, unknown>
 }
 
-export interface HumanReviewEntry {
-    id: string
-    decision: "approve" | "request_changes"
-    notes: string
-    timestamp: string
+export type PipelinePhase =
+    | 'idle'
+    | 'planning'
+    | 'executing'
+    | 'e2e_running'
+    | 'e2e_repairing'
+    | 'downloading'
+    | 'completed'
+    | 'failed'
+
+export interface E2EState {
+    status: 'waiting' | 'running' | 'passed' | 'failed' | 'repairing' | 'skipped'
+    attempt: number
+    maxAttempts: number
+    entryPoint: string | null
+    command: string | null
+    lastExitCode: number | null
+    lastStdout: string
+    lastStderr: string
+    history: Array<{
+        attempt: number
+        success: boolean
+        exitCode: number
+        duration: number
+        stdoutPreview: string
+    }>
+}
+
+export interface SandboxFileEntry {
+    name: string
+    type: 'file' | 'directory'
+    children?: SandboxFileEntry[]
+}
+
+export interface TimeEstimate {
+    elapsedMs: number
+    remainingMs: number | null
+    avgTaskMs: number | null
+    completedTasks: number
+    totalTasks: number
 }
 
 export interface AgentTask {
@@ -72,7 +110,7 @@ export interface AgentTask {
     reviewFeedback?: string
     lastError?: string
     executionLog?: AgentTaskLog[]
-    humanReviews?: HumanReviewEntry[]
+    humanReviews?: Array<{ id: string; decision: string; notes: string; timestamp: string }>
     paperId?: string
 }
 
@@ -98,6 +136,8 @@ export interface StudioPaper {
     title: string
     abstract: string
     methodSection?: string
+    authors?: string[]
+    researchAreas?: string[]
 
     // Reproduction state
     status: StudioPaperStatus
@@ -176,11 +216,19 @@ interface StudioState {
     // Agent Board state
     agentTasks: AgentTask[]
     boardSessionId: string | null
+    pipelinePhase: PipelinePhase
+    e2eState: E2EState | null
+    sandboxFiles: SandboxFileEntry[]
+    timeEstimate: TimeEstimate | null
     setBoardSessionId: (id: string | null) => void
     addAgentTask: (task: Omit<AgentTask, 'createdAt' | 'updatedAt'> & { id?: string }) => string
     updateAgentTask: (taskId: string, updates: Partial<AgentTask>) => void
     moveAgentTask: (taskId: string, status: AgentTask['status']) => void
     clearAgentTasks: () => void
+    setPipelinePhase: (phase: PipelinePhase) => void
+    setE2EState: (state: Partial<E2EState>) => void
+    setSandboxFiles: (files: SandboxFileEntry[]) => void
+    setTimeEstimate: (estimate: TimeEstimate) => void
 
     // Paper actions
     addPaper: (paper: Omit<StudioPaper, 'id' | 'createdAt' | 'updatedAt' | 'taskIds' | 'status'>) => string
@@ -235,14 +283,30 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     // Agent Board state
     agentTasks: [],
     boardSessionId: null,
+    pipelinePhase: 'idle' as PipelinePhase,
+    e2eState: null,
+    sandboxFiles: [],
+    timeEstimate: null,
 
     setBoardSessionId: (id) => {
         set({ boardSessionId: id })
     },
 
     clearAgentTasks: () => {
-        set({ agentTasks: [], boardSessionId: null })
+        set({ agentTasks: [], boardSessionId: null, pipelinePhase: 'idle', e2eState: null, sandboxFiles: [], timeEstimate: null })
     },
+
+    setPipelinePhase: (phase) => set({ pipelinePhase: phase }),
+
+    setE2EState: (partial) => set((state) => ({
+        e2eState: state.e2eState
+            ? { ...state.e2eState, ...partial }
+            : { status: 'waiting', attempt: 0, maxAttempts: 3, entryPoint: null, command: null, lastExitCode: null, lastStdout: '', lastStderr: '', history: [], ...partial } as E2EState,
+    })),
+
+    setSandboxFiles: (files) => set({ sandboxFiles: files }),
+
+    setTimeEstimate: (estimate) => set({ timeEstimate: estimate }),
 
     // Paper actions
     addPaper: (paper) => {
@@ -417,7 +481,6 @@ export const useStudioStore = create<StudioState>((set, get) => ({
                     createdAt: now,
                     updatedAt: now,
                     executionLog: task.executionLog || [],
-                    humanReviews: task.humanReviews || [],
                 },
             ],
         }))
