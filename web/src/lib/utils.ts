@@ -9,6 +9,8 @@ export function safeHref(url?: string | null) {
   if (!url) return null
   const trimmed = url.trim()
   if (!trimmed) return null
+  if (trimmed.startsWith("//")) return null
+  if (/[\u0000-\u001F\u007F]/.test(trimmed)) return null
   const hasScheme = /^[a-zA-Z][a-zA-Z\d+.-]*:/.test(trimmed)
   if (!hasScheme) return trimmed
   try {
@@ -17,6 +19,13 @@ export function safeHref(url?: string | null) {
   } catch {
     return null
   }
+}
+
+export function safeInternalHref(url?: string | null) {
+  const safe = safeHref(url)
+  if (!safe) return null
+  if (safe.startsWith("/") || safe.startsWith("?") || safe.startsWith("#")) return safe
+  return null
 }
 
 

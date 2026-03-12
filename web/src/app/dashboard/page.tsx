@@ -24,6 +24,7 @@ import {
   fetchDashboardTracks,
   fetchIntelligenceFeed,
 } from "@/lib/dashboard-api"
+import { safeHref, safeInternalHref } from "@/lib/utils"
 import type {
   DeadlineRadarItem,
   Paper,
@@ -136,23 +137,43 @@ function isExternalUrl(value: string): boolean {
   return /^https?:\/\//.test(value)
 }
 
+function normalizePaperRef(value: unknown): string | null {
+  const normalized = String(value ?? "").trim()
+  return normalized || null
+}
+
+function parseInternalPaperId(value: unknown): number | null {
+  if (typeof value === "number") {
+    return Number.isInteger(value) && value >= 0 ? value : null
+  }
+
+  if (typeof value !== "string") return null
+
+  const normalized = value.trim()
+  if (!normalized) return null
+
+  const parsed = Number(normalized)
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : null
+}
+
 function buildRecommendationCards(args: {
   trackFeedItems: TrackFeedItem[]
   activeTrack: ResearchTrackSummary | null
 }): DashboardRecommendationCardData[] {
   const { trackFeedItems, activeTrack } = args
 
-  return trackFeedItems.slice(0, 4).map((item) => {
+  return trackFeedItems.slice(0, 4).map((item, index) => {
     const recommendation = formatRecommendationLabel(item.latest_judge?.recommendation)
     const judgeScore = item.latest_judge?.overall
     const metric = judgeScore != null
       ? `Judge ${Number(judgeScore).toFixed(1)}`
       : `Feed ${item.feed_score.toFixed(1)}`
+    const paperRef = normalizePaperRef(item.paper.id)
 
     return {
-      id: String(item.paper.id),
-      paperRef: String(item.paper.id),
-      internalPaperId: typeof item.paper.id === "number" ? item.paper.id : Number.isFinite(Number(item.paper.id)) ? Number(item.paper.id) : null,
+      id: paperRef || `track-feed-${index}`,
+      paperRef,
+      internalPaperId: parseInternalPaperId(item.paper.id),
       title: item.paper.title,
       href: `/papers/${item.paper.id}`,
       meta: item.paper.venue || activeTrack?.name || "Recommendation",
@@ -211,15 +232,16 @@ function buildReadingQueueCards(args: {
       year: item.year,
       paperSource: item.paperSource,
       isSaved: Boolean(item.isSaved),
-      canSave: !item.isSaved && Boolean(item.internalPaperId || item.paperRef),
+      canSave: !item.isSaved && (item.internalPaperId !== null || Boolean(item.paperRef)),
     }))
   }
 
   const fallbackTags = (activeTrack?.keywords || []).slice(0, 2)
 
   return readingQueue.slice(0, 3).map((item, index) => {
-    const paper = paperMap.get(String(item.paper_id || item.id))
-    const parsedInternalPaperId = Number(item.paper_id)
+    const paperRef = normalizePaperRef(item.paper_id)
+    const paper = paperMap.get(paperRef || String(item.id))
+    const internalPaperId = parseInternalPaperId(item.paper_id)
     const tags = (
       paper?.tags?.length
         ? paper.tags
@@ -230,8 +252,8 @@ function buildReadingQueueCards(args: {
 
     return {
       id: item.id,
-      paperRef: item.paper_id ? String(item.paper_id) : null,
-      internalPaperId: Number.isFinite(parsedInternalPaperId) ? parsedInternalPaperId : null,
+      paperRef,
+      internalPaperId,
       title: item.title,
       venue:
         paper?.venue ||
@@ -243,7 +265,7 @@ function buildReadingQueueCards(args: {
       sourceLabel: activeTrack ? `${activeTrack.name} queue` : "Reading queue",
       priority: getQueuePriority(item, index),
       timeLabel: formatRelativeTime(item.saved_at),
-      href: item.paper_id ? `/papers/${item.paper_id}` : "/papers",
+      href: paperRef ? `/papers/${paperRef}` : "/papers",
       researchHref: activeTrack ? `/research?track_id=${activeTrack.id}` : "/research",
       authors: item.authors ? item.authors.split(",").map((value) => value.trim()).filter(Boolean) : [],
       year: null,
@@ -323,20 +345,29 @@ function ActionLink({
   primary?: boolean
   external?: boolean
 }) {
+  const safeLink = external ? safeHref(href) : safeInternalHref(href)
   const className = primary
     ? "inline-flex items-center rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-indigo-700"
     : "inline-flex items-center rounded-lg px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900"
 
+  if (!safeLink) {
+    return (
+      <span className={`${className} cursor-not-allowed opacity-60`}>
+        {label}
+      </span>
+    )
+  }
+
   if (external) {
     return (
-      <a href={href} target="_blank" rel="noreferrer" className={className}>
+      <a href={safeLink} target="_blank" rel="noreferrer" className={className}>
         {label}
       </a>
     )
   }
 
   return (
-    <Link href={href} className={className}>
+    <Link href={safeLink} className={className}>
       {label}
     </Link>
   )
@@ -405,13 +436,10 @@ function SignalCard({ item }: { item: DashboardIntelligenceCard }) {
 }
 
 function DeadlineCard({ item }: { item: DeadlineRadarItem }) {
-  return (
-    <a
-      href={item.url}
-      target="_blank"
-      rel="noreferrer"
-      className="group flex items-center justify-between gap-3 rounded-2xl border border-slate-100 bg-white p-4 shadow-sm transition-all hover:border-indigo-200 hover:shadow-md"
-    >
+  const safeUrl = safeHref(item.url)
+  const className = "group flex items-center justify-between gap-3 rounded-2xl border border-slate-100 bg-white p-4 shadow-sm transition-all hover:border-indigo-200 hover:shadow-md"
+  const content = (
+    <>
       <div className="flex items-center gap-3">
         <div className="flex h-12 w-12 flex-col items-center justify-center rounded-xl bg-orange-50 text-orange-600 transition-colors group-hover:bg-orange-100">
           <span className="text-[10px] font-bold uppercase">
@@ -431,6 +459,21 @@ function DeadlineCard({ item }: { item: DeadlineRadarItem }) {
       {item.days_left <= 14 ? (
         <div className="h-2 w-2 rounded-full bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.5)]" />
       ) : null}
+    </>
+  )
+
+  if (!safeUrl) {
+    return <div className={`${className} cursor-not-allowed opacity-80`}>{content}</div>
+  }
+
+  return (
+    <a
+      href={safeUrl}
+      target="_blank"
+      rel="noreferrer"
+      className={className}
+    >
+      {content}
     </a>
   )
 }
@@ -469,8 +512,8 @@ export default async function DashboardPage() {
   const recommendationCards: DashboardRecommendationCardData[] = latestBrief?.recommendations.length
     ? latestBrief.recommendations.map((item) => ({
         id: item.id,
-        paperRef: item.paperId || null,
-        internalPaperId: item.paperId && Number.isFinite(Number(item.paperId)) ? Number(item.paperId) : null,
+        paperRef: normalizePaperRef(item.paperId),
+        internalPaperId: parseInternalPaperId(item.paperId),
         title: item.title,
         href: item.href,
         meta: item.meta,
@@ -596,7 +639,7 @@ export default async function DashboardPage() {
             />
             <DashboardReadingQueuePanel
               initialItems={queueCards}
-              activeTrackId={activeTrack?.id || null}
+              activeTrackId={activeTrack?.id ?? null}
             />
           </section>
 
