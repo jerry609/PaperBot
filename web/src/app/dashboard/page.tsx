@@ -1,24 +1,23 @@
 import Link from "next/link"
 import {
-  AlertCircle,
   ArrowRight,
   BellDot,
   BookOpen,
   CalendarDays,
   Clock3,
-  FileText,
   Layers,
   type LucideIcon,
-  Sparkles,
   TrendingUp,
 } from "lucide-react"
 
+import DashboardReadingQueuePanel from "@/components/dashboard/DashboardReadingQueuePanel"
 import { fetchDeadlineRadar, fetchPapers } from "@/lib/api"
 import { fetchLatestDashboardBrief } from "@/lib/dashboard-brief"
 import {
   buildDashboardIntelligenceCards,
   type DashboardIntelligenceCard,
 } from "@/lib/dashboard-intelligence"
+import type { DashboardReadingQueueItem, DashboardReadingQueuePriority } from "@/lib/dashboard-reading-queue"
 import {
   fetchDashboardReadingQueue,
   fetchDashboardTrackFeed,
@@ -33,10 +32,10 @@ import type {
   TrackFeedItem,
 } from "@/lib/types"
 
-type PriorityLevel = "high" | "medium" | "low"
-
 type DashboardRecommendationCardData = {
   id: string
+  paperRef: string | null
+  internalPaperId: number | null
   title: string
   href: string
   meta: string
@@ -44,20 +43,10 @@ type DashboardRecommendationCardData = {
   tags: string[]
   metric: string
   recommendation?: string | null
-}
-
-type ReadingQueueCardData = {
-  id: string
-  title: string
-  venue: string
-  summary: string
-  tags: string[]
-  sourceLabel: string
-  priority: PriorityLevel
-  timeLabel: string
-  href: string
-  researchHref: string
-  isExternal?: boolean
+  authors: string[]
+  year?: number | null
+  paperSource?: "arxiv" | "semantic_scholar" | "openalex" | null
+  isSaved?: boolean
 }
 
 type TrackSpotlightItem = {
@@ -112,7 +101,7 @@ function formatRecommendationLabel(value?: string | null): string | null {
   }
 }
 
-function getQueuePriority(item: ReadingQueueItem, index: number): PriorityLevel {
+function getQueuePriority(item: ReadingQueueItem, index: number): DashboardReadingQueuePriority {
   if (typeof item.priority === "number") {
     if (item.priority <= 2) return "high"
     if (item.priority <= 4) return "medium"
@@ -127,7 +116,7 @@ function getQueuePriority(item: ReadingQueueItem, index: number): PriorityLevel 
 function getRecommendationPriority(
   recommendation?: string | null,
   index = 0,
-): PriorityLevel {
+): DashboardReadingQueuePriority {
   switch (String(recommendation || "").trim().toLowerCase()) {
     case "must read":
     case "must_read":
@@ -162,6 +151,8 @@ function buildRecommendationCards(args: {
 
     return {
       id: String(item.paper.id),
+      paperRef: String(item.paper.id),
+      internalPaperId: typeof item.paper.id === "number" ? item.paper.id : Number.isFinite(Number(item.paper.id)) ? Number(item.paper.id) : null,
       title: item.paper.title,
       href: `/papers/${item.paper.id}`,
       meta: item.paper.venue || activeTrack?.name || "Recommendation",
@@ -171,6 +162,10 @@ function buildRecommendationCards(args: {
       tags: item.matched_terms.slice(0, 3),
       metric,
       recommendation,
+      authors: [],
+      year: item.paper.year ?? null,
+      paperSource: null,
+      isSaved: String(item.latest_feedback_action || "").trim().toLowerCase() === "save",
     }
   })
 }
@@ -182,7 +177,7 @@ function buildReadingQueueCards(args: {
   activeTrack: ResearchTrackSummary | null
   latestBriefTime?: string | null
   latestBriefSource?: string | null
-}): ReadingQueueCardData[] {
+}): DashboardReadingQueueItem[] {
   const {
     recommendations,
     readingQueue,
@@ -198,6 +193,8 @@ function buildReadingQueueCards(args: {
 
     return recommendations.slice(0, 3).map((item, index) => ({
       id: item.id,
+      paperRef: item.paperRef,
+      internalPaperId: item.internalPaperId,
       title: item.title,
       venue: item.meta,
       summary: item.summary,
@@ -208,6 +205,13 @@ function buildReadingQueueCards(args: {
       href: item.href,
       researchHref: activeTrack ? `/research?track_id=${activeTrack.id}` : "/research",
       isExternal: isExternalUrl(item.href),
+      metric: item.metric,
+      recommendation: item.recommendation,
+      authors: item.authors,
+      year: item.year,
+      paperSource: item.paperSource,
+      isSaved: Boolean(item.isSaved),
+      canSave: !item.isSaved && Boolean(item.internalPaperId || item.paperRef),
     }))
   }
 
@@ -215,6 +219,7 @@ function buildReadingQueueCards(args: {
 
   return readingQueue.slice(0, 3).map((item, index) => {
     const paper = paperMap.get(String(item.paper_id || item.id))
+    const parsedInternalPaperId = Number(item.paper_id)
     const tags = (
       paper?.tags?.length
         ? paper.tags
@@ -225,6 +230,8 @@ function buildReadingQueueCards(args: {
 
     return {
       id: item.id,
+      paperRef: item.paper_id ? String(item.paper_id) : null,
+      internalPaperId: Number.isFinite(parsedInternalPaperId) ? parsedInternalPaperId : null,
       title: item.title,
       venue:
         paper?.venue ||
@@ -238,6 +245,11 @@ function buildReadingQueueCards(args: {
       timeLabel: formatRelativeTime(item.saved_at),
       href: item.paper_id ? `/papers/${item.paper_id}` : "/papers",
       researchHref: activeTrack ? `/research?track_id=${activeTrack.id}` : "/research",
+      authors: item.authors ? item.authors.split(",").map((value) => value.trim()).filter(Boolean) : [],
+      year: null,
+      paperSource: null,
+      isSaved: true,
+      canSave: false,
     }
   })
 }
@@ -266,27 +278,6 @@ function SectionHeader({
         </Link>
       ) : null}
     </div>
-  )
-}
-
-function PriorityBadge({ level }: { level: PriorityLevel }) {
-  const styles = {
-    high: "border-rose-100 bg-rose-50 text-rose-700",
-    medium: "border-amber-100 bg-amber-50 text-amber-700",
-    low: "border-slate-100 bg-slate-50 text-slate-600",
-  } satisfies Record<PriorityLevel, string>
-
-  const labels = {
-    high: "High",
-    medium: "Medium",
-    low: "Low",
-  } satisfies Record<PriorityLevel, string>
-
-  return (
-    <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold ${styles[level]}`}>
-      {level === "high" ? <AlertCircle className="mr-1 size-3" /> : null}
-      {labels[level]}
-    </span>
   )
 }
 
@@ -348,52 +339,6 @@ function ActionLink({
     <Link href={href} className={className}>
       {label}
     </Link>
-  )
-}
-
-function ReadingQueueCard({ item }: { item: ReadingQueueCardData }) {
-  return (
-    <article className="group rounded-2xl border border-slate-100 bg-white p-5 shadow-sm transition-all hover:border-indigo-200 hover:shadow-md">
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <PriorityBadge level={item.priority} />
-          <span className="text-xs font-medium text-slate-400">{item.sourceLabel}</span>
-        </div>
-        <span className="text-xs text-slate-400">{item.timeLabel}</span>
-      </div>
-
-      <h3 className="mt-3 text-lg font-bold leading-snug text-slate-800 transition-colors group-hover:text-indigo-600">
-        {item.title}
-      </h3>
-      <p className="mt-1 flex items-center text-sm text-slate-500">
-        <FileText className="mr-1.5 size-3.5" />
-        {item.venue}
-      </p>
-
-      <div className="mt-4 rounded-xl border border-indigo-50 bg-indigo-50/70 p-3">
-        <div className="flex items-start gap-2">
-          <Sparkles className="mt-0.5 size-4 shrink-0 text-indigo-500" />
-          <p className="text-sm leading-relaxed text-slate-700">{item.summary}</p>
-        </div>
-      </div>
-
-      <div className="mt-4 flex items-center justify-between gap-3 border-t border-slate-50 pt-4">
-        <div className="flex flex-wrap gap-2">
-          {item.tags.map((tag) => (
-            <span
-              key={`${item.id}-${tag}`}
-              className="rounded-md bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-600"
-            >
-              {tag}
-            </span>
-          ))}
-        </div>
-        <div className="flex items-center gap-2">
-          <ActionLink href={item.researchHref} label="Open research" />
-          <ActionLink href={item.href} label="Open paper" primary external={Boolean(item.isExternal)} />
-        </div>
-      </div>
-    </article>
   )
 }
 
@@ -521,8 +466,23 @@ export default async function DashboardPage() {
   const activeTrackFeed = activeTrack
     ? await fetchDashboardTrackFeed(activeTrack.id, "default", 4).catch(() => ({ items: [], total: 0 }))
     : { items: [], total: 0 }
-  const recommendationCards = latestBrief?.recommendations.length
-    ? latestBrief.recommendations
+  const recommendationCards: DashboardRecommendationCardData[] = latestBrief?.recommendations.length
+    ? latestBrief.recommendations.map((item) => ({
+        id: item.id,
+        paperRef: item.paperId || null,
+        internalPaperId: item.paperId && Number.isFinite(Number(item.paperId)) ? Number(item.paperId) : null,
+        title: item.title,
+        href: item.href,
+        meta: item.meta,
+        summary: item.summary,
+        tags: item.tags,
+        metric: item.metric,
+        recommendation: item.recommendation,
+        authors: item.authors,
+        year: item.year ?? null,
+        paperSource: item.paperSource ?? null,
+        isSaved: false,
+      }))
     : buildRecommendationCards({
         trackFeedItems: activeTrackFeed.items || [],
         activeTrack,
@@ -634,17 +594,10 @@ export default async function DashboardPage() {
               actionLabel="Open library"
               actionHref="/papers"
             />
-            <div className="space-y-4">
-              {queueCards.length > 0 ? (
-                queueCards.map((item) => (
-                  <ReadingQueueCard key={item.id} item={item} />
-                ))
-              ) : (
-                <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-6 text-sm text-slate-600 shadow-sm">
-                  No queued papers yet.
-                </div>
-              )}
-            </div>
+            <DashboardReadingQueuePanel
+              initialItems={queueCards}
+              activeTrackId={activeTrack?.id || null}
+            />
           </section>
 
           <section className="grid gap-8 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
