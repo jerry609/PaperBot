@@ -7,7 +7,7 @@ from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Depends
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy.exc import IntegrityError
@@ -36,6 +36,7 @@ from paperbot.infrastructure.exporters.obsidian_sync import (
 from paperbot.infrastructure.stores.memory_store import SqlAlchemyMemoryStore
 from paperbot.infrastructure.stores.research_store import SqlAlchemyResearchStore
 from paperbot.infrastructure.stores.workflow_metric_store import WorkflowMetricStore
+from paperbot.api.auth.dependencies import get_user_id
 from paperbot.memory.eval.collector import MemoryMetricCollector
 from paperbot.memory.extractor import extract_memories
 from paperbot.memory.schema import MemoryCandidate, NormalizedMessage
@@ -370,7 +371,6 @@ def _collect_conference_deadline_terms(item: Dict[str, Any]) -> Set[str]:
 
 
 class TrackCreateRequest(BaseModel):
-    user_id: str = "default"
     name: str = Field(..., min_length=1, max_length=128)
     description: str = ""
     keywords: List[str] = []
@@ -438,9 +438,14 @@ def _serialize_track_context_response(
 
 
 @router.post("/research/tracks", response_model=TrackResponse)
-def create_track(req: TrackCreateRequest, background_tasks: BackgroundTasks):
-    track = _get_research_store().create_track(
-        user_id=req.user_id,
+def create_track(
+    req: TrackCreateRequest,
+    background_tasks: BackgroundTasks,
+    user_id: str = Depends(get_user_id),
+):
+    effective_user_id = user_id
+    track = _research_store.create_track(
+        user_id=effective_user_id,
         name=req.name,
         description=req.description,
         keywords=req.keywords,
@@ -464,7 +469,7 @@ class TrackListResponse(BaseModel):
 
 @router.get("/research/tracks", response_model=TrackListResponse)
 def list_tracks(
-    user_id: str = "default",
+    user_id: str = Depends(get_user_id),
     include_archived: bool = Query(False),
     limit: int = Query(100, ge=1, le=500),
 ):
@@ -482,7 +487,7 @@ class DeadlineRadarResponse(BaseModel):
 
 @router.get("/research/deadlines/radar", response_model=DeadlineRadarResponse)
 def get_deadline_radar(
-    user_id: str = "default",
+    user_id: str = Depends(get_user_id),
     days: int = Query(180, ge=7, le=365),
     ccf_levels: str = Query("A,B,C"),
     field: Optional[str] = None,
@@ -571,8 +576,8 @@ def get_deadline_radar(
 
 
 @router.get("/research/tracks/active", response_model=TrackResponse)
-def get_active_track(user_id: str = "default"):
-    track = _get_research_store().get_active_track(user_id=user_id)
+def get_active_track(user_id: str = Depends(get_user_id)):
+    track = _research_store.get_active_track(user_id=user_id)
     if not track:
         raise HTTPException(status_code=404, detail="No active track for user")
     return TrackResponse(track=track)
@@ -594,7 +599,7 @@ def update_track(
     track_id: int,
     req: TrackUpdateRequest,
     background_tasks: BackgroundTasks,
-    user_id: str = "default",
+    user_id: str = Depends(get_user_id),
 ):
     update_data = req.model_dump(exclude_unset=True, exclude_none=True)
 
@@ -619,8 +624,12 @@ def update_track(
 
 
 @router.post("/research/tracks/{track_id}/activate", response_model=TrackResponse)
-def activate_track(track_id: int, background_tasks: BackgroundTasks, user_id: str = "default"):
-    track = _get_research_store().activate_track(user_id=user_id, track_id=track_id)
+def activate_track(
+    track_id: int,
+    background_tasks: BackgroundTasks,
+    user_id: str = Depends(get_user_id),
+):
+    track = _research_store.activate_track(user_id=user_id, track_id=track_id)
     if not track:
         raise HTTPException(status_code=404, detail="Track not found")
     _schedule_embedding_precompute(background_tasks, user_id=user_id, track_ids=[track_id])
@@ -628,7 +637,6 @@ def activate_track(track_id: int, background_tasks: BackgroundTasks, user_id: st
 
 
 class TaskCreateRequest(BaseModel):
-    user_id: str = "default"
     title: str = Field(..., min_length=1)
     status: str = "todo"
     priority: int = 0
@@ -642,9 +650,14 @@ class TaskResponse(BaseModel):
 
 
 @router.post("/research/tracks/{track_id}/tasks", response_model=TaskResponse)
-def add_task(track_id: int, req: TaskCreateRequest, background_tasks: BackgroundTasks):
-    task = _get_research_store().add_task(
-        user_id=req.user_id,
+def add_task(
+    track_id: int,
+    req: TaskCreateRequest,
+    background_tasks: BackgroundTasks,
+    user_id: str = Depends(get_user_id),
+):
+    task = _research_store.add_task(
+        user_id=user_id,
         track_id=track_id,
         title=req.title,
         status=req.status,
@@ -655,7 +668,7 @@ def add_task(track_id: int, req: TaskCreateRequest, background_tasks: Background
     )
     if not task:
         raise HTTPException(status_code=404, detail="Track not found")
-    _schedule_embedding_precompute(background_tasks, user_id=req.user_id, track_ids=[track_id])
+    _schedule_embedding_precompute(background_tasks, user_id=user_id, track_ids=[track_id])
     return TaskResponse(task=task)
 
 
@@ -668,7 +681,7 @@ class TaskListResponse(BaseModel):
 @router.get("/research/tracks/{track_id}/tasks", response_model=TaskListResponse)
 def list_tasks(
     track_id: int,
-    user_id: str = "default",
+    user_id: str = Depends(get_user_id),
     status: Optional[str] = None,
     limit: int = Query(100, ge=1, le=500),
 ):
@@ -679,7 +692,6 @@ def list_tasks(
 
 
 class MemoryItemCreateRequest(BaseModel):
-    user_id: str = "default"
     scope_type: str = "track"  # global/track
     scope_id: Optional[str] = None
     kind: str = Field("note", min_length=1, max_length=32)
@@ -705,9 +717,13 @@ def _resolve_track_scope_id(
 
 
 @router.post("/research/memory/items", response_model=MemoryItemResponse)
-def create_memory_item(req: MemoryItemCreateRequest, background_tasks: BackgroundTasks):
+def create_memory_item(
+    req: MemoryItemCreateRequest,
+    background_tasks: BackgroundTasks,
+    user_id: str = Depends(get_user_id),
+):
     scope_type = (req.scope_type or "global").strip() or "global"
-    scope_id = _resolve_track_scope_id(req.user_id, scope_type, req.scope_id)
+    scope_id = _resolve_track_scope_id(user_id, scope_type, req.scope_id)
     if scope_type == "track" and not scope_id:
         raise HTTPException(
             status_code=400,
@@ -724,14 +740,14 @@ def create_memory_item(req: MemoryItemCreateRequest, background_tasks: Backgroun
         scope_id=scope_id,
         status=req.status,
     )
-    created, _, rows = _get_memory_store().add_memories(user_id=req.user_id, memories=[cand])
+    created, _, rows = _memory_store.add_memories(user_id=user_id, memories=[cand])
     if created <= 0 or not rows:
         raise HTTPException(
             status_code=409, detail="Duplicate memory item (same scope/kind/content)"
         )
     if scope_type == "track":
         _schedule_embedding_precompute(
-            background_tasks, user_id=req.user_id, track_ids=[int(scope_id or 0)]
+            background_tasks, user_id=user_id, track_ids=[int(scope_id or 0)]
         )
     return MemoryItemResponse(item=SqlAlchemyMemoryStore._row_to_dict(rows[0]))
 
@@ -743,7 +759,7 @@ class MemoryItemListResponse(BaseModel):
 
 @router.get("/research/memory/items", response_model=MemoryItemListResponse)
 def list_memory_items(
-    user_id: str = "default",
+    user_id: str = Depends(get_user_id),
     scope_type: Optional[str] = None,
     scope_id: Optional[str] = None,
     kind: Optional[str] = None,
@@ -765,7 +781,7 @@ def list_memory_items(
 
 @router.get("/research/memory/inbox", response_model=MemoryItemListResponse)
 def list_memory_inbox(
-    user_id: str = "default",
+    user_id: str = Depends(get_user_id),
     track_id: Optional[int] = None,
     limit: int = Query(100, ge=1, le=500),
 ):
@@ -781,7 +797,6 @@ def list_memory_inbox(
 
 
 class MemorySuggestRequest(BaseModel):
-    user_id: str = "default"
     text: str = Field(..., min_length=1)
     scope_type: str = "track"
     scope_id: Optional[str] = None
@@ -798,9 +813,13 @@ class MemorySuggestResponse(BaseModel):
 
 
 @router.post("/research/memory/suggest", response_model=MemorySuggestResponse)
-def suggest_memories(req: MemorySuggestRequest, background_tasks: BackgroundTasks):
+def suggest_memories(
+    req: MemorySuggestRequest,
+    background_tasks: BackgroundTasks,
+    user_id: str = Depends(get_user_id),
+):
     scope_type = (req.scope_type or "global").strip() or "global"
-    scope_id = _resolve_track_scope_id(req.user_id, scope_type, req.scope_id)
+    scope_id = _resolve_track_scope_id(user_id, scope_type, req.scope_id)
     if scope_type == "track" and not scope_id:
         raise HTTPException(
             status_code=400,
@@ -824,13 +843,13 @@ def suggest_memories(req: MemorySuggestRequest, background_tasks: BackgroundTask
         )
         for m in extracted
     ]
-    created, skipped, rows = _get_memory_store().add_memories(user_id=req.user_id, memories=pending)
+    created, skipped, rows = _memory_store.add_memories(user_id=user_id, memories=pending)
     if scope_type == "track":
         _schedule_embedding_precompute(
-            background_tasks, user_id=req.user_id, track_ids=[int(scope_id or 0)]
+            background_tasks, user_id=user_id, track_ids=[int(scope_id or 0)]
         )
     return MemorySuggestResponse(
-        user_id=req.user_id,
+        user_id=user_id,
         created=created,
         skipped=skipped,
         candidates=[SqlAlchemyMemoryStore._row_to_dict(r) for r in rows],
@@ -838,7 +857,6 @@ def suggest_memories(req: MemorySuggestRequest, background_tasks: BackgroundTask
 
 
 class MemoryModerateRequest(BaseModel):
-    user_id: str = "default"
     status: str = Field(..., min_length=1)  # approved/rejected/pending/superseded
     content: Optional[str] = None
     kind: Optional[str] = None
@@ -848,9 +866,13 @@ class MemoryModerateRequest(BaseModel):
 
 
 @router.post("/research/memory/items/{item_id}/moderate", response_model=MemoryItemResponse)
-def moderate_memory_item(item_id: int, req: MemoryModerateRequest):
-    updated = _get_memory_store().update_item(
-        user_id=req.user_id,
+def moderate_memory_item(
+    item_id: int,
+    req: MemoryModerateRequest,
+    user_id: str = Depends(get_user_id),
+):
+    updated = _memory_store.update_item(
+        user_id=user_id,
         item_id=item_id,
         status=req.status,
         content=req.content,
@@ -866,7 +888,6 @@ def moderate_memory_item(item_id: int, req: MemoryModerateRequest):
 
 
 class BulkModerateRequest(BaseModel):
-    user_id: str = "default"
     item_ids: List[int] = Field(default_factory=list)
     status: str = Field(..., min_length=1)
 
@@ -877,9 +898,13 @@ class BulkModerateResponse(BaseModel):
 
 
 @router.post("/research/memory/bulk_moderate", response_model=BulkModerateResponse)
-def bulk_moderate(req: BulkModerateRequest, background_tasks: BackgroundTasks):
+def bulk_moderate(
+    req: BulkModerateRequest,
+    background_tasks: BackgroundTasks,
+    user_id: str = Depends(get_user_id),
+):
     result = _build_track_memory_service().bulk_moderate(
-        user_id=req.user_id,
+        user_id=user_id,
         item_ids=req.item_ids,
         status=req.status,
     )
@@ -887,7 +912,7 @@ def bulk_moderate(req: BulkModerateRequest, background_tasks: BackgroundTasks):
     updated = result.updated_items
     _schedule_embedding_precompute(
         background_tasks,
-        user_id=req.user_id,
+        user_id=user_id,
         track_ids=result.affected_track_ids,
     )
 
@@ -904,18 +929,17 @@ def bulk_moderate(req: BulkModerateRequest, background_tasks: BackgroundTasks):
             collector.record_false_positive_rate(
                 false_positive_count=high_confidence_rejected,
                 total_approved_count=len(items_before),
-                evaluator_id=f"user:{req.user_id}",
+                evaluator_id=f"user:{user_id}",
                 detail={
                     "item_ids": req.item_ids,
                     "action": "bulk_moderate_reject",
                 },
             )
 
-    return BulkModerateResponse(user_id=req.user_id, updated=updated)
+    return BulkModerateResponse(user_id=user_id, updated=updated)
 
 
 class BulkMoveRequest(BaseModel):
-    user_id: str = "default"
     item_ids: List[int] = Field(default_factory=list)
     scope_type: str = Field(..., min_length=1)
     scope_id: Optional[str] = None
@@ -927,10 +951,14 @@ class BulkMoveResponse(BaseModel):
 
 
 @router.post("/research/memory/bulk_move", response_model=BulkMoveResponse)
-def bulk_move(req: BulkMoveRequest, background_tasks: BackgroundTasks):
+def bulk_move(
+    req: BulkMoveRequest,
+    background_tasks: BackgroundTasks,
+    user_id: str = Depends(get_user_id),
+):
     try:
         result = _build_track_memory_service().bulk_move(
-            user_id=req.user_id,
+            user_id=user_id,
             item_ids=req.item_ids,
             scope_type=req.scope_type,
             scope_id=req.scope_id,
@@ -940,16 +968,15 @@ def bulk_move(req: BulkMoveRequest, background_tasks: BackgroundTasks):
 
     _schedule_embedding_precompute(
         background_tasks,
-        user_id=req.user_id,
+        user_id=user_id,
         track_ids=result.affected_track_ids,
     )
-    return BulkMoveResponse(user_id=req.user_id, updated=result.updated_items)
+    return BulkMoveResponse(user_id=user_id, updated=result.updated_items)
 
 
 class MemoryFeedbackRequest(BaseModel):
     """Request to record feedback on retrieved memories."""
 
-    user_id: str = "default"
     memory_ids: List[int] = Field(..., min_length=1, description="IDs of memories being rated")
     helpful_ids: List[int] = Field(
         default_factory=list, description="IDs of memories that were helpful"
@@ -970,7 +997,10 @@ class MemoryFeedbackResponse(BaseModel):
 
 
 @router.post("/research/memory/feedback", response_model=MemoryFeedbackResponse)
-def record_memory_feedback(req: MemoryFeedbackRequest):
+def record_memory_feedback(
+    req: MemoryFeedbackRequest,
+    user_id: str = Depends(get_user_id),
+):
     """
     Record user feedback on retrieved memories.
 
@@ -995,7 +1025,7 @@ def record_memory_feedback(req: MemoryFeedbackRequest):
         collector.record_retrieval_hit_rate(
             hits=hits,
             expected=total,
-            evaluator_id=f"user:{req.user_id}",
+            evaluator_id=f"user:{user_id}",
             detail={
                 "memory_ids": req.memory_ids,
                 "helpful_ids": list(helpful_set),
@@ -1009,7 +1039,7 @@ def record_memory_feedback(req: MemoryFeedbackRequest):
         hit_rate = 0.0
 
     return MemoryFeedbackResponse(
-        user_id=req.user_id,
+        user_id=user_id,
         total_rated=total,
         helpful_count=hits,
         not_helpful_count=len(not_helpful_set),
@@ -1027,7 +1057,7 @@ class ClearTrackMemoryResponse(BaseModel):
 def clear_track_memory(
     track_id: int,
     background_tasks: BackgroundTasks,
-    user_id: str = "default",
+    user_id: str = Depends(get_user_id),
     confirm: bool = Query(False),
 ):
     if not confirm:
@@ -1062,7 +1092,6 @@ def clear_track_memory(
 
 
 class PrecomputeEmbeddingsRequest(BaseModel):
-    user_id: str = "default"
     track_ids: Optional[List[int]] = None
 
 
@@ -1072,11 +1101,14 @@ class PrecomputeEmbeddingsResponse(BaseModel):
 
 
 @router.post("/research/embeddings/precompute", response_model=PrecomputeEmbeddingsResponse)
-def precompute_embeddings(req: PrecomputeEmbeddingsRequest):
-    result = _get_track_router().precompute_track_embeddings(
-        user_id=req.user_id, track_ids=req.track_ids or None
+def precompute_embeddings(
+    req: PrecomputeEmbeddingsRequest,
+    user_id: str = Depends(get_user_id),
+):
+    result = _track_router.precompute_track_embeddings(
+        user_id=user_id, track_ids=req.track_ids or None
     )
-    return PrecomputeEmbeddingsResponse(user_id=req.user_id, result=result)
+    return PrecomputeEmbeddingsResponse(user_id=user_id, result=result)
 
 
 class EvalSummaryResponse(BaseModel):
@@ -1087,7 +1119,7 @@ class EvalSummaryResponse(BaseModel):
 
 @router.get("/research/evals/summary", response_model=EvalSummaryResponse)
 def eval_summary(
-    user_id: str = "default",
+    user_id: str = Depends(get_user_id),
     track_id: Optional[int] = None,
     days: int = Query(30, ge=1, le=365),
 ):
@@ -1096,7 +1128,6 @@ def eval_summary(
 
 
 class PaperFeedbackRequest(BaseModel):
-    user_id: str = "default"
     track_id: Optional[int] = None
     paper_id: str = Field(..., min_length=1)
     action: str = Field(..., min_length=1)  # like/unlike/dislike/undislike/skip/save/unsave/cite
@@ -1122,7 +1153,11 @@ class PaperFeedbackResponse(BaseModel):
 
 
 @router.post("/research/papers/feedback", response_model=PaperFeedbackResponse)
-def add_paper_feedback(req: PaperFeedbackRequest, background_tasks: BackgroundTasks):
+def add_paper_feedback(
+    req: PaperFeedbackRequest,
+    background_tasks: BackgroundTasks,
+    user_id: str = Depends(get_user_id),
+):
     set_trace_id()  # Initialize trace_id for this request
     Logger.info(f"Received paper feedback request, action={req.action}", file=LogFiles.HARVEST)
     research_store = _get_research_store()
@@ -1131,7 +1166,7 @@ def add_paper_feedback(req: PaperFeedbackRequest, background_tasks: BackgroundTa
     active_track: Optional[Dict[str, Any]] = None
     if track_id is None:
         Logger.info("No track specified, getting active track", file=LogFiles.HARVEST)
-        active_track = research_store.get_active_track(user_id=req.user_id)
+        active_track = research_store.get_active_track(user_id=user_id)
         if not active_track:
             Logger.error("No active track found", file=LogFiles.HARVEST)
             raise HTTPException(status_code=400, detail="track_id missing and no active track")
@@ -1195,8 +1230,8 @@ def add_paper_feedback(req: PaperFeedbackRequest, background_tasks: BackgroundTa
             Logger.warning(f"Failed to save paper to library: {e}", file=LogFiles.HARVEST)
 
     Logger.info("Recording paper feedback to research store", file=LogFiles.HARVEST)
-    fb = research_store.add_paper_feedback(
-        user_id=req.user_id,
+    fb = _research_store.add_paper_feedback(
+        user_id=user_id,
         track_id=track_id,
         paper_id=req.paper_id,  # Always use external ID for consistency
         action=req.action,
@@ -1232,7 +1267,7 @@ class PaperFeedbackListResponse(BaseModel):
 @router.get("/research/tracks/{track_id}/papers/feedback", response_model=PaperFeedbackListResponse)
 def list_paper_feedback(
     track_id: int,
-    user_id: str = "default",
+    user_id: str = Depends(get_user_id),
     action: Optional[str] = None,
     limit: int = Query(200, ge=1, le=1000),
 ):
@@ -1243,7 +1278,6 @@ def list_paper_feedback(
 
 
 class PaperReadingStatusRequest(BaseModel):
-    user_id: str = "default"
     status: str = Field(..., min_length=1)  # unread/reading/read/archived
     mark_saved: Optional[bool] = None
     metadata: Dict[str, Any] = {}
@@ -1259,7 +1293,6 @@ class SavedPapersResponse(BaseModel):
 
 
 class DiscoverySeedRequest(BaseModel):
-    user_id: str = "default"
     track_id: Optional[int] = None
     seed_type: str = Field(..., pattern="^(doi|arxiv|openalex|semantic_scholar|author)$")
     seed_id: str = Field(..., min_length=1)
@@ -1282,28 +1315,24 @@ class DiscoverySeedResponse(BaseModel):
 
 
 class PaperCollectionCreateRequest(BaseModel):
-    user_id: str = "default"
     name: str = Field(..., min_length=1, max_length=128)
     description: str = ""
     track_id: Optional[int] = Field(default=None, ge=1)
 
 
 class PaperCollectionUpdateRequest(BaseModel):
-    user_id: str = "default"
     name: Optional[str] = Field(default=None, min_length=1, max_length=128)
     description: Optional[str] = None
     archived: Optional[bool] = None
 
 
 class PaperCollectionItemUpsertRequest(BaseModel):
-    user_id: str = "default"
     paper_id: str = Field(..., min_length=1)
     note: Optional[str] = ""
     tags: Optional[List[str]] = []
 
 
 class PaperCollectionItemPatchRequest(BaseModel):
-    user_id: str = "default"
     note: Optional[str] = ""
     tags: Optional[List[str]] = []
 
@@ -1342,7 +1371,6 @@ class AnchorDiscoverResponse(BaseModel):
 
 
 class AnchorActionRequest(BaseModel):
-    user_id: str = "default"
     action: str = Field(..., pattern="^(follow|ignore)$")
 
 
@@ -1366,9 +1394,13 @@ class PaperRepoListResponse(BaseModel):
 
 
 @router.post("/research/papers/{paper_id}/status", response_model=PaperReadingStatusResponse)
-def update_paper_status(paper_id: str, req: PaperReadingStatusRequest):
-    status = _get_research_store().set_paper_reading_status(
-        user_id=req.user_id,
+def update_paper_status(
+    paper_id: str,
+    req: PaperReadingStatusRequest,
+    user_id: str = Depends(get_user_id),
+):
+    status = _research_store.set_paper_reading_status(
+        user_id=user_id,
         paper_id=paper_id,
         status=req.status,
         metadata=req.metadata,
@@ -1381,7 +1413,7 @@ def update_paper_status(paper_id: str, req: PaperReadingStatusRequest):
 
 @router.get("/research/papers/saved", response_model=SavedPapersResponse)
 def list_saved_papers(
-    user_id: str = "default",
+    user_id: str = Depends(get_user_id),
     track_id: Optional[int] = None,
     collection_id: Optional[int] = None,
     sort_by: str = Query("saved_at"),
@@ -1398,7 +1430,7 @@ def list_saved_papers(
 
 
 @router.post("/research/discovery/seed", response_model=DiscoverySeedResponse)
-async def discover_from_seed(req: DiscoverySeedRequest):
+async def discover_from_seed(req: DiscoverySeedRequest, user_id: str = Depends(get_user_id)):
     if req.year_from and req.year_to and req.year_from > req.year_to:
         raise HTTPException(status_code=400, detail="year_from must be <= year_to")
 
@@ -1577,7 +1609,7 @@ async def discover_from_seed(req: DiscoverySeedRequest):
         year_to=req.year_to,
     )
     feedback_profile = (
-        _build_feedback_profile(user_id=req.user_id, track_id=req.track_id)
+        _build_feedback_profile(user_id=user_id, track_id=req.track_id)
         if req.personalized
         else {}
     )
@@ -1649,10 +1681,10 @@ async def discover_from_seed(req: DiscoverySeedRequest):
 
 
 @router.post("/research/collections", response_model=PaperCollectionResponse)
-def create_collection(req: PaperCollectionCreateRequest):
+def create_collection(req: PaperCollectionCreateRequest, user_id: str = Depends(get_user_id)):
     try:
-        collection = _get_research_store().create_collection(
-            user_id=req.user_id,
+        collection = _research_store.create_collection(
+            user_id=user_id,
             name=req.name,
             description=req.description,
             track_id=req.track_id,
@@ -1664,7 +1696,7 @@ def create_collection(req: PaperCollectionCreateRequest):
 
 @router.get("/research/collections", response_model=PaperCollectionListResponse)
 def list_collections(
-    user_id: str = "default",
+    user_id: str = Depends(get_user_id),
     include_archived: bool = Query(False),
     track_id: Optional[int] = Query(default=None),
     limit: int = Query(200, ge=1, le=1000),
@@ -1679,10 +1711,10 @@ def list_collections(
 
 
 @router.patch("/research/collections/{collection_id}", response_model=PaperCollectionResponse)
-def update_collection(collection_id: int, req: PaperCollectionUpdateRequest):
+def update_collection(collection_id: int, req: PaperCollectionUpdateRequest, user_id: str = Depends(get_user_id)):
     try:
-        collection = _get_research_store().update_collection(
-            user_id=req.user_id,
+        collection = _research_store.update_collection(
+            user_id=user_id,
             collection_id=collection_id,
             name=req.name,
             description=req.description,
@@ -1701,7 +1733,7 @@ def update_collection(collection_id: int, req: PaperCollectionUpdateRequest):
 )
 def list_collection_items(
     collection_id: int,
-    user_id: str = "default",
+    user_id: str = Depends(get_user_id),
     limit: int = Query(500, ge=1, le=5000),
 ):
     items = _get_research_store().list_collection_items(
@@ -1716,9 +1748,9 @@ def list_collection_items(
     "/research/collections/{collection_id}/items",
     response_model=PaperCollectionItemsResponse,
 )
-def upsert_collection_item(collection_id: int, req: PaperCollectionItemUpsertRequest):
-    item = _get_research_store().upsert_collection_item(
-        user_id=req.user_id,
+def upsert_collection_item(collection_id: int, req: PaperCollectionItemUpsertRequest, user_id: str = Depends(get_user_id)):
+    item = _research_store.upsert_collection_item(
+        user_id=user_id,
         collection_id=collection_id,
         paper_id=req.paper_id,
         note=req.note,
@@ -1726,11 +1758,9 @@ def upsert_collection_item(collection_id: int, req: PaperCollectionItemUpsertReq
     )
     if item is None:
         raise HTTPException(status_code=404, detail="Collection or paper not found")
-    items = _get_research_store().list_collection_items(
-        user_id=req.user_id, collection_id=collection_id
-    )
+    items = _research_store.list_collection_items(user_id=user_id, collection_id=collection_id)
     return PaperCollectionItemsResponse(
-        user_id=req.user_id, collection_id=collection_id, items=items
+        user_id=user_id, collection_id=collection_id, items=items
     )
 
 
@@ -1738,9 +1768,9 @@ def upsert_collection_item(collection_id: int, req: PaperCollectionItemUpsertReq
     "/research/collections/{collection_id}/items/{paper_id}",
     response_model=PaperCollectionItemsResponse,
 )
-def patch_collection_item(collection_id: int, paper_id: str, req: PaperCollectionItemPatchRequest):
-    item = _get_research_store().upsert_collection_item(
-        user_id=req.user_id,
+def patch_collection_item(collection_id: int, paper_id: str, req: PaperCollectionItemPatchRequest, user_id: str = Depends(get_user_id)):
+    item = _research_store.upsert_collection_item(
+        user_id=user_id,
         collection_id=collection_id,
         paper_id=paper_id,
         note=req.note,
@@ -1748,17 +1778,15 @@ def patch_collection_item(collection_id: int, paper_id: str, req: PaperCollectio
     )
     if item is None:
         raise HTTPException(status_code=404, detail="Collection or paper not found")
-    items = _get_research_store().list_collection_items(
-        user_id=req.user_id, collection_id=collection_id
-    )
+    items = _research_store.list_collection_items(user_id=user_id, collection_id=collection_id)
     return PaperCollectionItemsResponse(
-        user_id=req.user_id, collection_id=collection_id, items=items
+        user_id=user_id, collection_id=collection_id, items=items
     )
 
 
 @router.delete("/research/collections/{collection_id}/items/{paper_id}")
-def delete_collection_item(collection_id: int, paper_id: str, user_id: str = "default"):
-    ok = _get_research_store().remove_collection_item(
+def delete_collection_item(collection_id: int, paper_id: str, user_id: str = Depends(get_user_id)):
+    ok = _research_store.remove_collection_item(
         user_id=user_id,
         collection_id=collection_id,
         paper_id=paper_id,
@@ -1771,7 +1799,7 @@ def delete_collection_item(collection_id: int, paper_id: str, user_id: str = "de
 @router.get("/research/tracks/{track_id}/feed", response_model=TrackFeedResponse)
 def get_track_feed(
     track_id: int,
-    user_id: str = "default",
+    user_id: str = Depends(get_user_id),
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
 ):
@@ -1797,7 +1825,7 @@ def get_track_feed(
 
 @router.get("/research/papers/export")
 def export_papers(
-    user_id: str = "default",
+    user_id: str = Depends(get_user_id),
     track_id: Optional[int] = None,
     format: str = Query("bibtex", pattern="^(bibtex|ris|markdown|csl_json)$"),
 ):
@@ -1848,7 +1876,6 @@ def export_papers(
 
 
 class BibtexImportRequest(BaseModel):
-    user_id: str = "default"
     content: str = Field(..., min_length=1)
     track_id: Optional[int] = Field(default=None, ge=1)
     track_name: Optional[str] = Field(default=None, min_length=1, max_length=128)
@@ -1868,13 +1895,13 @@ class BibtexImportResponse(BaseModel):
 
 
 @router.post("/research/papers/import/bibtex", response_model=BibtexImportResponse)
-def import_bibtex(req: BibtexImportRequest):
+def import_bibtex(req: BibtexImportRequest, user_id: str = Depends(get_user_id)):
     entries = _parse_bibtex_entries(req.content)
     if not entries:
         raise HTTPException(status_code=400, detail="No valid BibTeX entries found")
 
     track = _resolve_or_create_import_track(
-        user_id=req.user_id,
+        user_id=user_id,
         track_id=req.track_id,
         track_name=req.track_name,
         default_track_name="BibTeX Imports",
@@ -1882,8 +1909,8 @@ def import_bibtex(req: BibtexImportRequest):
     track_pk = int(track["id"])
 
     paper_store = _get_paper_store()
-    existing_saved_ids = _get_research_store().list_paper_feedback_ids(
-        user_id=req.user_id,
+    existing_saved_ids = _research_store.list_paper_feedback_ids(
+        user_id=user_id,
         track_id=track_pk,
         action="save",
         limit=5000,
@@ -1923,8 +1950,8 @@ def import_bibtex(req: BibtexImportRequest):
                     "citation_key": str(entry.get("key") or ""),
                     "entry_type": str(entry.get("entry_type") or ""),
                 }
-                _get_research_store().add_paper_feedback(
-                    user_id=req.user_id,
+                _research_store.add_paper_feedback(
+                    user_id=user_id,
                     track_id=track_pk,
                     paper_id=paper_ref,
                     action="save",
@@ -1937,7 +1964,7 @@ def import_bibtex(req: BibtexImportRequest):
             errors.append(f"entry {index}: {exc}")
 
     return BibtexImportResponse(
-        user_id=req.user_id,
+        user_id=user_id,
         track_id=track_pk,
         track_name=str(track.get("name") or ""),
         parsed=len(entries),
@@ -1950,7 +1977,6 @@ def import_bibtex(req: BibtexImportRequest):
 
 
 class ZoteroSyncRequest(BaseModel):
-    user_id: str = "default"
     track_id: Optional[int] = Field(default=None, ge=1)
     track_name: Optional[str] = Field(default=None, min_length=1, max_length=128)
     library_type: str = Field(default="user", pattern="^(user|group)$")
@@ -1972,11 +1998,11 @@ class ZoteroPullResponse(BaseModel):
 
 
 @router.post("/research/integrations/zotero/pull", response_model=ZoteroPullResponse)
-def pull_from_zotero(req: ZoteroSyncRequest):
+def pull_from_zotero(req: ZoteroSyncRequest, user_id: str = Depends(get_user_id)):
     from paperbot.infrastructure.connectors.zotero_connector import ZoteroConnector
 
     track = _resolve_or_create_import_track(
-        user_id=req.user_id,
+        user_id=user_id,
         track_id=req.track_id,
         track_name=req.track_name,
         default_track_name="Zotero Imports",
@@ -1995,8 +2021,8 @@ def pull_from_zotero(req: ZoteroSyncRequest):
         raise HTTPException(status_code=502, detail=f"Failed to pull from Zotero: {exc}") from exc
 
     paper_store = _get_paper_store()
-    existing_saved_ids = _get_research_store().list_paper_feedback_ids(
-        user_id=req.user_id,
+    existing_saved_ids = _research_store.list_paper_feedback_ids(
+        user_id=user_id,
         track_id=track_pk,
         action="save",
         limit=5000,
@@ -2036,8 +2062,8 @@ def pull_from_zotero(req: ZoteroSyncRequest):
                     "zotero_library_type": req.library_type,
                     "zotero_library_id": req.library_id,
                 }
-                _get_research_store().add_paper_feedback(
-                    user_id=req.user_id,
+                _research_store.add_paper_feedback(
+                    user_id=user_id,
                     track_id=track_pk,
                     paper_id=paper_ref,
                     action="save",
@@ -2050,7 +2076,7 @@ def pull_from_zotero(req: ZoteroSyncRequest):
             errors.append(f"item {index}: {exc}")
 
     return ZoteroPullResponse(
-        user_id=req.user_id,
+        user_id=user_id,
         track_id=track_pk,
         track_name=str(track.get("name") or ""),
         total_remote=len(remote_items),
@@ -2079,17 +2105,17 @@ class ZoteroPushResponse(BaseModel):
 
 
 @router.post("/research/integrations/zotero/push", response_model=ZoteroPushResponse)
-def push_to_zotero(req: ZoteroPushRequest):
+def push_to_zotero(req: ZoteroPushRequest, user_id: str = Depends(get_user_id)):
     from paperbot.infrastructure.connectors.zotero_connector import ZoteroConnector
 
     if req.track_id is not None:
-        track = _get_research_store().get_track(user_id=req.user_id, track_id=req.track_id)
+        track = _research_store.get_track(user_id=user_id, track_id=req.track_id)
         if not track:
             raise HTTPException(status_code=404, detail="Track not found")
 
     connector = ZoteroConnector()
-    local_items = _get_research_store().list_saved_papers(
-        user_id=req.user_id,
+    local_items = _research_store.list_saved_papers(
+        user_id=user_id,
         track_id=req.track_id,
         sort_by="saved_at",
         limit=req.max_items,
@@ -2146,7 +2172,7 @@ def push_to_zotero(req: ZoteroPushRequest):
                 errors.append(f"batch {start // 50 + 1}: {exc}")
 
     return ZoteroPushResponse(
-        user_id=req.user_id,
+        user_id=user_id,
         track_id=req.track_id,
         local_saved=len(local_papers),
         remote_items=len(remote_items),
@@ -2159,10 +2185,9 @@ def push_to_zotero(req: ZoteroPushRequest):
 
 
 @router.get("/research/tracks/{track_id}/anchors/discover", response_model=AnchorDiscoverResponse)
-# TODO: IDOR — replace user_id query param with authenticated session user (PR #112 review).
 def discover_track_anchors(
     track_id: int,
-    user_id: str = "default",
+    user_id: str = Depends(get_user_id),
     limit: int = Query(20, ge=1, le=100),
     window_days: int = Query(365, ge=30, le=3650),
     personalized: bool = Query(True),
@@ -2199,18 +2224,17 @@ def discover_track_anchors(
     "/research/tracks/{track_id}/anchors/{author_id}/action",
     response_model=AnchorActionResponse,
 )
-# TODO: IDOR — replace req.user_id with authenticated session user (PR #112 review).
-def set_anchor_action(track_id: int, author_id: int, req: AnchorActionRequest):
+def set_anchor_action(track_id: int, author_id: int, req: AnchorActionRequest, user_id: str = Depends(get_user_id)):
     _ensure_anchor_feature_enabled()
 
-    track = _get_research_store().get_track(user_id=req.user_id, track_id=track_id)
+    track = _research_store.get_track(user_id=user_id, track_id=track_id)
     if not track:
         raise HTTPException(status_code=404, detail="Track not found")
 
     started = time.perf_counter()
     try:
         payload = _get_anchor_service().set_user_anchor_action(
-            user_id=req.user_id,
+            user_id=user_id,
             track_id=track_id,
             author_id=author_id,
             action=req.action,
@@ -2229,14 +2253,14 @@ def set_anchor_action(track_id: int, author_id: int, req: AnchorActionRequest):
         claim_count=0,
         evidence_count=0,
         elapsed_ms=elapsed_ms,
-        detail={"author_id": author_id, "user_id": req.user_id},
+        detail={"author_id": author_id, "user_id": user_id},
     )
 
     return AnchorActionResponse(action=payload)
 
 
 @router.get("/research/tracks/{track_id}/anchors/actions", response_model=AnchorActionListResponse)
-def list_anchor_actions(track_id: int, user_id: str = "default"):
+def list_anchor_actions(track_id: int, user_id: str = Depends(get_user_id)):
     _ensure_anchor_feature_enabled()
 
     track = _get_research_store().get_track(user_id=user_id, track_id=track_id)
@@ -2248,8 +2272,8 @@ def list_anchor_actions(track_id: int, user_id: str = "default"):
 
 
 @router.get("/research/papers/{paper_id}", response_model=PaperDetailResponse)
-def get_paper_detail(paper_id: str, user_id: str = "default"):
-    detail = _get_research_store().get_paper_detail(paper_id=paper_id, user_id=user_id)
+def get_paper_detail(paper_id: str, user_id: str = Depends(get_user_id)):
+    detail = _research_store.get_paper_detail(paper_id=paper_id, user_id=user_id)
     if not detail:
         raise HTTPException(status_code=404, detail="Paper not found in registry")
     return PaperDetailResponse(detail=detail)
@@ -2264,7 +2288,6 @@ def get_paper_repos(paper_id: str):
 
 
 class RouterSuggestRequest(BaseModel):
-    user_id: str = "default"
     query: str = Field(..., min_length=1)
 
 
@@ -2273,19 +2296,19 @@ class RouterSuggestResponse(BaseModel):
 
 
 @router.post("/research/router/suggest", response_model=RouterSuggestResponse)
-def suggest_track(req: RouterSuggestRequest):
-    active = _get_research_store().get_active_track(user_id=req.user_id)
+def suggest_track(req: RouterSuggestRequest, user_id: str = Depends(get_user_id)):
+    active = _research_store.get_active_track(user_id=user_id)
     if not active:
         return RouterSuggestResponse(suggestion=None)
     grounded_query = _get_workflow_query_grounder().ground_query(
-        user_id=req.user_id, query=req.query
+        user_id=user_id, query=req.query
     )
     routing_query = build_grounded_routing_query(
         original_query=req.query,
         grounded_query=grounded_query,
     )
     suggestion = _get_track_router().suggest_track(
-        user_id=req.user_id,
+        user_id=user_id,
         query=routing_query or req.query,
         active_track_id=int(active["id"]),
     )
@@ -2298,7 +2321,6 @@ def suggest_track(req: RouterSuggestRequest):
 
 
 class ContextRequest(BaseModel):
-    user_id: str = "default"
     query: str = Field(..., min_length=1)
     track_id: Optional[int] = None
     activate_track_id: Optional[int] = None  # confirm switch: activates then uses it
@@ -2378,7 +2400,7 @@ def get_evidence_coverage(
 
 
 @router.post("/research/context", response_model=ContextResponse)
-async def build_context(req: ContextRequest):
+async def build_context(req: ContextRequest, user_id: str = Depends(get_user_id)):
     set_trace_id()  # Initialize trace_id for this request
     Logger.info("Received build context request", file=LogFiles.HARVEST)
 
@@ -2390,8 +2412,8 @@ async def build_context(req: ContextRequest):
 
     if req.activate_track_id is not None:
         Logger.info("Activating research track", file=LogFiles.HARVEST)
-        activated = _get_research_store().activate_track(
-            user_id=req.user_id, track_id=req.activate_track_id
+        activated = _research_store.activate_track(
+            user_id=user_id, track_id=req.activate_track_id
         )
         if not activated:
             Logger.error("Research track not found", file=LogFiles.HARVEST)
@@ -2436,7 +2458,7 @@ async def build_context(req: ContextRequest):
     try:
         Logger.info("Building context pack with paper recommendations", file=LogFiles.HARVEST)
         pack = await engine.build_context_pack(
-            user_id=req.user_id,
+            user_id=user_id,
             query=req.query,
             track_id=req.track_id,
             include_cross_track=req.include_cross_track,
@@ -3960,8 +3982,8 @@ class StructuredCardResponse(BaseModel):
 
 
 @router.get("/research/papers/{paper_id}/card", response_model=StructuredCardResponse)
-def get_structured_card(paper_id: str, user_id: str = "default"):
-    detail = _get_research_store().get_paper_detail(paper_id=paper_id, user_id=user_id)
+def get_structured_card(paper_id: str, user_id: str = Depends(get_user_id)):
+    detail = _research_store.get_paper_detail(paper_id=paper_id, user_id=user_id)
     if not detail:
         raise HTTPException(status_code=404, detail="Paper not found")
 
@@ -4012,7 +4034,6 @@ def get_structured_card(paper_id: str, user_id: str = "default"):
 
 
 class RelatedWorkRequest(BaseModel):
-    user_id: str = "default"
     track_id: Optional[int] = None
     topic: str = Field(..., min_length=1)
     paper_ids: Optional[List[str]] = None
@@ -4025,9 +4046,9 @@ class RelatedWorkResponse(BaseModel):
 
 
 @router.post("/research/papers/related-work", response_model=RelatedWorkResponse)
-def generate_related_work(req: RelatedWorkRequest):
-    items = _get_research_store().list_saved_papers(
-        user_id=req.user_id, track_id=req.track_id, limit=req.limit
+def generate_related_work(req: RelatedWorkRequest, user_id: str = Depends(get_user_id)):
+    items = _research_store.list_saved_papers(
+        user_id=user_id, track_id=req.track_id, limit=req.limit
     )
     papers = [item["paper"] for item in items if item.get("paper")]
 

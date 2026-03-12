@@ -16,10 +16,12 @@ import uuid
 from dataclasses import asdict as _asdict
 from typing import Literal, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from paperbot.api.streaming import StreamEvent, sse_response
+from paperbot.api.streaming import StreamEvent, wrap_generator
+from paperbot.api.auth.dependencies import get_user_id
 from paperbot.application.services.p2c.models import (
     GenerateContextRequest as P2CRequest,
     RawPaperData,
@@ -330,11 +332,18 @@ async def _write_paper_scope_memories(
 
 
 @router.post("/generate")
-async def generate_context_pack(request: GenerateContextPackRequest):
+async def generate_context_pack(
+    request: GenerateContextPackRequest,
+    user_id: str = Depends(get_user_id),
+):
     """Generate a P2C context pack for the given paper. Returns SSE stream."""
     trace_id = set_trace_id()
+    # Prefer authenticated user id when available
+    effective_user_id = request.user_id or user_id
+    request.user_id = effective_user_id
+
     Logger.info(
-        f"[M2] generate_request trace_id={trace_id} paper_id={request.paper_id} user_id={request.user_id}",
+        f"[M2] generate_request trace_id={trace_id} paper_id={request.paper_id} user_id={effective_user_id}",
         file=LogFiles.API,
     )
     return sse_response(_generate_stream(request), workflow="p2c_generate")

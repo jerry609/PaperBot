@@ -3,10 +3,11 @@ from __future__ import annotations
 import hashlib
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, File, UploadFile, Query, HTTPException
+from fastapi import APIRouter, File, UploadFile, Query, HTTPException, Depends
 from pydantic import BaseModel, Field
 
 from paperbot.infrastructure.stores.memory_store import SqlAlchemyMemoryStore
+from paperbot.api.auth.dependencies import get_user_id
 from paperbot.memory import build_memory_context, extract_memories, parse_chat_log
 from paperbot.memory.schema import MemoryCandidate
 
@@ -56,7 +57,7 @@ class IngestResponse(BaseModel):
 @router.post("/memory/ingest", response_model=IngestResponse)
 async def ingest_memory(
     file: UploadFile = File(...),
-    user_id: str = Query("default", description="Memory namespace; use one id per person/team."),
+    user_id: str = Depends(get_user_id),
     workspace_id: Optional[str] = Query(None, description="Optional workspace/project namespace."),
     platform: Optional[str] = Query(None, description="Hint: chatgpt/gemini/claude/..."),
     use_llm: bool = Query(False, description="Use configured LLM to extract memories (falls back on heuristics)."),
@@ -122,7 +123,7 @@ class MemoryListResponse(BaseModel):
 
 @router.get("/memory/list", response_model=MemoryListResponse)
 def list_memories(
-    user_id: str = "default",
+    user_id: str = Depends(get_user_id),
     limit: int = 100,
     kind: Optional[str] = None,
     workspace_id: Optional[str] = None,
@@ -174,9 +175,10 @@ class ContextResponse(BaseModel):
 
 
 @router.post("/memory/context", response_model=ContextResponse)
-def memory_context(req: ContextRequest):
-    items = _get_store().search_memories(
-        user_id=req.user_id,
+def memory_context(req: ContextRequest, user_id: str = Depends(get_user_id)):
+    effective_user_id = req.user_id or user_id
+    items = _store.search_memories(
+        user_id=effective_user_id,
         workspace_id=req.workspace_id,
         query=req.query,
         limit=req.limit,
@@ -195,7 +197,7 @@ def memory_context(req: ContextRequest):
     ]
     ctx = build_memory_context(cands, max_items=req.limit)
     return ContextResponse(
-        user_id=req.user_id,
+        user_id=effective_user_id,
         query=req.query,
         context=ctx,
         items=[
