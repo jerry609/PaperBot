@@ -1,17 +1,13 @@
 import Link from "next/link"
 import {
-  Activity,
   ArrowRight,
-  Clock,
   FileText,
   FlaskConical,
-  Layers,
   Settings,
-  Sparkles,
   type LucideIcon,
 } from "lucide-react"
 
-import WorkflowDockCard from "@/components/dashboard/WorkflowDockCard"
+import TopicWorkflowDashboard from "@/components/research/TopicWorkflowDashboard"
 import { fetchDeadlineRadar, fetchLLMUsage, fetchPapers, fetchPipelineTasks } from "@/lib/api"
 import {
   buildDashboardIntelligenceCards,
@@ -30,7 +26,6 @@ import type {
   PipelineTask,
   ReadingQueueItem,
   ResearchTrackSummary,
-  TrackFeedItem,
 } from "@/lib/types"
 
 type DashboardPageProps = {
@@ -48,16 +43,6 @@ type QueuePreview = {
   time: string
   priority: PriorityLevel
   href: string
-}
-
-type BriefCardData = {
-  label: string
-  pill: string
-  tone: Tone
-  title: string
-  copy: string
-  metaLeft: string
-  metaRight: string
 }
 
 type LaneItemData = {
@@ -162,108 +147,6 @@ function buildQueuePreviewItems(
       href: item.paper_id ? `/papers/${item.paper_id}` : "/papers",
     }
   })
-}
-
-function buildBriefCards(args: {
-  activeTrack: ResearchTrackSummary | null
-  activeTrackFeed: TrackFeedItem[]
-  activeTrackFeedTotal: number
-  tasks: PipelineTask[]
-  deadlines: DeadlineRadarItem[]
-  queueItems: QueuePreview[]
-}): BriefCardData[] {
-  const { activeTrack, activeTrackFeed, activeTrackFeedTotal, tasks, deadlines, queueItems } = args
-  const failedTasks = tasks.filter((task) => task.status === "failed")
-  const runningTasks = tasks.filter((task) => task.status !== "success" && task.status !== "failed")
-  const latestTask = tasks[0]
-  const nearestDeadline = deadlines[0]
-  const highPriorityQueue = queueItems.filter((item) => item.priority === "high").length
-  const latestTrackPaper = activeTrackFeed[0]?.paper.title
-
-  return [
-    {
-      label: "Focus",
-      pill: activeTrack ? "当前焦点" : "待设置",
-      tone: activeTrack ? (activeTrackFeedTotal > 0 ? "good" : "info") : "warn",
-      title: activeTrack ? activeTrack.name : "还没有活跃的 Focus Track",
-      copy: activeTrack
-        ? activeTrackFeedTotal > 0
-          ? latestTrackPaper
-            ? `最近 ${activeTrackFeedTotal} 条相关更新已经进入这个 Track，最新命中是《${latestTrackPaper}》。`
-            : `最近 ${activeTrackFeedTotal} 条相关更新已经进入这个 Track。`
-          : activeTrack.description || "这个 Track 暂时没有新的 feed，可以直接从工作台继续 Search。"
-        : "先去 Research 创建一个 Focus Track，再回到首页继续推进今天的主题。",
-      metaLeft: activeTrack ? `${activeTrackFeedTotal} 条更新` : "前往 Research",
-      metaRight: activeTrack ? "Research" : "未设置",
-    },
-    {
-      label: "Pipeline",
-      pill: failedTasks.length > 0 ? "需要处理" : runningTasks.length > 0 ? "进行中" : "平稳",
-      tone: failedTasks.length > 0 ? "bad" : runningTasks.length > 0 ? "info" : "good",
-      title:
-        failedTasks.length > 0
-          ? `${failedTasks.length} 个后台任务需要处理`
-          : runningTasks.length > 0
-            ? `${runningTasks.length} 个后台任务正在运行`
-            : "后台任务当前平稳",
-      copy:
-        failedTasks.length > 0
-          ? `最近失败任务：${failedTasks[0]?.paper_title || "unknown task"}。`
-          : latestTask
-            ? `最近任务：${latestTask.paper_title}。`
-            : "近期开启的抓取或预处理任务会显示在这里。",
-      metaLeft: latestTask ? `最近任务 ${latestTask.started_at}` : "暂无最近任务",
-      metaRight:
-        failedTasks.length > 0
-          ? `${failedTasks.length} 失败`
-          : runningTasks.length > 0
-            ? `${runningTasks.length} 运行中`
-            : "无阻塞",
-    },
-    {
-      label: "Deadline",
-      pill:
-        nearestDeadline && nearestDeadline.days_left <= 14
-          ? "临近"
-          : nearestDeadline
-            ? "已跟踪"
-            : "平静",
-      tone:
-        nearestDeadline && nearestDeadline.days_left <= 14
-          ? "warn"
-          : nearestDeadline
-            ? "info"
-            : "good",
-      title: nearestDeadline
-        ? `${nearestDeadline.name} 还剩 ${nearestDeadline.days_left} 天`
-        : "近期没有紧迫截稿",
-      copy: nearestDeadline
-        ? `${nearestDeadline.field} 相关的提交窗口已经进入 Radar。`
-        : "Radar 中没有 14 天内需要优先处理的会议或 workshop 截止。",
-      metaLeft: nearestDeadline ? "Deadline Radar" : "保持当前节奏",
-      metaRight: nearestDeadline ? nearestDeadline.ccf_level || "Tracked" : "无紧迫项",
-    },
-    {
-      label: "Queue",
-      pill: queueItems.length > 0 ? "待处理" : "空队列",
-      tone:
-        queueItems.length === 0
-          ? "info"
-          : highPriorityQueue > 0
-            ? "warn"
-            : "good",
-      title:
-        queueItems.length > 0
-          ? `今天有 ${queueItems.length} 篇候选等待处理`
-          : "今天的待读队列还是空的",
-      copy:
-        queueItems[0]
-          ? `优先看看《${queueItems[0].title}》，决定是继续 Analyze 还是送入 Papers。`
-          : "可以从主工作台运行 Search 或 DailyPaper，先把候选池建立起来。",
-      metaLeft: `${highPriorityQueue} 篇高优`,
-      metaRight: queueItems[0] ? `最近 ${queueItems[0].time}` : "等待候选",
-    },
-  ]
 }
 
 function buildActionLanes(args: {
@@ -413,96 +296,6 @@ function getEvidenceStyles(source: string): {
   }
 }
 
-function FocusDeadlinesPanel({
-  track,
-  deadlines,
-}: {
-  track: ResearchTrackSummary | null
-  deadlines: DeadlineRadarItem[]
-}) {
-  const tone: Tone =
-    deadlines.length === 0
-      ? track
-        ? "good"
-        : "info"
-      : deadlines[0].days_left <= 14
-        ? "warn"
-        : "info"
-
-  return (
-    <section className="mt-5 border-t border-slate-100 pt-4">
-      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-        <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-indigo-600">Focus Deadlines</p>
-          <h4 className="mt-2 text-base font-semibold text-slate-900">当前焦点的 Top 3 DDL</h4>
-          <p className="mt-1 text-sm leading-6 text-slate-600">
-            {track
-              ? "根据 Track 的 keywords、methods 和 venues 自动关联最近会议，让 deadline 直接进入当前工作面。"
-              : "先设置 Focus Track，系统才会开始自动关联相关会议 deadline。"}
-          </p>
-        </div>
-        <TonePill tone={tone}>
-          {deadlines.length > 0 ? `${deadlines.length} 项` : track ? "暂无命中" : "等待焦点"}
-        </TonePill>
-      </div>
-
-      {deadlines.length > 0 ? (
-        <div className="mt-4 grid gap-3 md:grid-cols-3">
-          {deadlines.map((deadline) => {
-            const matchedTrack = deadline.matched_tracks.find((item) => item.track_id === track?.id)
-            const matchedTerms = (
-              matchedTrack?.matched_terms?.length
-                ? matchedTrack.matched_terms
-                : matchedTrack?.matched_keywords || []
-            ).slice(0, 3)
-
-            return (
-              <Link
-                key={`${deadline.name}-${deadline.deadline}`}
-                href={deadline.url}
-                target="_blank"
-                rel="noreferrer"
-                className="block rounded-xl bg-slate-50 px-4 py-3 transition-colors hover:bg-slate-100"
-              >
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-                    {deadline.ccf_level || deadline.field}
-                  </span>
-                  <span className="text-sm font-semibold text-slate-900">{deadline.days_left} 天</span>
-                </div>
-                <h5 className="mt-3 text-sm font-semibold leading-6 text-slate-900">{deadline.name}</h5>
-                <p className="mt-1 text-sm leading-6 text-slate-600">{deadline.field}</p>
-                {matchedTerms.length > 0 ? (
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {matchedTerms.map((term) => (
-                      <span
-                        key={`${deadline.name}-${term}`}
-                        className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-medium text-slate-600"
-                      >
-                        {term}
-                      </span>
-                    ))}
-                  </div>
-                ) : null}
-                <div className="mt-4 inline-flex items-center gap-1 text-sm font-semibold text-indigo-600">
-                  查看会议
-                  <ArrowRight size={14} />
-                </div>
-              </Link>
-            )
-          })}
-        </div>
-      ) : (
-        <div className="mt-4 rounded-xl border border-dashed border-slate-300 bg-slate-50/70 p-4 text-sm leading-6 text-slate-600">
-          {track
-            ? `当前还没有和 ${track.name} 自动关联的近期开会 DDL。可以补充 venues 或 methods，让匹配更稳定。`
-            : "先去 Research 设定 Focus Track，deadline 才会自动收敛到当前主题。"}
-        </div>
-      )}
-    </section>
-  )
-}
-
 function SectionIntro({
   eyebrow,
   title,
@@ -546,38 +339,6 @@ function TonePill({ tone, children }: { tone: Tone; children: React.ReactNode })
     >
       {children}
     </span>
-  )
-}
-
-function FocusOverviewPanel({ items }: { items: BriefCardData[] }) {
-  return (
-    <section className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-indigo-600">Overview</p>
-          <h4 className="mt-2 text-base font-semibold text-slate-900">焦点摘要</h4>
-          <p className="mt-1 text-sm leading-6 text-slate-600">把焦点、后台状态、deadline 和队列压成一个连续摘要，而不是四张分散卡片。</p>
-        </div>
-        <TonePill tone="info">{items.length} 项</TonePill>
-      </div>
-
-      <div className="mt-4 divide-y divide-slate-200">
-        {items.map((item) => (
-          <article key={item.label} className="py-4 first:pt-0 last:pb-0">
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">{item.label}</p>
-                <TonePill tone={item.tone}>{item.pill}</TonePill>
-              </div>
-              <span className="text-xs text-slate-500">{item.metaRight}</span>
-            </div>
-            <h5 className="mt-3 text-sm font-semibold leading-6 text-slate-900">{item.title}</h5>
-            <p className="mt-1 text-sm leading-6 text-slate-600">{item.copy}</p>
-            <div className="mt-3 text-xs text-slate-500">{item.metaLeft}</div>
-          </article>
-        ))}
-      </div>
-    </section>
   )
 }
 
@@ -699,9 +460,9 @@ function TodayRail({
   return (
     <aside className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
       <div>
-        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-indigo-600">Today</p>
-        <h3 className="mt-2 text-xl font-bold tracking-tight text-slate-900">今日侧栏</h3>
-        <p className="mt-1 text-sm leading-6 text-slate-600">把行动项、交接入口和队列收成一条连续的 rail，避免右侧变成卡片堆。</p>
+        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-indigo-600">Sidebar</p>
+        <h3 className="mt-2 text-xl font-bold tracking-tight text-slate-900">Today rail</h3>
+        <p className="mt-1 text-sm leading-6 text-slate-600">把提醒、交接入口和候选队列压进同一条侧栏，首页主区只保留简报和信号。</p>
       </div>
 
       <div className="mt-5 space-y-5">
@@ -841,21 +602,16 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   const activeTrackFeedResult = activeTrack
     ? await fetchDashboardTrackFeed(activeTrack.id, "default", 4).catch(() => ({ items: [], total: 0 }))
     : { items: [], total: 0 }
-  const activeTrackFeed = activeTrackFeedResult.items || []
   const activeTrackFeedTotal = activeTrackFeedResult.total || 0
   const intelligenceCards = buildDashboardIntelligenceCards(intelligenceFeed.items)
-  const focusDeadlines = activeTrack
-    ? deadlines.filter((deadline) =>
-        deadline.matched_tracks.some((matchedTrack) => matchedTrack.track_id === activeTrack.id),
-      ).slice(0, 3)
-    : []
+  const featuredSignal = intelligenceCards[0] || null
+  const secondarySignals = intelligenceCards.slice(1, 4)
   const queueItems = buildQueuePreviewItems(
     readingQueue,
     new Map(papers.map((paper) => [String(paper.id), paper])),
     activeTrack,
   )
 
-  const focusKeywords = (activeTrack?.keywords || []).slice(0, 3)
   const highPriorityQueue = queueItems.filter((item) => item.priority === "high").length
   const failedTasks = tasks.filter((task) => task.status === "failed")
   const urgentDeadlines = deadlines.filter((deadline) => deadline.days_left <= 14)
@@ -864,22 +620,6 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   const greeting = getGreeting()
   const libraryCount = papers.length
 
-  const focusSummary = activeTrack
-    ? activeTrackFeedTotal > 0
-      ? activeTrackFeed[0]?.paper.title
-        ? `当前焦点 Track「${activeTrack.name}」最近捕获了 ${activeTrackFeedTotal} 条相关更新，最新命中是《${activeTrackFeed[0].paper.title}》。`
-        : `当前焦点 Track「${activeTrack.name}」最近捕获了 ${activeTrackFeedTotal} 条相关更新。`
-      : activeTrack.description || `当前焦点 Track「${activeTrack.name}」暂时没有新的 feed，可以直接从工作台继续 Search。`
-    : "目前还没有活跃的 Focus Track。先去 Research 设定问题域，再回到首页继续推进今天的工作。"
-
-  const briefCards = buildBriefCards({
-    activeTrack,
-    activeTrackFeed,
-    activeTrackFeedTotal,
-    tasks,
-    deadlines,
-    queueItems,
-  })
   const lanes = buildActionLanes({
     tasks,
     deadlines,
@@ -925,7 +665,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
                 {greeting}，把今天最重要的问题先推进到可决策状态。
               </h1>
               <p className="mt-3 text-sm leading-6 text-slate-600">
-                首页收敛到焦点、主工作台、提醒和证据。深层研究、文献管理和配置继续留在各自页面。
+                首页只保留一份今日研究简报、一段 Signals 和一条侧栏。完整 workflow、Research 深潜和文献管理都回到各自页面。
               </p>
             </div>
 
@@ -942,127 +682,18 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
             </div>
           </header>
 
-          <section className="mt-4 grid items-start gap-4 xl:grid-cols-[minmax(0,1.35fr)_360px]" id="workflow">
+          <section className="mt-4 grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_360px]" id="workflow">
             <div className="space-y-4">
-              <article className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-                <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-                  <div className="max-w-3xl">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-indigo-600">Workspace</p>
-                    <h2 className="mt-2 text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">
-                      当前焦点工作台
-                    </h2>
-                    <p className="mt-3 text-sm leading-6 text-slate-600">
-                      把焦点摘要、运行概览和执行入口收进同一块区域，减少上下跳转和空白断层。
-                    </p>
-                  </div>
-
-                  <Link
-                    href={activeTrack ? `/research?track_id=${activeTrack.id}` : "/research"}
-                    className="inline-flex items-center gap-1.5 text-sm font-semibold text-indigo-600 transition-colors hover:text-indigo-700"
-                  >
-                    打开完整 Research
-                    <ArrowRight size={15} />
-                  </Link>
-                </div>
-
-                <div className="mt-5 grid items-start gap-5 xl:grid-cols-[minmax(0,1.1fr)_minmax(320px,0.9fr)]">
-                  <div>
-                    <div className="inline-flex items-center gap-2 rounded-full border border-indigo-100 bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700">
-                      <Sparkles size={14} />
-                      当前焦点
-                    </div>
-                    <h3 className="mt-4 text-2xl font-bold tracking-tight text-slate-900">
-                      {activeTrack?.name || "等待设置当前焦点"}
-                    </h3>
-                    <p className="mt-3 text-sm leading-6 text-slate-600">{focusSummary}</p>
-
-                    <div className="mt-5 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50/70">
-                      <div className="grid sm:grid-cols-2 xl:grid-cols-4">
-                        <div className="border-b border-slate-200 px-4 py-3 sm:border-r xl:border-b-0">
-                          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">Track 更新</p>
-                          <p className="mt-2 text-lg font-semibold text-slate-900">{activeTrackFeedTotal}</p>
-                        </div>
-                        <div className="border-b border-slate-200 px-4 py-3 xl:border-b-0 xl:border-r">
-                          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">候选队列</p>
-                          <p className="mt-2 text-lg font-semibold text-slate-900">{readingQueue.length}</p>
-                        </div>
-                        <div className="border-b border-slate-200 px-4 py-3 sm:border-r sm:border-b-0">
-                          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">提醒</p>
-                          <p className="mt-2 text-lg font-semibold text-slate-900">{alertCount}</p>
-                        </div>
-                        <div className="px-4 py-3">
-                          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">证据信号</p>
-                          <p className="mt-2 text-lg font-semibold text-slate-900">{signalCount}</p>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="mt-5 flex flex-wrap gap-2">
-                      <span className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-600">
-                        <Layers size={13} />
-                        {activeTrack ? activeTrack.name : "Focus 未设置"}
-                      </span>
-                      <span className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-600">
-                        <Activity size={13} />
-                        {signalCount} 条证据已压缩
-                      </span>
-                      <span className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-600">
-                        <Clock size={13} />
-                        {highPriorityQueue} 篇高优候选
-                      </span>
-                    </div>
-
-                    <div className="mt-4 flex flex-wrap gap-2">
-                      {focusKeywords.length > 0 ? (
-                        focusKeywords.map((keyword) => (
-                          <span
-                            key={keyword}
-                            className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-600"
-                          >
-                            {keyword}
-                          </span>
-                        ))
-                      ) : (
-                        <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-600">
-                          去 Research 添加关键词
-                        </span>
-                      )}
-                      {activeTrackFeedTotal > 0 ? (
-                        <span className="rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-700">
-                          {activeTrackFeedTotal} 条 Track feed
-                        </span>
-                      ) : null}
-                    </div>
-
-                    <FocusDeadlinesPanel track={activeTrack} deadlines={focusDeadlines} />
-
-                    <div className="mt-6 flex flex-wrap gap-3">
-                      <Link
-                        href="#signals"
-                        className="inline-flex min-h-11 items-center justify-center rounded-full border border-slate-200 bg-white px-5 text-sm font-semibold text-slate-700 transition-colors hover:border-slate-300 hover:bg-slate-50"
-                      >
-                        查看证据快照
-                      </Link>
-                      <Link
-                        href="/papers"
-                        className="inline-flex min-h-11 items-center justify-center rounded-full border border-slate-200 bg-white px-5 text-sm font-semibold text-slate-700 transition-colors hover:border-slate-300 hover:bg-slate-50"
-                      >
-                        打开 Papers
-                      </Link>
-                    </div>
-                  </div>
-
-                  <FocusOverviewPanel items={briefCards} />
-                </div>
-              </article>
-
-              <WorkflowDockCard
+              <TopicWorkflowDashboard
                 initialQueries={initialQueries}
-                activeTrackName={activeTrack?.name ?? null}
-                activeTrackHref={activeTrack ? `/research?track_id=${activeTrack.id}` : "/research"}
-                readingQueueCount={readingQueue.length}
-                urgentDeadlineCount={urgentDeadlines.length}
-                signalCount={signalCount}
+                compact
+                dashboardContext={{
+                  activeTrackName: activeTrack?.name ?? null,
+                  activeTrackHref: activeTrack ? `/research?track_id=${activeTrack.id}` : "/research",
+                  readingQueueCount: readingQueue.length,
+                  urgentDeadlineCount: urgentDeadlines.length,
+                  signalCount,
+                }}
               />
             </div>
 
@@ -1077,7 +708,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
 
           <section className="mt-4" id="signals">
             <article className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-              <div className="grid gap-4 xl:grid-cols-[220px_minmax(0,1fr)] xl:items-start">
+              <div className="grid gap-4 xl:grid-cols-[220px_minmax(0,1.15fr)_320px] xl:items-start">
                 <div>
                   <SectionIntro
                     eyebrow="Signals"
@@ -1100,12 +731,24 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
                   </div>
                 </div>
 
-                <div className="grid auto-rows-fr gap-3 md:grid-cols-2 xl:grid-cols-3">
-                  {intelligenceCards.length > 0 ? (
-                    intelligenceCards.map((item) => <EvidencePreviewCard key={item.id} item={item} compact />)
+                <div>
+                  {featuredSignal ? (
+                    <EvidencePreviewCard item={featuredSignal} />
                   ) : (
-                    <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50/50 p-5 text-sm leading-6 text-slate-600 md:col-span-2 xl:col-span-3">
+                    <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50/50 p-5 text-sm leading-6 text-slate-600">
                       当前没有需要上浮到首页的社区信号。可以直接在主工作台继续推进当前问题。
+                    </div>
+                  )}
+                </div>
+
+                <div className="space-y-3">
+                  {secondarySignals.length > 0 ? (
+                    secondarySignals.map((item) => (
+                      <EvidencePreviewCard key={item.id} item={item} compact />
+                    ))
+                  ) : (
+                    <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50/50 p-5 text-sm leading-6 text-slate-600">
+                      目前还没有次级信号需要占据首页侧栏。等新的 repo、社区或论文动态上浮后，这里会补齐辅助证据流。
                     </div>
                   )}
                 </div>

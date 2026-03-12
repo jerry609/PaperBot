@@ -92,3 +92,4 @@ async def test_context_engine_passes_year_filters_to_search_service():
     call = search_service.calls[0]
     assert call["year_from"] == 2020
     assert call["year_to"] == 2024
+    assert call["persist"] is False

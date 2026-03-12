@@ -61,7 +61,7 @@ export function DashboardCommandCenter({
     },
     {
       title: "Workflows",
-      description: "Harvest, DailyPaper and automation runs",
+      description: "Open the full Search, DailyPaper and analysis workbench",
       href: "/workflows",
       icon: Workflow,
       metric: `${runningPipelines} running`,

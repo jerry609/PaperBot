@@ -13,6 +13,10 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from paperbot.api.streaming import StreamEvent, sse_response
+from paperbot.application.services.candidate_curation import (
+    curate_search_result,
+    ingest_curated_report,
+)
 from paperbot.application.services.daily_push_service import DailyPushService
 from paperbot.application.services.llm_service import get_llm_service
 from paperbot.application.services.enrichment_pipeline import (
@@ -26,12 +30,9 @@ from paperbot.application.services.paper_search_service import PaperSearchServic
 from paperbot.application.workflows.analysis.paper_judge import PaperJudge
 from paperbot.application.workflows.dailypaper import (
     DailyPaperReporter,
-    build_daily_paper_report,
-    ingest_daily_report_to_registry,
-    normalize_llm_features,
+    render_daily_paper_markdown,
     normalize_output_formats,
     persist_judge_scores_to_registry,
-    render_daily_paper_markdown,
     select_judge_candidates,
 )
 from paperbot.application.workflows.unified_topic_search import (
@@ -155,6 +156,23 @@ class PapersCoolSearchResponse(BaseModel):
     summary: Dict[str, Any]
 
 
+class PapersCoolCurateRequest(BaseModel):
+    search_result: Dict[str, Any]
+    title: str = "DailyPaper Digest"
+    top_n: int = Field(10, ge=1, le=200)
+    enable_llm_analysis: bool = False
+    llm_features: List[str] = Field(default_factory=lambda: ["summary"])
+    enable_judge: bool = False
+    judge_runs: int = Field(1, ge=1, le=5)
+    judge_max_items_per_query: int = Field(5, ge=1, le=200)
+    judge_token_budget: int = Field(0, ge=0, le=2_000_000)
+
+
+class PapersCoolCurateResponse(BaseModel):
+    report: Dict[str, Any]
+    markdown: str
+
+
 class DailyPaperRequest(BaseModel):
     queries: List[str] = Field(default_factory=list)
     sources: List[str] = Field(default_factory=lambda: ["papers_cool"])
@@ -235,6 +253,18 @@ class PapersCoolReposResponse(BaseModel):
     persist_summary: Optional[Dict[str, int]] = None
 
 
+class PapersCoolIngestRequest(BaseModel):
+    report: Dict[str, Any]
+    persist_judge_scores: bool = False
+
+
+class PapersCoolIngestResponse(BaseModel):
+    report: Dict[str, Any]
+    markdown: str
+    registry_ingest: Dict[str, Any]
+    judge_registry_ingest: Optional[Dict[str, Any]] = None
+
+
 @router.post("/research/paperscool/search", response_model=PapersCoolSearchResponse)
 async def topic_search(req: PapersCoolSearchRequest):
     cleaned_queries = [q.strip() for q in req.queries if (q or "").strip()]
@@ -253,6 +283,59 @@ async def topic_search(req: PapersCoolSearchRequest):
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"topic search failed: {exc}") from exc
     return PapersCoolSearchResponse(**result)
+
+
+@router.post("/research/paperscool/curate", response_model=PapersCoolCurateResponse)
+async def curate_topic_search(req: PapersCoolCurateRequest):
+    try:
+        curated = await curate_search_result(
+            search_result=req.search_result,
+            title=req.title,
+            top_n=req.top_n,
+            enable_llm_analysis=req.enable_llm_analysis,
+            llm_features=req.llm_features,
+            enable_judge=req.enable_judge,
+            judge_runs=req.judge_runs,
+            judge_max_items_per_query=req.judge_max_items_per_query,
+            judge_token_budget=req.judge_token_budget,
+            llm_service_factory=get_llm_service,
+            judge_factory=PaperJudge,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"curate failed: {exc}") from exc
+
+    return PapersCoolCurateResponse(
+        report=curated.report,
+        markdown=render_daily_paper_markdown(curated.report),
+    )
+
+
+@router.post("/research/paperscool/ingest", response_model=PapersCoolIngestResponse)
+async def ingest_curated_topic_report(req: PapersCoolIngestRequest):
+    if not isinstance(req.report, dict) or not req.report:
+        raise HTTPException(status_code=400, detail="report is required")
+
+    ingested = ingest_curated_report(
+        report=req.report,
+        persist_judge_scores=bool(req.persist_judge_scores),
+    )
+    report = ingested.report
+    _enqueue_repo_enrichment_async(report)
+
+    return PapersCoolIngestResponse(
+        report=report,
+        markdown=render_daily_paper_markdown(report),
+        registry_ingest=(
+            dict(report.get("registry_ingest") or {})
+            if isinstance(report.get("registry_ingest"), dict)
+            else {}
+        ),
+        judge_registry_ingest=(
+            dict(report.get("judge_registry_ingest") or {})
+            if isinstance(report.get("judge_registry_ingest"), dict)
+            else None
+        ),
+    )
 
 
 async def _dailypaper_stream(req: DailyPaperRequest):
@@ -362,286 +445,48 @@ async def _dailypaper_stream(req: DailyPaperRequest):
     phase_ms["search"] = round((time.perf_counter() - phase_start) * 1000.0, 2)
     phase_start = time.perf_counter()
 
-    # Phase 2 — Build Report
+    # Phase 2 — Curate Report
     if req.resume and isinstance(session_state.get("report"), dict):
         report = dict(session_state.get("report") or {})
         yield StreamEvent(
             type="progress",
-            data={"phase": "build", "message": "Resumed report from checkpoint"},
+            data={"phase": "curate", "message": "Resumed curated report from checkpoint"},
         )
+        phase_ms["build"] = 0.0
+        phase_ms["enrich"] = 0.0
     else:
-        yield StreamEvent(type="progress", data={"phase": "build", "message": "Building report..."})
-        report = build_daily_paper_report(
-            search_result=search_result, title=req.title, top_n=req.top_n
+        yield StreamEvent(
+            type="progress",
+            data={"phase": "curate", "message": "Curating report..."},
         )
+        curated = await curate_search_result(
+            search_result=search_result,
+            title=req.title,
+            top_n=req.top_n,
+            enable_llm_analysis=req.enable_llm_analysis,
+            llm_features=req.llm_features,
+            enable_judge=req.enable_judge,
+            judge_runs=req.judge_runs,
+            judge_max_items_per_query=req.judge_max_items_per_query,
+            judge_token_budget=req.judge_token_budget,
+            llm_service_factory=get_llm_service,
+            judge_factory=PaperJudge,
+        )
+        report = curated.report
         _get_pipeline_session_store().save_checkpoint(
             session_id=session_id,
-            checkpoint="report_built",
+            checkpoint="enriched",
             state={"search_result": search_result, "report": report},
         )
+        phase_ms["build"] = curated.build_ms
+        phase_ms["enrich"] = curated.enrich_ms
 
-    yield StreamEvent(
-        type="report_built",
-        data={
-            "queries_count": len(report.get("queries") or []),
-            "global_top_count": len(report.get("global_top") or []),
-            "report": report,
-            "session_id": session_id,
-        },
-    )
-    phase_ms["build"] = round((time.perf_counter() - phase_start) * 1000.0, 2)
-    phase_start = time.perf_counter()
+        for event in curated.events:
+            payload = dict(event.data)
+            if event.type == "report_built":
+                payload["session_id"] = session_id
+            yield StreamEvent(type=event.type, data=payload)
 
-    query_items: List[Dict[str, Any]] = []
-    paper_query_map: Dict[int, str] = {}
-    for query in report.get("queries") or []:
-        query_name = query.get("normalized_query") or query.get("raw_query") or ""
-        for item in query.get("top_items") or []:
-            query_items.append(item)
-            paper_query_map[id(item)] = query_name
-
-    # Phase 3 — LLM Enrichment (pipeline)
-    if req.enable_llm_analysis:
-        features = normalize_llm_features(req.llm_features)
-        if features:
-            llm_service = get_llm_service()
-            llm_block: Dict[str, Any] = {
-                "enabled": True,
-                "features": features,
-                "query_trends": [],
-                "daily_insight": "",
-            }
-
-            llm_targets: set[int] = set()
-            if "summary" in features or "relevance" in features:
-                for query in report.get("queries") or []:
-                    for item in (query.get("top_items") or [])[:3]:
-                        llm_targets.add(id(item))
-
-            yield StreamEvent(
-                type="progress",
-                data={
-                    "phase": "llm",
-                    "message": "Starting LLM enrichment...",
-                    "total": len(llm_targets),
-                },
-            )
-
-            if llm_targets:
-                pipeline = EnrichmentPipeline(
-                    steps=[LLMEnrichmentStep(llm_service=llm_service, features=features)]
-                )
-                await pipeline.run(
-                    query_items,
-                    context=EnrichmentContext(
-                        query="; ".join(cleaned_queries),
-                        extra={
-                            "llm_target_ids": llm_targets,
-                            "query_for_relevance": "; ".join(cleaned_queries),
-                        },
-                    ),
-                )
-
-            if "trends" in features:
-                for query in report.get("queries") or []:
-                    query_name = query.get("normalized_query") or query.get("raw_query") or ""
-                    top_items = (query.get("top_items") or [])[:3]
-                    if not top_items:
-                        continue
-                    trend_text = llm_service.analyze_trends(topic=query_name, papers=top_items)
-                    llm_block["query_trends"].append({"query": query_name, "analysis": trend_text})
-                    yield StreamEvent(
-                        type="trend",
-                        data={
-                            "query": query_name,
-                            "analysis": trend_text,
-                            "done": len(llm_block["query_trends"]),
-                            "total": len(report.get("queries") or []),
-                        },
-                    )
-
-            if "insight" in features:
-                yield StreamEvent(
-                    type="progress",
-                    data={"phase": "insight", "message": "Generating daily insight..."},
-                )
-                llm_block["daily_insight"] = llm_service.generate_daily_insight(report)
-                yield StreamEvent(type="insight", data={"analysis": llm_block["daily_insight"]})
-
-            report["llm_analysis"] = llm_block
-            summary_done = sum(
-                1
-                for item in query_items
-                if id(item) in llm_targets and (item.get("ai_summary") or item.get("relevance"))
-            )
-            yield StreamEvent(
-                type="llm_done",
-                data={
-                    "summaries_count": summary_done,
-                    "trends_count": len(llm_block["query_trends"]),
-                },
-            )
-
-    # Phase 4 — Judge + Filter (pipeline)
-    if req.enable_judge:
-        llm_service_j = get_llm_service()
-        judge = PaperJudge(llm_service=llm_service_j)
-        selection = select_judge_candidates(
-            report,
-            max_items_per_query=req.judge_max_items_per_query,
-            n_runs=req.judge_runs,
-            token_budget=req.judge_token_budget,
-        )
-        selected = list(selection.get("selected") or [])
-        judge_targets: set[int] = set()
-        queries = list(report.get("queries") or [])
-        for row in selected:
-            query_index = int(row.get("query_index") or 0)
-            item_index = int(row.get("item_index") or 0)
-            if query_index >= len(queries):
-                continue
-            top_items = list(queries[query_index].get("top_items") or [])
-            if item_index >= len(top_items):
-                continue
-            judge_targets.add(id(top_items[item_index]))
-
-        yield StreamEvent(
-            type="progress",
-            data={
-                "phase": "judge",
-                "message": "Starting judge scoring",
-                "total": len(selected),
-                "budget": selection.get("budget") or {},
-            },
-        )
-
-        if judge_targets:
-            judge_pipeline = EnrichmentPipeline(
-                steps=[JudgeStep(judge=judge, n_runs=max(1, int(req.judge_runs)))]
-            )
-            await judge_pipeline.run(
-                query_items,
-                context=EnrichmentContext(
-                    query="; ".join(cleaned_queries),
-                    extra={"judge_target_ids": judge_targets, "paper_query_map": paper_query_map},
-                ),
-            )
-
-        recommendation_count: Dict[str, int] = {
-            "must_read": 0,
-            "worth_reading": 0,
-            "skim": 0,
-            "skip": 0,
-        }
-        for item in query_items:
-            if id(item) not in judge_targets:
-                continue
-            j_payload = item.get("judge") if isinstance(item.get("judge"), dict) else {}
-            rec = str(j_payload.get("recommendation") or "")
-            if rec in recommendation_count:
-                recommendation_count[rec] += 1
-
-        for query in report.get("queries") or []:
-            top_items = list(query.get("top_items") or [])
-            if not top_items:
-                continue
-            capped_count = min(len(top_items), max(1, int(req.judge_max_items_per_query)))
-            capped = top_items[:capped_count]
-            capped.sort(
-                key=lambda it: float((it.get("judge") or {}).get("overall") or -1), reverse=True
-            )
-            query["top_items"] = capped + top_items[capped_count:]
-
-        report["judge"] = {
-            "enabled": True,
-            "max_items_per_query": int(req.judge_max_items_per_query),
-            "n_runs": int(max(1, int(req.judge_runs))),
-            "recommendation_count": recommendation_count,
-            "budget": selection.get("budget") or {},
-        }
-        yield StreamEvent(type="judge_done", data=report["judge"])
-
-        KEEP_RECOMMENDATIONS = {"must_read", "worth_reading"}
-        yield StreamEvent(
-            type="progress",
-            data={"phase": "filter", "message": "Filtering papers by judge recommendation..."},
-        )
-
-        filter_pipeline = EnrichmentPipeline(steps=[FilterStep(keep=KEEP_RECOMMENDATIONS)])
-        await filter_pipeline.run(query_items, context=EnrichmentContext())
-
-        filter_log: List[Dict[str, Any]] = []
-        total_before = 0
-        total_after = 0
-        for query in report.get("queries") or []:
-            query_name = query.get("normalized_query") or query.get("raw_query") or ""
-            items_before = list(query.get("top_items") or [])
-            total_before += len(items_before)
-            kept: List[Dict[str, Any]] = []
-            for item in items_before:
-                if item.get("_filtered_out"):
-                    j = item.get("judge") if isinstance(item.get("judge"), dict) else {}
-                    filter_log.append(
-                        {
-                            "query": query_name,
-                            "title": item.get("title") or "Untitled",
-                            "recommendation": j.get("recommendation"),
-                            "overall": j.get("overall"),
-                            "action": "removed",
-                        }
-                    )
-                    continue
-                kept.append(item)
-            total_after += len(kept)
-            query["top_items"] = kept
-
-        judge_by_key: Dict[str, Dict[str, Any]] = {}
-        for item in query_items:
-            if not isinstance(item.get("judge"), dict):
-                continue
-            key = f"{(item.get('url') or '').strip()}|{(item.get('title') or '').strip().lower()}"
-            if key:
-                judge_by_key[key] = item["judge"]
-
-        global_before = list(report.get("global_top") or [])
-        global_kept = []
-        for item in global_before:
-            key = f"{(item.get('url') or '').strip()}|{(item.get('title') or '').strip().lower()}"
-            if key in judge_by_key:
-                item["judge"] = judge_by_key[key]
-            j = item.get("judge")
-            if isinstance(j, dict):
-                rec = str(j.get("recommendation") or "")
-                if rec in KEEP_RECOMMENDATIONS:
-                    global_kept.append(item)
-            else:
-                global_kept.append(item)
-        report["global_top"] = global_kept
-
-        report["filter"] = {
-            "enabled": True,
-            "keep_recommendations": list(KEEP_RECOMMENDATIONS),
-            "total_before": total_before,
-            "total_after": total_after,
-            "removed_count": total_before - total_after,
-            "log": filter_log,
-        }
-        yield StreamEvent(
-            type="filter_done",
-            data={
-                "total_before": total_before,
-                "total_after": total_after,
-                "removed_count": total_before - total_after,
-                "log": filter_log,
-            },
-        )
-
-    _get_pipeline_session_store().save_checkpoint(
-        session_id=session_id,
-        checkpoint="enriched",
-        state={"search_result": search_result, "report": report},
-    )
-    phase_ms["enrich"] = round((time.perf_counter() - phase_start) * 1000.0, 2)
     phase_start = time.perf_counter()
 
     if req.require_approval:
@@ -690,18 +535,10 @@ async def _dailypaper_stream(req: DailyPaperRequest):
 
     # Phase 5 — Persist + Notify
     yield StreamEvent(type="progress", data={"phase": "save", "message": "Saving to registry..."})
-    try:
-        ingest_summary = ingest_daily_report_to_registry(report)
-        report["registry_ingest"] = ingest_summary
-    except Exception as exc:
-        report["registry_ingest"] = {"error": str(exc)}
-
-    if req.enable_judge:
-        try:
-            report["judge_registry_ingest"] = persist_judge_scores_to_registry(report)
-        except Exception as exc:
-            report["judge_registry_ingest"] = {"error": str(exc)}
-
+    report = ingest_curated_report(
+        report=report,
+        persist_judge_scores=bool(req.enable_judge),
+    ).report
     _enqueue_repo_enrichment_async(report)
 
     markdown = render_daily_paper_markdown(report)
@@ -859,17 +696,10 @@ def _finalize_approved_session(session: Dict[str, Any]) -> Dict[str, Any]:
     if not report:
         raise HTTPException(status_code=400, detail="session has no report to approve")
 
-    try:
-        report["registry_ingest"] = ingest_daily_report_to_registry(report)
-    except Exception as exc:
-        report["registry_ingest"] = {"error": str(exc)}
-
-    if bool(payload.get("enable_judge")):
-        try:
-            report["judge_registry_ingest"] = persist_judge_scores_to_registry(report)
-        except Exception as exc:
-            report["judge_registry_ingest"] = {"error": str(exc)}
-
+    report = ingest_curated_report(
+        report=report,
+        persist_judge_scores=bool(payload.get("enable_judge")),
+    ).report
     _enqueue_repo_enrichment_async(report)
 
     markdown = render_daily_paper_markdown(report)
@@ -995,13 +825,14 @@ async def _sync_daily_report(req: DailyPaperRequest, cleaned_queries: List[str])
         )
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"daily search failed: {exc}") from exc
-    report = build_daily_paper_report(search_result=search_result, title=req.title, top_n=req.top_n)
-
-    try:
-        ingest_summary = ingest_daily_report_to_registry(report)
-        report["registry_ingest"] = ingest_summary
-    except Exception as exc:
-        report["registry_ingest"] = {"error": str(exc)}
+    curated = await curate_search_result(
+        search_result=search_result,
+        title=req.title,
+        top_n=req.top_n,
+        llm_service_factory=get_llm_service,
+        judge_factory=PaperJudge,
+    )
+    report = ingest_curated_report(report=curated.report).report
 
     _enqueue_repo_enrichment_async(report)
 

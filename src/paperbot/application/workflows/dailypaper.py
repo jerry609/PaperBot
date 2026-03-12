@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
+from paperbot.application.services.candidate_search import ingest_candidate_papers
 from paperbot.application.services.llm_service import LLMService, get_llm_service
 from paperbot.application.workflows.analysis.paper_judge import PaperJudge
 from paperbot.infrastructure.stores.paper_store import SqlAlchemyPaperStore
@@ -167,7 +168,12 @@ def ingest_daily_report_to_registry(
 
     papers = _iter_report_papers(report)
     source_hint = (report.get("sources") or [report.get("source") or "papers_cool"])[0]
-    return store.upsert_many(papers=papers, source_hint=source_hint, seen_at=seen_at)
+    return ingest_candidate_papers(
+        papers=papers,
+        registry=store,
+        source_hint=source_hint,
+        seen_at=seen_at,
+    )
 
 
 def persist_judge_scores_to_registry(

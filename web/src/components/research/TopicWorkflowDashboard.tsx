@@ -1828,6 +1828,9 @@ export default function TopicWorkflowDashboard({
     : compact
       ? "至少保留一个主题、来源和分支后才能执行。"
       : "At least one topic, source, and branch must stay enabled before execution."
+  const storageBoundaryHint = compact
+    ? "Search 先建立候选池；DailyPaper 会把排序后的结果回写到 registry，再交给 Research / Papers 继续沉淀。"
+    : "Search previews the candidate pool first; DailyPaper persists ranked results back into the registry before Research / Papers handoff."
   const emailOverrideField = notifyEnabled ? (
     <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4">
       <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
@@ -1860,6 +1863,305 @@ export default function TopicWorkflowDashboard({
       return sum
     }, 0) / 3 * 100,
   )
+  const workflowPageHref = queries.length
+    ? `/workflows?query=${encodeURIComponent(queries.join(","))}`
+    : "/workflows"
+  const snapshotHighlights = (
+    dailyResult?.report?.global_top?.length ? dailyResult.report.global_top : allPapers
+  ).slice(0, 3)
+  const snapshotInsight = (dailyResult?.report?.llm_analysis?.daily_insight || "").trim()
+  const snapshotTrendRows = (dailyResult?.report?.llm_analysis?.query_trends || []).slice(0, 2)
+
+  if (compact) {
+    return (
+      <div className="space-y-3" id="workflow-console">
+        <PaperDetailDialog
+          item={selectedPaper}
+          open={Boolean(selectedPaper)}
+          onClose={() => setSelectedPaper(null)}
+        />
+
+        <Card className="rounded-[28px] border border-slate-200/80 bg-white shadow-sm">
+          <CardHeader className="pb-4">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div className="max-w-3xl">
+                <div className="inline-flex items-center gap-2 rounded-full border border-indigo-100 bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700">
+                  <WorkflowIcon className="size-3.5" />
+                  Today&apos;s Research Brief
+                </div>
+                <h2 className="mt-3 text-2xl font-bold tracking-tight text-slate-900">
+                  {dashboardContext?.activeTrackName
+                    ? `${dashboardContext.activeTrackName} 的今日研究简报`
+                    : "首页只保留一份今日研究简报"}
+                </h2>
+                <p className="mt-2 text-sm leading-6 text-slate-600">
+                  首页主区现在只保留最近一次 workflow 的热点、交接状态和下一步建议。
+                  完整的 Search、DailyPaper、Analyze 与交付工作台已经回到独立的
+                  `/workflows` 页面。
+                </p>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <Badge className="rounded-full bg-indigo-600 px-3 py-1 text-[11px] font-medium text-white">
+                  {phaseLabel}
+                </Badge>
+                <Badge
+                  variant="secondary"
+                  className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-[11px] font-medium text-slate-600"
+                >
+                  {queries.length} topics
+                </Badge>
+                <Badge
+                  variant="secondary"
+                  className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-[11px] font-medium text-slate-600"
+                >
+                  {formatTimestamp(store.lastUpdated)}
+                </Badge>
+              </div>
+            </div>
+          </CardHeader>
+
+          <CardContent className="space-y-4">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-3.5">
+              <div className="flex flex-wrap gap-2">
+                <div className="rounded-full border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
+                  <span className="font-semibold text-slate-900">Focus:</span>{" "}
+                  {dashboardContext?.activeTrackName || "Global"} · {dashboardContext?.readingQueueCount ?? 0} queued
+                </div>
+                <div className="rounded-full border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
+                  <span className="font-semibold text-slate-900">Snapshot:</span>{" "}
+                  {hasReportData ? "Daily digest ready" : hasSearchData ? "Candidates ready" : "Waiting"}
+                  {" · "}
+                  {allPapers.length} candidates / {judgedPapersCount} judged
+                </div>
+                <div className="rounded-full border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
+                  <span className="font-semibold text-slate-900">Delivery:</span>{" "}
+                  {deliveryChannels.length ? deliveryChannels.join(" + ") : "Manual review"}
+                  {" · "}
+                  {saveDaily ? "persisted" : "preview"}
+                </div>
+                <div className="rounded-full border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
+                  <span className="font-semibold text-slate-900">Alerts:</span>{" "}
+                  {(dashboardContext?.urgentDeadlineCount ?? 0) + (dashboardContext?.signalCount ?? 0)} dashboard items
+                </div>
+              </div>
+            </div>
+
+            {hasWorkspaceOutput ? (
+              <div className="rounded-[24px] border border-slate-200 bg-slate-50/60 p-4">
+                <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                  <div className="max-w-2xl">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-indigo-600">
+                      Today&apos;s Push
+                    </p>
+                    <h3 className="mt-2 text-xl font-bold text-slate-900">
+                      {dailyResult?.report?.title || "Latest workflow candidate pool"}
+                    </h3>
+                    <p className="mt-2 text-sm leading-6 text-slate-600">{nextStepLabel}</p>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    <Button asChild size="sm" className="rounded-full bg-indigo-600 px-4 hover:bg-indigo-700">
+                      <Link href={workflowPageHref}>
+                        Open Full Workbench
+                        <ArrowUpRightIcon className="ml-1.5 size-4" />
+                      </Link>
+                    </Button>
+                    <Button asChild size="sm" variant="outline" className="rounded-full border-slate-200 px-4">
+                      <Link href={dashboardContext?.activeTrackHref || "/research"}>
+                        Open Research
+                        <ArrowUpRightIcon className="ml-1.5 size-4" />
+                      </Link>
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                  <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                      Last updated
+                    </p>
+                    <p className="mt-2 text-sm font-semibold text-slate-900">
+                      {formatTimestamp(store.lastUpdated)}
+                    </p>
+                  </div>
+                  <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                    <div className="flex items-center justify-between gap-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                      <span>Progress</span>
+                      <span>{overallProgressValue}%</span>
+                    </div>
+                    <Progress value={overallProgressValue} className="mt-3" />
+                    <p className="mt-3 text-xs text-slate-500">{phaseLabel}</p>
+                  </div>
+                  <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:col-span-2 xl:col-span-1">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                      Next handoff
+                    </p>
+                    <p className="mt-2 text-sm leading-6 text-slate-600">
+                      {dashboardContext?.activeTrackName
+                        ? `Send promising papers into ${dashboardContext.activeTrackName} and keep the homepage focused on decisions.`
+                        : "Move promising papers into Research once the shortlist stabilizes."}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mt-4 grid gap-3 xl:grid-cols-3">
+                  {snapshotHighlights.length > 0 ? (
+                    snapshotHighlights.map((item, index) => {
+                      const recommendation = item.judge?.recommendation
+                        ? REC_LABELS[item.judge.recommendation] || item.judge.recommendation
+                        : null
+                      const scoreLabel =
+                        item.judge?.overall != null
+                          ? `Judge ${Number(item.judge.overall).toFixed(1)}`
+                          : item.score != null
+                            ? `Score ${Number(item.score).toFixed(2)}`
+                            : "Candidate"
+                      const queryLabel =
+                        (item.matched_queries || []).slice(0, 2).join(" · ") || "Latest shortlist"
+
+                      return (
+                        <div
+                          key={`${item.title}-${index}`}
+                          className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
+                        >
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="flex flex-wrap gap-2">
+                              <Badge
+                                variant="secondary"
+                                className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-[11px] font-medium text-slate-600"
+                              >
+                                {queryLabel}
+                              </Badge>
+                              <Badge
+                                variant="secondary"
+                                className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-[11px] font-medium text-slate-600"
+                              >
+                                {scoreLabel}
+                              </Badge>
+                              {recommendation ? (
+                                <Badge className="rounded-full bg-indigo-600 px-3 py-1 text-[11px] font-medium text-white">
+                                  {recommendation}
+                                </Badge>
+                              ) : null}
+                            </div>
+                            <p className="text-xs text-slate-500">#{index + 1}</p>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => setSelectedPaper(item)}
+                            className="mt-3 block text-left"
+                          >
+                            <p className="text-base font-semibold leading-7 text-slate-900 transition-colors hover:text-indigo-700">
+                              {item.title}
+                            </p>
+                          </button>
+
+                          <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                            {(item.sources || []).slice(0, 3).map((source) => (
+                              <span
+                                key={`${item.title}-${source}`}
+                                className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1"
+                              >
+                                {SOURCE_LABELS[source] || source}
+                              </span>
+                            ))}
+                            {item.url ? (
+                              <a
+                                href={item.url}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="inline-flex items-center gap-1 font-medium text-indigo-600 hover:text-indigo-700"
+                              >
+                                Source
+                                <ArrowUpRightIcon className="size-3.5" />
+                              </a>
+                            ) : null}
+                          </div>
+                        </div>
+                      )
+                    })
+                  ) : (
+                    <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-6 text-sm leading-6 text-slate-600 xl:col-span-3">
+                      暂时还没有可上浮到首页的候选或 digest。打开完整 workbench
+                      跑一轮 Search 或 DailyPaper 之后，这里会自动显示最近的热点摘要。
+                    </div>
+                  )}
+                </div>
+
+                {snapshotInsight || snapshotTrendRows.length > 0 ? (
+                  <div className="mt-4 grid gap-3 xl:grid-cols-[minmax(0,1.35fr)_minmax(0,0.95fr)]">
+                    {snapshotInsight ? (
+                      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-indigo-600">
+                          Daily Insight
+                        </p>
+                        <p className="mt-3 text-sm leading-6 text-slate-600">{snapshotInsight}</p>
+                      </div>
+                    ) : null}
+
+                    {snapshotTrendRows.length > 0 ? (
+                      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-indigo-600">
+                          Topic Trends
+                        </p>
+                        <div className="mt-3 space-y-3">
+                          {snapshotTrendRows.map((trend) => (
+                            <div
+                              key={trend.query}
+                              className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3"
+                            >
+                              <p className="text-sm font-semibold text-slate-900">{trend.query}</p>
+                              <p className="mt-1 text-sm leading-6 text-slate-600">
+                                {trend.analysis}
+                              </p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+            ) : (
+              <div className="rounded-[24px] border border-dashed border-slate-300 bg-slate-50/60 p-6">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="max-w-2xl">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-indigo-600">
+                      No Snapshot Yet
+                    </p>
+                    <h3 className="mt-2 text-xl font-bold text-slate-900">
+                      还没有最近一次 workflow 运行结果
+                    </h3>
+                    <p className="mt-2 text-sm leading-6 text-slate-600">
+                      首页现在只负责展示快照，不再承载完整控制台。去 `/workflows`
+                      跑一轮 Search 或 DailyPaper，回来这里就能看到热点摘要、最近进度和研究交接状态。
+                    </p>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    <Button asChild size="sm" className="rounded-full bg-indigo-600 px-4 hover:bg-indigo-700">
+                      <Link href={workflowPageHref}>
+                        Open Full Workbench
+                        <ArrowUpRightIcon className="ml-1.5 size-4" />
+                      </Link>
+                    </Button>
+                    <Button asChild size="sm" variant="outline" className="rounded-full border-slate-200 px-4">
+                      <Link href={dashboardContext?.activeTrackHref || "/research"}>
+                        Open Research
+                        <ArrowUpRightIcon className="ml-1.5 size-4" />
+                      </Link>
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
 
   return (
     <div className={`${compact ? "space-y-3" : "space-y-4"}`}>
@@ -1899,6 +2201,18 @@ export default function TopicWorkflowDashboard({
                       </Badge>
                     ) : null}
                   </div>
+                  {compact ? (
+                    <div className="mt-3 flex flex-wrap items-center gap-3 text-sm text-slate-500">
+                      <span>这里负责多主题检索、DailyPaper 和 Analyze；单篇即时探索继续放在 Research。</span>
+                      <Link
+                        href={dashboardContext?.activeTrackHref || "/research"}
+                        className="inline-flex items-center gap-1 font-medium text-indigo-600 transition-colors hover:text-indigo-700"
+                      >
+                        Open Research
+                        <ArrowUpRightIcon className="size-3.5" />
+                      </Link>
+                    </div>
+                  ) : null}
                 </div>
 
                 <div className="grid gap-3 sm:grid-cols-3 xl:w-[420px]">
@@ -2225,7 +2539,10 @@ export default function TopicWorkflowDashboard({
                 )}
 
                 <div className="flex flex-col gap-3 border-t border-slate-100 pt-4">
-                  <p className="text-sm text-slate-500">{controlStateHint}</p>
+                  <div className="space-y-1">
+                    <p className="text-sm text-slate-500">{controlStateHint}</p>
+                    <p className="text-xs leading-5 text-slate-400">{storageBoundaryHint}</p>
+                  </div>
                   <div className={`${compact ? "grid gap-2 sm:grid-cols-2 xl:grid-cols-4" : "flex flex-wrap gap-2"}`}>
                     <Button
                       size="sm"
