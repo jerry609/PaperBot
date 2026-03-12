@@ -723,16 +723,36 @@ class SqlAlchemyResearchStore(FeedbackPort):
                 .scalars()
                 .all()
             )
+
+            # Track latest effective save/unsave state globally per paper
+            # and per (paper, track) pair. This ensures that track-scoped
+            # saved views only include papers whose *current* state for that
+            # track is "save", rather than any track that ever saved it.
             latest_save_state: Dict[int, tuple[bool, Optional[datetime]]] = {}
+            latest_per_track: Dict[tuple[int, int], str] = {}
+
             for row in feedback_rows:
                 pid = int(row.paper_ref_id or 0)
                 if pid <= 0:
                     continue
                 normalized_action = self._normalize_feedback_action(str(row.action or ""))
-                if normalized_action == "save":
-                    saved_track_membership[pid].add(int(row.track_id or 0))
+
+                # Per-track state: first row encountered in descending
+                # timestamp order is the effective state for that
+                # (paper, track) pair.
+                tid = int(row.track_id or 0)
+                key = (pid, tid)
+                if tid > 0 and key not in latest_per_track:
+                    latest_per_track[key] = normalized_action
+
+                # Global latest save/unsave per paper (track-agnostic)
                 if pid not in latest_save_state:
                     latest_save_state[pid] = (normalized_action == "save", row.ts)
+
+            # Build membership mapping from effective per-track states.
+            for (pid, tid), action in latest_per_track.items():
+                if action == "save":
+                    saved_track_membership[pid].add(tid)
 
             for pid, (is_saved, ts) in latest_save_state.items():
                 if not is_saved:
