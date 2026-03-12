@@ -258,6 +258,13 @@ class SqlAlchemyResearchStore(FeedbackPort):
             ).scalar_one_or_none()
             return self._track_to_dict(row) if row else None
 
+    def get_track_by_id(self, *, track_id: int) -> Optional[Dict[str, Any]]:
+        with self._provider.session() as session:
+            row = session.execute(
+                select(ResearchTrackModel).where(ResearchTrackModel.id == track_id)
+            ).scalar_one_or_none()
+            return self._track_to_dict(row) if row else None
+
     def get_active_track(self, *, user_id: str) -> Optional[Dict[str, Any]]:
         with self._provider.session() as session:
             row = session.execute(

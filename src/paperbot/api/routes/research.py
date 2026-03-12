@@ -105,6 +105,13 @@ def _schedule_obsidian_export_for_track(
     )
 
 
+def _trusted_track_user_id(track: Optional[Dict[str, Any]]) -> Optional[str]:
+    if track is None:
+        return None
+    user_id = str(track.get("user_id") or "").strip()
+    return user_id or None
+
+
 ENABLE_ANCHOR_AUTHORS = os.getenv("PAPERBOT_ENABLE_ANCHOR_AUTHORS", "true").lower() == "true"
 
 _DISCOVERY_STOPWORDS: Set[str] = {
@@ -347,10 +354,11 @@ def create_track(req: TrackCreateRequest, background_tasks: BackgroundTasks):
         methods=req.methods,
         activate=req.activate,
     )
-    track_user_id = str(track.get("user_id") or req.user_id).strip() or req.user_id
-    _schedule_embedding_precompute(
-        background_tasks, user_id=track_user_id, track_ids=[int(track.get("id") or 0)]
-    )
+    track_user_id = _trusted_track_user_id(track)
+    if track_user_id:
+        _schedule_embedding_precompute(
+            background_tasks, user_id=track_user_id, track_ids=[int(track.get("id") or 0)]
+        )
     _schedule_obsidian_export_for_track(background_tasks, track=track, for_tracks=True)
     return TrackResponse(track=track)
 
@@ -496,8 +504,9 @@ def update_track(
         raise HTTPException(status_code=409, detail="Track name already exists") from None
     if not track:
         raise HTTPException(status_code=404, detail="Track not found")
-    track_user_id = str(track.get("user_id") or user_id).strip() or user_id
-    _schedule_embedding_precompute(background_tasks, user_id=track_user_id, track_ids=[track_id])
+    track_user_id = _trusted_track_user_id(track)
+    if track_user_id:
+        _schedule_embedding_precompute(background_tasks, user_id=track_user_id, track_ids=[track_id])
     _schedule_obsidian_export_for_track(background_tasks, track=track, for_tracks=True)
     return TrackResponse(track=track)
 
@@ -1120,10 +1129,7 @@ def add_paper_feedback(req: PaperFeedbackRequest, background_tasks: BackgroundTa
     normalized_action = research_store._normalize_feedback_action(req.action)
     current_action = research_store._effective_feedback_action(normalized_action)
     if normalized_action in {"save", "unsave"}:
-        export_track = active_track or research_store.get_track(
-            user_id=req.user_id,
-            track_id=int(track_id),
-        )
+        export_track = active_track or research_store.get_track_by_id(track_id=int(track_id))
         _schedule_obsidian_export_for_track(
             background_tasks,
             track=export_track,

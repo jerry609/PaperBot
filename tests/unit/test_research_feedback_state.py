@@ -186,8 +186,7 @@ def test_feedback_route_schedules_obsidian_export_using_persisted_track_owner(mo
         def _effective_feedback_action(self, action: str):
             return action
 
-        def get_track(self, *, user_id: str, track_id: int):
-            assert user_id == "spoofed-request-user"
+        def get_track_by_id(self, *, track_id: int):
             assert track_id == 9
             return {"id": 9, "user_id": "persisted-owner", "name": "Secure Track"}
 
