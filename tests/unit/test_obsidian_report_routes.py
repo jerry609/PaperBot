@@ -165,7 +165,7 @@ def test_obsidian_sync_routes_expose_status_scan_and_watch_controls(monkeypatch,
     monkeypatch.setattr(
         obsidian_route,
         "_build_obsidian_sync_service",
-        lambda request=None: fake_sync_service,
+        lambda app: fake_sync_service,
     )
     monkeypatch.setattr(
         obsidian_route,
@@ -174,25 +174,61 @@ def test_obsidian_sync_routes_expose_status_scan_and_watch_controls(monkeypatch,
     )
     monkeypatch.setattr(obsidian_route, "ObsidianVaultWatcher", _FakeWatcher)
     monkeypatch.setattr(obsidian_route, "WATCHDOG_AVAILABLE", True)
-    obsidian_route._vault_watcher = None
 
     with TestClient(app) as client:
+        assert getattr(client.app.state, "obsidian_vault_watcher", None) is None
         status_response = client.get("/api/obsidian/sync/status")
         scan_response = client.post("/api/obsidian/sync/scan")
         start_response = client.post("/api/obsidian/sync/watch/start")
+        assert getattr(client.app.state, "obsidian_vault_watcher", None) is not None
         stop_response = client.post("/api/obsidian/sync/watch/stop")
+        assert getattr(client.app.state, "obsidian_vault_watcher", None) is None
 
     assert status_response.status_code == 200
     assert status_response.json()["tracked_note_count"] == 4
     assert status_response.json()["watchdog_available"] is True
 
     assert scan_response.status_code == 200
-    assert scan_response.json()["memories_created"] == 3
+    assert scan_response.json()["accepted"] is True
+    assert scan_response.json()["status"] == "scan_scheduled"
+    assert scan_response.json()["mode"] == "background"
+    assert scan_response.json()["root_path"] == str(root_path)
 
     assert start_response.status_code == 200
     assert start_response.json()["watching"] is True
     assert start_response.json()["mode"] == "watchdog"
+    assert start_response.json()["scan_scheduled"] is True
 
     assert stop_response.status_code == 200
     assert stop_response.json()["watching"] is False
     assert fake_sync_service.scan_calls >= 2
+
+
+def test_obsidian_runtime_shutdown_closes_store_and_watcher():
+    class _FakeStore:
+        def __init__(self) -> None:
+            self.close_calls = 0
+
+        def close(self) -> None:
+            self.close_calls += 1
+
+    class _FakeShutdownWatcher:
+        def __init__(self) -> None:
+            self.stop_calls = 0
+
+        def stop(self) -> None:
+            self.stop_calls += 1
+
+    fake_store = _FakeStore()
+    fake_watcher = _FakeShutdownWatcher()
+
+    obsidian_route.initialize_obsidian_runtime(app)
+    app.state.obsidian_memory_store = fake_store
+    app.state.obsidian_vault_watcher = fake_watcher
+
+    obsidian_route.shutdown_obsidian_runtime(app)
+
+    assert fake_store.close_calls == 1
+    assert fake_watcher.stop_calls == 1
+    assert app.state.obsidian_memory_store is None
+    assert app.state.obsidian_vault_watcher is None

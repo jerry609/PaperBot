@@ -101,6 +101,12 @@ async def _startup_eventlog():
     except Exception:
         # If SQLAlchemy isn't available or DB init fails, fall back to logging only.
         app.state.event_log = LoggingEventLog()
+    obsidian.initialize_obsidian_runtime(app)
+
+
+@app.on_event("shutdown")
+async def _shutdown_obsidian_runtime():
+    obsidian.shutdown_obsidian_runtime(app)
 
 
 if __name__ == "__main__":

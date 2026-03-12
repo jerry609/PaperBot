@@ -216,6 +216,44 @@ def test_export_library_snapshot_backfills_existing_cited_by_links(tmp_path: Pat
     assert "[[PaperBot/Papers/2026-uniicl-1|UniICL]]" in prior_note
 
 
+def test_update_note_link_index_uses_explicit_root_path(tmp_path: Path, monkeypatch):
+    exporter = ObsidianFilesystemExporter()
+    root_path = tmp_path / "vault" / "PaperBot"
+    note_path = root_path / "Papers" / "nested" / "prior.md"
+    note_path.parent.mkdir(parents=True)
+    note_path.write_text(
+        (
+            "---\n"
+            "paperbot_type: paper\n"
+            "paperbot_managed_links: []\n"
+            "cited_by: []\n"
+            "---\n"
+            "# Prior\n\n"
+            "## Cited By\n"
+            "- [[PaperBot/Papers/existing|Existing]]\n"
+        ),
+        encoding="utf-8",
+    )
+
+    captured: dict[str, object] = {}
+
+    def _capture_write(**kwargs):
+        captured.update(kwargs)
+
+    monkeypatch.setattr(exporter, "_write_managed_note", _capture_write)
+
+    exporter._update_note_link_index(
+        note_path=note_path,
+        root_path=root_path,
+        frontmatter_key="cited_by",
+        heading="Cited By",
+        link="[[PaperBot/Papers/current|Current]]",
+    )
+
+    assert captured["root_path"] == root_path
+    assert "[[PaperBot/Papers/current|Current]]" in captured["frontmatter_payload"]["cited_by"]
+
+
 def test_export_library_snapshot_requires_existing_vault_directory(tmp_path: Path):
     exporter = ObsidianFilesystemExporter()
     missing_vault = tmp_path / "missing-vault"
