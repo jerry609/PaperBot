@@ -292,31 +292,31 @@ export function EmbeddingSettingsPanel() {
                   </div>
                 </div>
 
-                <div className="mt-4 grid gap-3 md:grid-cols-3">
-                  <div className="rounded-xl border bg-background p-3">
+                <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                  <div className="min-w-0 rounded-xl border bg-background p-3">
                     <div className="flex items-center gap-2 text-[11px] uppercase tracking-wide text-muted-foreground">
                       <Cpu className="h-3.5 w-3.5" />
                       Active model
                     </div>
-                    <p className="mt-2 text-sm font-medium break-words">
+                    <p className="mt-2 min-w-0 text-sm font-medium break-words leading-5">
                       {useCustomEndpoint ? form.model || "Unset" : data?.environment.model || "Unset"}
                     </p>
                   </div>
-                  <div className="rounded-xl border bg-background p-3">
+                  <div className="min-w-0 rounded-xl border bg-background p-3">
                     <div className="flex items-center gap-2 text-[11px] uppercase tracking-wide text-muted-foreground">
                       <Route className="h-3.5 w-3.5" />
                       Endpoint route
                     </div>
-                    <p className="mt-2 text-sm font-medium break-all">
+                    <p className="mt-2 min-w-0 text-sm font-medium break-all leading-5">
                       {useCustomEndpoint ? form.base_url || "Unset" : environmentRouteLabel(data?.environment)}
                     </p>
                   </div>
-                  <div className="rounded-xl border bg-background p-3">
+                  <div className="min-w-0 rounded-xl border bg-background p-3">
                     <div className="flex items-center gap-2 text-[11px] uppercase tracking-wide text-muted-foreground">
                       <ShieldCheck className="h-3.5 w-3.5" />
                       Credential source
                     </div>
-                    <p className="mt-2 text-sm font-medium">
+                    <p className="mt-2 min-w-0 text-sm font-medium break-all leading-5">
                       {useCustomEndpoint
                         ? form.api_key_env || "PAPERBOT_EMBEDDING_API_KEY"
                         : data?.environment.api_key_env || "OPENAI_API_KEY"}
@@ -344,31 +344,31 @@ export function EmbeddingSettingsPanel() {
                     </Button>
                   </div>
 
-                  <div className="grid gap-3 md:grid-cols-3">
-                    <div className="rounded-xl border p-3">
+                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                    <div className="min-w-0 rounded-xl border p-3">
                       <p className="text-xs text-muted-foreground">Model source</p>
-                      <p className="mt-1 text-sm font-medium">
+                      <p className="mt-1 min-w-0 text-sm font-medium break-words leading-5">
                         {data?.environment.model || "text-embedding-3-small"}
                       </p>
                       <p className="mt-1 text-xs text-muted-foreground">
                         {data?.environment.model_env || "default"}
                       </p>
                     </div>
-                    <div className="rounded-xl border p-3">
+                    <div className="min-w-0 rounded-xl border p-3">
                       <p className="text-xs text-muted-foreground">Route mode</p>
-                      <p className="mt-1 text-sm font-medium">
+                      <p className="mt-1 min-w-0 text-sm font-medium break-words leading-5">
                         {environmentRouteLabel(data?.environment)}
                       </p>
                       <p className="mt-1 text-xs text-muted-foreground">
                         Exact environment URL is intentionally hidden in the browser.
                       </p>
                     </div>
-                    <div className="rounded-xl border p-3">
+                    <div className="min-w-0 rounded-xl border p-3">
                       <p className="text-xs text-muted-foreground">Credential check</p>
                       <p className="mt-1 text-sm font-medium">
                         {data?.environment.api_key_present ? "Detected" : "Missing"}
                       </p>
-                      <p className="mt-1 text-xs text-muted-foreground">
+                      <p className="mt-1 min-w-0 text-xs text-muted-foreground break-all leading-5">
                         {data?.environment.api_key_env || "OPENAI_API_KEY"}
                       </p>
                     </div>

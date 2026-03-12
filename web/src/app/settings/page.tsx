@@ -273,7 +273,7 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="flex-1 space-y-4 p-8 pt-6 max-w-3xl">
+    <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col space-y-4 p-8 pt-6">
       <h2 className="text-2xl font-bold tracking-tight">Settings</h2>
 
       <div>
