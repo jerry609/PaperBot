@@ -1970,202 +1970,181 @@ export default function TopicWorkflowDashboard({
             </div>
 
             {hasWorkspaceOutput ? (
-              <div className="grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_360px]">
-                <div className="rounded-[24px] border border-slate-200 bg-slate-50/60 p-4">
-                  <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                    <div className="max-w-2xl">
-                      <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-indigo-600">
-                        Today&apos;s Push
-                      </p>
-                      <h3 className="mt-2 text-xl font-bold text-slate-900">
-                        {dailyResult?.report?.title || "Latest workflow candidate pool"}
-                      </h3>
-                      <p className="mt-2 text-sm leading-6 text-slate-600">{nextStepLabel}</p>
-                    </div>
-
-                    <div className="flex flex-wrap gap-2">
-                      <Button asChild size="sm" className="rounded-full bg-indigo-600 px-4 hover:bg-indigo-700">
-                        <Link href={workflowPageHref}>
-                          Open Full Workbench
-                          <ArrowUpRightIcon className="ml-1.5 size-4" />
-                        </Link>
-                      </Button>
-                      <Button asChild size="sm" variant="outline" className="rounded-full border-slate-200 px-4">
-                        <Link href={dashboardContext?.activeTrackHref || "/research"}>
-                          Open Research
-                          <ArrowUpRightIcon className="ml-1.5 size-4" />
-                        </Link>
-                      </Button>
-                    </div>
+              <div className="rounded-[24px] border border-slate-200 bg-slate-50/60 p-4">
+                <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                  <div className="max-w-2xl">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-indigo-600">
+                      Today&apos;s Push
+                    </p>
+                    <h3 className="mt-2 text-xl font-bold text-slate-900">
+                      {dailyResult?.report?.title || "Latest workflow candidate pool"}
+                    </h3>
+                    <p className="mt-2 text-sm leading-6 text-slate-600">{nextStepLabel}</p>
                   </div>
 
-                  <div className="mt-4 space-y-3">
-                    {snapshotHighlights.length > 0 ? (
-                      snapshotHighlights.map((item, index) => {
-                        const recommendation = item.judge?.recommendation
-                          ? REC_LABELS[item.judge.recommendation] || item.judge.recommendation
-                          : null
-                        const scoreLabel =
-                          item.judge?.overall != null
-                            ? `Judge ${Number(item.judge.overall).toFixed(1)}`
-                            : item.score != null
-                              ? `Score ${Number(item.score).toFixed(2)}`
-                              : "Candidate"
-                        const queryLabel =
-                          (item.matched_queries || []).slice(0, 2).join(" · ") || "Latest shortlist"
+                  <div className="flex flex-wrap gap-2">
+                    <Button asChild size="sm" className="rounded-full bg-indigo-600 px-4 hover:bg-indigo-700">
+                      <Link href={workflowPageHref}>
+                        Open Full Workbench
+                        <ArrowUpRightIcon className="ml-1.5 size-4" />
+                      </Link>
+                    </Button>
+                    <Button asChild size="sm" variant="outline" className="rounded-full border-slate-200 px-4">
+                      <Link href={dashboardContext?.activeTrackHref || "/research"}>
+                        Open Research
+                        <ArrowUpRightIcon className="ml-1.5 size-4" />
+                      </Link>
+                    </Button>
+                  </div>
+                </div>
 
-                        return (
-                          <div
-                            key={`${item.title}-${index}`}
-                            className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
-                          >
-                            <div className="flex items-center justify-between gap-3">
-                              <div className="flex flex-wrap gap-2">
-                                <Badge
-                                  variant="secondary"
-                                  className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-[11px] font-medium text-slate-600"
-                                >
-                                  {queryLabel}
+                <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                  <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                      Last updated
+                    </p>
+                    <p className="mt-2 text-sm font-semibold text-slate-900">
+                      {formatTimestamp(store.lastUpdated)}
+                    </p>
+                  </div>
+                  <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                    <div className="flex items-center justify-between gap-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                      <span>Progress</span>
+                      <span>{overallProgressValue}%</span>
+                    </div>
+                    <Progress value={overallProgressValue} className="mt-3" />
+                    <p className="mt-3 text-xs text-slate-500">{phaseLabel}</p>
+                  </div>
+                  <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:col-span-2 xl:col-span-1">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                      Next handoff
+                    </p>
+                    <p className="mt-2 text-sm leading-6 text-slate-600">
+                      {dashboardContext?.activeTrackName
+                        ? `Send promising papers into ${dashboardContext.activeTrackName} and keep the homepage focused on decisions.`
+                        : "Move promising papers into Research once the shortlist stabilizes."}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mt-4 grid gap-3 xl:grid-cols-3">
+                  {snapshotHighlights.length > 0 ? (
+                    snapshotHighlights.map((item, index) => {
+                      const recommendation = item.judge?.recommendation
+                        ? REC_LABELS[item.judge.recommendation] || item.judge.recommendation
+                        : null
+                      const scoreLabel =
+                        item.judge?.overall != null
+                          ? `Judge ${Number(item.judge.overall).toFixed(1)}`
+                          : item.score != null
+                            ? `Score ${Number(item.score).toFixed(2)}`
+                            : "Candidate"
+                      const queryLabel =
+                        (item.matched_queries || []).slice(0, 2).join(" · ") || "Latest shortlist"
+
+                      return (
+                        <div
+                          key={`${item.title}-${index}`}
+                          className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
+                        >
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="flex flex-wrap gap-2">
+                              <Badge
+                                variant="secondary"
+                                className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-[11px] font-medium text-slate-600"
+                              >
+                                {queryLabel}
+                              </Badge>
+                              <Badge
+                                variant="secondary"
+                                className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-[11px] font-medium text-slate-600"
+                              >
+                                {scoreLabel}
+                              </Badge>
+                              {recommendation ? (
+                                <Badge className="rounded-full bg-indigo-600 px-3 py-1 text-[11px] font-medium text-white">
+                                  {recommendation}
                                 </Badge>
-                                <Badge
-                                  variant="secondary"
-                                  className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-[11px] font-medium text-slate-600"
-                                >
-                                  {scoreLabel}
-                                </Badge>
-                                {recommendation ? (
-                                  <Badge className="rounded-full bg-indigo-600 px-3 py-1 text-[11px] font-medium text-white">
-                                    {recommendation}
-                                  </Badge>
-                                ) : null}
-                              </div>
-                              <p className="text-xs text-slate-500">#{index + 1}</p>
-                            </div>
-
-                            <button
-                              type="button"
-                              onClick={() => setSelectedPaper(item)}
-                              className="mt-3 block text-left"
-                            >
-                              <p className="text-base font-semibold leading-7 text-slate-900 transition-colors hover:text-indigo-700">
-                                {item.title}
-                              </p>
-                            </button>
-
-                            <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-500">
-                              {(item.sources || []).slice(0, 3).map((source) => (
-                                <span
-                                  key={`${item.title}-${source}`}
-                                  className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1"
-                                >
-                                  {SOURCE_LABELS[source] || source}
-                                </span>
-                              ))}
-                              {item.url ? (
-                                <a
-                                  href={item.url}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="inline-flex items-center gap-1 font-medium text-indigo-600 hover:text-indigo-700"
-                                >
-                                  Source
-                                  <ArrowUpRightIcon className="size-3.5" />
-                                </a>
                               ) : null}
                             </div>
+                            <p className="text-xs text-slate-500">#{index + 1}</p>
                           </div>
-                        )
-                      })
-                    ) : (
-                      <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-6 text-sm leading-6 text-slate-600">
-                        暂时还没有可上浮到首页的候选或 digest。打开完整 workbench
-                        跑一轮 Search 或 DailyPaper 之后，这里会自动显示最近的热点摘要。
-                      </div>
-                    )}
-                  </div>
-                </div>
 
-                <div className="space-y-3">
-                  <div className="rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm">
-                    <div className="flex items-center justify-between gap-3">
-                      <div>
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-indigo-600">
-                          Brief Context
-                        </p>
-                        <h3 className="mt-2 text-lg font-bold text-slate-900">
-                          最近一次运行上下文
-                        </h3>
-                      </div>
-                      <Badge
-                        variant="secondary"
-                        className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-[11px] font-medium text-slate-600"
-                      >
-                        {phaseLabel}
-                      </Badge>
-                    </div>
-
-                    <div className="mt-4 grid gap-3">
-                      <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3">
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-                          Last updated
-                        </p>
-                        <p className="mt-2 text-sm font-semibold text-slate-900">
-                          {formatTimestamp(store.lastUpdated)}
-                        </p>
-                      </div>
-                      <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3">
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-                          Progress
-                        </p>
-                        <div className="mt-2 flex items-center justify-between gap-3 text-xs text-slate-500">
-                          <span>stage completion</span>
-                          <span>{overallProgressValue}%</span>
-                        </div>
-                        <Progress value={overallProgressValue} className="mt-2" />
-                      </div>
-                      <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3">
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-                          Next handoff
-                        </p>
-                        <p className="mt-2 text-sm leading-6 text-slate-600">
-                          {dashboardContext?.activeTrackName
-                            ? `Send promising papers into ${dashboardContext.activeTrackName} and keep the homepage focused on decisions.`
-                            : "Move promising papers into Research once the shortlist stabilizes."}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-
-                  {snapshotInsight ? (
-                    <div className="rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm">
-                      <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-indigo-600">
-                        Daily Insight
-                      </p>
-                      <p className="mt-3 text-sm leading-6 text-slate-600">{snapshotInsight}</p>
-                    </div>
-                  ) : null}
-
-                  {snapshotTrendRows.length > 0 ? (
-                    <div className="rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm">
-                      <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-indigo-600">
-                        Topic Trends
-                      </p>
-                      <div className="mt-3 space-y-3">
-                        {snapshotTrendRows.map((trend) => (
-                          <div
-                            key={trend.query}
-                            className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3"
+                          <button
+                            type="button"
+                            onClick={() => setSelectedPaper(item)}
+                            className="mt-3 block text-left"
                           >
-                            <p className="text-sm font-semibold text-slate-900">{trend.query}</p>
-                            <p className="mt-1 text-sm leading-6 text-slate-600">
-                              {trend.analysis}
+                            <p className="text-base font-semibold leading-7 text-slate-900 transition-colors hover:text-indigo-700">
+                              {item.title}
                             </p>
+                          </button>
+
+                          <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                            {(item.sources || []).slice(0, 3).map((source) => (
+                              <span
+                                key={`${item.title}-${source}`}
+                                className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1"
+                              >
+                                {SOURCE_LABELS[source] || source}
+                              </span>
+                            ))}
+                            {item.url ? (
+                              <a
+                                href={item.url}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="inline-flex items-center gap-1 font-medium text-indigo-600 hover:text-indigo-700"
+                              >
+                                Source
+                                <ArrowUpRightIcon className="size-3.5" />
+                              </a>
+                            ) : null}
                           </div>
-                        ))}
-                      </div>
+                        </div>
+                      )
+                    })
+                  ) : (
+                    <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-6 text-sm leading-6 text-slate-600 xl:col-span-3">
+                      暂时还没有可上浮到首页的候选或 digest。打开完整 workbench
+                      跑一轮 Search 或 DailyPaper 之后，这里会自动显示最近的热点摘要。
                     </div>
-                  ) : null}
+                  )}
                 </div>
+
+                {snapshotInsight || snapshotTrendRows.length > 0 ? (
+                  <div className="mt-4 grid gap-3 xl:grid-cols-[minmax(0,1.35fr)_minmax(0,0.95fr)]">
+                    {snapshotInsight ? (
+                      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-indigo-600">
+                          Daily Insight
+                        </p>
+                        <p className="mt-3 text-sm leading-6 text-slate-600">{snapshotInsight}</p>
+                      </div>
+                    ) : null}
+
+                    {snapshotTrendRows.length > 0 ? (
+                      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-indigo-600">
+                          Topic Trends
+                        </p>
+                        <div className="mt-3 space-y-3">
+                          {snapshotTrendRows.map((trend) => (
+                            <div
+                              key={trend.query}
+                              className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3"
+                            >
+                              <p className="text-sm font-semibold text-slate-900">{trend.query}</p>
+                              <p className="mt-1 text-sm leading-6 text-slate-600">
+                                {trend.analysis}
+                              </p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
               </div>
             ) : (
               <div className="rounded-[24px] border border-dashed border-slate-300 bg-slate-50/60 p-6">
