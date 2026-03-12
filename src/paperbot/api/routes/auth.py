@@ -156,12 +156,15 @@ class UpdateMeRequest(BaseModel):
 
 @router.patch("/me", response_model=MeResponse)
 def update_me(req: UpdateMeRequest, current_user: User = Depends(get_current_user)):
-    _user_store.update_profile(current_user.id, req.display_name)
+    update_data = req.model_dump(exclude_unset=True)
+    if "display_name" in update_data:
+        _user_store.update_profile(current_user.id, update_data["display_name"])
+    updated_user = _user_store.get_by_id(current_user.id)
     return MeResponse(
         id=current_user.id,
         email=current_user.email,
         github_username=current_user.github_username,
-        display_name=req.display_name,
+        display_name=updated_user.display_name if updated_user else current_user.display_name,
         avatar_url=current_user.avatar_url,
     )
 

@@ -31,7 +31,11 @@ def _log_email(to_email: str, reset_url: str) -> None:
 def _send_via_resend(to_email: str, reset_url: str) -> None:  # pragma: no cover
     import resend  # type: ignore[import]
 
-    resend.api_key = os.environ["RESEND_API_KEY"]
+    api_key = os.getenv("RESEND_API_KEY")
+    if not api_key:
+        logger.error("Cannot send email via Resend: RESEND_API_KEY is not set.")
+        return
+    resend.api_key = api_key
     from_addr = os.getenv("EMAIL_FROM", "PaperBot <noreply@paperbot.app>")
 
     resend.Emails.send({
