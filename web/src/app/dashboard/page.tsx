@@ -604,6 +604,8 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
     : { items: [], total: 0 }
   const activeTrackFeedTotal = activeTrackFeedResult.total || 0
   const intelligenceCards = buildDashboardIntelligenceCards(intelligenceFeed.items)
+  const featuredSignal = intelligenceCards[0] || null
+  const secondarySignals = intelligenceCards.slice(1, 4)
   const queueItems = buildQueuePreviewItems(
     readingQueue,
     new Map(papers.map((paper) => [String(paper.id), paper])),
@@ -706,7 +708,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
 
           <section className="mt-4" id="signals">
             <article className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-              <div className="grid gap-4 xl:grid-cols-[220px_minmax(0,1fr)] xl:items-start">
+              <div className="grid gap-4 xl:grid-cols-[220px_minmax(0,1.15fr)_320px] xl:items-start">
                 <div>
                   <SectionIntro
                     eyebrow="Signals"
@@ -729,12 +731,24 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
                   </div>
                 </div>
 
-                <div className="grid auto-rows-fr gap-3 md:grid-cols-2 xl:grid-cols-3">
-                  {intelligenceCards.length > 0 ? (
-                    intelligenceCards.map((item) => <EvidencePreviewCard key={item.id} item={item} compact />)
+                <div>
+                  {featuredSignal ? (
+                    <EvidencePreviewCard item={featuredSignal} />
                   ) : (
-                    <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50/50 p-5 text-sm leading-6 text-slate-600 md:col-span-2 xl:col-span-3">
+                    <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50/50 p-5 text-sm leading-6 text-slate-600">
                       当前没有需要上浮到首页的社区信号。可以直接在主工作台继续推进当前问题。
+                    </div>
+                  )}
+                </div>
+
+                <div className="space-y-3">
+                  {secondarySignals.length > 0 ? (
+                    secondarySignals.map((item) => (
+                      <EvidencePreviewCard key={item.id} item={item} compact />
+                    ))
+                  ) : (
+                    <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50/50 p-5 text-sm leading-6 text-slate-600">
+                      目前还没有次级信号需要占据首页侧栏。等新的 repo、社区或论文动态上浮后，这里会补齐辅助证据流。
                     </div>
                   )}
                 </div>
