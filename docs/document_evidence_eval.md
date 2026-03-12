@@ -184,6 +184,25 @@ Two benchmark tiers should exist:
   - optional, manual, and used only to validate whether production embeddings
     outperform the deterministic hash baseline
 
+### Dedicated embedding configuration
+
+Live shadow runs should not assume the chat endpoint also supports embeddings.
+
+PaperBot now resolves embedding configuration in this order:
+
+- `PAPERBOT_EMBEDDING_API_KEY`
+- `PAPERBOT_EMBEDDING_BASE_URL`
+- `PAPERBOT_EMBEDDING_MODEL`
+
+If those are unset, it falls back to:
+
+- `OPENAI_API_KEY`
+- `OPENAI_BASE_URL`
+- `OPENAI_EMBEDDING_MODEL`
+
+This separation matters because many OpenAI-compatible relays expose chat
+completions but do not expose `/embeddings`.
+
 This means the answer is:
 
 - benchmark coverage does not require an embedding API
@@ -205,8 +224,21 @@ Before enabling embedding retrieval by default for document evidence, require:
 PYTHONPATH=src python scripts/eval_document_evidence.py \
   --fixtures evals/fixtures/document_evidence/bench_v1.json \
   --output output/reports/document_evidence_bench_v1.json \
+  --embedding-provider hash \
   --fail-under-hybrid-recall 0.5 \
   --fail-under-hybrid-hit-rate 0.5
+```
+
+Optional live shadow run:
+
+```bash
+PAPERBOT_EMBEDDING_API_KEY=... \
+PAPERBOT_EMBEDDING_BASE_URL=https://your-embedding-endpoint/v1 \
+PAPERBOT_EMBEDDING_MODEL=text-embedding-3-small \
+PYTHONPATH=src python scripts/eval_document_evidence.py \
+  --fixtures evals/fixtures/document_evidence/bench_v1.json \
+  --output output/reports/document_evidence_bench_live.json \
+  --embedding-provider openai
 ```
 
 ## Next implementation steps

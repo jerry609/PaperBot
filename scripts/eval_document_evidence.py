@@ -4,6 +4,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from typing import Optional, Tuple
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src"))
@@ -13,6 +14,32 @@ from paperbot.application.services.document_evidence_benchmark import (  # noqa:
     load_document_evidence_benchmark_fixture,
     run_document_evidence_benchmark,
 )
+from paperbot.context_engine.embeddings import (  # noqa: E402
+    EmbeddingConfig,
+    EmbeddingProvider,
+    HashEmbeddingProvider,
+    OpenAIEmbeddingProvider,
+    try_build_default_embedding_provider,
+)
+
+
+def _build_embedding_provider(
+    provider_name: str,
+    embedding_model: str,
+) -> Tuple[Optional[EmbeddingProvider], str]:
+    normalized = str(provider_name or "hash").strip().lower()
+    config = EmbeddingConfig(model=str(embedding_model or "").strip() or None)
+    if normalized == "hash":
+        return HashEmbeddingProvider(dim=128), "hash"
+    if normalized == "openai":
+        return OpenAIEmbeddingProvider(config=config), f"openai:{config.resolve_model()}"
+    if normalized == "default":
+        provider = try_build_default_embedding_provider(config=config)
+        label = provider.__class__.__name__.lower() if provider is not None else "none"
+        return provider, label
+    if normalized == "none":
+        return None, "none"
+    raise SystemExit(f"Unsupported embedding provider: {provider_name}")
 
 
 def main() -> int:
@@ -33,6 +60,16 @@ def main() -> int:
         help="Comma-separated retrieval modes to run.",
     )
     parser.add_argument(
+        "--embedding-provider",
+        default="hash",
+        help="Embedding provider for indexing/query evaluation: hash, openai, default, or none.",
+    )
+    parser.add_argument(
+        "--embedding-model",
+        default="",
+        help="Optional embedding model override for openai/default providers.",
+    )
+    parser.add_argument(
         "--fail-under-hybrid-recall",
         type=float,
         default=0.0,
@@ -48,7 +85,20 @@ def main() -> int:
 
     fixture = load_document_evidence_benchmark_fixture(REPO_ROOT / args.fixtures)
     modes = [mode.strip() for mode in str(args.modes).split(",") if mode.strip()]
-    result = run_document_evidence_benchmark(fixture, modes=modes)
+    embedding_provider, provider_label = _build_embedding_provider(
+        args.embedding_provider,
+        args.embedding_model,
+    )
+    if embedding_provider is None and any(mode in {"embedding_only", "hybrid"} for mode in modes):
+        raise SystemExit(
+            "Embedding provider is disabled, but embedding_only/hybrid modes were requested."
+        )
+    result = run_document_evidence_benchmark(
+        fixture,
+        modes=modes,
+        embedding_provider=embedding_provider,
+        provider_label=provider_label,
+    )
     print(format_document_evidence_benchmark_report(result))
 
     output_path = REPO_ROOT / args.output
