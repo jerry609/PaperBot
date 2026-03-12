@@ -171,6 +171,20 @@ const WORKFLOW_REFERENCE_LINKS: Array<{
   },
 ]
 
+function normalizeWorkflowQueries(values: string[]): string[] {
+  return values.map((value) => value.trim()).filter(Boolean)
+}
+
+function shouldPersistWorkflowQueries(queries: string[]): boolean {
+  const normalizedQueries = normalizeWorkflowQueries(queries)
+  if (normalizedQueries.length === 0) return false
+
+  const normalizedDefaults = normalizeWorkflowQueries(DEFAULT_QUERIES)
+  if (normalizedQueries.length !== normalizedDefaults.length) return true
+
+  return normalizedQueries.some((value, index) => value !== normalizedDefaults[index])
+}
+
 function getNextWorkflowAction(args: {
   hasSearchData: boolean
   hasReportData: boolean
@@ -1863,7 +1877,7 @@ export default function TopicWorkflowDashboard({
       return sum
     }, 0) / 3 * 100,
   )
-  const workflowPageHref = queries.length
+  const workflowPageHref = shouldPersistWorkflowQueries(queries)
     ? `/workflows?query=${encodeURIComponent(queries.join(","))}`
     : "/workflows"
   const snapshotHighlights = (
