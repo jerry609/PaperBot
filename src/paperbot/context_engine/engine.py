@@ -1207,4 +1207,19 @@ class ContextEngine:
                         f"Failed to close paper_store: {exc}",
                         file=LogFiles.HARVEST,
                     )
+
+        if (
+            self.evidence_retriever is not None
+            and self.evidence_retriever is not self.paper_store
+        ):
+            close_fn = getattr(self.evidence_retriever, "close", None)
+            if callable(close_fn):
+                try:
+                    close_fn()
+                except Exception as exc:  # pragma: no cover - best-effort cleanup
+                    Logger.warning(
+                        f"Failed to close evidence_retriever: {exc}",
+                        file=LogFiles.HARVEST,
+                    )
+
         return None
