@@ -562,6 +562,7 @@ class ObsidianFilesystemExporter(VaultExporterPort):
         papers_dir: Path,
         paper_refs: List[Dict[str, Any]],
     ) -> None:
+        root_path = papers_dir.parent
         for paper_ref in paper_refs:
             note_path = Path(str(paper_ref.get("path") or "")).expanduser()
             if not note_path:
@@ -576,6 +577,7 @@ class ObsidianFilesystemExporter(VaultExporterPort):
                     continue
                 self._update_note_link_index(
                     note_path=target_path,
+                    root_path=root_path,
                     frontmatter_key="cited_by",
                     heading="Cited By",
                     link=current_link,
@@ -587,6 +589,7 @@ class ObsidianFilesystemExporter(VaultExporterPort):
                     continue
                 self._update_note_link_index(
                     note_path=target_path,
+                    root_path=root_path,
                     frontmatter_key="cites",
                     heading="References",
                     link=current_link,
@@ -596,6 +599,7 @@ class ObsidianFilesystemExporter(VaultExporterPort):
         self,
         *,
         note_path: Path,
+        root_path: Path,
         frontmatter_key: str,
         heading: str,
         link: str,
@@ -627,7 +631,7 @@ class ObsidianFilesystemExporter(VaultExporterPort):
         )
         self._write_managed_note(
             note_path=note_path,
-            root_path=note_path.parents[1],
+            root_path=root_path,
             frontmatter_payload=frontmatter,
             managed_body=updated_body,
             managed_headings=PAPER_MANAGED_HEADINGS,
