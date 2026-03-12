@@ -7,6 +7,7 @@ Phase-0 intent:
   - `scholar_pipeline`
   - `paper2code`
 - Add deterministic retrieval quality regression coverage for `PaperSearchService`
+- Add deterministic document-evidence retrieval coverage for indexed paper chunks
 - Track basic metrics (success rate, latency, cost estimate) and catch regressions early.
 
 Suggested layout (see `docs/PLAN.md` for details):
@@ -19,4 +20,3 @@ evals/
   scorers/
   reports/
 ```
-
