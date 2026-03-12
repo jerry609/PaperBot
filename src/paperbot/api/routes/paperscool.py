@@ -17,6 +17,7 @@ from paperbot.application.services.candidate_curation import (
     curate_search_result,
     ingest_curated_report,
 )
+from paperbot.application.services.candidate_search import resolve_existing_canonical_paper_id
 from paperbot.application.services.daily_push_service import DailyPushService
 from paperbot.application.services.llm_service import get_llm_service
 from paperbot.application.services.enrichment_pipeline import (
@@ -39,6 +40,7 @@ from paperbot.application.workflows.unified_topic_search import (
     make_default_search_service,
     run_unified_topic_search,
 )
+from paperbot.infrastructure.services.document_indexing_service import DocumentIndexingService
 from paperbot.infrastructure.stores.paper_store import PaperStore
 from paperbot.infrastructure.stores.pipeline_session_store import PipelineSessionStore
 from paperbot.infrastructure.stores.research_store import SqlAlchemyResearchStore
@@ -56,6 +58,8 @@ def _get_pipeline_session_store() -> PipelineSessionStore:
     if _pipeline_session_store is None:
         _pipeline_session_store = PipelineSessionStore()
     return _pipeline_session_store
+
+
 # Test compatibility hook: unit tests can monkeypatch this to inject a fake workflow.
 PapersCoolTopicSearchWorkflow = None
 
@@ -115,6 +119,104 @@ def _count_report_claims_and_evidence(report: Dict[str, Any]) -> tuple[int, int]
                 if isinstance(eq, list) and eq:
                     evidences += len(eq)
     return claims, evidences
+
+
+def _iter_report_item_refs(report: Dict[str, Any]) -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for query in report.get("queries") or []:
+        for item in query.get("top_items") or []:
+            if not isinstance(item, dict):
+                continue
+            key = (str(item.get("url") or ""), str(item.get("title") or ""))
+            if key in seen:
+                continue
+            seen.add(key)
+            rows.append(item)
+    for item in report.get("global_top") or []:
+        if not isinstance(item, dict):
+            continue
+        key = (str(item.get("url") or ""), str(item.get("title") or ""))
+        if key in seen:
+            continue
+        seen.add(key)
+        rows.append(item)
+    return rows
+
+
+def _build_document_indexing_service() -> DocumentIndexingService:
+    paper_store = PaperStore()
+    return DocumentIndexingService(paper_store=paper_store)
+
+
+def _annotate_report_with_canonical_ids(
+    report: Dict[str, Any], *, paper_store: PaperStore
+) -> List[int]:
+    canonical_ids: List[int] = []
+    seen: set[int] = set()
+    for item in _iter_report_item_refs(report):
+        canonical_id = resolve_existing_canonical_paper_id(item, registry=paper_store)
+        if canonical_id is None or canonical_id <= 0:
+            continue
+        item["canonical_id"] = canonical_id
+        item["canonical_paper_id"] = canonical_id
+        if canonical_id in seen:
+            continue
+        seen.add(canonical_id)
+        canonical_ids.append(canonical_id)
+    return canonical_ids
+
+
+def _process_document_index_jobs(limit: int) -> Dict[str, int]:
+    service = _build_document_indexing_service()
+    try:
+        return service.process_pending_jobs(limit=max(1, int(limit)))
+    finally:
+        service.close()
+
+
+def _process_document_index_jobs_async(limit: int) -> None:
+    try:
+        _process_document_index_jobs(limit)
+    except Exception:
+        return
+
+
+def _schedule_document_indexing_for_report(
+    report: Dict[str, Any], *, trigger_source: str
+) -> Dict[str, Any]:
+    service = _build_document_indexing_service()
+    try:
+        paper_ids = _annotate_report_with_canonical_ids(report, paper_store=service.paper_store)
+        summary: Dict[str, Any] = {
+            "trigger_source": str(trigger_source or "manual"),
+            "total": len(paper_ids),
+            "queued": 0,
+            "skipped": 0,
+            "paper_ids": paper_ids,
+            "async_processing": False,
+        }
+        if not paper_ids:
+            report["document_index_ingest"] = summary
+            return summary
+
+        enqueue_summary = service.enqueue_papers(
+            paper_ids=paper_ids,
+            trigger_source=str(trigger_source or "manual"),
+        )
+        summary.update(enqueue_summary)
+        summary["async_processing"] = bool(enqueue_summary.get("queued"))
+        report["document_index_ingest"] = summary
+    finally:
+        service.close()
+
+    if summary.get("queued") and _env_flag("PAPERBOT_DOCUMENT_INDEX_ASYNC", default=True):
+        Thread(
+            target=_process_document_index_jobs_async,
+            args=(int(summary["queued"]),),
+            daemon=True,
+        ).start()
+    return summary
 
 
 async def _run_topic_search(
@@ -263,6 +365,7 @@ class PapersCoolIngestResponse(BaseModel):
     markdown: str
     registry_ingest: Dict[str, Any]
     judge_registry_ingest: Optional[Dict[str, Any]] = None
+    document_index_ingest: Optional[Dict[str, Any]] = None
 
 
 @router.post("/research/paperscool/search", response_model=PapersCoolSearchResponse)
@@ -320,6 +423,10 @@ async def ingest_curated_topic_report(req: PapersCoolIngestRequest):
         persist_judge_scores=bool(req.persist_judge_scores),
     )
     report = ingested.report
+    document_index_ingest = _schedule_document_indexing_for_report(
+        report,
+        trigger_source="paperscool_ingest_api",
+    )
     _enqueue_repo_enrichment_async(report)
 
     return PapersCoolIngestResponse(
@@ -335,6 +442,7 @@ async def ingest_curated_topic_report(req: PapersCoolIngestRequest):
             if isinstance(report.get("judge_registry_ingest"), dict)
             else None
         ),
+        document_index_ingest=document_index_ingest,
     )
 
 
@@ -539,6 +647,10 @@ async def _dailypaper_stream(req: DailyPaperRequest):
         report=report,
         persist_judge_scores=bool(req.enable_judge),
     ).report
+    _schedule_document_indexing_for_report(
+        report,
+        trigger_source="paperscool_daily_stream",
+    )
     _enqueue_repo_enrichment_async(report)
 
     markdown = render_daily_paper_markdown(report)
@@ -700,6 +812,10 @@ def _finalize_approved_session(session: Dict[str, Any]) -> Dict[str, Any]:
         report=report,
         persist_judge_scores=bool(payload.get("enable_judge")),
     ).report
+    _schedule_document_indexing_for_report(
+        report,
+        trigger_source="paperscool_daily_approval",
+    )
     _enqueue_repo_enrichment_async(report)
 
     markdown = render_daily_paper_markdown(report)
@@ -833,7 +949,10 @@ async def _sync_daily_report(req: DailyPaperRequest, cleaned_queries: List[str])
         judge_factory=PaperJudge,
     )
     report = ingest_curated_report(report=curated.report).report
-
+    _schedule_document_indexing_for_report(
+        report,
+        trigger_source="paperscool_daily_sync",
+    )
     _enqueue_repo_enrichment_async(report)
 
     markdown = render_daily_paper_markdown(report)

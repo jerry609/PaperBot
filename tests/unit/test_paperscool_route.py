@@ -77,19 +77,31 @@ class _FakeWorkflow:
         }
 
 
-async def _fake_run_topic_search(*, queries, sources, branches, top_k_per_query, show_per_branch, min_score=0.0):
+async def _fake_run_topic_search(
+    *, queries, sources, branches, top_k_per_query, show_per_branch, min_score=0.0
+):
     """Async fake that replaces _run_topic_search for tests."""
     return _FakeWorkflow().run(
-        queries=queries, sources=sources, branches=branches,
-        top_k_per_query=top_k_per_query, show_per_branch=show_per_branch, min_score=min_score,
+        queries=queries,
+        sources=sources,
+        branches=branches,
+        top_k_per_query=top_k_per_query,
+        show_per_branch=show_per_branch,
+        min_score=min_score,
     )
 
 
-async def _fake_run_topic_search_multi(*, queries, sources, branches, top_k_per_query, show_per_branch, min_score=0.0):
+async def _fake_run_topic_search_multi(
+    *, queries, sources, branches, top_k_per_query, show_per_branch, min_score=0.0
+):
     """Async fake returning multiple papers for filter testing."""
     return _FakeWorkflowMultiPaper().run(
-        queries=queries, sources=sources, branches=branches,
-        top_k_per_query=top_k_per_query, show_per_branch=show_per_branch, min_score=min_score,
+        queries=queries,
+        sources=sources,
+        branches=branches,
+        top_k_per_query=top_k_per_query,
+        show_per_branch=show_per_branch,
+        min_score=min_score,
     )
 
 
@@ -146,6 +158,7 @@ def test_paperscool_curate_route_returns_report_without_ingest():
 
 def test_paperscool_ingest_route_wires_explicit_ingest(monkeypatch):
     captured: list[str] = []
+    captured_index_triggers: list[str] = []
 
     def _fake_ingest(*, report, persist_judge_scores=False):
         payload = {
@@ -161,6 +174,18 @@ def test_paperscool_ingest_route_wires_explicit_ingest(monkeypatch):
         paperscool_route,
         "_enqueue_repo_enrichment_async",
         lambda report: captured.append(str(report.get("title") or "")),
+    )
+    monkeypatch.setattr(
+        paperscool_route,
+        "_schedule_document_indexing_for_report",
+        lambda report, *, trigger_source: (
+            captured_index_triggers.append(trigger_source),
+            report.__setitem__(
+                "document_index_ingest",
+                {"total": 1, "queued": 1, "skipped": 0, "trigger_source": trigger_source},
+            ),
+            report["document_index_ingest"],
+        )[2],
     )
 
     with TestClient(api_main.app) as client:
@@ -181,11 +206,26 @@ def test_paperscool_ingest_route_wires_explicit_ingest(monkeypatch):
     payload = resp.json()
     assert payload["registry_ingest"]["total"] == 1
     assert payload["judge_registry_ingest"]["created"] == 1
+    assert payload["document_index_ingest"]["queued"] == 1
     assert captured == ["Curated Digest"]
+    assert captured_index_triggers == ["paperscool_ingest_api"]
 
 
 def test_paperscool_daily_route_success(monkeypatch, tmp_path):
     monkeypatch.setattr(paperscool_route, "_run_topic_search", _fake_run_topic_search)
+    captured_index_triggers: list[str] = []
+    monkeypatch.setattr(
+        paperscool_route,
+        "_schedule_document_indexing_for_report",
+        lambda report, *, trigger_source: (
+            captured_index_triggers.append(trigger_source),
+            report.__setitem__(
+                "document_index_ingest",
+                {"total": 1, "queued": 1, "skipped": 0, "trigger_source": trigger_source},
+            ),
+            report["document_index_ingest"],
+        )[2],
+    )
 
     with TestClient(api_main.app) as client:
         resp = client.post(
@@ -205,6 +245,8 @@ def test_paperscool_daily_route_success(monkeypatch, tmp_path):
     assert payload["report"]["stats"]["unique_items"] == 1
     assert payload["markdown_path"] is not None
     assert payload["json_path"] is not None
+    assert payload["report"]["document_index_ingest"]["queued"] == 1
+    assert captured_index_triggers == ["paperscool_daily_sync"]
 
 
 def test_paperscool_daily_route_with_llm_enrichment(monkeypatch):
@@ -942,11 +984,7 @@ def test_paperscool_daily_approval_decisions(monkeypatch, tmp_path):
             report={
                 **report,
                 "registry_ingest": {"saved": len(report.get("queries") or [])},
-                **(
-                    {"judge_registry_ingest": {"saved": 0}}
-                    if persist_judge_scores
-                    else {}
-                ),
+                **({"judge_registry_ingest": {"saved": 0}} if persist_judge_scores else {}),
             }
         ),
     )

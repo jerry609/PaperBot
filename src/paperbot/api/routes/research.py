@@ -46,6 +46,7 @@ _metric_collector: Optional[MemoryMetricCollector] = None
 _workflow_metric_store: Optional[WorkflowMetricStore] = None
 _paper_store: Optional["PaperStore"] = None
 _paper_search_service: Optional["PaperSearchService"] = None
+_document_index_store: Optional["DocumentIndexStore"] = None
 _anchor_service: Optional["AnchorService"] = None
 _subscription_service: Optional["SubscriptionService"] = None
 
@@ -260,6 +261,16 @@ def _get_paper_search_service() -> "PaperSearchService":
             registry=_get_paper_store(),
         )
     return _paper_search_service
+
+
+def _get_document_index_store() -> "DocumentIndexStore":
+    """Lazy initialization of document evidence retrieval store."""
+    from paperbot.infrastructure.stores.document_index_store import DocumentIndexStore
+
+    global _document_index_store
+    if _document_index_store is None:
+        _document_index_store = DocumentIndexStore()
+    return _document_index_store
 
 
 def _get_anchor_service() -> "AnchorService":
@@ -586,7 +597,9 @@ def update_track(
         raise HTTPException(status_code=404, detail="Track not found")
     track_user_id = _trusted_track_user_id(track)
     if track_user_id:
-        _schedule_embedding_precompute(background_tasks, user_id=track_user_id, track_ids=[track_id])
+        _schedule_embedding_precompute(
+            background_tasks, user_id=track_user_id, track_ids=[track_id]
+        )
     _schedule_obsidian_export_for_track(background_tasks, track=track, for_tracks=True)
     return TrackResponse(track=track)
 
@@ -2372,6 +2385,7 @@ async def build_context(req: ContextRequest):
         memory_store=_get_memory_store(),
         paper_store=_get_paper_store(),
         search_service=search_service,
+        evidence_retriever=_get_document_index_store(),
         track_router=_get_track_router(),
         config=ContextEngineConfig(
             memory_limit=req.memory_limit,
