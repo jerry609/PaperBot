@@ -1,4 +1,11 @@
+import { existsSync } from "node:fs";
 import { defineConfig, devices } from "@playwright/test";
+
+const e2ePort = process.env.E2E_PORT || "3100";
+const e2eBaseUrl = process.env.E2E_BASE_URL || `http://127.0.0.1:${e2ePort}`;
+const useChromeChannel =
+  process.platform === "darwin" &&
+  existsSync("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome");
 
 export default defineConfig({
   testDir: "./e2e",
@@ -9,7 +16,7 @@ export default defineConfig({
   reporter: [["html", { open: "never" }], ["list"]],
 
   use: {
-    baseURL: process.env.E2E_BASE_URL || "http://localhost:3000",
+    baseURL: e2eBaseUrl,
     trace: "on-first-retry",
     screenshot: "only-on-failure",
   },
@@ -17,7 +24,10 @@ export default defineConfig({
   projects: [
     {
       name: "chromium",
-      use: { ...devices["Desktop Chrome"] },
+      use: {
+        ...devices["Desktop Chrome"],
+        ...(useChromeChannel ? { channel: "chrome" as const } : {}),
+      },
     },
   ],
 
@@ -25,9 +35,9 @@ export default defineConfig({
   webServer: process.env.E2E_BASE_URL
     ? undefined
     : {
-        command: "npm run dev",
-        url: "http://localhost:3000",
-        reuseExistingServer: !process.env.CI,
+        command: `npm run dev -- --hostname 127.0.0.1 --port ${e2ePort}`,
+        url: e2eBaseUrl,
+        reuseExistingServer: false,
         timeout: 120_000,
       },
 });
