@@ -26,15 +26,18 @@ import {
 import {
   Sheet,
   SheetContent,
+  SheetDescription,
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
 
 import { SearchBox } from "./SearchBox"
 import { TrackPills } from "./TrackPills"
 import { SearchResults } from "./SearchResults"
 import { MemoryTab } from "./MemoryTab"
+import { SavedTab } from "./SavedTab"
 import { CreateTrackModal } from "./CreateTrackModal"
 import { EditTrackModal } from "./EditTrackModal"
 import { ManageTracksModal } from "./ManageTracksModal"
@@ -83,6 +86,7 @@ export default function ResearchPageNew() {
 
   // Memory drawer state
   const [memoryOpen, setMemoryOpen] = useState(false)
+  const [workspaceTab, setWorkspaceTab] = useState<"saved" | "memory">("saved")
 
   // Anchor mode state (used for search filtering)
   const [anchorPersonalized, setAnchorPersonalized] = useState(true)
@@ -549,7 +553,14 @@ export default function ResearchPageNew() {
             disabled={loading}
             anchorMode={anchorPersonalized ? "personalized" : "global"}
             onAnchorModeChange={(mode) => setAnchorPersonalized(mode === "personalized")}
-            onOpenMemory={() => setMemoryOpen(true)}
+            onOpenLibrary={() => {
+              setWorkspaceTab("saved")
+              setMemoryOpen(true)
+            }}
+            onOpenMemory={() => {
+              setWorkspaceTab("memory")
+              setMemoryOpen(true)
+            }}
             yearFrom={yearFrom}
             yearTo={yearTo}
             onYearFromChange={setYearFrom}
@@ -630,12 +641,46 @@ export default function ResearchPageNew() {
 
         {/* Memory Sheet Drawer */}
         <Sheet open={memoryOpen} onOpenChange={setMemoryOpen}>
-          <SheetContent className="w-full sm:max-w-lg overflow-y-auto">
-            <SheetHeader>
-              <SheetTitle>Track Memory</SheetTitle>
-            </SheetHeader>
-            <div className="mt-4">
-              <MemoryTab userId={userId} trackId={activeTrackId} />
+          <SheetContent className="w-full border-l border-border/70 p-0 sm:max-w-2xl">
+            <div className="flex h-full flex-col bg-gradient-to-b from-slate-50 via-white to-white">
+              <SheetHeader className="border-b border-border/70 bg-white/90 px-5 py-4 backdrop-blur">
+                <div className="flex flex-wrap items-center gap-2">
+                  <SheetTitle>Workspace Library</SheetTitle>
+                  <Badge variant="secondary">
+                    {activeTrack?.name ? `Track: ${activeTrack.name}` : "Global scope"}
+                  </Badge>
+                </div>
+                <SheetDescription>
+                  Review saved papers, trigger export handoffs, and inspect track memory without leaving the
+                  research workspace.
+                </SheetDescription>
+              </SheetHeader>
+              <div className="flex min-h-0 flex-1 flex-col px-5 pb-5 pt-4">
+                <Tabs
+                  value={workspaceTab}
+                  onValueChange={(value) => setWorkspaceTab(value as "saved" | "memory")}
+                  className="flex min-h-0 flex-1 flex-col"
+                >
+                  <TabsList className="grid h-auto w-full grid-cols-2 rounded-2xl bg-slate-100 p-1">
+                    <TabsTrigger value="saved" className="rounded-xl">
+                      Saved
+                    </TabsTrigger>
+                    <TabsTrigger value="memory" className="rounded-xl">
+                      Memory
+                    </TabsTrigger>
+                  </TabsList>
+                  <TabsContent value="saved" className="mt-4 min-h-0 flex-1 overflow-y-auto pr-1">
+                    <SavedTab
+                      userId={userId}
+                      trackId={activeTrackId}
+                      trackName={activeTrack?.name ?? null}
+                    />
+                  </TabsContent>
+                  <TabsContent value="memory" className="mt-4 min-h-0 flex-1 overflow-y-auto pr-1">
+                    <MemoryTab userId={userId} trackId={activeTrackId} />
+                  </TabsContent>
+                </Tabs>
+              </div>
             </div>
           </SheetContent>
         </Sheet>
