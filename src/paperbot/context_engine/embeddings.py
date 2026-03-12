@@ -10,10 +10,34 @@ from typing import List, Optional
 
 @dataclass(frozen=True)
 class EmbeddingConfig:
-    model: str = "text-embedding-3-small"
-    api_key_env: str = "OPENAI_API_KEY"
-    base_url_env: str = "OPENAI_BASE_URL"
+    model: Optional[str] = None
+    model_env: str = "PAPERBOT_EMBEDDING_MODEL"
+    api_key_env: str = "PAPERBOT_EMBEDDING_API_KEY"
+    base_url_env: str = "PAPERBOT_EMBEDDING_BASE_URL"
     timeout_seconds: float = 30.0
+
+    def resolve_model(self) -> str:
+        explicit = str(self.model or "").strip()
+        if explicit:
+            return explicit
+        env_value = _first_nonempty_env(self.model_env, "OPENAI_EMBEDDING_MODEL")
+        if env_value:
+            return env_value
+        return "text-embedding-3-small"
+
+    def resolve_api_key(self) -> str:
+        return _first_nonempty_env(self.api_key_env, "OPENAI_API_KEY")
+
+    def resolve_base_url(self) -> str:
+        return _first_nonempty_env(self.base_url_env, "OPENAI_BASE_URL")
+
+
+def _first_nonempty_env(*names: str) -> str:
+    for name in names:
+        value = os.getenv(str(name or ""), "").strip()
+        if value:
+            return value
+    return ""
 
 
 class EmbeddingProvider:
@@ -24,9 +48,12 @@ class EmbeddingProvider:
 class OpenAIEmbeddingProvider(EmbeddingProvider):
     def __init__(self, config: Optional[EmbeddingConfig] = None):
         self.config = config or EmbeddingConfig()
-        api_key = os.getenv(self.config.api_key_env, "")
+        api_key = self.config.resolve_api_key()
         if not api_key:
-            raise RuntimeError(f"Missing API key env: {self.config.api_key_env}")
+            raise RuntimeError(
+                "Missing embedding API key env: "
+                f"{self.config.api_key_env} (fallback: OPENAI_API_KEY)"
+            )
 
         try:
             from openai import OpenAI  # type: ignore
@@ -34,7 +61,7 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
             raise RuntimeError("openai library not installed") from e
 
         client_kwargs = {"api_key": api_key}
-        base_url = os.getenv(self.config.base_url_env)
+        base_url = self.config.resolve_base_url()
         if base_url:
             client_kwargs["base_url"] = base_url
 
@@ -47,7 +74,7 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
         # Guardrail: keep request bounded.
         if len(s) > 24000:
             s = s[:24000]
-        resp = self._client.embeddings.create(model=self.config.model, input=s)
+        resp = self._client.embeddings.create(model=self.config.resolve_model(), input=s)
         if not getattr(resp, "data", None):
             return None
         vec = getattr(resp.data[0], "embedding", None)

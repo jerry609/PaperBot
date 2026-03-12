@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
 from paperbot.application.services.retrieval_benchmark import mrr_at_k, ndcg_at_k, recall_at_k
-from paperbot.context_engine.embeddings import HashEmbeddingProvider
+from paperbot.context_engine.embeddings import EmbeddingProvider, HashEmbeddingProvider
 from paperbot.infrastructure.services.document_indexing_service import DocumentIndexingService
 from paperbot.infrastructure.stores.document_index_store import DocumentIndexStore
 from paperbot.infrastructure.stores.paper_store import PaperStore
@@ -154,16 +154,18 @@ def _seed_fixture_into_store(
     fixture: DocumentEvidenceBenchmarkFixture,
     *,
     db_url: str,
+    embedding_provider: Optional[EmbeddingProvider] = None,
 ) -> Dict[int, int]:
+    provider = embedding_provider or HashEmbeddingProvider(dim=128)
     paper_store = PaperStore(db_url=db_url, auto_create_schema=True)
     service = DocumentIndexingService(
         paper_store=paper_store,
         index_store=DocumentIndexStore(
             db_url=db_url,
             auto_create_schema=True,
-            embedding_provider=HashEmbeddingProvider(dim=128),
+            embedding_provider=provider,
         ),
-        embedding_provider=HashEmbeddingProvider(dim=128),
+        embedding_provider=provider,
     )
     id_map: Dict[int, int] = {}
     try:
@@ -238,9 +240,12 @@ def _rank_embedding_only(
     *,
     query: str,
     top_k: int,
+    embedding_provider: Optional[EmbeddingProvider],
 ) -> List[Dict[str, Any]]:
-    provider = HashEmbeddingProvider(dim=128)
-    query_embedding = provider.embed(query)
+    if embedding_provider is None:
+        return []
+
+    query_embedding = embedding_provider.embed(query)
     if not query_embedding:
         return []
 
@@ -266,7 +271,12 @@ def _rank_mode(
 ) -> List[Dict[str, Any]]:
     normalized_mode = str(mode or "").strip().lower()
     if normalized_mode == "embedding_only":
-        return _rank_embedding_only(store.list_chunks(), query=query, top_k=top_k)
+        return _rank_embedding_only(
+            store.list_chunks(),
+            query=query,
+            top_k=top_k,
+            embedding_provider=store.embedding_provider,
+        )
 
     if normalized_mode == "fts_only":
         fts_store = DocumentIndexStore(db_url=store.db_url, auto_create_schema=False)
@@ -343,15 +353,22 @@ def run_document_evidence_benchmark(
     fixture: DocumentEvidenceBenchmarkFixture,
     *,
     modes: Sequence[str] = ("fts_only", "embedding_only", "hybrid"),
+    embedding_provider: Optional[EmbeddingProvider] = None,
+    provider_label: str = "hash",
 ) -> Dict[str, Any]:
+    provider = embedding_provider or HashEmbeddingProvider(dim=128)
     with tempfile.TemporaryDirectory(prefix="paperbot-document-evidence-bench-") as temp_dir:
         db_url = f"sqlite:///{Path(temp_dir) / 'document_evidence_bench.db'}"
-        id_map = _seed_fixture_into_store(fixture, db_url=db_url)
+        id_map = _seed_fixture_into_store(
+            fixture,
+            db_url=db_url,
+            embedding_provider=provider,
+        )
         remapped_cases = [_remap_case(case, id_map=id_map) for case in fixture.cases]
         hybrid_store = DocumentIndexStore(
             db_url=db_url,
             auto_create_schema=False,
-            embedding_provider=HashEmbeddingProvider(dim=128),
+            embedding_provider=provider,
         )
         try:
             case_results: List[Dict[str, Any]] = []
@@ -385,6 +402,7 @@ def run_document_evidence_benchmark(
             "fixture_version": fixture.version,
             "case_count": len(fixture.cases),
             "modes": [str(mode) for mode in modes],
+            "embedding_provider": str(provider_label or "hash"),
         },
         "cases": case_results,
         "summary": {
@@ -400,6 +418,7 @@ def format_document_evidence_benchmark_report(result: Dict[str, Any]) -> str:
     lines = [
         "Document Evidence Benchmark",
         f"Fixture: {config.get('fixture_version')}",
+        f"Embedding Provider: {config.get('embedding_provider') or 'unknown'}",
         f"Cases: {int(config.get('case_count', 0))}",
     ]
     for mode, metrics_by_group in summary.items():
