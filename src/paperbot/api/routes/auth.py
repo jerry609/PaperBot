@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import os
 import httpx
+from typing import Optional
+
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, EmailStr
 
@@ -21,14 +23,14 @@ _user_store = SqlAlchemyUserStore()
 class RegisterRequest(BaseModel):
     email: EmailStr
     password: str
-    display_name: str | None = None
+    display_name: Optional[str] = None
 
 
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     user_id: int
-    display_name: str | None
+    display_name: Optional[str]
 
 
 @router.post("/register", response_model=TokenResponse, status_code=201)
@@ -87,10 +89,10 @@ def login(req: LoginRequest):
 
 class MeResponse(BaseModel):
     id: int
-    email: str | None
-    github_username: str | None
-    display_name: str | None
-    avatar_url: str | None
+    email: Optional[str]
+    github_username: Optional[str]
+    display_name: Optional[str]
+    avatar_url: Optional[str]
 
 
 @router.get("/me", response_model=MeResponse)
@@ -106,10 +108,10 @@ def me(current_user: User = Depends(get_current_user)):
 
 class GithubExchangeRequest(BaseModel):
     github_id: str
-    login: str | None = None
-    name: str | None = None
-    avatar_url: str | None = None
-    email: str | None = None
+    login: Optional[str] = None
+    name: Optional[str] = None
+    avatar_url: Optional[str] = None
+    email: Optional[str] = None
     access_token: str
 
 
@@ -151,7 +153,7 @@ async def github_exchange(req: GithubExchangeRequest):
 # ── Account management ───────────────────────────────────────────────────────
 
 class UpdateMeRequest(BaseModel):
-    display_name: str | None = None
+    display_name: Optional[str] = None
 
 
 @router.patch("/me", response_model=MeResponse)
