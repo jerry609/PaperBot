@@ -25,8 +25,8 @@ python-dotenv>=0.19.0
 cryptography>=41.0.0
 keyring>=25.0.0
 
-# 配置模型
-pydantic>=2.0.0
+# 配置模型（需要 EmailStr 支持）
+pydantic[email]>=2.0.0
 
 # 日志和调试
 colorlog>=6.7.0
@@ -101,3 +101,8 @@ sqlite-vec>=0.1.6
 
 # Fuzzy string matching for paper deduplication
 rapidfuzz>=3.0.0
+
+# Authentication (JWT + password hashing)
+python-jose[cryptography]>=3.3.0
+bcrypt>=4.0.0
+resend>=0.7.0

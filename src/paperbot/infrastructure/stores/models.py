@@ -4,7 +4,19 @@ import json
 from datetime import datetime
 from typing import Any, Dict, Optional
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, LargeBinary, String, Text, UniqueConstraint
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    LargeBinary,
+    String,
+    Text,
+    UniqueConstraint,
+    CheckConstraint,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -1335,3 +1347,51 @@ class IntelligenceEventModel(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
 
     payload_json: Mapped[str] = mapped_column(Text, default="{}")
+
+
+# ============================================================================
+# Authentication: Users
+# ============================================================================
+
+
+class UserModel(Base):
+    """User accounts for authentication and personalization.
+
+    Either email (with hashed_password) or github_id must be provided.
+    """
+
+    __tablename__ = "users"
+    __table_args__ = (
+        UniqueConstraint("email", name="uq_users_email"),
+        UniqueConstraint("github_id", name="uq_users_github_id"),
+        CheckConstraint("email IS NOT NULL OR github_id IS NOT NULL", name="ck_users_identity"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
+    hashed_password: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    github_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
+    github_username: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    display_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    avatar_url: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_login_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+# ============================================================================
+# Authentication: Password Reset Tokens
+# ============================================================================
+
+
+class PasswordResetTokenModel(Base):
+    """One-time tokens for password reset. Expires after 1 hour."""
+
+    __tablename__ = "password_reset_tokens"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    token: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

@@ -33,6 +33,7 @@ from .routes import (
     intelligence,
     push_commands,
     agent_board,
+    auth,
 )
 from paperbot.api.error_handling import install_api_error_handling
 from paperbot.infrastructure.event_log.logging_event_log import LoggingEventLog
@@ -90,6 +91,7 @@ app.include_router(feed.router, prefix="/api", tags=["Feed"])
 app.include_router(intelligence.router, prefix="/api", tags=["Intelligence"])
 app.include_router(push_commands.router, prefix="/api", tags=["Push"])
 app.include_router(agent_board.router, tags=["Agent Board"])
+app.include_router(auth.router)
 
 
 @app.on_event("startup")
