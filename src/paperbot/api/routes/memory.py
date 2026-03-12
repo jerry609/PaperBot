@@ -176,8 +176,8 @@ class ContextResponse(BaseModel):
 
 @router.post("/memory/context", response_model=ContextResponse)
 def memory_context(req: ContextRequest, user_id: str = Depends(get_user_id)):
-    effective_user_id = req.user_id or user_id
-    items = _store.search_memories(
+    effective_user_id = user_id
+    items = _get_store().search_memories(
         user_id=effective_user_id,
         workspace_id=req.workspace_id,
         query=req.query,
