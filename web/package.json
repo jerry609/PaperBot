@@ -8,9 +8,9 @@
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
-    "test:e2e": "npx playwright test",
-    "test:e2e:ui": "npx playwright test --ui",
-    "test:e2e:headed": "npx playwright test --headed",
+    "test:e2e": "node ./scripts/run-playwright-e2e.mjs",
+    "test:e2e:ui": "node ./scripts/run-playwright-e2e.mjs --ui",
+    "test:e2e:headed": "node ./scripts/run-playwright-e2e.mjs --headed",
     "test:e2e:report": "npx playwright show-report"
   },
   "dependencies": {

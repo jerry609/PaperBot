@@ -1,4 +1,5 @@
 import Link from "next/link"
+import { unstable_noStore as noStore } from "next/cache"
 import {
   ArrowRight,
   BellDot,
@@ -32,6 +33,9 @@ import type {
   ResearchTrackSummary,
   TrackFeedItem,
 } from "@/lib/types"
+
+export const dynamic = "force-dynamic"
+export const revalidate = 0
 
 type DashboardRecommendationCardData = {
   id: string
@@ -479,6 +483,8 @@ function DeadlineCard({ item }: { item: DeadlineRadarItem }) {
 }
 
 export default async function DashboardPage() {
+  noStore()
+
   const [
     tracksResult,
     readingQueueResult,
