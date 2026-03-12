@@ -1922,50 +1922,28 @@ export default function TopicWorkflowDashboard({
           </CardHeader>
 
           <CardContent className="space-y-4">
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-              <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-                  Focus Track
-                </p>
-                <p className="mt-2 text-lg font-semibold text-slate-900">
-                  {dashboardContext?.activeTrackName || "Global"}
-                </p>
-                <p className="mt-1 text-xs text-slate-500">
-                  {dashboardContext?.readingQueueCount ?? 0} queued
-                </p>
-              </div>
-              <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-                  Snapshot
-                </p>
-                <p className="mt-2 text-lg font-semibold text-slate-900">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-3.5">
+              <div className="flex flex-wrap gap-2">
+                <div className="rounded-full border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
+                  <span className="font-semibold text-slate-900">Focus:</span>{" "}
+                  {dashboardContext?.activeTrackName || "Global"} · {dashboardContext?.readingQueueCount ?? 0} queued
+                </div>
+                <div className="rounded-full border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
+                  <span className="font-semibold text-slate-900">Snapshot:</span>{" "}
                   {hasReportData ? "Daily digest ready" : hasSearchData ? "Candidates ready" : "Waiting"}
-                </p>
-                <p className="mt-1 text-xs text-slate-500">
-                  {allPapers.length} candidates · {judgedPapersCount} judged
-                </p>
-              </div>
-              <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-                  Delivery
-                </p>
-                <p className="mt-2 text-lg font-semibold text-slate-900">
+                  {" · "}
+                  {allPapers.length} candidates / {judgedPapersCount} judged
+                </div>
+                <div className="rounded-full border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
+                  <span className="font-semibold text-slate-900">Delivery:</span>{" "}
                   {deliveryChannels.length ? deliveryChannels.join(" + ") : "Manual review"}
-                </p>
-                <p className="mt-1 text-xs text-slate-500">
-                  {saveDaily ? "Artifacts persisted" : "Ephemeral preview"}
-                </p>
-              </div>
-              <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-                  Alerts
-                </p>
-                <p className="mt-2 text-lg font-semibold text-slate-900">
-                  {(dashboardContext?.urgentDeadlineCount ?? 0) + (dashboardContext?.signalCount ?? 0)}
-                </p>
-                <p className="mt-1 text-xs text-slate-500">
-                  deadlines + signals on dashboard
-                </p>
+                  {" · "}
+                  {saveDaily ? "persisted" : "preview"}
+                </div>
+                <div className="rounded-full border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
+                  <span className="font-semibold text-slate-900">Alerts:</span>{" "}
+                  {(dashboardContext?.urgentDeadlineCount ?? 0) + (dashboardContext?.signalCount ?? 0)} dashboard items
+                </div>
               </div>
             </div>
 
