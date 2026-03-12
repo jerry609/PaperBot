@@ -34,6 +34,7 @@ from .routes import (
     intelligence,
     push_commands,
     agent_board,
+    wiki,
     auth,
 )
 from paperbot.api.error_handling import install_api_error_handling
@@ -93,6 +94,7 @@ app.include_router(feed.router, prefix="/api", tags=["Feed"])
 app.include_router(intelligence.router, prefix="/api", tags=["Intelligence"])
 app.include_router(push_commands.router, prefix="/api", tags=["Push"])
 app.include_router(agent_board.router, tags=["Agent Board"])
+app.include_router(wiki.router, prefix="/api", tags=["Wiki"])
 app.include_router(auth.router)
 
 

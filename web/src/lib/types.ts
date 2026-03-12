@@ -107,6 +107,8 @@ export interface WikiConcept {
     examples: string[]
     category: "Method" | "Task" | "Metric" | "Architecture" | "Dataset"
     icon: string // Lucide icon name or identifier
+    paper_count?: number
+    track_count?: number
 }
 
 export interface LLMUsageDailyRecord {

@@ -18,49 +18,22 @@ const iconMap: Record<string, LucideIcon> = {
     "bar-chart": BarChart2,
     "waves": Waves,
     "image": ImageIcon,
+    "book-open": BookOpen,
 }
 
 type WikiSearchParams = Promise<{ q?: string | string[] }>
 
-function conceptMatchesKeyword(
-    keyword: string,
-    concept: {
-        name: string
-        description: string
-        definition: string
-        category: string
-        related_papers: string[]
-        related_concepts: string[]
-        examples: string[]
-    },
-) {
-    if (!keyword) return true
-    const haystack = [
-        concept.name,
-        concept.description,
-        concept.definition,
-        concept.category,
-        concept.related_papers.join(" "),
-        concept.related_concepts.join(" "),
-        concept.examples.join(" "),
-    ]
-        .join(" ")
-        .toLowerCase()
-    return haystack.includes(keyword)
-}
-
 export default async function WikiPage({ searchParams }: { searchParams: WikiSearchParams }) {
-    const concepts = await fetchWikiConcepts()
-    const categories = ["All", "Method", "Architecture", "Metric", "Dataset", "Task"]
     const rawKeyword = await searchParams
     const keywordValue = rawKeyword?.q
     const keyword = (Array.isArray(keywordValue) ? keywordValue[0] : keywordValue || "")
         .trim()
         .toLowerCase()
+    const concepts = await fetchWikiConcepts(keyword)
+    const categories = ["All", ...Array.from(new Set(concepts.map((concept) => concept.category)))]
 
     return (
         <div className="flex-1 p-8 pt-6 min-h-screen">
-            {/* Header */}
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
                 <div>
                     <h2 className="text-3xl font-bold tracking-tight flex items-center gap-3">
@@ -68,7 +41,7 @@ export default async function WikiPage({ searchParams }: { searchParams: WikiSea
                         Knowledge Base
                     </h2>
                     <p className="text-muted-foreground mt-1">
-                        Explore {concepts.length} core concepts in AI/ML research.
+                        Explore {concepts.length} grounded concepts across your library and active tracks.
                     </p>
                 </div>
                 <form method="get" className="flex w-full md:max-w-md items-center gap-2 bg-background p-1.5 rounded-lg border shadow-sm">
@@ -84,7 +57,6 @@ export default async function WikiPage({ searchParams }: { searchParams: WikiSea
                 </form>
             </div>
 
-            {/* Category Tabs */}
             <Tabs defaultValue="All" className="w-full">
                 <TabsList className="mb-6 bg-muted/50">
                     {categories.map(cat => (
@@ -102,7 +74,7 @@ export default async function WikiPage({ searchParams }: { searchParams: WikiSea
 
                 {categories.map(cat => {
                     const filteredConcepts = concepts.filter(
-                        (c) => (cat === "All" || c.category === cat) && conceptMatchesKeyword(keyword, c),
+                        (c) => cat === "All" || c.category === cat,
                     )
                     return (
                     <TabsContent
@@ -140,7 +112,6 @@ export default async function WikiPage({ searchParams }: { searchParams: WikiSea
 
                                                 <Separator />
 
-                                                {/* Definition */}
                                                 <div>
                                                     <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1 flex items-center gap-1">
                                                         <Lightbulb className="h-3 w-3" /> Definition
@@ -148,7 +119,6 @@ export default async function WikiPage({ searchParams }: { searchParams: WikiSea
                                                     <p className="text-sm line-clamp-2">{concept.definition}</p>
                                                 </div>
 
-                                                {/* Related Concepts */}
                                                 <div>
                                                     <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1 flex items-center gap-1">
                                                         <Network className="h-3 w-3" /> Related Concepts
@@ -162,7 +132,6 @@ export default async function WikiPage({ searchParams }: { searchParams: WikiSea
                                                     </div>
                                                 </div>
 
-                                                {/* Key Papers */}
                                                 <div>
                                                     <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1 flex items-center gap-1">
                                                         <Book className="h-3 w-3" /> Key Papers
@@ -176,14 +145,18 @@ export default async function WikiPage({ searchParams }: { searchParams: WikiSea
                                                     </div>
                                                 </div>
 
-                                                {/* Examples */}
+                                                <p className="text-xs text-muted-foreground">
+                                                    Grounded by {concept.paper_count || 0} papers
+                                                    {" · "}
+                                                    {concept.track_count || 0} track matches
+                                                </p>
+
                                                 {concept.examples.length > 0 && (
                                                     <p className="text-xs text-muted-foreground">
                                                         <span className="font-medium">Examples:</span> {concept.examples.slice(0, 2).join(", ")}
                                                     </p>
                                                 )}
 
-                                                {/* Explore Button */}
                                                 <Button variant="ghost" size="sm" className="w-full mt-1 text-primary hover:bg-primary/5">
                                                     Explore Concept <ArrowRight className="ml-1 h-4 w-4" />
                                                 </Button>

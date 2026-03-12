@@ -578,64 +578,23 @@ export async function fetchScholarDetails(id: string): Promise<ScholarDetails> {
     }
 }
 
-export async function fetchWikiConcepts(): Promise<WikiConcept[]> {
-    return [
-        {
-            id: "transformer",
-            name: "Transformer",
-            description: "A deep learning model architecture relying on self-attention mechanisms.",
-            definition: "The Transformer architecture processes input sequences in parallel using self-attention, allowing it to capture long-range dependencies more effectively than RNNs. It consists of encoder and decoder stacks, each containing multi-head attention and feed-forward layers.",
-            related_papers: ["Attention Is All You Need", "BERT", "GPT-3"],
-            related_concepts: ["Self-Attention", "Positional Encoding", "Multi-Head Attention"],
-            examples: ["GPT-4", "Claude", "LLaMA"],
-            category: "Architecture",
-            icon: "layers"
-        },
-        {
-            id: "rlhf",
-            name: "RLHF",
-            description: "Reinforcement Learning from Human Feedback, used to align LLMs with human preferences.",
-            definition: "RLHF trains a reward model on human preference data, then fine-tunes the language model using PPO to maximize the reward. This alignment technique helps reduce harmful outputs and improve helpfulness.",
-            related_papers: ["InstructGPT", "Constitutional AI"],
-            related_concepts: ["PPO", "Reward Model", "Alignment"],
-            examples: ["ChatGPT alignment", "Claude training"],
-            category: "Method",
-            icon: "target"
-        },
-        {
-            id: "bleu",
-            name: "BLEU Score",
-            description: "A metric for evaluating the quality of machine translated text.",
-            definition: "BLEU (Bilingual Evaluation Understudy) compares n-gram overlaps between generated and reference translations. Scores range from 0 to 1, with higher scores indicating better translation quality.",
-            related_papers: ["BLEU: a Method for Automatic Evaluation"],
-            related_concepts: ["ROUGE", "METEOR", "BERTScore"],
-            examples: ["MT evaluation", "Summarization scoring"],
-            category: "Metric",
-            icon: "bar-chart"
-        },
-        {
-            id: "diffusion",
-            name: "Diffusion Models",
-            description: "Generative models that learn to reverse a gradual noising process.",
-            definition: "Diffusion models add Gaussian noise to data over multiple steps, then learn to reverse this process. They achieve state-of-the-art image generation by iteratively denoising random noise into coherent samples.",
-            related_papers: ["DDPM", "Stable Diffusion", "DALL-E 2"],
-            related_concepts: ["Denoising", "Score Matching", "Latent Diffusion"],
-            examples: ["Midjourney", "Stable Diffusion XL"],
-            category: "Method",
-            icon: "waves"
-        },
-        {
-            id: "imagenet",
-            name: "ImageNet",
-            description: "Large-scale visual database for object recognition research.",
-            definition: "ImageNet contains over 14 million images annotated with 20,000+ categories. The ILSVRC subset (1000 classes) became the standard benchmark for image classification, driving major advances in CNNs.",
-            related_papers: ["ImageNet Classification with Deep CNNs"],
-            related_concepts: ["Transfer Learning", "Fine-tuning", "Pretraining"],
-            examples: ["ResNet-50 on ImageNet", "ViT benchmarks"],
-            category: "Dataset",
-            icon: "image"
+export async function fetchWikiConcepts(query?: string): Promise<WikiConcept[]> {
+    const params = new URLSearchParams()
+    if (query && query.trim()) {
+        params.set("q", query.trim())
+    }
+    try {
+        const res = await fetch(`${API_BASE_URL}/wiki/concepts${params.size ? `?${params.toString()}` : ""}`, {
+            cache: "no-store",
+        })
+        if (!res.ok) {
+            return []
         }
-    ]
+        const data = await res.json() as { items?: WikiConcept[] }
+        return data.items || []
+    } catch {
+        return []
+    }
 }
 
 export async function fetchPapers(): Promise<Paper[]> {
