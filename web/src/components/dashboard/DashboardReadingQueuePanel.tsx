@@ -16,7 +16,7 @@ import {
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
-import { cn } from "@/lib/utils"
+import { cn, safeHref, safeInternalHref } from "@/lib/utils"
 import type { DashboardReadingQueueItem, DashboardReadingQueuePriority } from "@/lib/dashboard-reading-queue"
 
 type QueueDetail = {
@@ -26,6 +26,19 @@ type QueueDetail = {
   dataset?: string | null
   conclusion?: string | null
   limitations?: string | null
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === "object" ? value as Record<string, unknown> : null
+}
+
+function getNestedRecord(source: Record<string, unknown> | null, key: string): Record<string, unknown> | null {
+  return asRecord(source?.[key])
+}
+
+function getOptionalString(source: Record<string, unknown> | null, key: string): string | null {
+  const value = source?.[key]
+  return typeof value === "string" ? value : null
 }
 
 function PriorityBadge({ level }: { level: DashboardReadingQueuePriority }) {
@@ -50,28 +63,18 @@ function PriorityBadge({ level }: { level: DashboardReadingQueuePriority }) {
 }
 
 function extractQueueDetail(detailPayload: unknown, cardPayload: unknown): QueueDetail {
-  const detailRecord = detailPayload && typeof detailPayload === "object" ? detailPayload as Record<string, unknown> : {}
-  const detail = detailRecord.detail && typeof detailRecord.detail === "object"
-    ? detailRecord.detail as Record<string, unknown>
-    : {}
-  const paper = detail.paper && typeof detail.paper === "object"
-    ? detail.paper as Record<string, unknown>
-    : {}
-  const latestJudge = detail.latest_judge && typeof detail.latest_judge === "object"
-    ? detail.latest_judge as Record<string, unknown>
-    : {}
-  const cardRecord = cardPayload && typeof cardPayload === "object" ? cardPayload as Record<string, unknown> : {}
-  const structuredCard = cardRecord.structured_card && typeof cardRecord.structured_card === "object"
-    ? cardRecord.structured_card as Record<string, unknown>
-    : {}
+  const detail = getNestedRecord(asRecord(detailPayload), "detail")
+  const paper = getNestedRecord(detail, "paper")
+  const latestJudge = getNestedRecord(detail, "latest_judge")
+  const structuredCard = getNestedRecord(asRecord(cardPayload), "structured_card")
 
   return {
-    abstract: typeof paper.abstract === "string" ? paper.abstract : null,
-    judgeSummary: typeof latestJudge.one_line_summary === "string" ? latestJudge.one_line_summary : null,
-    method: typeof structuredCard.method === "string" ? structuredCard.method : null,
-    dataset: typeof structuredCard.dataset === "string" ? structuredCard.dataset : null,
-    conclusion: typeof structuredCard.conclusion === "string" ? structuredCard.conclusion : null,
-    limitations: typeof structuredCard.limitations === "string" ? structuredCard.limitations : null,
+    abstract: getOptionalString(paper, "abstract"),
+    judgeSummary: getOptionalString(latestJudge, "one_line_summary"),
+    method: getOptionalString(structuredCard, "method"),
+    dataset: getOptionalString(structuredCard, "dataset"),
+    conclusion: getOptionalString(structuredCard, "conclusion"),
+    limitations: getOptionalString(structuredCard, "limitations"),
   }
 }
 
@@ -92,10 +95,12 @@ function QueueCard({
   const [error, setError] = useState<string | null>(null)
   const [isSaved, setIsSaved] = useState(Boolean(item.isSaved))
 
-  const detailRef = item.internalPaperId ? String(item.internalPaperId) : item.paperRef
+  const detailRef = item.internalPaperId !== null ? String(item.internalPaperId) : item.paperRef
   const canLoadDetail = Boolean(detailRef)
-  const canSave = Boolean(item.canSave) && (item.internalPaperId ? true : Boolean(activeTrackId))
+  const canSave = Boolean(item.canSave) && (item.internalPaperId !== null || Boolean(activeTrackId))
   const canArchive = Boolean(isSaved && detailRef)
+  const safeResearchHref = safeInternalHref(item.researchHref) || "/research"
+  const safePaperHref = item.isExternal ? safeHref(item.href) : safeInternalHref(item.href)
 
   async function loadDetail() {
     if (!detailRef || detail || loadingDetail) return
@@ -131,7 +136,7 @@ function QueueCard({
     setLoadingSave(true)
     setError(null)
     try {
-      if (item.internalPaperId) {
+      if (item.internalPaperId !== null) {
         const res = await fetch(`/api/papers/${item.internalPaperId}/save`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -157,7 +162,7 @@ function QueueCard({
             paper_authors: item.authors || [],
             paper_year: item.year,
             paper_venue: item.venue,
-            paper_url: item.href,
+            paper_url: item.isExternal ? safeHref(item.href) || undefined : undefined,
             paper_source: item.paperSource || "semantic_scholar",
           }),
         })
@@ -343,21 +348,25 @@ function QueueCard({
 
         <div className="flex items-center gap-2">
           <Button asChild variant="ghost" size="sm" className="rounded-lg">
-            <Link href={item.researchHref}>
+            <Link href={safeResearchHref}>
               <MessageSquare className="mr-1.5 size-4" />
               Analyze
             </Link>
           </Button>
-          {item.isExternal ? (
+          {item.isExternal && safePaperHref ? (
             <Button asChild size="sm" className="rounded-lg bg-indigo-600 hover:bg-indigo-700">
-              <a href={item.href} target="_blank" rel="noreferrer">
+              <a href={safePaperHref} target="_blank" rel="noreferrer">
                 <ExternalLink className="mr-1.5 size-4" />
                 Open paper
               </a>
             </Button>
-          ) : (
+          ) : safePaperHref ? (
             <Button asChild size="sm" className="rounded-lg bg-indigo-600 hover:bg-indigo-700">
-              <Link href={item.href}>Open paper</Link>
+              <Link href={safePaperHref}>Open paper</Link>
+            </Button>
+          ) : (
+            <Button size="sm" className="rounded-lg bg-indigo-600 hover:bg-indigo-700" disabled>
+              Open paper
             </Button>
           )}
         </div>

@@ -224,15 +224,25 @@ export function buildDashboardBrief(report: DailyReport): DashboardBriefSnapshot
 
 async function resolveReportDirectory(): Promise<string | null> {
   const cwd = process.cwd()
-  const candidates = [
-    process.env.PAPERBOT_DAILYPAPER_OUTPUT_DIR,
+  const envCandidate = process.env.PAPERBOT_DAILYPAPER_OUTPUT_DIR?.trim() || null
+  const fallbackCandidates = [
     path.join(cwd, "reports", "dailypaper"),
     path.join(cwd, "..", "reports", "dailypaper"),
     path.join(cwd, "..", "output", "reports"),
     path.join(cwd, "output", "reports"),
-  ].filter(Boolean) as string[]
+  ]
 
-  for (const candidate of candidates) {
+  if (envCandidate) {
+    try {
+      const stats = await fs.stat(envCandidate)
+      if (stats.isDirectory()) return envCandidate
+      console.warn(`PAPERBOT_DAILYPAPER_OUTPUT_DIR is not a directory: ${envCandidate}`)
+    } catch (error) {
+      console.warn(`Unable to access PAPERBOT_DAILYPAPER_OUTPUT_DIR at ${envCandidate}:`, error)
+    }
+  }
+
+  for (const candidate of fallbackCandidates) {
     try {
       const stats = await fs.stat(candidate)
       if (stats.isDirectory()) return candidate
@@ -269,7 +279,8 @@ async function readLatestReport(): Promise<DailyReport | null> {
     try {
       const raw = await fs.readFile(file.fullPath, "utf-8")
       return JSON.parse(raw) as DailyReport
-    } catch {
+    } catch (error) {
+      console.warn(`Unable to parse DailyPaper report at ${file.fullPath}:`, error)
       continue
     }
   }
