@@ -206,40 +206,15 @@ jobs:
     if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork
     runs-on: ubuntu-latest
     steps:
-      - name: Comment skip reason on fork PR
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const marker = "<!-- vercel-preview-fork-notice -->";
-            const body = [
-              marker,
-              "Preview deployment was skipped because this PR comes from a fork and GitHub Actions does not expose the Vercel secrets required for preview deploy and protected preview smoke tests.",
-            ].join("\n");
-
-            const { owner, repo } = context.repo;
-            const issue_number = context.issue.number;
-            const comments = await github.paginate(github.rest.issues.listComments, {
-              owner,
-              repo,
-              issue_number,
-              per_page: 100,
-            });
-            const existing = comments.find((comment) =>
-              comment.user?.type === "Bot" && comment.body?.includes(marker)
-            );
-
-            if (existing) {
-              await github.rest.issues.updateComment({
-                owner,
-                repo,
-                comment_id: existing.id,
-                body,
-              });
-            } else {
-              await github.rest.issues.createComment({
-                owner,
-                repo,
-                issue_number,
-                body,
-              });
-            }
+      - name: Record skip reason for fork PR
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Fork PR detected; preview deployment is skipped because GitHub Actions does not expose the Vercel secrets required for protected preview deploys." 
+          {
+            echo "### Fork PR preview skipped"
+            echo
+            echo "This pull request comes from a fork, so GitHub Actions cannot access the Vercel secrets required for preview deployment and protected preview smoke tests."
+            echo
+            echo "The workflow is intentionally passing here to avoid a false-red CI result."
+          } >> "${GITHUB_STEP_SUMMARY}"
