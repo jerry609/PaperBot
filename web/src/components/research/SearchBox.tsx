@@ -1,7 +1,7 @@
 "use client"
 
 import { KeyboardEvent, useRef, useState } from "react"
-import { Brain, CalendarRange, Check, Loader2, Search } from "lucide-react"
+import { BookCopy, Brain, CalendarRange, Check, Loader2, Search } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { showTrackMemoryButton } from "@/config/features"
@@ -116,6 +116,7 @@ interface SearchBoxProps {
   anchorMode?: "personalized" | "global"
   onAnchorModeChange?: (mode: "personalized" | "global") => void
   onOpenMemory?: () => void
+  onOpenLibrary?: () => void
   yearFrom?: string
   yearTo?: string
   onYearFromChange?: (value: string) => void
@@ -138,6 +139,7 @@ export function SearchBox({
   anchorMode = "personalized",
   onAnchorModeChange,
   onOpenMemory,
+  onOpenLibrary,
   yearFrom = "",
   yearTo = "",
   onYearFromChange,
@@ -248,14 +250,28 @@ export function SearchBox({
 
           {/* Right side - Memory, Track selector and Search button */}
           <div className="flex items-center gap-1.5 sm:gap-2">
+            {onOpenLibrary && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 rounded-full bg-muted/40 hover:bg-muted"
+                onClick={onOpenLibrary}
+                disabled={disabled || isSearching}
+                title="Saved Library"
+                aria-label="Open saved library"
+              >
+                <BookCopy className="h-4 w-4" />
+              </Button>
+            )}
             {onOpenMemory && showTrackMemoryButton() && (
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-8 w-8"
+                className="h-8 w-8 rounded-full bg-muted/40 hover:bg-muted"
                 onClick={onOpenMemory}
                 disabled={disabled || isSearching}
                 title="Track Memory"
+                aria-label="Open track memory"
               >
                 <Brain className="h-4 w-4" />
               </Button>
