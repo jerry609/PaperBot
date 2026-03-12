@@ -1,26 +1,233 @@
-name: Vercel Auto Deploy
+name: Vercel Preview
 
 on:
+  pull_request:
+    branches:
+      - dev
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
   push:
     branches:
-      - dev  # 自动预览部署的分支
-      # 如需对 master/main 做生产部署，可在后续扩展
+      - dev
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: vercel-preview-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+  VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
 
 jobs:
-  deploy:
+  deploy_preview:
+    name: Deploy preview
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
     runs-on: ubuntu-latest
+    outputs:
+      preview_url: ${{ steps.deploy.outputs.preview_url }}
+    defaults:
+      run:
+        working-directory: web
     steps:
+      - name: Check required Vercel secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${{ secrets.VERCEL_TOKEN }}"
+          test -n "${{ secrets.VERCEL_ORG_ID }}"
+          test -n "${{ secrets.VERCEL_PROJECT_ID }}"
+
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Deploy to Vercel (preview)
-        uses: amondnet/vercel-action@v20
         with:
-          # Vercel 访问令牌
-          vercel-token: ${{ secrets.VERCEL_TOKEN }}
-          # Vercel 组织 ID
-          vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
-          # Vercel 项目 ID
-          vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
-          # Preview is the default deploy mode for `vercel` unless `--prod` is passed.
-          # Recent Vercel CLI versions reject `--preview` as an unknown flag.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install web dependencies
+        run: npm ci
+
+      - name: Install Vercel CLI
+        run: npm install --global vercel@latest
+
+      - name: Pull Vercel project settings
+        run: vercel pull --yes --environment=preview --token="${{ secrets.VERCEL_TOKEN }}"
+
+      - name: Build preview artifacts
+        run: vercel build --token="${{ secrets.VERCEL_TOKEN }}"
+
+      - name: Deploy preview
+        id: deploy
+        shell: bash
+        run: |
+          set -euo pipefail
+          deploy_log="$(mktemp)"
+          vercel deploy --prebuilt --token="${{ secrets.VERCEL_TOKEN }}" 2>&1 | tee "${deploy_log}"
+          preview_url="$(grep -Eo 'https://[^ ]+\.vercel\.app[^ ]*' "${deploy_log}" | tail -n 1)"
+          if [ -z "${preview_url}" ]; then
+            echo "Unable to determine preview URL from Vercel deploy output" >&2
+            exit 1
+          fi
+          echo "preview_url=${preview_url}" >> "${GITHUB_OUTPUT}"
+          echo "Preview URL: ${preview_url}"
+
+      - name: Comment preview URL on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        env:
+          PREVIEW_URL: ${{ steps.deploy.outputs.preview_url }}
+        with:
+          script: |
+            const marker = "<!-- vercel-preview-comment -->";
+            const body = [
+              marker,
+              "## Vercel Preview",
+              `- Preview: ${process.env.PREVIEW_URL}`,
+              "- Automation bypass is expected via `VERCEL_AUTOMATION_BYPASS_SECRET` for CI and Playwright.",
+            ].join("\n");
+
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner,
+              repo,
+              issue_number,
+              per_page: 100,
+            });
+            const existing = comments.find((comment) =>
+              comment.user?.type === "Bot" && comment.body?.includes(marker)
+            );
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number,
+                body,
+              });
+            }
+
+  preview_smoke:
+    name: Preview smoke
+    needs: deploy_preview
+    if: needs.deploy_preview.outputs.preview_url != ''
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - name: Check required preview smoke secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}"
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install web dependencies
+        run: npm ci
+
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Wait for preview readiness
+        shell: bash
+        env:
+          PREVIEW_URL: ${{ needs.deploy_preview.outputs.preview_url }}
+          VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 60); do
+            status="$(curl -sS -o /dev/null -w '%{http_code}' \
+              -H "x-vercel-protection-bypass: ${VERCEL_AUTOMATION_BYPASS_SECRET}" \
+              -H "x-vercel-set-bypass-cookie: true" \
+              "${PREVIEW_URL}/dashboard" || true)"
+            if [ "${status}" -ge 200 ] && [ "${status}" -lt 400 ]; then
+              echo "Preview is ready with status ${status}"
+              exit 0
+            fi
+            echo "Preview not ready yet (attempt ${attempt}, status ${status:-none})"
+            sleep 5
+          done
+          echo "Preview did not become ready in time" >&2
+          exit 1
+
+      - name: Run Playwright smoke against preview
+        env:
+          E2E_BASE_URL: ${{ needs.deploy_preview.outputs.preview_url }}
+          VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+        run: npm run test:e2e -- e2e/smoke.spec.ts
+
+  fork_notice:
+    name: Fork PR notice
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork
+    runs-on: ubuntu-latest
+    steps:
+      - name: Comment skip reason on fork PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const marker = "<!-- vercel-preview-fork-notice -->";
+            const body = [
+              marker,
+              "Preview deployment was skipped because this PR comes from a fork and GitHub Actions does not expose the Vercel secrets required for preview deploy and protected preview smoke tests.",
+            ].join("\n");
+
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner,
+              repo,
+              issue_number,
+              per_page: 100,
+            });
+            const existing = comments.find((comment) =>
+              comment.user?.type === "Bot" && comment.body?.includes(marker)
+            );
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number,
+                body,
+              });
+            }
