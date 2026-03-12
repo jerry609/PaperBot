@@ -12,6 +12,10 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy.exc import IntegrityError
 
+from paperbot.application.services.research_track_context_service import (
+    ResearchTrackContextService,
+    TrackContextSnapshot,
+)
 from paperbot.context_engine import ContextEngine, ContextEngineConfig
 from paperbot.context_engine.track_router import TrackRouter
 from paperbot.domain.paper_identity import normalize_arxiv_id, normalize_doi
@@ -63,6 +67,13 @@ def _get_track_router() -> TrackRouter:
             memory_store=_get_memory_store(),
         )
     return _track_router
+
+
+def _build_track_context_service() -> ResearchTrackContextService:
+    return ResearchTrackContextService(
+        track_reader=_get_research_store(),
+        memory_store=_get_memory_store(),
+    )
 
 
 def _schedule_obsidian_export(
@@ -314,6 +325,52 @@ class TrackResponse(BaseModel):
     track: Dict[str, Any]
 
 
+class TrackContextMemorySummaryResponse(BaseModel):
+    total_items: int
+    approved_items: int
+    pending_items: int
+    top_tags: List[str]
+    latest_memory_at: Optional[str] = None
+
+
+class TrackContextFeedbackSummaryResponse(BaseModel):
+    total_items: int
+    actions: Dict[str, int]
+    latest_feedback_at: Optional[str] = None
+    recent_items: List[Dict[str, Any]]
+
+
+class TrackContextSavedPapersResponse(BaseModel):
+    total_items: int
+    latest_saved_at: Optional[str] = None
+    recent_items: List[Dict[str, Any]]
+
+
+class TrackContextResponse(BaseModel):
+    user_id: str
+    track_id: int
+    track: Dict[str, Any]
+    tasks: List[Dict[str, Any]]
+    milestones: List[Dict[str, Any]]
+    memory: TrackContextMemorySummaryResponse
+    feedback: TrackContextFeedbackSummaryResponse
+    saved_papers: TrackContextSavedPapersResponse
+    eval_summary: Dict[str, Any]
+
+
+def _serialize_track_context_response(
+    *,
+    user_id: str,
+    snapshot: TrackContextSnapshot,
+) -> TrackContextResponse:
+    track_id = int(snapshot.track.get("id") or 0)
+    return TrackContextResponse(
+        user_id=user_id,
+        track_id=track_id,
+        **snapshot.to_dict(),
+    )
+
+
 @router.post("/research/tracks", response_model=TrackResponse)
 def create_track(req: TrackCreateRequest, background_tasks: BackgroundTasks):
     track = _get_research_store().create_track(
@@ -456,6 +513,17 @@ def get_active_track(user_id: str = "default"):
     if not track:
         raise HTTPException(status_code=404, detail="No active track for user")
     return TrackResponse(track=track)
+
+
+@router.get("/research/tracks/{track_id}/context", response_model=TrackContextResponse)
+def get_track_context(track_id: int, user_id: str = "default"):
+    snapshot = _build_track_context_service().get_track_context(
+        user_id=user_id,
+        track_id=track_id,
+    )
+    if snapshot is None:
+        raise HTTPException(status_code=404, detail="Track not found")
+    return _serialize_track_context_response(user_id=user_id, snapshot=snapshot)
 
 
 @router.patch("/research/tracks/{track_id}", response_model=TrackResponse)
