@@ -182,13 +182,15 @@ function StudioContent() {
                 </Button>
             </div>
 
-            {/* Desktop: 2-panel workspace (ChatHistory left, ReproductionLog right) */}
-            <div className="hidden md:flex flex-1 min-h-0">
-                {viewMode === "agent_board" ? (
-                    <ReproductionLog
-                        viewMode={viewMode}
-                        onViewModeChange={setViewMode}
-                    />
+            {/* Desktop: full-width for context/agent board, split for chat workflow */}
+            <div className="hidden md:flex flex-1 min-h-0 min-w-0">
+                {viewMode === "agent_board" || viewMode === "context" ? (
+                    <div className="flex-1 min-w-0">
+                        <ReproductionLog
+                            viewMode={viewMode}
+                            onViewModeChange={setViewMode}
+                        />
+                    </div>
                 ) : (
                     <ResizablePanelGroup orientation="horizontal" className="flex-1">
                         <ResizablePanel defaultSize={20} minSize={14}>

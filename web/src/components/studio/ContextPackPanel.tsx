@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { useStudioStore } from "@/lib/store/studio-store"
 import { readSSE } from "@/lib/sse"
 import { backendUrl } from "@/lib/backend-url"
+import { cn } from "@/lib/utils"
 import type {
   ContextPackSession,
   ExtractionObservation,
@@ -26,9 +27,10 @@ interface Props {
   pack: ReproContextPack
   onSessionCreated?: (session: ContextPackSession) => void
   onDeployToBoard?: () => void
+  className?: string
 }
 
-export function ContextPackPanel({ pack, onSessionCreated, onDeployToBoard }: Props) {
+export function ContextPackPanel({ pack, onSessionCreated, onDeployToBoard, className }: Props) {
   const [creating, setCreating] = useState(false)
   const [deploying, setDeploying] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -95,6 +97,7 @@ export function ContextPackPanel({ pack, onSessionCreated, onDeployToBoard }: Pr
         body: JSON.stringify({
           paper_id: selectedPaperId || "",
           context_pack_id: pack.context_pack_id,
+          paper_title: pack.paper?.title || "",
         }),
       })
       if (!sessionRes.ok) throw new Error(`Failed to create board session (${sessionRes.status})`)
@@ -134,12 +137,6 @@ export function ContextPackPanel({ pack, onSessionCreated, onDeployToBoard }: Pr
                 message: string
                 details?: Record<string, unknown>
               }[]) || [],
-              humanReviews: (t.human_reviews as {
-                id: string
-                decision: "approve" | "request_changes"
-                notes: string
-                timestamp: string
-              }[]) || [],
               paperId: selectedPaperId || undefined,
             })
           }
@@ -157,7 +154,7 @@ export function ContextPackPanel({ pack, onSessionCreated, onDeployToBoard }: Pr
   }
 
   return (
-    <div className="h-full flex flex-col gap-4 p-4 overflow-auto">
+    <div className={cn("h-full flex flex-col gap-4 p-4 overflow-auto", className)}>
       <Card>
         <CardHeader className="space-y-2">
           <CardTitle className="text-lg">{pack.paper.title}</CardTitle>
