@@ -14,7 +14,7 @@ from paperbot.application.collaboration.message_schema import new_run_id, new_tr
 from paperbot.core.abstractions import AgentRunContext
 from paperbot.api.auth.dependencies import get_user_id
 
-from ..streaming import StreamEvent, sse_response
+from ..streaming import StreamEvent, wrap_generator
 
 router = APIRouter()
 
@@ -196,8 +196,7 @@ async def generate_code(
     event_log = getattr(http_request.app.state, "event_log", None)
     run_id = new_run_id()
     trace_id = new_trace_id()
-    #  Respect authenticated user id where available; fall back to request.user_id
-    request.user_id = request.user_id or user_id
+    request.user_id = user_id
 
     return StreamingResponse(
         wrap_generator(

@@ -443,9 +443,8 @@ def create_track(
     background_tasks: BackgroundTasks,
     user_id: str = Depends(get_user_id),
 ):
-    effective_user_id = user_id
-    track = _research_store.create_track(
-        user_id=effective_user_id,
+    track = _get_research_store().create_track(
+        user_id=user_id,
         name=req.name,
         description=req.description,
         keywords=req.keywords,
@@ -577,7 +576,7 @@ def get_deadline_radar(
 
 @router.get("/research/tracks/active", response_model=TrackResponse)
 def get_active_track(user_id: str = Depends(get_user_id)):
-    track = _research_store.get_active_track(user_id=user_id)
+    track = _get_research_store().get_active_track(user_id=user_id)
     if not track:
         raise HTTPException(status_code=404, detail="No active track for user")
     return TrackResponse(track=track)
@@ -629,7 +628,7 @@ def activate_track(
     background_tasks: BackgroundTasks,
     user_id: str = Depends(get_user_id),
 ):
-    track = _research_store.activate_track(user_id=user_id, track_id=track_id)
+    track = _get_research_store().activate_track(user_id=user_id, track_id=track_id)
     if not track:
         raise HTTPException(status_code=404, detail="Track not found")
     _schedule_embedding_precompute(background_tasks, user_id=user_id, track_ids=[track_id])
@@ -656,7 +655,7 @@ def add_task(
     background_tasks: BackgroundTasks,
     user_id: str = Depends(get_user_id),
 ):
-    task = _research_store.add_task(
+    task = _get_research_store().add_task(
         user_id=user_id,
         track_id=track_id,
         title=req.title,
@@ -740,7 +739,7 @@ def create_memory_item(
         scope_id=scope_id,
         status=req.status,
     )
-    created, _, rows = _memory_store.add_memories(user_id=user_id, memories=[cand])
+    created, _, rows = _get_memory_store().add_memories(user_id=user_id, memories=[cand])
     if created <= 0 or not rows:
         raise HTTPException(
             status_code=409, detail="Duplicate memory item (same scope/kind/content)"
