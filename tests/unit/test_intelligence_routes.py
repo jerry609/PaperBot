@@ -1,6 +1,7 @@
 from fastapi.testclient import TestClient
 
 from paperbot.api import main as api_main
+from paperbot.api.auth import dependencies as auth_deps
 from paperbot.api.routes import intelligence as intelligence_route
 from paperbot.infrastructure.services.intelligence_radar_service import RadarProfile
 
@@ -89,25 +90,36 @@ class _FakeResearchStore:
         ]
 
 
+def _override_user_id(user_id: str):
+    def _dep_override():
+        return user_id
+
+    return _dep_override
+
+
 def test_intelligence_feed_route_returns_external_signal_payload(monkeypatch):
     service = _FakeIntelligenceService()
     monkeypatch.setattr(intelligence_route, "_service", service)
     monkeypatch.setattr(intelligence_route, "_research_store", _FakeResearchStore())
 
-    with TestClient(api_main.app) as client:
-        resp = client.get(
-            "/api/intelligence/feed",
-            params={
-                "user_id": "default",
-                "limit": 1,
-                "source": "reddit",
-                "keyword": "rag",
-                "repo": "org/rag-agent",
-                "sort_by": "delta",
-                "sort_order": "desc",
-                "track_id": 7,
-            },
-        )
+    app = api_main.app
+    app.dependency_overrides[auth_deps.get_required_user_id] = _override_user_id("default")
+    try:
+        with TestClient(app) as client:
+            resp = client.get(
+                "/api/intelligence/feed",
+                params={
+                    "limit": 1,
+                    "source": "reddit",
+                    "keyword": "rag",
+                    "repo": "org/rag-agent",
+                    "sort_by": "delta",
+                    "sort_order": "desc",
+                    "track_id": 7,
+                },
+            )
+    finally:
+        app.dependency_overrides.clear()
 
     assert resp.status_code == 200
     payload = resp.json()
@@ -152,14 +164,29 @@ def test_intelligence_feed_route_returns_external_signal_payload(monkeypatch):
     assert "rag" in item["research_query"]
 
 
-def test_intelligence_feed_route_rejects_cross_user_access(monkeypatch):
+def test_intelligence_feed_route_uses_authenticated_user_id(monkeypatch):
     service = _FakeIntelligenceService()
     monkeypatch.setattr(intelligence_route, "_service", service)
     monkeypatch.setattr(intelligence_route, "_research_store", _FakeResearchStore())
 
-    with TestClient(api_main.app) as client:
-        resp = client.get("/api/intelligence/feed", params={"user_id": "u-radar"})
+    app = api_main.app
+    app.dependency_overrides[auth_deps.get_required_user_id] = _override_user_id("u-radar")
+    try:
+        with TestClient(app) as client:
+            resp = client.get(
+                "/api/intelligence/feed",
+                params={
+                    "limit": 1,
+                    "source": "reddit",
+                    "keyword": "rag",
+                    "repo": "org/rag-agent",
+                    "sort_by": "delta",
+                    "sort_order": "desc",
+                    "track_id": 7,
+                },
+            )
+    finally:
+        app.dependency_overrides.clear()
 
-    assert resp.status_code == 403
-    assert resp.json()["detail"] == "cross-user intelligence access requires authenticated user context"
-    assert service.list_feed_calls == []
+    assert resp.status_code == 200
+    assert service.list_feed_calls[0]["user_id"] == "u-radar"

@@ -575,6 +575,7 @@ class PaperStore(RegistryPort):
             fields_of_study_json=json.dumps(paper.fields_of_study, ensure_ascii=False),
             primary_source=paper.source.value,
             sources_json=json.dumps([paper.source.value], ensure_ascii=False),
+            first_seen_at=now,
             created_at=now,
             updated_at=now,
         )

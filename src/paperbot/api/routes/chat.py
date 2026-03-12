@@ -4,7 +4,9 @@ Chat API Route - Interactive conversation with AI about papers
 
 from typing import List, Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+
+from paperbot.api.auth.dependencies import get_required_user_id
 from pydantic import BaseModel, Field, field_validator
 
 from ...application.collaboration.message_schema import new_trace_id
@@ -128,11 +130,13 @@ Be concise and helpful. When discussing papers, cite specific details when avail
 
 
 @router.post("/chat")
-async def chat(request: ChatRequest):
+async def chat(request: ChatRequest, user_id: str = Depends(get_required_user_id)):
     """
     Chat with PaperBot AI and stream response.
 
     Returns Server-Sent Events with streaming text.
     """
     trace_id = new_trace_id()
+    # Override any client-provided user_id with authenticated user
+    request.user_id = user_id
     return sse_response(chat_stream(request, trace_id=trace_id), workflow="chat", trace_id=trace_id)
