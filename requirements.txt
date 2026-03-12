@@ -61,6 +61,8 @@ e2b-code-interpreter>=1.0.0
 # Report Engine
 weasyprint>=62.3
 json-repair>=0.22.0
+jinja2>=3.1.0
+markdown>=3.4.0
 
 # FastAPI backend for CLI/Web
 fastapi==0.115.0

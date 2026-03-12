@@ -27,18 +27,34 @@ classifiers = [
 
 dependencies = [
     "requests>=2.28.0",
+    "httpx[http2]>=0.27.0,<0.28.0",
     "aiohttp>=3.8.0",
+    "aiofiles>=22.1.0",
     "beautifulsoup4>=4.11.0",
     "cryptography>=41.0.0",
     "lxml>=4.9.0",
     "pydantic>=2.0",
     "loguru>=0.7.0",
     "openai>=1.0.0",
+    "anthropic>=0.3.0",
     "PyYAML>=6.0",
+    "python-dotenv>=0.19.0",
+    "fastapi==0.115.0",
+    "starlette>=0.37.2,<0.39.0",
+    "uvicorn[standard]>=0.32.0",
+    "sse-starlette>=2.1.0",
+    "python-multipart>=0.0.6",
     "SQLAlchemy>=2.0.0",
     "alembic>=1.13.0",
+    "psycopg[binary]>=3.2.0",
     "keyring>=25.0.0",
     "rapidfuzz>=3.0.0",
+    "gitpython>=3.1.0",
+    "jinja2>=3.1.0",
+    "markdown>=3.4.0",
+    "json-repair>=0.22.0",
+    "arq>=0.25.0,<0.26.0",
+    "redis>=5.0.0",
 ]
 
 [project.optional-dependencies]
@@ -53,6 +69,28 @@ dev = [
     "aioresponses>=0.7.6",
     "arq>=0.25.0,<0.26.0",
     "redis>=5.0.0",
+]
+pdf = [
+    "pdfplumber>=0.7.0",
+    "PyPDF2>=3.0.0",
+    "weasyprint>=62.3",
+]
+push = [
+    "apprise>=1.9.0",
+    "feedgen>=1.0.0",
+]
+# Keep torch-family packages out of the package metadata by default.
+# They are environment-specific and are usually generated per-reproduction task.
+repro = [
+    "numpy>=1.24.0",
+    "pandas>=1.5.0",
+]
+sandbox = [
+    "docker>=7.0.0",
+    "e2b-code-interpreter>=1.0.0",
+]
+search = [
+    "sqlite-vec>=0.1.6",
 ]
 
 [project.urls]
@@ -87,4 +125,3 @@ target-version = ['py310']
 profile = "black"
 line_length = 100
 src_paths = ["src"]
-
