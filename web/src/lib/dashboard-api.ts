@@ -25,9 +25,11 @@ function formatDateLabel(value?: string | null): string {
   return parsed.toLocaleDateString("en-US", { month: "short", day: "numeric" })
 }
 
-async function fetchJsonOrNull<T>(path: string): Promise<T | null> {
+async function fetchJsonOrNull<T>(path: string, accessToken?: string): Promise<T | null> {
   try {
-    const res = await fetch(`${API_BASE_URL}${path}`, { cache: "no-store" })
+    const headers: Record<string, string> = {}
+    if (accessToken) headers["Authorization"] = `Bearer ${accessToken}`
+    const res = await fetch(`${API_BASE_URL}${path}`, { cache: "no-store", headers })
     if (!res.ok) return null
     return (await res.json()) as T
   } catch {
@@ -35,27 +37,24 @@ async function fetchJsonOrNull<T>(path: string): Promise<T | null> {
   }
 }
 
-export async function fetchDashboardTracks(userId: string = "default"): Promise<ResearchTrackSummary[]> {
+export async function fetchDashboardTracks(accessToken?: string): Promise<ResearchTrackSummary[]> {
   const payload = await fetchJsonOrNull<{ tracks?: ResearchTrackSummary[] }>(
-    `/research/tracks?user_id=${encodeURIComponent(userId)}`
+    `/research/tracks`,
+    accessToken,
   )
   return payload?.tracks || []
 }
 
 export async function fetchDashboardTrackFeed(
   trackId: number,
-  userId: string = "default",
+  accessToken?: string,
   limit: number = 6,
 ): Promise<{ items: TrackFeedItem[]; total: number }> {
-  const qs = new URLSearchParams({
-    user_id: userId,
-    limit: String(limit),
-    offset: "0",
-  })
+  const qs = new URLSearchParams({ limit: String(limit), offset: "0" })
   const payload = await fetchJsonOrNull<{ items?: TrackFeedItem[]; total?: number }>(
-    `/research/tracks/${encodeURIComponent(String(trackId))}/feed?${qs.toString()}`
+    `/research/tracks/${encodeURIComponent(String(trackId))}/feed?${qs.toString()}`,
+    accessToken,
   )
-
   return {
     items: payload?.items || [],
     total: Number(payload?.total || 0),
@@ -64,29 +63,26 @@ export async function fetchDashboardTrackFeed(
 
 export async function fetchDashboardAnchors(
   trackId: number,
-  userId: string = "default",
+  accessToken?: string,
   limit: number = 4,
 ): Promise<AnchorPreviewItem[]> {
   const qs = new URLSearchParams({
-    user_id: userId,
     limit: String(limit),
     window_days: "730",
     personalized: "true",
   })
   const payload = await fetchJsonOrNull<{ items?: AnchorPreviewItem[] }>(
-    `/research/tracks/${encodeURIComponent(String(trackId))}/anchors/discover?${qs.toString()}`
+    `/research/tracks/${encodeURIComponent(String(trackId))}/anchors/discover?${qs.toString()}`,
+    accessToken,
   )
   return payload?.items || []
 }
 
 export async function fetchDashboardReadingQueue(
-  userId: string = "default",
+  accessToken?: string,
   limit: number = 8,
 ): Promise<ReadingQueueItem[]> {
-  const qs = new URLSearchParams({
-    user_id: userId,
-    limit: String(limit),
-  })
+  const qs = new URLSearchParams({ limit: String(limit) })
   const payload = await fetchJsonOrNull<{
     items?: Array<{
       saved_at?: string
@@ -97,7 +93,7 @@ export async function fetchDashboardReadingQueue(
         authors?: string[]
       }
     }>
-  }>(`/research/papers/saved?${qs.toString()}`)
+  }>(`/research/papers/saved?${qs.toString()}`, accessToken)
 
   return (payload?.items || []).map((row, index) => {
     const paper = row.paper || {}
@@ -113,12 +109,11 @@ export async function fetchDashboardReadingQueue(
 }
 
 export async function fetchIntelligenceFeed(
-  userId: string = "default",
+  accessToken?: string,
   limit: number = 6,
   filters?: IntelligenceFeedFilters,
 ): Promise<IntelligenceFeedResponse> {
   const qs = new URLSearchParams({
-    user_id: userId,
     limit: String(limit),
   })
   if (filters?.source) qs.set("source", filters.source)
@@ -128,7 +123,7 @@ export async function fetchIntelligenceFeed(
   if (filters?.sortOrder) qs.set("sort_order", filters.sortOrder)
   if (filters?.trackId) qs.set("track_id", String(filters.trackId))
 
-  const payload = await fetchJsonOrNull<IntelligenceFeedResponse>(`/intelligence/feed?${qs.toString()}`)
+  const payload = await fetchJsonOrNull<IntelligenceFeedResponse>(`/intelligence/feed?${qs.toString()}`, accessToken)
   return payload || {
     items: [],
     refreshed_at: null,
@@ -139,7 +134,7 @@ export async function fetchIntelligenceFeed(
   }
 }
 
-export async function fetchDashboardActivities(userId: string = "default"): Promise<Activity[]> {
+export async function fetchDashboardActivities(accessToken?: string): Promise<Activity[]> {
   const [runsPayload, savedPayload] = await Promise.all([
     fetchJsonOrNull<{
       runs?: Array<{
@@ -161,7 +156,7 @@ export async function fetchDashboardActivities(userId: string = "default"): Prom
           year?: number | null
         }
       }>
-    }>(`/research/papers/saved?user_id=${encodeURIComponent(userId)}&limit=4`),
+    }>(`/research/papers/saved?limit=4`, accessToken),
   ])
 
   const activities: Activity[] = []

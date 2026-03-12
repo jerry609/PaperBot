@@ -94,7 +94,6 @@ function toValidYear(value: string): number | undefined {
 }
 
 interface DiscoveryGraphWorkspaceProps {
-  userId: string
   trackId: number | null
   onSavePaper: (paper: SavePaperPayload) => Promise<void>
   initialSeedType?: SeedType
@@ -103,8 +102,7 @@ interface DiscoveryGraphWorkspaceProps {
 }
 
 export default function DiscoveryGraphWorkspace({
-  userId,
-  trackId,
+    trackId,
   onSavePaper,
   initialSeedType = "doi",
   initialSeedId = "",
@@ -225,7 +223,6 @@ export default function DiscoveryGraphWorkspace({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          user_id: userId,
           track_id: trackId ?? undefined,
           seed_type: seedType,
           seed_id: seedId.trim(),

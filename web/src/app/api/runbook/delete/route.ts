@@ -8,10 +8,10 @@ export async function POST(req: Request) {
   const body = await req.text()
   const upstream = await fetch(`${apiBaseUrl()}/api/runbook/delete`, {
     method: "POST",
-    headers: {
+    headers: await (await import("../../_utils/auth-headers")).withBackendAuth(req, {
       "Content-Type": req.headers.get("content-type") || "application/json",
       Accept: "application/json",
-    },
+    }),
     body,
   })
   const text = await upstream.text()
@@ -23,4 +23,3 @@ export async function POST(req: Request) {
     },
   })
 }
-

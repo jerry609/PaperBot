@@ -12,8 +12,7 @@ import {
     LLMUsageSummary,
     DeadlineRadarItem,
 } from "./types"
-
-const API_BASE_URL = (process.env.PAPERBOT_API_BASE_URL || "http://127.0.0.1:8000") + "/api"
+import { API_BASE_URL } from "./config"
 
 function slugToName(slug: string): string {
     return slug
@@ -61,7 +60,7 @@ export async function fetchStats(): Promise<Stats> {
     }
 }
 
-export async function fetchActivities(): Promise<Activity[]> {
+export async function fetchActivities(accessToken?: string): Promise<Activity[]> {
     const activities: Activity[] = []
     try {
         // Fetch recent harvest runs
@@ -85,8 +84,10 @@ export async function fetchActivities(): Promise<Activity[]> {
     } catch { /* keep going */ }
 
     try {
-        // Fetch recent saved papers
-        const savedRes = await fetch(`${API_BASE_URL}/research/papers/saved?user_id=default&limit=3`, { cache: "no-store" })
+        // Fetch recent saved papers for the authenticated user
+        const headers: Record<string, string> = {}
+        if (accessToken) headers["Authorization"] = `Bearer ${accessToken}`
+        const savedRes = await fetch(`${API_BASE_URL}/research/papers/saved?limit=3`, { cache: "no-store", headers })
         if (savedRes.ok) {
             const savedData = await savedRes.json() as { papers?: Array<{ paper_id: string; title: string; authors?: string[]; venue?: string; year?: number; saved_at?: string }> }
             for (const paper of (savedData.papers || []).slice(0, 3)) {
@@ -116,9 +117,11 @@ export async function fetchActivities(): Promise<Activity[]> {
     return activities
 }
 
-export async function fetchTrendingTopics(): Promise<TrendingTopic[]> {
+export async function fetchTrendingTopics(accessToken?: string): Promise<TrendingTopic[]> {
     try {
-        const res = await fetch(`${API_BASE_URL}/research/tracks?user_id=default`, { cache: "no-store" })
+        const headers: Record<string, string> = {}
+        if (accessToken) headers["Authorization"] = `Bearer ${accessToken}`
+        const res = await fetch(`${API_BASE_URL}/research/tracks`, { cache: "no-store", headers })
         if (!res.ok) return []
         const data = await res.json() as { tracks?: Array<{ keywords?: string[] }> }
         const keywordCounts = new Map<string, number>()
@@ -157,9 +160,11 @@ export async function fetchPipelineTasks(): Promise<PipelineTask[]> {
     }
 }
 
-export async function fetchReadingQueue(): Promise<ReadingQueueItem[]> {
+export async function fetchReadingQueue(accessToken?: string): Promise<ReadingQueueItem[]> {
     try {
-        const res = await fetch(`${API_BASE_URL}/research/papers/saved?user_id=default&limit=5`, { cache: "no-store" })
+        const headers: Record<string, string> = {}
+        if (accessToken) headers["Authorization"] = `Bearer ${accessToken}`
+        const res = await fetch(`${API_BASE_URL}/research/papers/saved?limit=5`, { cache: "no-store", headers })
         if (!res.ok) return []
         const data = await res.json() as { papers?: Array<{ paper_id: string; title: string }> }
         return (data.papers || []).slice(0, 5).map((p, i) => ({
@@ -197,16 +202,14 @@ export async function fetchLLMUsage(days: number = 7): Promise<LLMUsageSummary> 
     }
 }
 
-export async function fetchDeadlineRadar(userId: string = "default"): Promise<DeadlineRadarItem[]> {
+export async function fetchDeadlineRadar(accessToken?: string): Promise<DeadlineRadarItem[]> {
     try {
-        const qs = new URLSearchParams({
-            user_id: userId,
-            days: "180",
-            ccf_levels: "A,B,C",
-            limit: "10",
-        })
+        const qs = new URLSearchParams({ days: "180", ccf_levels: "A,B,C", limit: "10" })
+        const headers: Record<string, string> = {}
+        if (accessToken) headers["Authorization"] = `Bearer ${accessToken}`
         const res = await fetch(`${API_BASE_URL}/research/deadlines/radar?${qs.toString()}`, {
             cache: "no-store",
+            headers,
         })
         if (!res.ok) return []
         const payload = await res.json() as { items?: DeadlineRadarItem[] }
@@ -274,7 +277,7 @@ export async function fetchScholars(): Promise<Scholar[]> {
     }
 }
 
-export async function fetchPaperDetails(id: string): Promise<PaperDetails> {
+export async function fetchPaperDetails(id: string, accessToken?: string): Promise<PaperDetails> {
     type PaperDetailPayload = {
         detail?: {
             paper?: {
@@ -300,9 +303,11 @@ export async function fetchPaperDetails(id: string): Promise<PaperDetails> {
     }
 
     try {
+        const headers: Record<string, string> = {}
+        if (accessToken) headers["Authorization"] = `Bearer ${accessToken}`
         const res = await fetch(
-            `${API_BASE_URL}/research/papers/${encodeURIComponent(id)}?user_id=default`,
-            { cache: "no-store" },
+            `${API_BASE_URL}/research/papers/${encodeURIComponent(id)}`,
+            { cache: "no-store", headers },
         )
         if (!res.ok) throw new Error("paper detail unavailable")
         const data = await res.json() as PaperDetailPayload
@@ -597,9 +602,11 @@ export async function fetchWikiConcepts(query?: string): Promise<WikiConcept[]> 
     }
 }
 
-export async function fetchPapers(): Promise<Paper[]> {
+export async function fetchPapers(accessToken?: string): Promise<Paper[]> {
     try {
-        const res = await fetch(`${API_BASE_URL}/papers/library`)
+        const headers: Record<string, string> = {}
+        if (accessToken) headers["Authorization"] = `Bearer ${accessToken}`
+        const res = await fetch(`${API_BASE_URL}/papers/library`, { headers })
         if (!res.ok) {
             return []
         }

@@ -108,8 +108,8 @@ function QueueCard({
     setError(null)
     try {
       const [detailRes, cardRes] = await Promise.all([
-        fetch(`/api/research/papers/${encodeURIComponent(detailRef)}?user_id=default`, { cache: "no-store" }),
-        fetch(`/api/research/papers/${encodeURIComponent(detailRef)}/card?user_id=default`, { cache: "no-store" }),
+        fetch(`/api/research/papers/${encodeURIComponent(detailRef)}`, { cache: "no-store" }),
+        fetch(`/api/research/papers/${encodeURIComponent(detailRef)}/card`, { cache: "no-store" }),
       ])
 
       const detailPayload = detailRes.ok ? await detailRes.json() : null
@@ -141,7 +141,6 @@ function QueueCard({
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            user_id: "default",
             track_id: activeTrackId,
           }),
         })
@@ -154,7 +153,6 @@ function QueueCard({
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            user_id: "default",
             track_id: activeTrackId,
             paper_id: item.paperRef,
             action: "save",
@@ -189,7 +187,6 @@ function QueueCard({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          user_id: "default",
           status: "archived",
           mark_saved: true,
         }),

@@ -1,12 +1,26 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { CheckCircle2, KeyRound, Loader2, Plus, Trash2, Wrench, Pencil } from "lucide-react"
+import {
+  CheckCircle2,
+  Eye,
+  EyeOff,
+  KeyRound,
+  Loader2,
+  Pencil,
+  Plus,
+  Trash2,
+  Wrench,
+} from "lucide-react"
+import { useSession, signOut } from "next-auth/react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent } from "@/components/ui/card"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { fetchJson, getErrorMessage } from "@/lib/fetch"
 import {
   Dialog,
   DialogContent,
@@ -17,7 +31,8 @@ import {
 } from "@/components/ui/dialog"
 
 import { EmbeddingSettingsPanel } from "@/components/settings/EmbeddingSettingsPanel"
-import { ScholarSubscriptionsPanel } from "@/components/settings/ScholarSubscriptionsPanel"
+
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 type ModelEndpoint = {
   id: number
@@ -56,6 +71,8 @@ type Preset = {
   models: string[]
   task_types: string[]
 }
+
+// ─── Constants ────────────────────────────────────────────────────────────────
 
 const QUICK_PRESETS: Preset[] = [
   {
@@ -108,6 +125,8 @@ const EMPTY_FORM: FormState = {
   is_default: false,
 }
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
 function toPayload(form: FormState) {
   return {
     name: form.name.trim(),
@@ -134,7 +153,299 @@ function statusDot(item: ModelEndpoint) {
   return "bg-gray-400"
 }
 
-export default function SettingsPage() {
+// ─── Account Section ──────────────────────────────────────────────────────────
+
+function AccountSection() {
+  const { data: session, update: updateSession } = useSession()
+
+  const isOAuth = session?.provider === "github"
+
+  const [displayName, setDisplayName] = useState("")
+  const [nameLoading, setNameLoading] = useState(false)
+  const [nameMsg, setNameMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null)
+
+  const [currentPw, setCurrentPw] = useState("")
+  const [newPw, setNewPw] = useState("")
+  const [confirmPw, setConfirmPw] = useState("")
+  const [showCurrentPw, setShowCurrentPw] = useState(false)
+  const [showNewPw, setShowNewPw] = useState(false)
+  const [pwLoading, setPwLoading] = useState(false)
+  const [pwMsg, setPwMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null)
+
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [deleteConfirmText, setDeleteConfirmText] = useState("")
+  const [deleteLoading, setDeleteLoading] = useState(false)
+  const [deleteErr, setDeleteErr] = useState<string | null>(null)
+
+  useEffect(() => {
+    setDisplayName(session?.user?.name || "")
+  }, [session])
+
+  async function saveName() {
+    setNameLoading(true)
+    setNameMsg(null)
+    try {
+      const data = await fetchJson<{ display_name?: string }>("/api/auth/me", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ display_name: displayName.trim() || null }),
+      })
+      await updateSession({ name: data.display_name ?? displayName.trim() })
+      setNameMsg({ type: "ok", text: "Display name updated." })
+    } catch (e) {
+      setNameMsg({ type: "err", text: getErrorMessage(e) })
+    } finally {
+      setNameLoading(false)
+    }
+  }
+
+  async function changePassword() {
+    if (newPw !== confirmPw) {
+      setPwMsg({ type: "err", text: "New passwords do not match." })
+      return
+    }
+    setPwLoading(true)
+    setPwMsg(null)
+    try {
+      await fetchJson("/api/auth/me/change-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ current_password: currentPw, new_password: newPw }),
+      })
+      setCurrentPw("")
+      setNewPw("")
+      setConfirmPw("")
+      setPwMsg({ type: "ok", text: "Password updated successfully." })
+    } catch (e) {
+      setPwMsg({ type: "err", text: getErrorMessage(e) })
+    } finally {
+      setPwLoading(false)
+    }
+  }
+
+  async function deleteAccount() {
+    setDeleteLoading(true)
+    setDeleteErr(null)
+    try {
+      const res = await fetch("/api/auth/me", { method: "DELETE" })
+      if (!res.ok) {
+        const data = await res.json().catch(() => null)
+        throw new Error(data?.detail || `${res.status}`)
+      }
+      await signOut({ callbackUrl: "/login" })
+    } catch (e) {
+      setDeleteErr(getErrorMessage(e))
+      setDeleteLoading(false)
+    }
+  }
+
+  const email = session?.user?.email ?? undefined
+
+  return (
+    <div className="space-y-4">
+      {/* Profile */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Profile</CardTitle>
+          <CardDescription>Update your display name shown across the app.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {email && (
+            <div className="space-y-1.5">
+              <Label>Email</Label>
+              <Input value={email} disabled className="text-muted-foreground" />
+            </div>
+          )}
+          <div className="space-y-1.5">
+            <Label htmlFor="display-name">Display name</Label>
+            <div className="flex gap-2">
+              <Input
+                id="display-name"
+                value={displayName}
+                onChange={(e) => setDisplayName(e.target.value)}
+                placeholder="Your name"
+                disabled={nameLoading}
+              />
+              <Button onClick={saveName} disabled={nameLoading} variant="outline">
+                {nameLoading
+                  ? <Loader2 className="h-4 w-4 animate-spin" />
+                  : <Pencil className="h-4 w-4 mr-1" />}
+                Save
+              </Button>
+            </div>
+            {nameMsg && (
+              <p className={`text-xs ${nameMsg.type === "ok" ? "text-green-600" : "text-destructive"}`}>
+                {nameMsg.text}
+              </p>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Security */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Security</CardTitle>
+          <CardDescription>
+            {isOAuth
+              ? "Your account is managed via GitHub. Password sign-in is not available."
+              : "Change your password. You'll stay signed in on this device."}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {isOAuth ? (
+            <p className="text-sm text-muted-foreground">Signed in with GitHub — no password to manage.</p>
+          ) : (
+            <div className="space-y-4">
+              <div className="space-y-1.5">
+                <Label htmlFor="current-pw">Current password</Label>
+                <div className="relative">
+                  <Input
+                    id="current-pw"
+                    type={showCurrentPw ? "text" : "password"}
+                    value={currentPw}
+                    onChange={(e) => setCurrentPw(e.target.value)}
+                    disabled={pwLoading}
+                    className="pr-9"
+                  />
+                  <button
+                    type="button"
+                    tabIndex={-1}
+                    onClick={() => setShowCurrentPw((v) => !v)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    {showCurrentPw ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="new-pw">New password</Label>
+                <div className="relative">
+                  <Input
+                    id="new-pw"
+                    type={showNewPw ? "text" : "password"}
+                    value={newPw}
+                    onChange={(e) => setNewPw(e.target.value)}
+                    disabled={pwLoading}
+                    minLength={8}
+                    placeholder="Min. 8 characters"
+                    className="pr-9"
+                  />
+                  <button
+                    type="button"
+                    tabIndex={-1}
+                    onClick={() => setShowNewPw((v) => !v)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    {showNewPw ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="confirm-pw">Confirm new password</Label>
+                <Input
+                  id="confirm-pw"
+                  type="password"
+                  value={confirmPw}
+                  onChange={(e) => setConfirmPw(e.target.value)}
+                  disabled={pwLoading}
+                  className={confirmPw && confirmPw !== newPw ? "border-destructive" : ""}
+                />
+                {confirmPw && confirmPw !== newPw && (
+                  <p className="text-xs text-destructive">Passwords do not match.</p>
+                )}
+              </div>
+
+              {pwMsg && (
+                <p className={`text-sm ${pwMsg.type === "ok" ? "text-green-600" : "text-destructive"}`}>
+                  {pwMsg.text}
+                </p>
+              )}
+
+              <Button
+                onClick={changePassword}
+                disabled={pwLoading || !currentPw || !newPw || newPw !== confirmPw}
+              >
+                {pwLoading && <Loader2 className="h-4 w-4 animate-spin" />}
+                Update password
+              </Button>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Danger Zone */}
+      <Card className="border-destructive/40">
+        <CardHeader>
+          <CardTitle className="text-base text-destructive">Danger zone</CardTitle>
+          <CardDescription>These actions are irreversible. Please proceed with caution.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="flex items-center justify-between rounded-md border px-4 py-3">
+            <div>
+              <p className="text-sm font-medium">Sign out</p>
+              <p className="text-xs text-muted-foreground">End your current session.</p>
+            </div>
+            <Button variant="outline" onClick={() => signOut({ callbackUrl: "/login" })}>
+              Sign out
+            </Button>
+          </div>
+
+          <div className="flex items-center justify-between rounded-md border border-destructive/30 px-4 py-3">
+            <div>
+              <p className="text-sm font-medium">Delete account</p>
+              <p className="text-xs text-muted-foreground">
+                Permanently deactivate your account. Your data will no longer be accessible.
+              </p>
+            </div>
+            <Button variant="destructive" onClick={() => setDeleteDialogOpen(true)}>
+              Delete account
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Delete confirmation dialog */}
+      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Delete your account?</DialogTitle>
+            <DialogDescription>
+              This will permanently deactivate your account. This action cannot be undone.
+              Type <span className="font-mono font-semibold">delete my account</span> to confirm.
+            </DialogDescription>
+          </DialogHeader>
+          <Input
+            value={deleteConfirmText}
+            onChange={(e) => setDeleteConfirmText(e.target.value)}
+            placeholder="delete my account"
+            disabled={deleteLoading}
+          />
+          {deleteErr && <p className="text-sm text-destructive">{deleteErr}</p>}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteDialogOpen(false)} disabled={deleteLoading}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={deleteConfirmText !== "delete my account" || deleteLoading}
+              onClick={deleteAccount}
+            >
+              {deleteLoading && <Loader2 className="h-4 w-4 animate-spin" />}
+              Delete account
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  )
+}
+
+// ─── Model Providers Section ──────────────────────────────────────────────────
+
+function ModelProvidersSection() {
   const [items, setItems] = useState<ModelEndpoint[]>([])
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -155,7 +466,7 @@ export default function SettingsPage() {
       const payload = await res.json()
       setItems(payload.items || [])
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      setError(getErrorMessage(e))
       setItems([])
     } finally {
       setLoading(false)
@@ -219,7 +530,7 @@ export default function SettingsPage() {
       setDialogOpen(false)
       setMessage(editing ? "Provider updated." : "Provider created.")
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      setError(getErrorMessage(e))
     } finally {
       setSaving(false)
     }
@@ -235,7 +546,7 @@ export default function SettingsPage() {
       await load()
       setMessage("Provider removed.")
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      setError(getErrorMessage(e))
     }
   }
 
@@ -248,7 +559,7 @@ export default function SettingsPage() {
       await load()
       setMessage("Provider activated.")
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      setError(getErrorMessage(e))
     }
   }
 
@@ -266,25 +577,17 @@ export default function SettingsPage() {
       if (!res.ok) throw new Error(String(payload?.detail || `${res.status}`))
       setMessage(payload?.message || "Connection test passed.")
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      setError(getErrorMessage(e))
     } finally {
       setTestingId(null)
     }
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col space-y-4 p-8 pt-6">
-      <h2 className="text-2xl font-bold tracking-tight">Settings</h2>
-
-      <div>
-        <h3 className="text-base font-semibold">Model Providers</h3>
-        <p className="text-sm text-muted-foreground">Configure LLM providers for paper analysis</p>
-      </div>
-
+    <>
       {error && <p className="text-sm text-destructive">{error}</p>}
       {message && <p className="text-sm text-green-600">{message}</p>}
 
-      {/* Provider Cards */}
       <div className="space-y-2">
         {loading ? (
           <p className="text-sm text-muted-foreground">Loading providers...</p>
@@ -303,9 +606,7 @@ export default function SettingsPage() {
                     <div className="min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-medium text-sm">{item.name}</span>
-                        {item.is_default && (
-                          <Badge className="text-xs">Default</Badge>
-                        )}
+                        {item.is_default && <Badge className="text-xs">Default</Badge>}
                       </div>
                       <p className="text-xs text-muted-foreground truncate">
                         {(item.models || []).join(", ") || "no models"} · {item.base_url || "(default URL)"}
@@ -329,13 +630,7 @@ export default function SettingsPage() {
                   </div>
 
                   <div className="flex items-center gap-1 shrink-0">
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => testItem(item.id)}
-                      disabled={testingId === item.id}
-                      title="Test"
-                    >
+                    <Button size="sm" variant="ghost" onClick={() => testItem(item.id)} disabled={testingId === item.id} title="Test">
                       {testingId === item.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wrench className="h-3.5 w-3.5" />}
                     </Button>
                     <Button size="sm" variant="ghost" onClick={() => openEdit(item)} title="Edit">
@@ -357,12 +652,10 @@ export default function SettingsPage() {
         )}
       </div>
 
-      {/* Add Provider + Quick Presets */}
       <div className="space-y-3">
         <Button onClick={() => openAdd()} variant="outline">
           <Plus className="h-4 w-4 mr-1.5" /> Add Provider
         </Button>
-
         <div>
           <p className="text-xs text-muted-foreground mb-1.5">Quick Presets</p>
           <div className="flex flex-wrap gap-1.5">
@@ -379,9 +672,7 @@ export default function SettingsPage() {
         <EmbeddingSettingsPanel />
       </div>
 
-      <div className="pt-4 border-t">
-        <ScholarSubscriptionsPanel />
-      </div>
+
 
       {/* Add/Edit Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
@@ -472,6 +763,36 @@ export default function SettingsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </>
+  )
+}
+
+// ─── Page ─────────────────────────────────────────────────────────────────────
+
+export default function SettingsPage() {
+  return (
+    <div className="flex-1 p-8 pt-6 max-w-3xl">
+      <h2 className="text-2xl font-bold tracking-tight mb-6">Settings</h2>
+
+      <Tabs defaultValue="account">
+        <TabsList className="mb-6">
+          <TabsTrigger value="account">Account</TabsTrigger>
+          <TabsTrigger value="models">Model Providers</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="account">
+          <AccountSection />
+        </TabsContent>
+
+        <TabsContent value="models">
+          <div className="space-y-4">
+            <div>
+              <p className="text-sm text-muted-foreground">Configure LLM providers for paper analysis.</p>
+            </div>
+            <ModelProvidersSection />
+          </div>
+        </TabsContent>
+      </Tabs>
     </div>
   )
 }

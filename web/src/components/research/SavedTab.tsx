@@ -47,7 +47,6 @@ type SavedResponse = {
 }
 
 interface SavedTabProps {
-  userId: string
   trackId: number | null
   trackName?: string | null
 }
@@ -67,7 +66,7 @@ function toPaper(item: SavedItem): Paper {
   }
 }
 
-export function SavedTab({ userId, trackId, trackName = null }: SavedTabProps) {
+export function SavedTab({ trackId, trackName = null }: SavedTabProps) {
   const [items, setItems] = useState<SavedItem[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -88,10 +87,9 @@ export function SavedTab({ userId, trackId, trackName = null }: SavedTabProps) {
       buildObsidianExportCommand({
         vaultPath: obsidianVaultPath,
         rootDir: obsidianRootDir,
-        userId,
         trackId,
       }),
-    [obsidianRootDir, obsidianVaultPath, trackId, userId]
+    [obsidianRootDir, obsidianVaultPath, trackId]
   )
   const obsidianScope = useMemo(
     () => describeObsidianScope(trackId, trackName),
@@ -99,10 +97,10 @@ export function SavedTab({ userId, trackId, trackName = null }: SavedTabProps) {
   )
 
   const handleExport = async (format: "bibtex" | "ris" | "markdown" | "csl_json") => {
-    const qs = new URLSearchParams({ format, user_id: userId })
+    const qs = new URLSearchParams({ format })
     if (trackId != null) qs.set("track_id", String(trackId))
     try {
-      const res = await fetch(`/api/papers/export?${qs.toString()}`)
+      const res = await fetch(`/api/papers/export`)
       if (!res.ok) throw new Error(`${res.status}`)
       const blob = await res.blob()
       const extMap: Record<string, string> = { bibtex: "bib", ris: "ris", markdown: "md", csl_json: "csl.json" }
@@ -127,7 +125,6 @@ export function SavedTab({ userId, trackId, trackName = null }: SavedTabProps) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          user_id: userId,
           track_id: trackId,
           topic: rwTopic.trim(),
         }),
@@ -167,14 +164,13 @@ export function SavedTab({ userId, trackId, trackName = null }: SavedTabProps) {
     setError(null)
     try {
       const qs = new URLSearchParams({
-        user_id: userId,
         sort_by: "saved_at",
         limit: "100",
       })
       if (trackId != null) {
         qs.set("track_id", String(trackId))
       }
-      const res = await fetch(`/api/research/papers/saved?${qs.toString()}`)
+      const res = await fetch(`/api/research/papers/saved`)
       if (!res.ok) {
         throw new Error(`${res.status} ${res.statusText}`)
       }
@@ -191,7 +187,7 @@ export function SavedTab({ userId, trackId, trackName = null }: SavedTabProps) {
   useEffect(() => {
     load().catch(() => {})
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userId, trackId])
+  }, [trackId])
 
   return (
     <div className="space-y-4">

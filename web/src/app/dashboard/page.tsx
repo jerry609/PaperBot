@@ -10,6 +10,7 @@ import {
   type LucideIcon,
   TrendingUp,
 } from "lucide-react"
+import { auth } from "@/auth"
 
 import DashboardReadingQueuePanel from "@/components/dashboard/DashboardReadingQueuePanel"
 import { fetchDeadlineRadar, fetchPapers } from "@/lib/api"
@@ -484,6 +485,8 @@ function DeadlineCard({ item }: { item: DeadlineRadarItem }) {
 
 export default async function DashboardPage() {
   noStore()
+  const session = await auth()
+  const accessToken = session?.accessToken
 
   const [
     tracksResult,
@@ -493,12 +496,12 @@ export default async function DashboardPage() {
     latestBriefResult,
     deadlinesResult,
   ] = await Promise.allSettled([
-    fetchDashboardTracks("default"),
-    fetchDashboardReadingQueue("default", 6),
-    fetchIntelligenceFeed("default", 6, { sortBy: "delta", sortOrder: "desc" }),
-    fetchPapers(),
+    fetchDashboardTracks(accessToken),
+    fetchDashboardReadingQueue(accessToken, 6),
+    fetchIntelligenceFeed(accessToken, 6, { sortBy: "delta", sortOrder: "desc" }),
+    fetchPapers(accessToken),
     fetchLatestDashboardBrief(),
-    fetchDeadlineRadar("default"),
+    fetchDeadlineRadar(accessToken),
   ])
 
   const tracks = tracksResult.status === "fulfilled" ? tracksResult.value : []
@@ -513,7 +516,7 @@ export default async function DashboardPage() {
   const orderedTracks = [...tracks].sort((left, right) => Number(Boolean(right.is_active)) - Number(Boolean(left.is_active)))
   const activeTrack = orderedTracks[0] || null
   const activeTrackFeed = activeTrack
-    ? await fetchDashboardTrackFeed(activeTrack.id, "default", 4).catch(() => ({ items: [], total: 0 }))
+    ? await fetchDashboardTrackFeed(activeTrack.id, accessToken, 4).catch(() => ({ items: [], total: 0 }))
     : { items: [], total: 0 }
   const recommendationCards: DashboardRecommendationCardData[] = latestBrief?.recommendations.length
     ? latestBrief.recommendations.map((item) => ({
@@ -550,7 +553,7 @@ export default async function DashboardPage() {
   const spotlightSeeds = orderedTracks.slice(0, 3)
   const spotlightItems: TrackSpotlightItem[] = await Promise.all(
     spotlightSeeds.map(async (track) => {
-      const feed = await fetchDashboardTrackFeed(track.id, "default", 1).catch(() => ({ items: [], total: 0 }))
+      const feed = await fetchDashboardTrackFeed(track.id, accessToken, 1).catch(() => ({ items: [], total: 0 }))
       return {
         id: track.id,
         name: track.name,

@@ -1,4 +1,5 @@
 import { fetchPaperDetails } from "@/lib/api"
+import { auth } from "@/auth"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -14,7 +15,9 @@ import { VelocityChart } from "@/components/paper/VelocityChart"
 
 export default async function PaperPage({ params }: { params: Promise<{ id: string }> }) {
     const { id } = await params
-    const paper = await fetchPaperDetails(id)
+    const session = await auth()
+    const accessToken = (session as any)?.accessToken as string | undefined
+    const paper = await fetchPaperDetails(id, accessToken)
 
     return (
         <div className="flex-1 space-y-4 p-8 pt-6 h-screen flex flex-col">

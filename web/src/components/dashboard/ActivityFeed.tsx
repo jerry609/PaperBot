@@ -1,5 +1,6 @@
 import type { Activity } from "@/lib/types"
 import { fetchActivities } from "@/lib/api"
+import { auth } from "@/auth"
 
 import { NewPaperCard } from "./feed/NewPaperCard"
 import { MilestoneCard } from "./feed/MilestoneCard"
@@ -12,7 +13,11 @@ interface ActivityFeedProps {
 }
 
 export async function ActivityFeed({ activities, maxItems = 6, showTitle = true }: ActivityFeedProps) {
-  const items = activities ?? (await fetchActivities())
+  const items = activities ?? (await (async () => {
+    const session = await auth()
+    const accessToken = (session as any)?.accessToken as string | undefined
+    return fetchActivities(accessToken)
+  })())
   const visible = items.slice(0, maxItems)
 
   return (

@@ -2,6 +2,7 @@
 
 import Link from "next/link"
 import { useEffect, useMemo, useState } from "react"
+import { useSession } from "next-auth/react"
 import { useSearchParams } from "next/navigation"
 
 import { ArrowLeft, Compass } from "lucide-react"
@@ -15,8 +16,8 @@ import type { Track } from "./TrackSelector"
 
 type SeedType = "doi" | "arxiv" | "openalex" | "semantic_scholar" | "author"
 export default function ResearchDiscoveryPage() {
+  const { data: session } = useSession()
   const searchParams = useSearchParams()
-  const [userId] = useState("default")
   const [tracks, setTracks] = useState<Track[]>([])
   const [activeTrackId, setActiveTrackId] = useState<number | null>(null)
   const [loading, setLoading] = useState(false)
@@ -59,7 +60,7 @@ export default function ResearchDiscoveryPage() {
 
   async function refreshTracks() {
     const data = await fetchJson<{ tracks: Track[] }>(
-      `/api/research/tracks?user_id=${encodeURIComponent(userId)}`
+      `/api/research/tracks`
     )
     setTracks(data.tracks || [])
     const active = data.tracks.find((track) => track.is_active)
@@ -71,7 +72,7 @@ export default function ResearchDiscoveryPage() {
     setError(null)
     try {
       await fetchJson(
-        `/api/research/tracks/${trackId}/activate?user_id=${encodeURIComponent(userId)}`,
+        `/api/research/tracks/${trackId}/activate`,
         {
           method: "POST",
           body: "{}",
@@ -100,7 +101,6 @@ export default function ResearchDiscoveryPage() {
     await fetchJson(`/api/research/papers/feedback`, {
       method: "POST",
       body: JSON.stringify({
-        user_id: userId,
         track_id: activeTrackId,
         paper_id: paper.paper_id,
         action: "save",
@@ -175,7 +175,6 @@ export default function ResearchDiscoveryPage() {
 
         <DiscoveryGraphWorkspace
           className="mt-0"
-          userId={userId}
           trackId={activeTrackId}
           onSavePaper={handleDiscoverySave}
           initialSeedType={routeSeedType}
