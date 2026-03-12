@@ -14,7 +14,14 @@ from paperbot.infrastructure.stores.memory_store import SqlAlchemyMemoryStore
 from paperbot.memory.schema import MemoryCandidate
 
 
-def _make_engine(*, memory_store=None, research_store=None, config=None, evidence_retriever=None):
+def _make_engine(
+    *,
+    memory_store=None,
+    research_store=None,
+    config=None,
+    evidence_retriever=None,
+    query_grounder=None,
+):
     """Create a ContextEngine with faked stores."""
     rs = research_store or MagicMock()
     ms = memory_store or MagicMock()
@@ -53,6 +60,7 @@ def _make_engine(*, memory_store=None, research_store=None, config=None, evidenc
         memory_store=ms,
         evidence_retriever=evidence_retriever,
         config=config,
+        query_grounder=query_grounder,
         track_router=MagicMock(),
     )
     return engine, rs, ms
@@ -212,6 +220,77 @@ class TestBuildContextPackLayers:
         assert len(result["evidence_hits"]) == 1
         assert result["evidence_hits"][0]["paper_id"] == 1
         assert result["routing"]["evidence_hit_count"] == 1
+
+    @pytest.mark.asyncio
+    async def test_context_pack_uses_grounded_query_for_search_and_routing(self):
+        captured_queries: list[str] = []
+
+        class _FakeGrounder:
+            def ground_query(self, *, user_id: str, query: str, limit: int = 3):
+                return type(
+                    "_Grounded",
+                    (),
+                    {
+                        "canonical_query": "retrieval augmented generation latency",
+                        "concepts": [object()],
+                        "to_dict": lambda self: {
+                            "original_query": query,
+                            "canonical_query": "retrieval augmented generation latency",
+                            "search_queries": [
+                                query,
+                                "retrieval augmented generation latency",
+                            ],
+                            "concepts": [{"id": "rag"}],
+                        },
+                    },
+                )()
+
+        async def _fake_search_candidate_papers(service, *, query, **kwargs):
+            captured_queries.append(query)
+            return object()
+
+        def _fake_search_result_to_candidate_dicts(*args, **kwargs):
+            return [
+                {
+                    "paper_id": "1",
+                    "canonical_id": 1,
+                    "title": "RAG Latency Study",
+                    "abstract": (
+                        "Retrieval-augmented generation latency is analyzed with enough detail "
+                        "to pass the academic paper filter."
+                    ),
+                    "year": 2026,
+                    "citation_count": 4,
+                    "url": "https://example.com/rag-latency",
+                }
+            ]
+
+        monkeypatch = pytest.MonkeyPatch()
+        try:
+            monkeypatch.setattr(
+                engine_module, "search_candidate_papers", _fake_search_candidate_papers
+            )
+            monkeypatch.setattr(
+                engine_module,
+                "search_result_to_candidate_dicts",
+                _fake_search_result_to_candidate_dicts,
+            )
+            engine, rs, ms = _make_engine(
+                query_grounder=_FakeGrounder(),
+                config=ContextEngineConfig(offline=False, paper_limit=1),
+            )
+            engine.search_service = MagicMock()
+
+            result = await engine.build_context_pack(
+                user_id="u1",
+                query="rag latency",
+            )
+        finally:
+            monkeypatch.undo()
+
+        assert captured_queries == ["retrieval augmented generation latency"]
+        assert result["routing"]["resolved_query"] == "retrieval augmented generation latency"
+        assert result["routing"]["query_grounding"]["concepts"] == [{"id": "rag"}]
 
     @pytest.mark.asyncio
     async def test_no_paper_id_layer3_is_zero(self):

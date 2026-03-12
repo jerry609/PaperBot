@@ -7,13 +7,19 @@ import random
 import re
 import time
 from dataclasses import asdict, dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 from paperbot.application.ports.document_intelligence_port import EvidenceRetrieverPort
 from paperbot.context_engine.track_router import TrackRouter, TrackRouterConfig
 from paperbot.infrastructure.stores.memory_store import SqlAlchemyMemoryStore
 from paperbot.infrastructure.stores.research_store import SqlAlchemyResearchStore
 from paperbot.utils.logging_config import Logger, LogFiles
+
+if TYPE_CHECKING:
+    from paperbot.application.services.workflow_query_grounder import (
+        GroundedQuery,
+        WorkflowQueryGrounderPort,
+    )
 
 # Optional: PaperSearchService for unified search
 try:
@@ -520,6 +526,7 @@ class ContextEngine:
         search_service: Optional[Any] = None,
         evidence_retriever: Optional[EvidenceRetrieverPort] = None,
         track_router: Optional[TrackRouter] = None,
+        query_grounder: Optional["WorkflowQueryGrounderPort"] = None,
         config: Optional[ContextEngineConfig] = None,
     ):
         self.research_store = research_store or SqlAlchemyResearchStore()
@@ -527,6 +534,7 @@ class ContextEngine:
         self.paper_store = paper_store
         self.search_service = search_service
         self.evidence_retriever = evidence_retriever
+        self.query_grounder = query_grounder
         self.config = config or ContextEngineConfig()
         self.track_router = track_router or TrackRouter(
             research_store=self.research_store,
@@ -796,6 +804,13 @@ class ContextEngine:
         include_cross_track: bool = False,
         paper_id: Optional[str] = None,
     ) -> Dict[str, Any]:
+        grounded_query: Optional["GroundedQuery"] = None
+        resolved_query = query
+        if self.query_grounder is not None:
+            grounded_query = self.query_grounder.ground_query(user_id=user_id, query=query)
+            if grounded_query.canonical_query:
+                resolved_query = grounded_query.canonical_query
+
         active_track = self.research_store.get_active_track(user_id=user_id)
         routed_track = (
             self.research_store.get_track(user_id=user_id, track_id=track_id)
@@ -807,7 +822,7 @@ class ContextEngine:
         if track_id is None and active_track is not None:
             routing_suggestion = self.track_router.suggest_track(
                 user_id=user_id,
-                query=query,
+                query=resolved_query,
                 active_track_id=int(active_track["id"]),
                 limit=50,
             )
@@ -837,7 +852,7 @@ class ContextEngine:
         # Layer 3: paper-scoped memories (on-demand)
         paper_memories = self._load_layer3_paper(user_id, paper_id)
 
-        merged_query = _expand_short_query(query)
+        merged_query = _expand_short_query(resolved_query)
         if routed_track:
             merged_query = _merge_query(merged_query, routed_track.get("keywords") or [])
 
@@ -1116,6 +1131,7 @@ class ContextEngine:
             "used_active_track": track_id is None,
             "include_cross_track": bool(include_cross_track),
             "query": query,
+            "resolved_query": resolved_query,
             "merged_query": merged_query,
             "stage": stage,
             "exploration_ratio": float(exploration_ratio),
@@ -1126,6 +1142,8 @@ class ContextEngine:
             "year_from": self.config.year_from,
             "year_to": self.config.year_to,
         }
+        if grounded_query is not None and grounded_query.concepts:
+            routing["query_grounding"] = grounded_query.to_dict()
 
         context_run_id: Optional[int] = None
         try:
@@ -1253,10 +1271,7 @@ class ContextEngine:
                         file=LogFiles.HARVEST,
                     )
 
-        if (
-            self.evidence_retriever is not None
-            and self.evidence_retriever is not self.paper_store
-        ):
+        if self.evidence_retriever is not None and self.evidence_retriever is not self.paper_store:
             close_fn = getattr(self.evidence_retriever, "close", None)
             if callable(close_fn):
                 try:

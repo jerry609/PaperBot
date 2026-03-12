@@ -28,6 +28,8 @@ from paperbot.application.services.enrichment_pipeline import (
     LLMEnrichmentStep,
 )
 from paperbot.application.services.paper_search_service import PaperSearchService
+from paperbot.application.services.wiki_concept_service import WikiConceptService
+from paperbot.application.services.workflow_query_grounder import WorkflowQueryGrounder
 from paperbot.application.workflows.analysis.paper_judge import PaperJudge
 from paperbot.application.workflows.dailypaper import (
     DailyPaperReporter,
@@ -44,6 +46,7 @@ from paperbot.infrastructure.services.document_indexing_service import DocumentI
 from paperbot.infrastructure.stores.paper_store import PaperStore
 from paperbot.infrastructure.stores.pipeline_session_store import PipelineSessionStore
 from paperbot.infrastructure.stores.research_store import SqlAlchemyResearchStore
+from paperbot.infrastructure.stores.wiki_concept_store import WikiConceptStore
 from paperbot.infrastructure.stores.workflow_metric_store import WorkflowMetricStore
 from paperbot.utils.text_processing import extract_github_url
 
@@ -51,6 +54,7 @@ router = APIRouter()
 _paper_search_service: Optional[PaperSearchService] = None
 _pipeline_session_store: Optional[PipelineSessionStore] = None
 _workflow_metric_store: Optional[WorkflowMetricStore] = None
+_workflow_query_grounder: Optional[WorkflowQueryGrounder] = None
 
 
 def _get_pipeline_session_store() -> PipelineSessionStore:
@@ -103,6 +107,13 @@ def _get_workflow_metric_store() -> WorkflowMetricStore:
     if _workflow_metric_store is None:
         _workflow_metric_store = WorkflowMetricStore()
     return _workflow_metric_store
+
+
+def _get_workflow_query_grounder() -> WorkflowQueryGrounder:
+    global _workflow_query_grounder
+    if _workflow_query_grounder is None:
+        _workflow_query_grounder = WorkflowQueryGrounder(WikiConceptService(WikiConceptStore()))
+    return _workflow_query_grounder
 
 
 def _count_report_claims_and_evidence(report: Dict[str, Any]) -> tuple[int, int]:
@@ -221,6 +232,7 @@ def _schedule_document_indexing_for_report(
 
 async def _run_topic_search(
     *,
+    user_id: str,
     queries: List[str],
     sources: List[str],
     branches: List[str],
@@ -230,17 +242,20 @@ async def _run_topic_search(
 ) -> Dict[str, Any]:
     return await run_unified_topic_search(
         queries=queries,
+        user_id=user_id,
         sources=sources,
         branches=branches,
         top_k_per_query=top_k_per_query,
         show_per_branch=show_per_branch,
         min_score=min_score,
         search_service=_get_paper_search_service(),
+        query_grounder=_get_workflow_query_grounder(),
         persist=False,
     )
 
 
 class PapersCoolSearchRequest(BaseModel):
+    user_id: str = "default"
     queries: List[str] = Field(default_factory=list)
     sources: List[str] = Field(default_factory=lambda: ["papers_cool"])
     branches: List[str] = Field(default_factory=lambda: ["arxiv", "venue"])
@@ -276,6 +291,7 @@ class PapersCoolCurateResponse(BaseModel):
 
 
 class DailyPaperRequest(BaseModel):
+    user_id: str = "default"
     queries: List[str] = Field(default_factory=list)
     sources: List[str] = Field(default_factory=lambda: ["papers_cool"])
     branches: List[str] = Field(default_factory=lambda: ["arxiv", "venue"])
@@ -376,6 +392,7 @@ async def topic_search(req: PapersCoolSearchRequest):
 
     try:
         result = await _run_topic_search(
+            user_id=req.user_id,
             queries=cleaned_queries,
             sources=req.sources,
             branches=req.branches,
@@ -527,6 +544,7 @@ async def _dailypaper_stream(req: DailyPaperRequest):
             type="progress", data={"phase": "search", "message": "Searching papers..."}
         )
         search_result = await _run_topic_search(
+            user_id=req.user_id,
             queries=cleaned_queries,
             sources=req.sources,
             branches=req.branches,
@@ -932,6 +950,7 @@ async def _sync_daily_report(req: DailyPaperRequest, cleaned_queries: List[str])
     effective_top_k = max(int(req.top_k_per_query), int(req.top_n), 1)
     try:
         search_result = await _run_topic_search(
+            user_id=req.user_id,
             queries=cleaned_queries,
             sources=req.sources,
             branches=req.branches,

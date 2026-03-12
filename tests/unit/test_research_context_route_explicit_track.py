@@ -64,3 +64,54 @@ def test_context_route_uses_explicit_track_id_without_activation(monkeypatch):
     assert captured["user_id"] == "u-explicit"
     assert response.json()["context_pack"]["routing"]["track_id"] == 42
     assert metric_store.track_ids[-1] == 42
+
+
+def test_router_suggest_uses_grounded_query(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class _FakeResearchStore:
+        def get_active_track(self, *, user_id: str):
+            return {"id": 7, "name": "Retrieval Systems"}
+
+    class _FakeTrackRouter:
+        def suggest_track(self, *, user_id: str, query: str, active_track_id: int):
+            captured["user_id"] = user_id
+            captured["query"] = query
+            captured["active_track_id"] = active_track_id
+            return {"track_id": active_track_id, "score": 0.9}
+
+    class _FakeGrounder:
+        def ground_query(self, *, user_id: str, query: str, limit: int = 3):
+            return type(
+                "_Grounded",
+                (),
+                {
+                    "canonical_query": "retrieval augmented generation latency",
+                    "concepts": [object()],
+                    "to_dict": lambda self: {
+                        "original_query": query,
+                        "canonical_query": "retrieval augmented generation latency",
+                        "search_queries": [
+                            query,
+                            "retrieval augmented generation latency",
+                        ],
+                        "concepts": [{"id": "rag"}],
+                    },
+                },
+            )()
+
+    monkeypatch.setattr(research_route, "_research_store", _FakeResearchStore())
+    monkeypatch.setattr(research_route, "_track_router", _FakeTrackRouter())
+    monkeypatch.setattr(research_route, "_workflow_query_grounder", _FakeGrounder())
+
+    with TestClient(api_main.app) as client:
+        response = client.post(
+            "/api/research/router/suggest",
+            json={"user_id": "u1", "query": "rag latency"},
+        )
+
+    assert response.status_code == 200
+    assert captured["query"] == "retrieval augmented generation latency"
+    assert response.json()["suggestion"]["query_grounding"]["canonical_query"] == (
+        "retrieval augmented generation latency"
+    )

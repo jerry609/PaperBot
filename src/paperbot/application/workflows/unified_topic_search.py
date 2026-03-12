@@ -4,13 +4,19 @@ import asyncio
 import math
 import re
 from datetime import datetime, timezone
-from typing import Any, Dict, Iterable, List, Optional, Sequence
+from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Optional, Sequence
 
 from paperbot.application.services.candidate_search import (
     resolve_candidate_paper_id,
     search_candidate_papers,
 )
 from paperbot.application.services.paper_search_service import PaperSearchService, SearchResult
+
+if TYPE_CHECKING:
+    from paperbot.application.services.workflow_query_grounder import (
+        GroundedQuery,
+        WorkflowQueryGrounderPort,
+    )
 
 
 _QUERY_ALIASES = {
@@ -80,6 +86,16 @@ def _unique_preserve(values: Iterable[str]) -> List[str]:
         seen.add(v)
         out.append(v)
     return out
+
+
+def _default_grounded_query(query: str) -> "GroundedQuery | Dict[str, Any]":
+    cleaned_query = (query or "").strip()
+    return {
+        "original_query": cleaned_query,
+        "canonical_query": cleaned_query,
+        "search_queries": [cleaned_query] if cleaned_query else [],
+        "concepts": [],
+    }
 
 
 def _matched_keywords(paper: Dict[str, Any], tokens: List[str]) -> List[str]:
@@ -154,7 +170,8 @@ def _search_result_to_items(
                 "pdf_url": str(p.get("pdf_url") or "").strip(),
                 "authors": list(p.get("authors") or []),
                 "subject_or_venue": venue,
-                "published_at": p.get("publication_date") or (str(p.get("year")) if p.get("year") else ""),
+                "published_at": p.get("publication_date")
+                or (str(p.get("year")) if p.get("year") else ""),
                 "snippet": str(p.get("abstract") or "").strip(),
                 "keywords": _unique_preserve(
                     [
@@ -184,9 +201,13 @@ def _merge_item(target: Dict[str, Any], incoming: Dict[str, Any]) -> None:
     target["matched_keywords"] = _unique_preserve(
         [*target.get("matched_keywords", []), *incoming.get("matched_keywords", [])]
     )
-    target["branches"] = _unique_preserve([*target.get("branches", []), *incoming.get("branches", [])])
+    target["branches"] = _unique_preserve(
+        [*target.get("branches", []), *incoming.get("branches", [])]
+    )
     target["sources"] = _unique_preserve([*target.get("sources", []), *incoming.get("sources", [])])
-    target["keywords"] = _unique_preserve([*target.get("keywords", []), *incoming.get("keywords", [])])
+    target["keywords"] = _unique_preserve(
+        [*target.get("keywords", []), *incoming.get("keywords", [])]
+    )
     target["authors"] = _unique_preserve([*target.get("authors", []), *incoming.get("authors", [])])
 
     incoming_url = str(incoming.get("url") or "").strip()
@@ -203,12 +224,14 @@ def _merge_item(target: Dict[str, Any], incoming: Dict[str, Any]) -> None:
 async def run_unified_topic_search(
     *,
     queries: Sequence[str],
+    user_id: str = "default",
     branches: Sequence[str] = ("arxiv", "venue"),
     sources: Sequence[str] = ("papers_cool",),
     top_k_per_query: int = 5,
     show_per_branch: int = 25,
     min_score: float = 0.0,
     search_service: Optional[PaperSearchService] = None,
+    query_grounder: Optional["WorkflowQueryGrounderPort"] = None,
     persist: bool = False,
 ) -> Dict[str, Any]:
     normalized_sources = normalize_topic_sources(sources)
@@ -219,14 +242,34 @@ async def run_unified_topic_search(
         raw_query = (raw or "").strip()
         if not raw_query:
             continue
-        normalized_query = _normalize_query(raw_query)
+        grounded = (
+            query_grounder.ground_query(user_id=user_id, query=raw_query)
+            if query_grounder is not None
+            else _default_grounded_query(raw_query)
+        )
+        canonical_query = str(
+            grounded["canonical_query"] if isinstance(grounded, dict) else grounded.canonical_query
+        )
+        search_queries = list(
+            grounded["search_queries"] if isinstance(grounded, dict) else grounded.search_queries
+        )
+        concepts = list(grounded["concepts"] if isinstance(grounded, dict) else grounded.concepts)
+        normalized_query = _normalize_query(canonical_query or raw_query)
         if normalized_query in seen_queries:
             continue
         seen_queries.add(normalized_query)
         query_specs.append(
             {
                 "raw_query": raw_query,
+                "canonical_query": canonical_query or raw_query,
                 "normalized_query": normalized_query,
+                "search_queries": _unique_preserve(
+                    _normalize_query(value) for value in search_queries
+                ),
+                "grounded_concepts": [
+                    concept.to_dict() if hasattr(concept, "to_dict") else dict(concept)
+                    for concept in concepts
+                ],
                 "tokens": _tokenize_query(normalized_query),
             }
         )
@@ -252,12 +295,17 @@ async def run_unified_topic_search(
     max_results = max(1, int(show_per_branch))
 
     tasks = [
-        search_candidate_papers(
-            service,
-            query=spec["normalized_query"],
-            sources=normalized_sources,
-            max_results=max_results,
-            persist=bool(persist),
+        asyncio.gather(
+            *[
+                search_candidate_papers(
+                    service,
+                    query=search_query,
+                    sources=normalized_sources,
+                    max_results=max_results,
+                    persist=bool(persist),
+                )
+                for search_query in (spec["search_queries"] or [spec["normalized_query"]])
+            ]
         )
         for spec in query_specs
     ]
@@ -267,20 +315,44 @@ async def run_unified_topic_search(
     aggregated: List[Dict[str, Any]] = []
     by_key: Dict[str, Dict[str, Any]] = {}
 
-    for spec, search_result in zip(query_specs, search_results):
-        query_items = _search_result_to_items(
-            search_result=search_result,
-            normalized_query=spec["normalized_query"],
-            query_tokens=spec["tokens"],
-            branches=branches,
-            fallback_sources=normalized_sources,
-            min_score=min_score,
-        )
+    for spec, spec_search_results in zip(query_specs, search_results):
+        query_items: List[Dict[str, Any]] = []
+        query_items_by_key: Dict[str, Dict[str, Any]] = {}
+        for search_query, search_result in zip(
+            spec["search_queries"] or [spec["normalized_query"]],
+            spec_search_results,
+        ):
+            current_items = _search_result_to_items(
+                search_result=search_result,
+                normalized_query=search_query,
+                query_tokens=spec["tokens"],
+                branches=branches,
+                fallback_sources=normalized_sources,
+                min_score=min_score,
+            )
+            for item in current_items:
+                url = str(item.get("url") or "").strip().lower()
+                title = str(item.get("title") or "").strip().lower()
+                key = url or title
+                if not key:
+                    continue
+                existing_query_item = query_items_by_key.get(key)
+                if existing_query_item is None:
+                    cloned_query_item = dict(item)
+                    query_items_by_key[key] = cloned_query_item
+                    query_items.append(cloned_query_item)
+                else:
+                    _merge_item(existing_query_item, item)
+
+        query_items.sort(key=lambda row: float(row.get("score") or 0.0), reverse=True)
 
         query_views.append(
             {
                 "raw_query": spec["raw_query"],
+                "canonical_query": spec["canonical_query"],
                 "normalized_query": spec["normalized_query"],
+                "search_queries": spec["search_queries"] or [spec["normalized_query"]],
+                "grounded_concepts": spec["grounded_concepts"],
                 "tokens": spec["tokens"],
                 "total_hits": len(query_items),
                 "items": query_items[: max(0, int(top_k_per_query))],
@@ -312,6 +384,7 @@ async def run_unified_topic_search(
         query_highlights.append(
             {
                 "raw_query": row.get("raw_query") or "",
+                "canonical_query": row.get("canonical_query") or "",
                 "normalized_query": row.get("normalized_query") or "",
                 "hit_count": total_hits,
                 "top_title": (top_item or {}).get("title") or "",

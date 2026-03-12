@@ -25,12 +25,19 @@ class WikiConceptSeed:
     related_concepts: Tuple[str, ...]
     examples: Tuple[str, ...]
     aliases: Tuple[str, ...] = ()
+    canonical_query: Optional[str] = None
 
     @property
     def terms(self) -> Tuple[str, ...]:
         values = {self.name.lower(), self.id.lower()}
         values.update(alias.lower() for alias in self.aliases if alias.strip())
         return tuple(sorted(values))
+
+    @property
+    def resolved_query(self) -> str:
+        if self.canonical_query:
+            return _normalize_text(self.canonical_query)
+        return _normalize_text(self.name.replace("-", " "))
 
 
 @dataclass(frozen=True)
@@ -44,6 +51,20 @@ class WikiConceptView:
     examples: List[str]
     category: str
     icon: str
+    paper_count: int
+    track_count: int
+
+    def to_dict(self) -> Dict[str, object]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class ResolvedWikiConcept:
+    id: str
+    name: str
+    category: str
+    canonical_query: str
+    matched_terms: List[str]
     paper_count: int
     track_count: int
 
@@ -66,6 +87,7 @@ _CATALOG: Tuple[WikiConceptSeed, ...] = (
         related_concepts=("Self-Attention", "Positional Encoding", "Multi-Head Attention"),
         examples=("GPT-4", "Claude", "LLaMA"),
         aliases=("transformer", "self-attention", "attention"),
+        canonical_query="transformer",
     ),
     WikiConceptSeed(
         id="rlhf",
@@ -80,6 +102,7 @@ _CATALOG: Tuple[WikiConceptSeed, ...] = (
         related_concepts=("Alignment", "Reward Model", "PPO"),
         examples=("ChatGPT alignment", "Claude training"),
         aliases=("rlhf", "reinforcement learning from human feedback", "alignment"),
+        canonical_query="reinforcement learning from human feedback",
     ),
     WikiConceptSeed(
         id="rag",
@@ -94,6 +117,7 @@ _CATALOG: Tuple[WikiConceptSeed, ...] = (
         related_concepts=("Dense Retrieval", "Context Window", "Vector Index"),
         examples=("Paper QA", "Enterprise search copilots"),
         aliases=("rag", "retrieval-augmented generation", "retrieval augmented generation"),
+        canonical_query="retrieval augmented generation",
     ),
     WikiConceptSeed(
         id="bleu",
@@ -108,6 +132,7 @@ _CATALOG: Tuple[WikiConceptSeed, ...] = (
         related_concepts=("ROUGE", "METEOR", "BERTScore"),
         examples=("MT evaluation", "Summarization scoring"),
         aliases=("bleu", "bleu score"),
+        canonical_query="bleu score",
     ),
     WikiConceptSeed(
         id="diffusion",
@@ -122,6 +147,7 @@ _CATALOG: Tuple[WikiConceptSeed, ...] = (
         related_concepts=("Denoising", "Score Matching", "Latent Diffusion"),
         examples=("Stable Diffusion", "Imagen"),
         aliases=("diffusion", "diffusion model", "latent diffusion"),
+        canonical_query="diffusion models",
     ),
     WikiConceptSeed(
         id="imagenet",
@@ -136,6 +162,7 @@ _CATALOG: Tuple[WikiConceptSeed, ...] = (
         related_concepts=("Transfer Learning", "Pretraining", "Fine-tuning"),
         examples=("ResNet-50 on ImageNet", "ViT benchmarks"),
         aliases=("imagenet",),
+        canonical_query="imagenet",
     ),
 )
 
@@ -231,6 +258,46 @@ class WikiConceptService:
         )
         return filtered[: max(1, limit)]
 
+    def resolve_concepts(
+        self,
+        *,
+        user_id: str,
+        query: str,
+        limit: int = 3,
+    ) -> List[ResolvedWikiConcept]:
+        normalized_query = _normalize_text(query)
+        if not normalized_query:
+            return []
+
+        snapshot = self._concept_store.load_grounding_snapshot(user_id=user_id)
+        matches: List[ResolvedWikiConcept] = []
+        for seed in _CATALOG:
+            matched_terms = self._matched_seed_terms(seed, normalized_query)
+            if not matched_terms:
+                continue
+            view = self._build_view(seed, snapshot)
+            matches.append(
+                ResolvedWikiConcept(
+                    id=seed.id,
+                    name=seed.name,
+                    category=seed.category,
+                    canonical_query=seed.resolved_query,
+                    matched_terms=matched_terms,
+                    paper_count=view.paper_count,
+                    track_count=view.track_count,
+                )
+            )
+
+        matches.sort(
+            key=lambda item: (
+                -self._resolved_query_score(item, normalized_query),
+                -item.paper_count,
+                -item.track_count,
+                item.name.lower(),
+            )
+        )
+        return matches[: max(1, limit)]
+
     @staticmethod
     def categories() -> List[str]:
         categories = sorted({seed.category for seed in _CATALOG})
@@ -269,8 +336,24 @@ class WikiConceptService:
             score += 10
         if _contains_term(_normalize_text(item.category), normalized_query):
             score += 3
-        if any(_contains_term(_normalize_text(paper), normalized_query) for paper in item.related_papers):
+        if any(
+            _contains_term(_normalize_text(paper), normalized_query)
+            for paper in item.related_papers
+        ):
             score += 2
+        return score
+
+    @staticmethod
+    def _matched_seed_terms(seed: WikiConceptSeed, normalized_query: str) -> List[str]:
+        matched = [term for term in seed.terms if _contains_term(normalized_query, term)]
+        return sorted(set(matched), key=lambda term: (-len(term), term))
+
+    @staticmethod
+    def _resolved_query_score(item: ResolvedWikiConcept, normalized_query: str) -> int:
+        score = 0
+        if _contains_term(normalized_query, item.id):
+            score += 20
+        score += sum(max(1, len(term)) for term in item.matched_terms[:3])
         return score
 
     @staticmethod
@@ -283,7 +366,11 @@ class WikiConceptService:
             if any(_contains_term(text, term) for term in seed.terms):
                 matches.append(record)
         matches.sort(
-            key=lambda row: (int(row["citation_count"]), int(row["year"] or 0), row["title"].lower()),
+            key=lambda row: (
+                int(row["citation_count"]),
+                int(row["year"] or 0),
+                row["title"].lower(),
+            ),
             reverse=True,
         )
         return matches
