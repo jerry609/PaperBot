@@ -13,7 +13,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from paperbot.api.streaming import StreamEvent, sse_response
@@ -23,6 +24,7 @@ from paperbot.application.workflows.harvest_pipeline import (
     HarvestPipeline,
     HarvestProgress,
 )
+from paperbot.api.auth.dependencies import get_user_id
 from paperbot.infrastructure.stores.paper_store import PaperStore, paper_to_dict
 from paperbot.utils.logging_config import LogFiles, Logger, clear_trace_id, set_trace_id
 
@@ -324,12 +326,9 @@ class LibraryResponse(BaseModel):
     offset: int
 
 
-# TODO(auth): user_id is accepted from client without authentication.
-# This is intentional for the MVP single-user setup. For multi-user production,
-# user_id should come from an authenticated session or JWT token.
 @router.get("/papers/library", response_model=LibraryResponse)
 def get_user_library(
-    user_id: str = Query("default", description="User ID"),
+    user_id: str = Depends(get_user_id),
     track_id: Optional[int] = Query(None, description="Filter by track"),
     actions: Optional[str] = Query(None, description="Filter by actions (comma-separated)"),
     sort_by: str = Query("saved_at", description="Sort field"),
@@ -392,13 +391,15 @@ def get_paper(paper_id: int):
 class SavePaperRequest(BaseModel):
     """Request to save paper to library."""
 
-    # TODO(auth): user_id from client without auth - intentional for MVP single-user setup
-    user_id: str = Field("default", description="User ID")
     track_id: Optional[int] = Field(None, description="Associated track ID")
 
 
 @router.post("/papers/{paper_id}/save")
-def save_paper_to_library(paper_id: int, request: SavePaperRequest):
+def save_paper_to_library(
+    paper_id: int,
+    request: SavePaperRequest,
+    user_id: str = Depends(get_user_id),
+):
     """
     Save a paper to user's library.
 
@@ -413,7 +414,7 @@ def save_paper_to_library(paper_id: int, request: SavePaperRequest):
     # Use research store to record feedback
     research_store = _get_research_store()
     feedback = research_store.record_paper_feedback(
-        user_id=request.user_id,
+        user_id=user_id,
         paper_id=str(paper_id),
         action="save",
         track_id=request.track_id,
@@ -422,13 +423,10 @@ def save_paper_to_library(paper_id: int, request: SavePaperRequest):
     return {"success": True, "feedback": feedback}
 
 
-# TODO(auth): user_id accepted from query string without authentication.
-# Intentional for MVP single-user setup. For multi-user production, user_id
-# should come from authenticated session/JWT, not query parameters.
 @router.delete("/papers/{paper_id}/save")
 def remove_paper_from_library(
     paper_id: int,
-    user_id: str = Query("default", description="User ID"),
+    user_id: str = Depends(get_user_id),
 ):
     """Remove a paper from user's library."""
     store = _get_paper_store()

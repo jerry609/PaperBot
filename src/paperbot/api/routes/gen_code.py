@@ -6,11 +6,13 @@ import tempfile
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from paperbot.application.collaboration.message_schema import new_run_id, new_trace_id
 from paperbot.core.abstractions import AgentRunContext
+from paperbot.api.auth.dependencies import get_user_id
 
 from ..streaming import StreamEvent, sse_response
 
@@ -181,7 +183,11 @@ async def gen_code_stream(
 
 
 @router.post("/gen-code")
-async def generate_code(request: GenCodeRequest, http_request: Request):
+async def generate_code(
+    request: GenCodeRequest,
+    http_request: Request,
+    user_id: str = Depends(get_user_id),
+):
     """
     Generate code from paper and stream progress.
 
@@ -190,9 +196,19 @@ async def generate_code(request: GenCodeRequest, http_request: Request):
     event_log = getattr(http_request.app.state, "event_log", None)
     run_id = new_run_id()
     trace_id = new_trace_id()
-    return sse_response(
-        gen_code_stream(request, event_log=event_log, run_id=run_id, trace_id=trace_id),
-        workflow="gen_code",
-        run_id=run_id,
-        trace_id=trace_id,
+    #  Respect authenticated user id where available; fall back to request.user_id
+    request.user_id = request.user_id or user_id
+
+    return StreamingResponse(
+        wrap_generator(
+            gen_code_stream(request, event_log=event_log, run_id=run_id, trace_id=trace_id),
+            workflow="gen_code",
+            run_id=run_id,
+            trace_id=trace_id,
+        ),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+        },
     )
