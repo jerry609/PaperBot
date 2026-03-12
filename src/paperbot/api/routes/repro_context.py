@@ -21,7 +21,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from paperbot.api.streaming import StreamEvent, wrap_generator, sse_response
-from paperbot.api.auth.dependencies import get_user_id
+from paperbot.api.auth.dependencies import get_user_id, get_required_user_id
 from paperbot.application.services.p2c.models import (
     GenerateContextRequest as P2CRequest,
     RawPaperData,
@@ -334,7 +334,7 @@ async def _write_paper_scope_memories(
 @router.post("/generate")
 async def generate_context_pack(
     request: GenerateContextPackRequest,
-    user_id: str = Depends(get_user_id),
+    user_id: str = Depends(get_required_user_id),
 ):
     """Generate a P2C context pack for the given paper. Returns SSE stream."""
     trace_id = set_trace_id()
@@ -357,7 +357,7 @@ async def list_context_packs(
     project_id: Optional[str] = None,
     limit: int = 20,
     offset: int = 0,
-    user_id: str = Depends(get_user_id),
+    user_id: str = Depends(get_required_user_id),
 ):
     """List context packs for a user, with optional filters."""
     set_trace_id()
@@ -381,7 +381,7 @@ async def list_context_packs(
 # ------------------------------------------------------------------ #
 
 @router.get("/{pack_id}")
-async def get_context_pack(pack_id: str, user_id: str = Depends(get_user_id)):
+async def get_context_pack(pack_id: str, user_id: str = Depends(get_required_user_id)):
     """Return the full context pack detail."""
     set_trace_id()
     Logger.info(f"[M2] get_pack pack_id={pack_id}", file=LogFiles.API)
@@ -395,7 +395,7 @@ async def get_context_pack(pack_id: str, user_id: str = Depends(get_user_id)):
 
 
 @router.get("/{pack_id}/observation/{observation_id}")
-async def get_observation_detail(pack_id: str, observation_id: str, user_id: str = Depends(get_user_id)):
+async def get_observation_detail(pack_id: str, observation_id: str, user_id: str = Depends(get_required_user_id)):
     """Return a single observation detail by ID."""
     set_trace_id()
     Logger.info(
@@ -420,7 +420,7 @@ async def get_observation_detail(pack_id: str, observation_id: str, user_id: str
 # ------------------------------------------------------------------ #
 
 @router.post("/{pack_id}/session")
-async def create_repro_session(pack_id: str, request: CreateSessionRequest, user_id: str = Depends(get_user_id)):
+async def create_repro_session(pack_id: str, request: CreateSessionRequest, user_id: str = Depends(get_required_user_id)):
     """
     Convert a context pack into a runbook session.
 
@@ -467,7 +467,7 @@ async def create_repro_session(pack_id: str, request: CreateSessionRequest, user
 # ------------------------------------------------------------------ #
 
 @router.delete("/{pack_id}")
-async def delete_context_pack(pack_id: str, user_id: str = Depends(get_user_id)):
+async def delete_context_pack(pack_id: str, user_id: str = Depends(get_required_user_id)):
     """Soft-delete a context pack."""
     set_trace_id()
     Logger.info(f"[M2] delete_pack pack_id={pack_id}", file=LogFiles.API)

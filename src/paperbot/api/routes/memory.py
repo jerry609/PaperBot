@@ -7,7 +7,7 @@ from fastapi import APIRouter, File, UploadFile, Query, HTTPException, Depends
 from pydantic import BaseModel, Field
 
 from paperbot.infrastructure.stores.memory_store import SqlAlchemyMemoryStore
-from paperbot.api.auth.dependencies import get_user_id
+from paperbot.api.auth.dependencies import get_required_user_id
 from paperbot.memory import build_memory_context, extract_memories, parse_chat_log
 from paperbot.memory.schema import MemoryCandidate
 
@@ -57,7 +57,7 @@ class IngestResponse(BaseModel):
 @router.post("/memory/ingest", response_model=IngestResponse)
 async def ingest_memory(
     file: UploadFile = File(...),
-    user_id: str = Depends(get_user_id),
+    user_id: str = Depends(get_required_user_id),
     workspace_id: Optional[str] = Query(None, description="Optional workspace/project namespace."),
     platform: Optional[str] = Query(None, description="Hint: chatgpt/gemini/claude/..."),
     use_llm: bool = Query(False, description="Use configured LLM to extract memories (falls back on heuristics)."),
@@ -123,7 +123,7 @@ class MemoryListResponse(BaseModel):
 
 @router.get("/memory/list", response_model=MemoryListResponse)
 def list_memories(
-    user_id: str = Depends(get_user_id),
+    user_id: str = Depends(get_required_user_id),
     limit: int = 100,
     kind: Optional[str] = None,
     workspace_id: Optional[str] = None,
@@ -175,10 +175,9 @@ class ContextResponse(BaseModel):
 
 
 @router.post("/memory/context", response_model=ContextResponse)
-def memory_context(req: ContextRequest, user_id: str = Depends(get_user_id)):
-    effective_user_id = user_id
+def memory_context(req: ContextRequest, user_id: str = Depends(get_required_user_id)):
     items = _get_store().search_memories(
-        user_id=effective_user_id,
+        user_id=user_id,
         workspace_id=req.workspace_id,
         query=req.query,
         limit=req.limit,
@@ -197,7 +196,7 @@ def memory_context(req: ContextRequest, user_id: str = Depends(get_user_id)):
     ]
     ctx = build_memory_context(cands, max_items=req.limit)
     return ContextResponse(
-        user_id=effective_user_id,
+        user_id=user_id,
         query=req.query,
         context=ctx,
         items=[
@@ -229,7 +228,7 @@ class MemoryItemUpdateRequest(BaseModel):
 
 
 @router.patch("/memory/items/{item_id}", response_model=MemoryItemOut)
-def update_memory_item(user_id: str, item_id: int, body: MemoryItemUpdateRequest):
+def update_memory_item(item_id: int, body: MemoryItemUpdateRequest, user_id: str = Depends(get_required_user_id)):
     updated = _get_store().update_item(
         user_id=user_id,
         item_id=item_id,
@@ -259,11 +258,11 @@ def update_memory_item(user_id: str, item_id: int, body: MemoryItemUpdateRequest
 
 @router.delete("/memory/items/{item_id}")
 def delete_memory_item(
-    user_id: str,
     item_id: int,
     actor_id: str = "system",
     reason: str = "",
     hard: bool = False,
+    user_id: str = Depends(get_required_user_id),
 ):
     if hard:
         ok = _get_store().hard_delete_item(user_id=user_id, item_id=item_id, actor_id=actor_id)

@@ -12,7 +12,7 @@ from pydantic import BaseModel
 
 from paperbot.application.collaboration.message_schema import new_run_id, new_trace_id
 from paperbot.core.abstractions import AgentRunContext
-from paperbot.api.auth.dependencies import get_user_id
+from paperbot.api.auth.dependencies import get_required_user_id
 
 from ..streaming import StreamEvent, wrap_generator
 
@@ -30,7 +30,7 @@ class GenCodeRequest(BaseModel):
 
 
 async def gen_code_stream(
-    request: GenCodeRequest, *, event_log=None, run_id: str = "", trace_id: str = ""
+    request: GenCodeRequest, *, user_id: str, event_log=None, run_id: str = "", trace_id: str = ""
 ):
     """Stream code generation progress"""
     try:
@@ -96,7 +96,7 @@ async def gen_code_stream(
         result = await agent.reproduce_from_paper(
             paper_context,
             output_dir=output_dir,
-            user_id=request.user_id,
+            user_id=user_id,
             event_log=event_log,
             run_id=run_id,
             trace_id=trace_id,
@@ -186,7 +186,7 @@ async def gen_code_stream(
 async def generate_code(
     request: GenCodeRequest,
     http_request: Request,
-    user_id: str = Depends(get_user_id),
+    user_id: str = Depends(get_required_user_id),
 ):
     """
     Generate code from paper and stream progress.
@@ -196,11 +196,10 @@ async def generate_code(
     event_log = getattr(http_request.app.state, "event_log", None)
     run_id = new_run_id()
     trace_id = new_trace_id()
-    request.user_id = user_id
 
     return StreamingResponse(
         wrap_generator(
-            gen_code_stream(request, event_log=event_log, run_id=run_id, trace_id=trace_id),
+            gen_code_stream(request, user_id=user_id, event_log=event_log, run_id=run_id, trace_id=trace_id),
             workflow="gen_code",
             run_id=run_id,
             trace_id=trace_id,
