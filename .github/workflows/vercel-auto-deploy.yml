@@ -16,8 +16,11 @@ jobs:
       - name: Deploy to Vercel (preview)
         uses: amondnet/vercel-action@v20
         with:
-          vercel-token: ${{ secrets.VERCEL_TOKEN }}          # Vercel 访问令牌
-          vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}        # Vercel 组织 ID
-          vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}# Vercel 项目 ID
+          # Vercel 访问令牌
+          vercel-token: ${{ secrets.VERCEL_TOKEN }}
+          # Vercel 组织 ID
+          vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
+          # Vercel 项目 ID
+          vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
           # Preview is the default deploy mode for `vercel` unless `--prod` is passed.
           # Recent Vercel CLI versions reject `--preview` as an unknown flag.
