@@ -78,7 +78,14 @@ class _FakeWorkflow:
 
 
 async def _fake_run_topic_search(
-    *, queries, sources, branches, top_k_per_query, show_per_branch, min_score=0.0
+    *,
+    user_id="default",
+    queries,
+    sources,
+    branches,
+    top_k_per_query,
+    show_per_branch,
+    min_score=0.0,
 ):
     """Async fake that replaces _run_topic_search for tests."""
     return _FakeWorkflow().run(
@@ -92,7 +99,14 @@ async def _fake_run_topic_search(
 
 
 async def _fake_run_topic_search_multi(
-    *, queries, sources, branches, top_k_per_query, show_per_branch, min_score=0.0
+    *,
+    user_id="default",
+    queries,
+    sources,
+    branches,
+    top_k_per_query,
+    show_per_branch,
+    min_score=0.0,
 ):
     """Async fake returning multiple papers for filter testing."""
     return _FakeWorkflowMultiPaper().run(
@@ -124,6 +138,35 @@ def test_paperscool_search_route_success(monkeypatch):
     payload = resp.json()
     assert payload["source"] == "papers.cool"
     assert payload["summary"]["unique_items"] == 1
+
+
+def test_paperscool_search_route_passes_user_id(monkeypatch):
+    captured: dict[str, object] = {}
+
+    async def _fake_search(**kwargs):
+        captured.update(kwargs)
+        return _FakeWorkflow().run(
+            queries=kwargs["queries"],
+            sources=kwargs["sources"],
+            branches=kwargs["branches"],
+            top_k_per_query=kwargs["top_k_per_query"],
+            show_per_branch=kwargs["show_per_branch"],
+            min_score=kwargs["min_score"],
+        )
+
+    monkeypatch.setattr(paperscool_route, "_run_topic_search", _fake_search)
+
+    with TestClient(api_main.app) as client:
+        resp = client.post(
+            "/api/research/paperscool/search",
+            json={
+                "user_id": "u-search",
+                "queries": ["rag latency"],
+            },
+        )
+
+    assert resp.status_code == 200
+    assert captured["user_id"] == "u-search"
 
 
 def test_paperscool_search_route_requires_queries():

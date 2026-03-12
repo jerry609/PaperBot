@@ -62,3 +62,15 @@ def test_wiki_concept_service_filters_by_category():
     assert items
     assert all(item.category == "Metric" for item in items)
     assert any(item.id == "bleu" for item in items)
+
+
+def test_wiki_concept_service_resolves_grounded_concepts_for_query():
+    service = WikiConceptService(_FakeWikiConceptStore())
+
+    items = service.resolve_concepts(user_id="default", query="rag latency")
+
+    assert items
+    top = items[0]
+    assert top.id == "rag"
+    assert top.canonical_query == "retrieval augmented generation"
+    assert top.matched_terms == ["rag"]

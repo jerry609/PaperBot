@@ -12,6 +12,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy.exc import IntegrityError
 
+from paperbot.application.services.workflow_query_grounder import WorkflowQueryGrounder
 from paperbot.application.services.research_track_context_service import (
     ResearchTrackContextService,
     TrackContextSnapshot,
@@ -35,7 +36,9 @@ from paperbot.infrastructure.stores.workflow_metric_store import WorkflowMetricS
 from paperbot.memory.eval.collector import MemoryMetricCollector
 from paperbot.memory.extractor import extract_memories
 from paperbot.memory.schema import MemoryCandidate, NormalizedMessage
+from paperbot.infrastructure.stores.wiki_concept_store import WikiConceptStore
 from paperbot.utils.logging_config import LogFiles, Logger, set_trace_id
+from paperbot.application.services.wiki_concept_service import WikiConceptService
 
 router = APIRouter()
 
@@ -49,6 +52,7 @@ _paper_search_service: Optional["PaperSearchService"] = None
 _document_index_store: Optional["DocumentIndexStore"] = None
 _anchor_service: Optional["AnchorService"] = None
 _subscription_service: Optional["SubscriptionService"] = None
+_workflow_query_grounder: Optional[WorkflowQueryGrounder] = None
 
 
 def _get_research_store() -> SqlAlchemyResearchStore:
@@ -73,6 +77,13 @@ def _get_track_router() -> TrackRouter:
             memory_store=_get_memory_store(),
         )
     return _track_router
+
+
+def _get_workflow_query_grounder() -> WorkflowQueryGrounder:
+    global _workflow_query_grounder
+    if _workflow_query_grounder is None:
+        _workflow_query_grounder = WorkflowQueryGrounder(WikiConceptService(WikiConceptStore()))
+    return _workflow_query_grounder
 
 
 def _build_track_context_service() -> ResearchTrackContextService:
@@ -2263,9 +2274,19 @@ def suggest_track(req: RouterSuggestRequest):
     active = _get_research_store().get_active_track(user_id=req.user_id)
     if not active:
         return RouterSuggestResponse(suggestion=None)
-    suggestion = _get_track_router().suggest_track(
-        user_id=req.user_id, query=req.query, active_track_id=int(active["id"])
+    grounded_query = _get_workflow_query_grounder().ground_query(
+        user_id=req.user_id, query=req.query
     )
+    suggestion = _get_track_router().suggest_track(
+        user_id=req.user_id,
+        query=grounded_query.canonical_query or req.query,
+        active_track_id=int(active["id"]),
+    )
+    if suggestion is not None and grounded_query.concepts:
+        suggestion = {
+            **suggestion,
+            "query_grounding": grounded_query.to_dict(),
+        }
     return RouterSuggestResponse(suggestion=suggestion)
 
 
@@ -2387,6 +2408,7 @@ async def build_context(req: ContextRequest):
         search_service=search_service,
         evidence_retriever=_get_document_index_store(),
         track_router=_get_track_router(),
+        query_grounder=_get_workflow_query_grounder(),
         config=ContextEngineConfig(
             memory_limit=req.memory_limit,
             paper_limit=req.paper_limit,
