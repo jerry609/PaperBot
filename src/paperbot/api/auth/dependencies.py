@@ -73,3 +73,17 @@ def get_user_id(
     if user is None:
         return "default"
     return str(user.id)
+
+
+def get_required_user_id(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer),
+) -> str:
+    """Like get_user_id but rejects unauthenticated requests even when AUTH_OPTIONAL=true.
+
+    Use this for any endpoint that writes or reads user-scoped data, so that
+    anonymous callers cannot touch the shared "default" namespace.
+    """
+    user = _resolve_user(credentials)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+    return str(user.id)
