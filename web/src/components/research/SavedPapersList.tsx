@@ -26,6 +26,11 @@ import {
 import { Input } from "@/components/ui/input"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Textarea } from "@/components/ui/textarea"
+import {
+  currentFeedbackFromRequestAction,
+  toggleSaveFeedbackAction,
+  type PaperFeedbackRequestAction,
+} from "@/lib/paper-feedback"
 
 
 type SavedPaperSort = "saved_at" | "judge_score" | "published_at"
@@ -194,6 +199,7 @@ export default function SavedPapersList() {
   // Track filter state
   const [tracks, setTracks] = useState<Track[]>([])
   const [selectedTrackId, setSelectedTrackId] = useState<number | null>(null)
+  const activeTrackId = selectedTrackId
 
   // Fetch tracks on mount
   useEffect(() => {
@@ -279,30 +285,50 @@ export default function SavedPapersList() {
 
   const isAllSelected = pagedItems.length > 0 && selectedIds.size === pagedItems.length
 
-  const unsavePaper = useCallback(async (paperId: number) => {
-    setUpdatingAction({ paperId, action: "unsave" })
-    setError(null)
-    try {
-      const res = await fetch(`/api/papers/${paperId}/save?user_id=default`, {
-        method: "DELETE",
-      })
-
-      if (!res.ok) {
-        const errorText = await res.text()
-        if (errorText.startsWith("<!DOCTYPE") || errorText.startsWith("<html")) {
-          throw new Error(`Server error: ${res.status} ${res.statusText}`)
+  const unsavePaper = useCallback(
+    async (paperId: number, externalId: string | null) => {
+      const requestAction: PaperFeedbackRequestAction = toggleSaveFeedbackAction(true)
+      setUpdatingAction({ paperId, action: "unsave" })
+      setError(null)
+      try {
+        const payload = {
+          user_id: "default",
+          track_id: activeTrackId,
+          paper_id: externalId || String(paperId),
+          action: requestAction,
+          weight: 0.0,
+          context_run_id: null,
+          context_rank: undefined,
+          metadata: {},
         }
-        throw new Error(errorText)
-      }
 
-      setItems((prev) => prev.filter((row) => row.paper.id !== paperId))
-    } catch (err) {
-      const detail = err instanceof Error ? err.message : String(err)
-      setError(detail)
-    } finally {
-      setUpdatingAction(null)
-    }
-  }, [])
+        const res = await fetch(`/api/research/papers/feedback`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        })
+
+        if (!res.ok) {
+          const errorText = await res.text()
+          if (errorText.startsWith("<!DOCTYPE") || errorText.startsWith("<html")) {
+            throw new Error(`Server error: ${res.status} ${res.statusText}`)
+          }
+          throw new Error(errorText)
+        }
+        const currentAction = currentFeedbackFromRequestAction(requestAction)
+
+        if (currentAction !== "save") {
+          setItems((prev) => prev.filter((row) => row.paper.id !== paperId))
+        }
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err)
+        setError(detail)
+      } finally {
+        setUpdatingAction(null)
+      }
+    },
+    [activeTrackId],
+  )
 
   const toggleReadStatus = useCallback(
     async (paperId: number, currentStatus: ReadingStatus) => {
@@ -821,7 +847,7 @@ export default function SavedPapersList() {
         ) : (
           <>
             <div className="rounded-md border">
-              <Table>
+              <Table className="table-fixed w-full">
                 <TableHeader>
                   <TableRow>
                     <TableHead className="w-[50px]">
@@ -831,12 +857,12 @@ export default function SavedPapersList() {
                         aria-label="Select all"
                       />
                     </TableHead>
-                    <TableHead>Title</TableHead>
-                    <TableHead>Source</TableHead>
-                    <TableHead>Saved</TableHead>
-                    <TableHead>Judge</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
+                    <TableHead className="w-[40%]">Title</TableHead>
+                    <TableHead className="w-[14%]">Source</TableHead>
+                    <TableHead className="w-[16%] text-center">Saved</TableHead>
+                    <TableHead className="w-[10%] text-center">Judge</TableHead>
+                    <TableHead className="w-[10%] text-center">Status</TableHead>
+                    <TableHead className="w-[10%] text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -857,27 +883,29 @@ export default function SavedPapersList() {
                             aria-label={`Select ${paper.title}`}
                           />
                         </TableCell>
-                        <TableCell className="max-w-[480px]">
-                          <div className="font-medium">{paper.title}</div>
+                        <TableCell className="max-w-[480px] align-top">
+                          <div className="truncate text-sm font-medium" title={paper.title}>
+                            {paper.title}
+                          </div>
                           <div className="mt-1 text-xs text-muted-foreground">
                             {(paper.authors || []).slice(0, 4).join(", ") || "Unknown authors"}
                           </div>
                           {paper.venue ? <div className="mt-1 text-xs text-muted-foreground">{paper.venue}</div> : null}
                         </TableCell>
-                        <TableCell>
+                        <TableCell className="whitespace-nowrap">
                           <Badge variant="outline">{paper.primary_source || paper.source || "unknown"}</Badge>
                         </TableCell>
-                        <TableCell className="text-xs text-muted-foreground">
+                        <TableCell className="text-center text-xs text-muted-foreground">
                           <div>{formatDate(item.saved_at)}</div>
                           <div>Published: {formatDate(paper.publication_date || paper.published_at)}</div>
                         </TableCell>
-                        <TableCell>
+                        <TableCell className="text-center">
                           <div className="text-sm">{formatJudge(item.latest_judge?.overall)}</div>
                           {item.latest_judge?.recommendation ? (
                             <div className="text-xs text-muted-foreground">{item.latest_judge.recommendation}</div>
                           ) : null}
                         </TableCell>
-                        <TableCell>
+                        <TableCell className="text-center">
                           <Badge>{status}</Badge>
                         </TableCell>
                         <TableCell className="space-x-2 text-right">
@@ -896,7 +924,7 @@ export default function SavedPapersList() {
                             size="sm"
                             variant="ghost"
                             disabled={rowUpdating}
-                            onClick={() => unsavePaper(paper.id)}
+                            onClick={() => unsavePaper(paper.id, paper.external_url || paper.url || null)}
                           >
                             {unsaving ? <Loader2 className="h-3 w-3 animate-spin" /> : "Unsave"}
                           </Button>
