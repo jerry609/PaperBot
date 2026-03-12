@@ -38,6 +38,11 @@ jobs:
       run:
         working-directory: web
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
       - name: Check required Vercel secrets
         shell: bash
         run: |
@@ -45,11 +50,6 @@ jobs:
           test -n "${{ secrets.VERCEL_TOKEN }}"
           test -n "${{ secrets.VERCEL_ORG_ID }}"
           test -n "${{ secrets.VERCEL_PROJECT_ID }}"
-
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -137,16 +137,16 @@ jobs:
       run:
         working-directory: web
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
       - name: Check required preview smoke secrets
         shell: bash
         run: |
           set -euo pipefail
           test -n "${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}"
-
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
