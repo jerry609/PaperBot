@@ -11,6 +11,7 @@ from .source_collector import (
     SourceCollectRequest,
     SourceCollectResult,
 )
+from .track_memory_store_port import TrackMemoryStorePort
 
 __all__ = [
     "EventLogPort",
@@ -21,5 +22,6 @@ __all__ = [
     "SourceCollector",
     "SourceCollectRequest",
     "SourceCollectResult",
+    "TrackMemoryStorePort",
     "NullSourceCollector",
 ]
