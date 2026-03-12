@@ -16,6 +16,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 
+import { EmbeddingSettingsPanel } from "@/components/settings/EmbeddingSettingsPanel"
 import { ScholarSubscriptionsPanel } from "@/components/settings/ScholarSubscriptionsPanel"
 
 type ModelEndpoint = {
@@ -372,6 +373,10 @@ export default function SettingsPage() {
             ))}
           </div>
         </div>
+      </div>
+
+      <div className="pt-4 border-t">
+        <EmbeddingSettingsPanel />
       </div>
 
       <div className="pt-4 border-t">

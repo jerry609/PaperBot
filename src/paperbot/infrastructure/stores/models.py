@@ -1173,6 +1173,24 @@ class ModelEndpointModel(Base):
         )
 
 
+class EmbeddingEndpointModel(Base):
+    """Singleton embedding endpoint configuration managed from Settings."""
+
+    __tablename__ = "embedding_endpoints"
+    __table_args__ = (UniqueConstraint("scope", name="uq_embedding_endpoints_scope"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    scope: Mapped[str] = mapped_column(String(32), default="default", index=True)
+    provider: Mapped[str] = mapped_column(String(32), default="openai", index=True)
+    base_url: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    api_key_env: Mapped[str] = mapped_column(String(64), default="PAPERBOT_EMBEDDING_API_KEY")
+    api_key_value: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    model: Mapped[str] = mapped_column(String(128), default="text-embedding-3-small")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+
 class LLMUsageModel(Base):
     """LLM token/cost usage records for dashboard and alerting."""
 

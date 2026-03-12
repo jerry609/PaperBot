@@ -27,6 +27,7 @@ from .routes import (
     obsidian,
     harvest,
     model_endpoints,
+    embedding_settings,
     studio_chat,
     repro_context,
     feed,
@@ -85,6 +86,7 @@ app.include_router(newsletter.router, prefix="/api", tags=["Newsletter"])
 app.include_router(obsidian.router, prefix="/api", tags=["Obsidian"])
 app.include_router(harvest.router, prefix="/api", tags=["Harvest"])
 app.include_router(model_endpoints.router, prefix="/api", tags=["Model Endpoints"])
+app.include_router(embedding_settings.router, prefix="/api", tags=["Embedding Settings"])
 app.include_router(studio_chat.router, prefix="/api", tags=["Studio Chat"])
 app.include_router(repro_context.router, prefix="/api/research/repro/context", tags=["P2C"])
 app.include_router(feed.router, prefix="/api", tags=["Feed"])

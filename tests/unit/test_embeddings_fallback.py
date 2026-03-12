@@ -2,9 +2,18 @@ from __future__ import annotations
 
 from paperbot.context_engine.embeddings import (
     EmbeddingConfig,
+    EmbeddingProvider,
     HashEmbeddingProvider,
     try_build_default_embedding_provider,
 )
+
+
+class _FakeOpenAIProvider(EmbeddingProvider):
+    def __init__(self, config: EmbeddingConfig) -> None:
+        self.config = config
+
+    def embed(self, text: str):
+        return [1.0]
 
 
 def test_hash_fallback_provider_available_without_openai_key(monkeypatch):
@@ -54,6 +63,36 @@ def test_embedding_config_falls_back_to_openai_envs(monkeypatch):
     assert config.resolve_api_key() == "chat-key"
     assert config.resolve_base_url() == "https://chat.example/v1"
     assert config.resolve_model() == "text-embedding-fallback"
+
+
+def test_registry_embedding_config_is_merged_into_default_provider(monkeypatch):
+    captured = {}
+
+    def _fake_provider(config: EmbeddingConfig):
+        captured["config"] = config
+        return _FakeOpenAIProvider(config)
+
+    monkeypatch.setattr(
+        "paperbot.context_engine.embeddings._load_registry_embedding_config",
+        lambda: EmbeddingConfig(
+            model="text-embedding-registry",
+            api_key="registry-key",
+            base_url="https://registry.example/v1",
+        ),
+    )
+    monkeypatch.setattr(
+        "paperbot.context_engine.embeddings.OpenAIEmbeddingProvider", _fake_provider
+    )
+    monkeypatch.setenv("PAPERBOT_EMBEDDING_PROVIDER_CHAIN", "openai,none")
+
+    provider = try_build_default_embedding_provider(
+        config=EmbeddingConfig(model="text-embedding-explicit")
+    )
+
+    assert isinstance(provider, _FakeOpenAIProvider)
+    assert captured["config"].resolve_model() == "text-embedding-explicit"
+    assert captured["config"].resolve_api_key() == "registry-key"
+    assert captured["config"].resolve_base_url() == "https://registry.example/v1"
 
 
 def test_hash_provider_tokenizes_japanese_kana_and_kanji() -> None:
