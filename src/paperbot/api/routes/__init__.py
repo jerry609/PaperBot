@@ -22,6 +22,7 @@ from . import (
     intelligence,
     push_commands,
     agent_board,
+    wiki,
 )
 
 __all__ = [
@@ -46,4 +47,5 @@ __all__ = [
     "intelligence",
     "push_commands",
     "agent_board",
+    "wiki",
 ]
