@@ -315,8 +315,6 @@ export default function SavedPapersList() {
           }
           throw new Error(errorText)
         }
-
-        const data = await res.json()
         const currentAction = currentFeedbackFromRequestAction(requestAction)
 
         if (currentAction !== "save") {
