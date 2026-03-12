@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from typing import List, Optional
 
 from paperbot.domain.identity import PaperIdentity
@@ -28,9 +27,7 @@ class ArxivSearchAdapter:
         year_from: Optional[int] = None,
         year_to: Optional[int] = None,
     ) -> List[PaperCandidate]:
-        records = await asyncio.to_thread(
-            self._connector.search, query=query, max_results=max_results
-        )
+        records = await self._connector.search(query=query, max_results=max_results)
         return [self._to_candidate(r) for r in records]
 
     @staticmethod
@@ -47,4 +44,4 @@ class ArxivSearchAdapter:
         )
 
     async def close(self) -> None:
-        pass
+        await self._connector.close()

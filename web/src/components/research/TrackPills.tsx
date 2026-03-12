@@ -41,6 +41,26 @@ function getTrackIcon(name: string): LucideIcon {
   return trackIcons[name] || defaultIcon
 }
 
+export function getVisibleTracks(
+  tracks: Track[],
+  activeTrackId: number | null,
+  maxVisible: number,
+): Track[] {
+  if (maxVisible <= 0) {
+    return []
+  }
+
+  const activeTrack = tracks.find((track) => track.id === activeTrackId) || null
+  const visibleTracks = tracks.slice(0, maxVisible)
+  if (
+    activeTrack &&
+    !visibleTracks.some((track) => track.id === activeTrack.id)
+  ) {
+    visibleTracks.splice(Math.max(visibleTracks.length - 1, 0), 1, activeTrack)
+  }
+  return visibleTracks
+}
+
 export function TrackPills({
   tracks,
   activeTrackId,
@@ -49,7 +69,7 @@ export function TrackPills({
   disabled = false,
   maxVisible = 5,
 }: TrackPillsProps) {
-  const visibleTracks = tracks.slice(0, maxVisible)
+  const visibleTracks = getVisibleTracks(tracks, activeTrackId, maxVisible)
   const hasMore = tracks.length > maxVisible
 
   return (
@@ -64,7 +84,9 @@ export function TrackPills({
               ? "bg-primary text-primary-foreground shadow-sm"
               : "bg-background hover:bg-accent"
           )}
-          onClick={() => onSelectTrack(track.id)}
+          onClick={() => {
+            if (track.id !== activeTrackId) onSelectTrack(track.id)
+          }}
           disabled={disabled}
         >
           {(() => {

@@ -37,6 +37,83 @@ export interface Task {
     paperId?: string  // Link task to a paper
 }
 
+export type AgentTaskStatus = 'planning' | 'in_progress' | 'repairing' | 'done'
+
+export type BlockType = "think" | "tool" | "diff" | "info" | "result"
+
+export interface AgentTaskLog {
+    id: string
+    timestamp: string
+    event: string
+    phase: string
+    level: "info" | "warning" | "error" | "success"
+    message: string
+    blockType?: BlockType
+    details?: Record<string, unknown>
+}
+
+export type PipelinePhase =
+    | 'idle'
+    | 'planning'
+    | 'executing'
+    | 'e2e_running'
+    | 'e2e_repairing'
+    | 'downloading'
+    | 'completed'
+    | 'failed'
+
+export interface E2EState {
+    status: 'waiting' | 'running' | 'passed' | 'failed' | 'repairing' | 'skipped'
+    attempt: number
+    maxAttempts: number
+    entryPoint: string | null
+    command: string | null
+    lastExitCode: number | null
+    lastStdout: string
+    lastStderr: string
+    history: Array<{
+        attempt: number
+        success: boolean
+        exitCode: number
+        duration: number
+        stdoutPreview: string
+    }>
+}
+
+export interface SandboxFileEntry {
+    name: string
+    type: 'file' | 'directory'
+    children?: SandboxFileEntry[]
+}
+
+export interface TimeEstimate {
+    elapsedMs: number
+    remainingMs: number | null
+    avgTaskMs: number | null
+    completedTasks: number
+    totalTasks: number
+}
+
+export interface AgentTask {
+    id: string
+    title: string
+    description: string
+    status: AgentTaskStatus
+    assignee: string
+    progress: number
+    tags: string[]
+    createdAt: string
+    updatedAt: string
+    subtasks: { id: string; title: string; done: boolean }[]
+    codexOutput?: string
+    generatedFiles?: string[]
+    reviewFeedback?: string
+    lastError?: string
+    executionLog?: AgentTaskLog[]
+    humanReviews?: Array<{ id: string; decision: string; notes: string; timestamp: string }>
+    paperId?: string
+}
+
 export type GenCodeResult = {
     success?: boolean
     outputDir?: string
@@ -59,6 +136,8 @@ export interface StudioPaper {
     title: string
     abstract: string
     methodSection?: string
+    authors?: string[]
+    researchAreas?: string[]
 
     // Reproduction state
     status: StudioPaperStatus
@@ -134,6 +213,23 @@ interface StudioState {
     generationProgress: StageProgressEvent[]
     liveObservations: StageObservationsEvent[]
 
+    // Agent Board state
+    agentTasks: AgentTask[]
+    boardSessionId: string | null
+    pipelinePhase: PipelinePhase
+    e2eState: E2EState | null
+    sandboxFiles: SandboxFileEntry[]
+    timeEstimate: TimeEstimate | null
+    setBoardSessionId: (id: string | null) => void
+    addAgentTask: (task: Omit<AgentTask, 'createdAt' | 'updatedAt'> & { id?: string }) => string
+    updateAgentTask: (taskId: string, updates: Partial<AgentTask>) => void
+    moveAgentTask: (taskId: string, status: AgentTask['status']) => void
+    clearAgentTasks: () => void
+    setPipelinePhase: (phase: PipelinePhase) => void
+    setE2EState: (state: Partial<E2EState>) => void
+    setSandboxFiles: (files: SandboxFileEntry[]) => void
+    setTimeEstimate: (estimate: TimeEstimate) => void
+
     // Paper actions
     addPaper: (paper: Omit<StudioPaper, 'id' | 'createdAt' | 'updatedAt' | 'taskIds' | 'status'>) => string
     updatePaper: (paperId: string, updates: Partial<Omit<StudioPaper, 'id' | 'createdAt'>>) => void
@@ -183,6 +279,34 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     contextPackError: null,
     generationProgress: [],
     liveObservations: [],
+
+    // Agent Board state
+    agentTasks: [],
+    boardSessionId: null,
+    pipelinePhase: 'idle' as PipelinePhase,
+    e2eState: null,
+    sandboxFiles: [],
+    timeEstimate: null,
+
+    setBoardSessionId: (id) => {
+        set({ boardSessionId: id })
+    },
+
+    clearAgentTasks: () => {
+        set({ agentTasks: [], boardSessionId: null, pipelinePhase: 'idle', e2eState: null, sandboxFiles: [], timeEstimate: null })
+    },
+
+    setPipelinePhase: (phase) => set({ pipelinePhase: phase }),
+
+    setE2EState: (partial) => set((state) => ({
+        e2eState: state.e2eState
+            ? { ...state.e2eState, ...partial }
+            : { status: 'waiting', attempt: 0, maxAttempts: 3, entryPoint: null, command: null, lastExitCode: null, lastStdout: '', lastStderr: '', history: [], ...partial } as E2EState,
+    })),
+
+    setSandboxFiles: (files) => set({ sandboxFiles: files }),
+
+    setTimeEstimate: (estimate) => set({ timeEstimate: estimate }),
 
     // Paper actions
     addPaper: (paper) => {
@@ -343,6 +467,44 @@ export const useStudioStore = create<StudioState>((set, get) => ({
             }
         }
         return id
+    },
+
+    addAgentTask: (task) => {
+        const id = task.id?.trim() || `agent-task-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
+        const now = new Date().toISOString()
+        set(state => ({
+            agentTasks: [
+                ...state.agentTasks,
+                {
+                    ...task,
+                    id,
+                    createdAt: now,
+                    updatedAt: now,
+                    executionLog: task.executionLog || [],
+                },
+            ],
+        }))
+        return id
+    },
+
+    updateAgentTask: (taskId, updates) => {
+        set(state => ({
+            agentTasks: state.agentTasks.map(task =>
+                task.id === taskId
+                    ? { ...task, ...updates, updatedAt: new Date().toISOString() }
+                    : task
+            ),
+        }))
+    },
+
+    moveAgentTask: (taskId, status) => {
+        set(state => ({
+            agentTasks: state.agentTasks.map(task =>
+                task.id === taskId
+                    ? { ...task, status, updatedAt: new Date().toISOString() }
+                    : task
+            ),
+        }))
     },
 
     updateTaskStatus: (taskId, status) => {

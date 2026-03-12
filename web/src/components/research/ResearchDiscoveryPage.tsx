@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react"
 import { useSearchParams } from "next/navigation"
 
 import { ArrowLeft, Compass } from "lucide-react"
+import { fetchJson, getErrorMessage } from "@/lib/fetch"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -13,53 +14,6 @@ import DiscoveryGraphWorkspace from "./DiscoveryGraphWorkspace"
 import type { Track } from "./TrackSelector"
 
 type SeedType = "doi" | "arxiv" | "openalex" | "semantic_scholar" | "author"
-
-type UpstreamErrorBody = {
-  detail?: string
-  error?: string
-}
-
-function toFriendlyErrorMessage(status: number, rawText: string): string | null {
-  if (!rawText) return null
-
-  let parsed: UpstreamErrorBody | null = null
-  try {
-    parsed = JSON.parse(rawText) as UpstreamErrorBody
-  } catch {
-    parsed = null
-  }
-
-  const detail = parsed && typeof parsed.detail === "string" ? parsed.detail : undefined
-
-  if (detail && (detail.includes("Upstream API unreachable") || detail.includes("Upstream API timed out"))) {
-    if (detail.includes("timed out")) {
-      return "Unable to connect to service (request timed out). Please ensure the backend is running. Please try again."
-    }
-    return "Unable to connect to service. Please ensure the backend is running."
-  }
-
-  // Fallback: surface backend-provided detail when available
-  if (detail) return detail
-
-  return null
-}
-
-async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, init)
-  if (!res.ok) {
-    const text = await res.text().catch(() => "")
-    const friendly = toFriendlyErrorMessage(res.status, text)
-    if (friendly) {
-      throw new Error(friendly)
-    }
-    const statusLabel = `${res.status} ${res.statusText}`.trim()
-    const base = statusLabel || "Request failed"
-    const message = text ? `${base} ${text}`.trim() : base
-    throw new Error(message)
-  }
-  return res.json() as Promise<T>
-}
-
 export default function ResearchDiscoveryPage() {
   const searchParams = useSearchParams()
   const [userId] = useState("default")
@@ -91,7 +45,7 @@ export default function ResearchDiscoveryPage() {
   )
 
   useEffect(() => {
-    refreshTracks().catch((err) => setError(err instanceof Error ? err.message : String(err)))
+    refreshTracks().catch((err) => setError(getErrorMessage(err)))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -126,7 +80,7 @@ export default function ResearchDiscoveryPage() {
       )
       await refreshTracks()
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      setError(getErrorMessage(err))
     } finally {
       setLoading(false)
     }

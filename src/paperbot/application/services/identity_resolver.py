@@ -25,10 +25,12 @@ class IdentityResolver:
         self,
         identity_store: Optional[IdentityStore] = None,
         db_url: Optional[str] = None,
+        *,
+        provider: Optional[SessionProvider] = None,
     ):
         self._identity_store = identity_store or IdentityStore(db_url=db_url)
         self._db_url = db_url or get_db_url()
-        self._provider = SessionProvider(self._db_url)
+        self._provider = provider or SessionProvider(self._db_url)
 
     def resolve(
         self,

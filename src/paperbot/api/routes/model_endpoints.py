@@ -13,8 +13,22 @@ from paperbot.infrastructure.stores.model_endpoint_store import ModelEndpointSto
 
 router = APIRouter()
 
-_store = ModelEndpointStore()
-_usage_store = LLMUsageStore()
+_store: Optional[ModelEndpointStore] = None
+_usage_store: Optional[LLMUsageStore] = None
+
+
+def _get_store() -> ModelEndpointStore:
+    global _store
+    if _store is None:
+        _store = ModelEndpointStore()
+    return _store
+
+
+def _get_usage_store() -> LLMUsageStore:
+    global _usage_store
+    if _usage_store is None:
+        _usage_store = LLMUsageStore()
+    return _usage_store
 
 _ALLOWED_VENDORS = ["openai_compatible", "openai", "anthropic", "ollama"]
 _ALLOWED_TASK_TYPES = [
@@ -107,7 +121,7 @@ def _build_model_config(endpoint: Dict[str, Any]) -> ModelConfig:
 
 @router.get("/model-endpoints", response_model=ModelEndpointListResponse)
 def list_model_endpoints(enabled_only: bool = False):
-    rows = _store.list_endpoints(enabled_only=enabled_only)
+    rows = _get_store().list_endpoints(enabled_only=enabled_only)
     return ModelEndpointListResponse(items=rows)
 
 
@@ -119,7 +133,7 @@ def get_model_endpoint_capabilities():
 @router.post("/model-endpoints", response_model=ModelEndpointResponse)
 def create_model_endpoint(req: ModelEndpointCreateRequest):
     try:
-        row = _store.upsert_endpoint(payload=req.model_dump())
+        row = _get_store().upsert_endpoint(payload=req.model_dump())
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return ModelEndpointResponse(item=row)
@@ -127,13 +141,13 @@ def create_model_endpoint(req: ModelEndpointCreateRequest):
 
 @router.patch("/model-endpoints/{endpoint_id}", response_model=ModelEndpointResponse)
 def update_model_endpoint(endpoint_id: int, req: ModelEndpointUpdateRequest):
-    existing = _store.get_endpoint(endpoint_id)
+    existing = _get_store().get_endpoint(endpoint_id)
     if not existing:
         raise HTTPException(status_code=404, detail="model endpoint not found")
 
     payload = {k: v for k, v in req.model_dump().items() if v is not None}
     try:
-        row = _store.upsert_endpoint(payload=payload, endpoint_id=endpoint_id)
+        row = _get_store().upsert_endpoint(payload=payload, endpoint_id=endpoint_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return ModelEndpointResponse(item=row)
@@ -141,7 +155,7 @@ def update_model_endpoint(endpoint_id: int, req: ModelEndpointUpdateRequest):
 
 @router.delete("/model-endpoints/{endpoint_id}")
 def delete_model_endpoint(endpoint_id: int):
-    ok = _store.delete_endpoint(endpoint_id)
+    ok = _get_store().delete_endpoint(endpoint_id)
     if not ok:
         raise HTTPException(status_code=404, detail="model endpoint not found")
     return {"ok": True}
@@ -149,7 +163,7 @@ def delete_model_endpoint(endpoint_id: int):
 
 @router.post("/model-endpoints/{endpoint_id}/activate", response_model=EndpointActivateResponse)
 def activate_model_endpoint(endpoint_id: int):
-    row = _store.activate_endpoint(endpoint_id)
+    row = _get_store().activate_endpoint(endpoint_id)
     if not row:
         raise HTTPException(status_code=404, detail="model endpoint not found")
     return EndpointActivateResponse(item=row)
@@ -158,13 +172,13 @@ def activate_model_endpoint(endpoint_id: int):
 @router.get("/model-endpoints/usage", response_model=LLMUsageSummaryResponse)
 def get_llm_usage_summary(days: int = 7):
     window = max(1, min(int(days), 90))
-    summary = _usage_store.summarize(days=window)
+    summary = _get_usage_store().summarize(days=window)
     return LLMUsageSummaryResponse(summary=summary)
 
 
 @router.post("/model-endpoints/{endpoint_id}/test", response_model=EndpointTestResponse)
 def test_model_endpoint(endpoint_id: int, req: EndpointTestRequest):
-    endpoint = _store.get_endpoint(endpoint_id, include_secrets=True)
+    endpoint = _get_store().get_endpoint(endpoint_id, include_secrets=True)
     if not endpoint:
         raise HTTPException(status_code=404, detail="model endpoint not found")
 

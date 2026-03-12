@@ -1,10 +1,14 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { AlertTriangle, ChevronDown, ChevronRight } from "lucide-react"
+import { AlertTriangle, ChevronDown, ChevronRight, LayoutDashboard } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { useStudioStore } from "@/lib/store/studio-store"
+import { readSSE } from "@/lib/sse"
+import { backendUrl } from "@/lib/backend-url"
+import { cn } from "@/lib/utils"
 import type {
   ContextPackSession,
   ExtractionObservation,
@@ -22,11 +26,15 @@ const CONFIDENCE_STYLES: Array<{ max: number; className: string }> = [
 interface Props {
   pack: ReproContextPack
   onSessionCreated?: (session: ContextPackSession) => void
+  onDeployToBoard?: () => void
+  className?: string
 }
 
-export function ContextPackPanel({ pack, onSessionCreated }: Props) {
+export function ContextPackPanel({ pack, onSessionCreated, onDeployToBoard, className }: Props) {
   const [creating, setCreating] = useState(false)
+  const [deploying, setDeploying] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const { selectedPaperId, addAgentTask, setBoardSessionId, clearAgentTasks } = useStudioStore()
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [filter, setFilter] = useState<{ stage: string | null; type: ObservationType | null; concept: ObservationConcept | null }>({
     stage: null,
@@ -77,8 +85,76 @@ export function ContextPackPanel({ pack, onSessionCreated }: Props) {
     }
   }
 
+  const handleDeployToBoard = async () => {
+    setDeploying(true)
+    setError(null)
+    clearAgentTasks()
+    try {
+      // 1. Create agent board session (direct to backend, bypasses Next.js rewrite buffering)
+      const sessionRes = await fetch(backendUrl("/api/agent-board/sessions"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          paper_id: selectedPaperId || "",
+          context_pack_id: pack.context_pack_id,
+          paper_title: pack.paper?.title || "",
+        }),
+      })
+      if (!sessionRes.ok) throw new Error(`Failed to create board session (${sessionRes.status})`)
+      const session = await sessionRes.json()
+      setBoardSessionId(session.session_id)
+
+      // 2. Start planning (SSE) -- Claude decomposes into tasks
+      //    Must go directly to backend; Next.js rewrite proxy buffers SSE.
+      const planRes = await fetch(backendUrl(`/api/agent-board/sessions/${session.session_id}/plan`), {
+        method: "POST",
+      })
+      if (!planRes.ok || !planRes.body) throw new Error(`Planning failed (${planRes.status})`)
+
+      for await (const evt of readSSE(planRes.body)) {
+        if (evt?.type === "progress") {
+          const data = (evt.data ?? {}) as Record<string, unknown>
+          if (data.event === "task_created" && data.task) {
+            const t = data.task as Record<string, unknown>
+            addAgentTask({
+              id: (t.id as string) || `task-${Date.now()}`,
+              title: (t.title as string) || "Untitled",
+              description: (t.description as string) || "",
+              status: (t.status as "planning") || "planning",
+              assignee: (t.assignee as string) || "claude",
+              progress: (t.progress as number) || 0,
+              tags: (t.tags as string[]) || [],
+              subtasks: (t.subtasks as { id: string; title: string; done: boolean }[]) || [],
+              codexOutput: (t.codex_output as string) || undefined,
+              generatedFiles: (t.generated_files as string[]) || [],
+              reviewFeedback: (t.review_feedback as string) || undefined,
+              executionLog: (t.execution_log as {
+                id: string
+                timestamp: string
+                event: string
+                phase: string
+                level: "info" | "warning" | "error" | "success"
+                message: string
+                details?: Record<string, unknown>
+              }[]) || [],
+              paperId: selectedPaperId || undefined,
+            })
+          }
+        } else if (evt?.type === "error") {
+          throw new Error(evt.message || "Planning failed")
+        }
+      }
+
+      onDeployToBoard?.()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to deploy to board")
+    } finally {
+      setDeploying(false)
+    }
+  }
+
   return (
-    <div className="h-full flex flex-col gap-4 p-4 overflow-auto">
+    <div className={cn("h-full flex flex-col gap-4 p-4 overflow-auto", className)}>
       <Card>
         <CardHeader className="space-y-2">
           <CardTitle className="text-lg">{pack.paper.title}</CardTitle>
@@ -170,8 +246,12 @@ export function ContextPackPanel({ pack, onSessionCreated }: Props) {
 
       {error && <p className="text-xs text-red-600">{error}</p>}
 
-      <div className="flex justify-end">
-        <Button onClick={handleCreateSession} disabled={creating}>
+      <div className="flex justify-end gap-2">
+        <Button variant="outline" onClick={handleDeployToBoard} disabled={deploying || creating}>
+          <LayoutDashboard className="h-4 w-4 mr-1.5" />
+          {deploying ? "Deploying..." : "Deploy to Agent Board"}
+        </Button>
+        <Button onClick={handleCreateSession} disabled={creating || deploying}>
           {creating ? "Creating..." : "Create Repro Session"}
         </Button>
       </div>

@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
 from paperbot.application.ports.paper_search_port import SearchPort
+from paperbot.application.services.paper_dedup import PaperDeduplicator
 from paperbot.domain.paper import PaperCandidate
 
 logger = logging.getLogger(__name__)
@@ -241,32 +242,42 @@ class PaperSearchService:
     ) -> Tuple[List[Tuple[float, PaperCandidate]], Dict[str, List[str]]]:
         rrf_k = max(1.0, float(rrf_k or self.DEFAULT_RRF_K))
 
-        scores: Dict[str, float] = defaultdict(float)
-        provenance: Dict[str, List[str]] = defaultdict(list)
-        source_contrib: Dict[str, Dict[str, float]] = defaultdict(dict)
-        best_by_key: Dict[str, PaperCandidate] = {}
+        dedup = self._deduplicator or PaperDeduplicator()
+
+        # First pass: feed all papers into the deduplicator
+        for papers in results_by_source.values():
+            for paper in papers:
+                dedup.add(paper)
+
+        # Second pass: compute RRF scores, mapping each original paper to its canonical
+        scores: Dict[int, float] = defaultdict(float)
+        provenance: Dict[int, List[str]] = defaultdict(list)
+        source_contrib: Dict[int, Dict[str, float]] = defaultdict(dict)
 
         for source, papers in results_by_source.items():
             weight = float(source_weights.get(source, 0.5))
             for rank, paper in enumerate(papers, start=1):
-                key = self._paper_key(paper)
+                canonical = dedup.canonical_for(paper)
+                if canonical is None:
+                    continue
+                obj_id = id(canonical)
                 contrib = weight / (rrf_k + rank)
-                scores[key] += contrib
-                source_contrib[key][source] = source_contrib[key].get(source, 0.0) + contrib
-                if source not in provenance[key]:
-                    provenance[key].append(source)
-
-                best = best_by_key.get(key)
-                if best is None or self._paper_quality(paper) > self._paper_quality(best):
-                    best_by_key[key] = paper
+                scores[obj_id] += contrib
+                source_contrib[obj_id][source] = (
+                    source_contrib[obj_id].get(source, 0.0) + contrib
+                )
+                if source not in provenance[obj_id]:
+                    provenance[obj_id].append(source)
 
         fused: List[Tuple[float, PaperCandidate]] = []
-        for key, paper in best_by_key.items():
-            score = float(scores.get(key, 0.0))
+        for paper in dedup.results():
+            obj_id = id(paper)
+            score = float(scores.get(obj_id, 0.0))
             ranked_sources = sorted(
-                source_contrib.get(key, {}).items(), key=lambda item: (-item[1], item[0])
+                source_contrib.get(obj_id, {}).items(),
+                key=lambda item: (-item[1], item[0]),
             )
-            paper.title_hash = key
+            paper.title_hash = self._paper_key(paper)
             paper.retrieval_score = score
             paper.retrieval_sources = [name for name, _ in ranked_sources]
             fused.append((score, paper))
@@ -280,5 +291,10 @@ class PaperSearchService:
             )
         )
 
-        normalized_provenance = {k: list(v) for k, v in provenance.items()}
+        normalized_provenance: Dict[str, List[str]] = {}
+        for paper in dedup.results():
+            obj_id = id(paper)
+            key = self._paper_key(paper)
+            normalized_provenance[key] = list(provenance.get(obj_id, []))
+
         return fused, normalized_provenance

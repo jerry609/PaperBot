@@ -1,0 +1,73 @@
+{
+  "version": "v1",
+  "description": "Seed benchmark for document evidence retrieval over indexed paper metadata and structured cards.",
+  "papers": [
+    {
+      "paper_id": 101,
+      "title": "Sparse Retrieval for Transformer Agents",
+      "abstract": "We study retrieval-aware memory routing for transformer agents and show that sparse retrieval improves latency without collapsing answer quality.",
+      "structured_card": {
+        "method": "A sparse retrieval memory routing strategy chooses a compact evidence set before generation.",
+        "findings": [
+          "Retrieval-aware routing reduces latency on long-context tasks.",
+          "Answer quality remains stable when the evidence set stays compact."
+        ],
+        "limitations": "The v1 system only indexes metadata-derived text instead of full PDF evidence."
+      }
+    },
+    {
+      "paper_id": 102,
+      "title": "Graph Retrieval Routers for Research Workflows",
+      "abstract": "We route research queries through graph-structured retrieval paths and improve evidence selection for workflow orchestration.",
+      "structured_card": {
+        "method": "Graph retrieval routing adds query decomposition and path scoring before evidence ranking.",
+        "findings": [
+          "Graph-based routing improves evidence precision for multi-hop research questions."
+        ],
+        "limitations": "Latency increases when path expansion is unbounded."
+      }
+    }
+  ],
+  "cases": [
+    {
+      "case_id": "doc_evi_001",
+      "query": "retrieval-aware memory routing latency",
+      "query_type": "paraphrase",
+      "top_k": 5,
+      "judgments": [
+        {
+          "paper_id": 101,
+          "chunk_ref": "101:method:0",
+          "relevance": 3
+        },
+        {
+          "paper_id": 101,
+          "chunk_ref": "101:findings:0",
+          "relevance": 2
+        }
+      ],
+      "expected_paper_ids": [101],
+      "expected_chunk_refs": ["101:method:0"]
+    },
+    {
+      "case_id": "doc_evi_002",
+      "query": "multi-hop graph evidence routing precision",
+      "query_type": "term_mismatch",
+      "top_k": 5,
+      "judgments": [
+        {
+          "paper_id": 102,
+          "chunk_ref": "102:findings:0",
+          "relevance": 3
+        },
+        {
+          "paper_id": 102,
+          "chunk_ref": "102:method:0",
+          "relevance": 2
+        }
+      ],
+      "expected_paper_ids": [102],
+      "expected_chunk_refs": ["102:findings:0"]
+    }
+  ]
+}

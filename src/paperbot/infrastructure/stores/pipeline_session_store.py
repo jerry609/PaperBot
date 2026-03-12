@@ -7,6 +7,7 @@ from uuid import uuid4
 
 from sqlalchemy import desc, select
 
+from paperbot.application.ports.pipeline_session_port import PipelineSessionPort
 from paperbot.infrastructure.stores.models import Base, PipelineSessionModel
 from paperbot.infrastructure.stores.sqlalchemy_db import SessionProvider, get_db_url
 
@@ -15,14 +16,14 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-class PipelineSessionStore:
+class PipelineSessionStore(PipelineSessionPort):
     """Persist lightweight workflow checkpoints for resume support."""
 
     def __init__(self, db_url: Optional[str] = None, *, auto_create_schema: bool = True):
         self.db_url = db_url or get_db_url()
         self._provider = SessionProvider(self.db_url)
         if auto_create_schema:
-            Base.metadata.create_all(self._provider.engine)
+            self._provider.ensure_tables(Base.metadata)
 
     def start_session(
         self,

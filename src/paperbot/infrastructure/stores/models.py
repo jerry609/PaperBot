@@ -4,7 +4,19 @@ import json
 from datetime import datetime
 from typing import Any, Dict, Optional
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, LargeBinary, String, Text, UniqueConstraint
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    LargeBinary,
+    String,
+    Text,
+    UniqueConstraint,
+    CheckConstraint,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -989,6 +1001,109 @@ class PaperModel(Base):
         self.structured_card_json = json.dumps(card or {}, ensure_ascii=False)
 
 
+class DocumentAssetModel(Base):
+    """Indexed document source bound to a canonical paper."""
+
+    __tablename__ = "document_assets"
+    __table_args__ = (
+        UniqueConstraint("paper_id", "source_type", name="uq_document_assets_paper_source"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    paper_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("papers.id", ondelete="CASCADE"), index=True
+    )
+    source_type: Mapped[str] = mapped_column(String(32), default="paper_metadata", index=True)
+    title: Mapped[str] = mapped_column(Text, default="")
+    locator_url: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    checksum: Mapped[str] = mapped_column(String(64), default="", index=True)
+    metadata_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+    paper = relationship("PaperModel")
+
+    def set_metadata(self, data: Dict[str, Any]) -> None:
+        self.metadata_json = json.dumps(data or {}, ensure_ascii=False)
+
+    def get_metadata(self) -> Dict[str, Any]:
+        try:
+            return json.loads(self.metadata_json or "{}")
+        except Exception:
+            return {}
+
+
+class DocumentIndexJobModel(Base):
+    """Best-effort async indexing queue for canonical papers."""
+
+    __tablename__ = "document_index_jobs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    paper_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("papers.id", ondelete="CASCADE"), index=True
+    )
+    asset_id: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        ForeignKey("document_assets.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    trigger_source: Mapped[str] = mapped_column(String(64), default="manual", index=True)
+    status: Mapped[str] = mapped_column(String(16), default="queued", index=True)
+    chunk_count: Mapped[int] = mapped_column(Integer, default=0)
+    attempt_count: Mapped[int] = mapped_column(Integer, default=0)
+    error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    enqueued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+    paper = relationship("PaperModel")
+    asset = relationship("DocumentAssetModel")
+
+
+class DocumentChunkModel(Base):
+    """Searchable retrieval chunk for indexed paper evidence."""
+
+    __tablename__ = "document_chunks"
+    __table_args__ = (
+        UniqueConstraint("asset_id", "chunk_index", name="uq_document_chunks_asset_index"),
+        Index("ix_document_chunks_paper_section", "paper_id", "section"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    paper_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("papers.id", ondelete="CASCADE"), index=True
+    )
+    asset_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("document_assets.id", ondelete="CASCADE"), index=True
+    )
+    chunk_index: Mapped[int] = mapped_column(Integer, index=True)
+    section: Mapped[str] = mapped_column(String(128), default="", index=True)
+    heading: Mapped[str] = mapped_column(String(255), default="")
+    content: Mapped[str] = mapped_column(Text, default="")
+    content_hash: Mapped[str] = mapped_column(String(64), index=True)
+    token_count: Mapped[int] = mapped_column(Integer, default=0)
+    embedding_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    metadata_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+    paper = relationship("PaperModel")
+    asset = relationship("DocumentAssetModel")
+
+    def set_metadata(self, data: Dict[str, Any]) -> None:
+        self.metadata_json = json.dumps(data or {}, ensure_ascii=False)
+
+    def get_metadata(self) -> Dict[str, Any]:
+        try:
+            return json.loads(self.metadata_json or "{}")
+        except Exception:
+            return {}
+
+
 class PaperIdentifierModel(Base):
     """Maps (source, external_id) → papers.id for unified identity resolution."""
 
@@ -1056,6 +1171,24 @@ class ModelEndpointModel(Base):
             [str(x).strip() for x in (rows or []) if str(x).strip()],
             ensure_ascii=False,
         )
+
+
+class EmbeddingEndpointModel(Base):
+    """Singleton embedding endpoint configuration managed from Settings."""
+
+    __tablename__ = "embedding_endpoints"
+    __table_args__ = (UniqueConstraint("scope", name="uq_embedding_endpoints_scope"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    scope: Mapped[str] = mapped_column(String(32), default="default", index=True)
+    provider: Mapped[str] = mapped_column(String(32), default="openai", index=True)
+    base_url: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    api_key_env: Mapped[str] = mapped_column(String(64), default="PAPERBOT_EMBEDDING_API_KEY")
+    api_key_value: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    model: Mapped[str] = mapped_column(String(128), default="text-embedding-3-small")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
 
 
 class LLMUsageModel(Base):
@@ -1293,3 +1426,93 @@ class ReproCodeExperienceModel(Base):
     content: Mapped[str] = mapped_column(Text, default="")
     code_snippet: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+class IntelligenceEventModel(Base):
+    """Cached community radar signal from external sources."""
+
+    __tablename__ = "intelligence_events"
+    __table_args__ = (
+        UniqueConstraint("user_id", "external_id", name="uq_intelligence_events_user_external"),
+        Index("ix_intelligence_events_user_score", "user_id", "score"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True, default="default")
+    external_id: Mapped[str] = mapped_column(String(255), nullable=False)
+
+    source: Mapped[str] = mapped_column(String(32), default="unknown", index=True)
+    source_label: Mapped[str] = mapped_column(String(64), default="")
+    kind: Mapped[str] = mapped_column(String(64), default="signal", index=True)
+
+    title: Mapped[str] = mapped_column(Text, default="")
+    summary: Mapped[str] = mapped_column(Text, default="")
+    url: Mapped[str] = mapped_column(Text, default="")
+
+    repo_full_name: Mapped[str] = mapped_column(String(128), default="", index=True)
+    author_name: Mapped[str] = mapped_column(String(128), default="", index=True)
+
+    keyword_hits_json: Mapped[str] = mapped_column(Text, default="[]")
+    author_matches_json: Mapped[str] = mapped_column(Text, default="[]")
+    repo_matches_json: Mapped[str] = mapped_column(Text, default="[]")
+
+    metric_name: Mapped[str] = mapped_column(String(64), default="")
+    metric_value: Mapped[int] = mapped_column(Integer, default=0)
+    metric_delta: Mapped[int] = mapped_column(Integer, default=0)
+    score: Mapped[float] = mapped_column(Float, default=0.0, index=True)
+
+    published_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    detected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+    payload_json: Mapped[str] = mapped_column(Text, default="{}")
+
+
+# ============================================================================
+# Authentication: Users
+# ============================================================================
+
+
+class UserModel(Base):
+    """User accounts for authentication and personalization.
+
+    Either email (with hashed_password) or github_id must be provided.
+    """
+
+    __tablename__ = "users"
+    __table_args__ = (
+        UniqueConstraint("email", name="uq_users_email"),
+        UniqueConstraint("github_id", name="uq_users_github_id"),
+        CheckConstraint("email IS NOT NULL OR github_id IS NOT NULL", name="ck_users_identity"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
+    hashed_password: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    github_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
+    github_username: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    display_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    avatar_url: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_login_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+# ============================================================================
+# Authentication: Password Reset Tokens
+# ============================================================================
+
+
+class PasswordResetTokenModel(Base):
+    """One-time tokens for password reset. Expires after 1 hour."""
+
+    __tablename__ = "password_reset_tokens"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    token: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

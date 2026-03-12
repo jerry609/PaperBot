@@ -6,7 +6,7 @@ from pathlib import Path
 from sqlalchemy import select
 
 from paperbot.domain.identity import PaperIdentity
-from paperbot.infrastructure.stores.models import PaperJudgeScoreModel
+from paperbot.infrastructure.stores.models import PaperJudgeScoreModel, PaperReadingStatusModel
 from paperbot.infrastructure.stores.paper_store import SqlAlchemyPaperStore
 from paperbot.infrastructure.stores.research_store import SqlAlchemyResearchStore
 from paperbot.infrastructure.stores.identity_store import IdentityStore
@@ -138,6 +138,126 @@ def test_saved_list_and_detail_from_research_store(tmp_path: Path):
     assert detail is not None
     assert detail["paper"]["title"] == "UniICL"
     assert detail["reading_status"]["status"] == "read"
+
+
+def test_unsave_removes_saved_state_from_library(tmp_path: Path):
+    db_path = tmp_path / "saved-unsave.db"
+    db_url = f"sqlite:///{db_path}"
+
+    paper_store = SqlAlchemyPaperStore(db_url=db_url)
+    research_store = SqlAlchemyResearchStore(db_url=db_url)
+
+    paper = paper_store.upsert_paper(
+        paper={
+            "title": "Toggle Save Paper",
+            "url": "https://example.com/toggle-save",
+            "pdf_url": "https://example.com/toggle-save.pdf",
+        }
+    )
+
+    track = research_store.create_track(user_id="u-save", name="track-save", activate=True)
+    research_store.add_paper_feedback(
+        user_id="u-save",
+        track_id=int(track["id"]),
+        paper_id=str(paper["id"]),
+        action="save",
+        metadata={"title": "Toggle Save Paper"},
+    )
+
+    assert len(research_store.list_saved_papers(user_id="u-save", limit=10)) == 1
+
+    research_store.add_paper_feedback(
+        user_id="u-save",
+        track_id=int(track["id"]),
+        paper_id=str(paper["id"]),
+        action="unsave",
+        metadata={"title": "Toggle Save Paper"},
+    )
+
+    assert research_store.list_saved_papers(user_id="u-save", limit=10) == []
+
+    with research_store._provider.session() as session:
+        status = session.execute(
+            select(PaperReadingStatusModel).where(
+                PaperReadingStatusModel.user_id == "u-save",
+                PaperReadingStatusModel.paper_id == int(paper["id"]),
+            )
+        ).scalar_one_or_none()
+
+    assert status is not None
+    assert status.saved_at is None
+
+
+def test_feedback_ids_follow_effective_toggle_state(tmp_path: Path):
+    db_path = tmp_path / "feedback-effective-state.db"
+    db_url = f"sqlite:///{db_path}"
+
+    paper_store = SqlAlchemyPaperStore(db_url=db_url)
+    research_store = SqlAlchemyResearchStore(db_url=db_url)
+
+    paper = paper_store.upsert_paper(
+        paper={
+            "title": "Toggle Reaction Paper",
+            "url": "https://example.com/toggle-reaction",
+            "pdf_url": "https://example.com/toggle-reaction.pdf",
+        }
+    )
+
+    track = research_store.create_track(user_id="u-react", name="track-react", activate=True)
+    track_id = int(track["id"])
+    paper_id = str(paper["id"])
+
+    research_store.add_paper_feedback(
+        user_id="u-react",
+        track_id=track_id,
+        paper_id=paper_id,
+        action="like",
+        metadata={"title": "Toggle Reaction Paper"},
+    )
+    assert research_store.list_paper_feedback_ids(
+        user_id="u-react", track_id=track_id, action="like"
+    ) == {paper_id}
+
+    research_store.add_paper_feedback(
+        user_id="u-react",
+        track_id=track_id,
+        paper_id=paper_id,
+        action="unlike",
+        metadata={"title": "Toggle Reaction Paper"},
+    )
+    assert (
+        research_store.list_paper_feedback_ids(user_id="u-react", track_id=track_id, action="like")
+        == set()
+    )
+
+    research_store.add_paper_feedback(
+        user_id="u-react",
+        track_id=track_id,
+        paper_id=paper_id,
+        action="dislike",
+        metadata={"title": "Toggle Reaction Paper"},
+    )
+    assert research_store.list_paper_feedback_ids(
+        user_id="u-react", track_id=track_id, action="dislike"
+    ) == {paper_id}
+    assert (
+        research_store.list_paper_feedback_ids(user_id="u-react", track_id=track_id, action="like")
+        == set()
+    )
+
+    research_store.add_paper_feedback(
+        user_id="u-react",
+        track_id=track_id,
+        paper_id=paper_id,
+        action="undislike",
+        metadata={"title": "Toggle Reaction Paper"},
+    )
+    assert (
+        research_store.list_paper_feedback_ids(
+            user_id="u-react", track_id=track_id, action="dislike"
+        )
+        == set()
+    )
 
 
 def test_feedback_resolves_via_identity_store_mapping(tmp_path: Path):

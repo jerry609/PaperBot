@@ -4,13 +4,7 @@ import path from "node:path"
 type DailyReportJudge = {
   overall?: number | null
   recommendation?: string | null
-}
-
-type DailyDigestCard = {
-  highlight?: string
-  method?: string
-  finding?: string
-  tags?: string[]
+  one_line_summary?: string | null
 }
 
 type DailyReportItem = {
@@ -23,13 +17,16 @@ type DailyReportItem = {
   snippet?: string
   subject_or_venue?: string
   venue?: string
+  year?: number
   authors?: string[]
   matched_queries?: string[]
   matched_keywords?: string[]
-  branches?: string[]
   sources?: string[]
   judge?: DailyReportJudge
-  digest_card?: DailyDigestCard
+  digest_card?: {
+    highlight?: string
+    tags?: string[]
+  }
 }
 
 type DailyReportQuery = {
@@ -49,51 +46,40 @@ type DailyReport = {
   generated_at?: string
   source?: string
   sources?: string[]
-  stats?: {
-    unique_items?: number
-    total_query_hits?: number
-    query_count?: number
-  }
-  queries?: DailyReportQuery[]
   global_top?: DailyReportItem[]
+  queries?: DailyReportQuery[]
   llm_analysis?: {
     query_trends?: DailyReportTrend[]
   }
 }
 
-export interface DashboardDailyBriefHighlight {
+export type DashboardBriefRecommendation = {
   id: string
+  paperId?: string | null
   title: string
   href: string
-  queryLabel: string
-  venueLabel: string
-  metricLabel: string
+  meta: string
   summary: string
-  sourceBadges: string[]
   tags: string[]
+  metric: string
   recommendation?: string | null
+  authors: string[]
+  year?: number | null
+  paperSource?: "arxiv" | "semantic_scholar" | "openalex" | null
 }
 
-export interface DashboardDailyBrief {
+export type DashboardBriefTrend = {
+  query: string
+  analysis: string
+}
+
+export type DashboardBriefSnapshot = {
   title: string
-  date: string
+  date?: string | null
   generatedAt?: string | null
   sourceLabel: string
-  sourceBadges: string[]
-  stats: {
-    uniqueItems: number
-    totalQueryHits: number
-    queryCount: number
-  }
-  highlights: DashboardDailyBriefHighlight[]
-  queryPulse: Array<{
-    query: string
-    hits: number
-  }>
-  trendRows: Array<{
-    query: string
-    analysis: string
-  }>
+  recommendations: DashboardBriefRecommendation[]
+  trendRows: DashboardBriefTrend[]
 }
 
 const SOURCE_LABELS: Record<string, string> = {
@@ -104,9 +90,9 @@ const SOURCE_LABELS: Record<string, string> = {
   venue: "Venue",
 }
 
-function toSourceLabel(value: string): string {
-  const normalized = value.trim()
-  if (!normalized) return "DailyPaper"
+function toSourceLabel(value?: string | null): string {
+  const normalized = String(value || "").trim()
+  if (!normalized) return "Daily Brief"
   return SOURCE_LABELS[normalized] || normalized.replace(/_/g, " ")
 }
 
@@ -128,44 +114,7 @@ function toRecommendationLabel(value?: string | null): string | null {
   }
 }
 
-function pickHighlightHref(item: DailyReportItem): string {
-  const candidates = [item.external_url, item.url, item.pdf_url]
-  const firstUrl = candidates.find((value) => typeof value === "string" && value.trim())
-  return firstUrl?.trim() || "/workflows"
-}
-
-function buildHighlightKey(item: DailyReportItem, queryLabel: string): string {
-  return String(item.paper_id || item.url || item.title || queryLabel).trim()
-}
-
-function dedupeHighlightItems(
-  items: Array<{ item: DailyReportItem; queryLabel: string }>,
-): Array<{ item: DailyReportItem; queryLabel: string }> {
-  const seen = new Set<string>()
-  const deduped: Array<{ item: DailyReportItem; queryLabel: string }> = []
-
-  for (const candidate of items) {
-    const key = buildHighlightKey(candidate.item, candidate.queryLabel)
-    if (!key || seen.has(key)) continue
-    seen.add(key)
-    deduped.push(candidate)
-  }
-
-  return deduped
-}
-
-function buildHighlightSummary(item: DailyReportItem): string {
-  const digest = item.digest_card || {}
-  const summary = String(digest.highlight || item.snippet || "").trim()
-  if (summary) return summary
-
-  const authors = (item.authors || []).filter(Boolean).slice(0, 3).join(", ")
-  if (authors) return authors
-
-  return "已进入今日简报候选池，建议优先判断是否值得继续深入。"
-}
-
-function buildHighlightMetric(item: DailyReportItem): string {
+function buildMetric(item: DailyReportItem): string {
   if (item.judge?.overall != null) {
     return `Judge ${Number(item.judge.overall).toFixed(1)}`
   }
@@ -174,103 +123,126 @@ function buildHighlightMetric(item: DailyReportItem): string {
     return `Score ${Number(item.score).toFixed(1)}`
   }
 
-  return "Daily pick"
+  return "Brief pick"
 }
 
-function collectHighlightBadges(item: DailyReportItem): string[] {
-  const badges = [...(item.sources || []), ...(item.branches || [])]
-    .map((value) => toSourceLabel(String(value || "")))
+function buildHref(item: DailyReportItem): string {
+  const candidates = [item.external_url, item.url, item.pdf_url]
+  const href = candidates.find((value) => typeof value === "string" && value.trim())
+  return href?.trim() || "/workflows"
+}
+
+function inferPaperSource(item: DailyReportItem): "arxiv" | "semantic_scholar" | "openalex" | null {
+  const rawUrls = [item.external_url, item.url, item.pdf_url]
+    .map((value) => String(value || "").trim().toLowerCase())
     .filter(Boolean)
 
-  return Array.from(new Set(badges)).slice(0, 3)
+  if (rawUrls.some((value) => value.includes("arxiv.org"))) return "arxiv"
+  if (rawUrls.some((value) => value.includes("semanticscholar.org"))) return "semantic_scholar"
+  if (rawUrls.some((value) => value.includes("openalex.org"))) return "openalex"
+
+  const paperId = String(item.paper_id || "").trim()
+  if (/^\d{4}\.\d{4,5}(v\d+)?$/i.test(paperId)) return "arxiv"
+
+  return null
 }
 
-function collectHighlightTags(item: DailyReportItem): string[] {
-  const digestTags = (item.digest_card?.tags || []).map((value) => String(value || "").trim())
-  const keywordTags = (item.matched_keywords || []).map((value) => String(value || "").trim())
-  return Array.from(new Set([...digestTags, ...keywordTags].filter(Boolean))).slice(0, 3)
+function buildSummary(item: DailyReportItem, recommendation: string | null): string {
+  const highlight = String(item.digest_card?.highlight || "").trim()
+  if (highlight) return highlight
+
+  const oneLine = String(item.judge?.one_line_summary || "").trim()
+  if (oneLine) return oneLine
+
+  const snippet = String(item.snippet || "").trim()
+  if (snippet) return snippet
+
+  if (recommendation) return `${recommendation} from the latest DailyPaper brief.`
+  return "Picked from the latest DailyPaper brief."
 }
 
-export function buildDashboardDailyBrief(report: DailyReport): DashboardDailyBrief {
-  const queryRows = (report.queries || []).map((query) => ({
-    queryLabel: String(query.normalized_query || query.raw_query || "").trim(),
-    items: query.top_items || [],
-  }))
+function buildKey(item: DailyReportItem, index: number): string {
+  return String(item.paper_id || item.url || item.title || `brief-${index}`).trim()
+}
 
-  const queryItems = queryRows.flatMap((row) =>
-    row.items.map((item) => ({
-      item,
-      queryLabel: row.queryLabel || "Daily digest",
-    })),
-  )
-  const globalItems = (report.global_top || []).map((item) => ({
-    item,
-    queryLabel: (item.matched_queries || []).map((value) => String(value || "").trim()).find(Boolean) || "Daily digest",
-  }))
+function dedupeItems(items: DailyReportItem[]): DailyReportItem[] {
+  const seen = new Set<string>()
+  const deduped: DailyReportItem[] = []
 
-  const highlightSeed = globalItems.length > 0 ? globalItems : queryItems
-  const highlights = dedupeHighlightItems(highlightSeed).slice(0, 4).map(({ item, queryLabel }, index) => ({
-    id: buildHighlightKey(item, `${queryLabel}-${index}`),
-    title: String(item.title || "Untitled paper"),
-    href: pickHighlightHref(item),
-    queryLabel,
-    venueLabel: String(item.subject_or_venue || item.venue || "DailyPaper"),
-    metricLabel: buildHighlightMetric(item),
-    summary: buildHighlightSummary(item),
-    sourceBadges: collectHighlightBadges(item),
-    tags: collectHighlightTags(item),
-    recommendation: toRecommendationLabel(item.judge?.recommendation),
-  }))
+  for (const item of items) {
+    const key = buildKey(item, deduped.length)
+    if (!key || seen.has(key)) continue
+    seen.add(key)
+    deduped.push(item)
+  }
 
-  const queryPulse = queryRows
-    .filter((row) => row.queryLabel)
-    .map((row) => ({
-      query: row.queryLabel,
-      hits: row.items.length,
-    }))
-    .sort((left, right) => right.hits - left.hits)
-    .slice(0, 6)
+  return deduped
+}
 
-  const trendRows = (report.llm_analysis?.query_trends || [])
-    .map((row) => ({
-      query: String(row.query || "").trim(),
-      analysis: String(row.analysis || "").trim(),
-    }))
-    .filter((row) => row.query && row.analysis)
-    .slice(0, 3)
-
-  const reportSourceBadges = Array.from(
-    new Set(
-      [...(report.sources || []), report.source || ""]
-        .map((value) => toSourceLabel(String(value || "")))
-        .filter(Boolean),
-    ),
-  )
+export function buildDashboardBrief(report: DailyReport): DashboardBriefSnapshot {
+  const queryItems = (report.queries || []).flatMap((query) => query.top_items || [])
+  const primaryItems = dedupeItems((report.global_top || []).length ? report.global_top || [] : queryItems)
 
   return {
-    title: String(report.title || "DailyPaper Digest"),
-    date: String(report.date || ""),
+    title: String(report.title || "Daily Brief"),
+    date: report.date || null,
     generatedAt: report.generated_at || null,
-    sourceLabel: reportSourceBadges[0] || "DailyPaper",
-    sourceBadges: reportSourceBadges,
-    stats: {
-      uniqueItems: Number(report.stats?.unique_items || 0),
-      totalQueryHits: Number(report.stats?.total_query_hits || 0),
-      queryCount: Number(report.stats?.query_count || queryRows.length),
-    },
-    highlights,
-    queryPulse,
-    trendRows,
+    sourceLabel: toSourceLabel((report.sources || [report.source || ""]).find(Boolean)),
+    recommendations: primaryItems.slice(0, 4).map((item, index) => {
+      const recommendation = toRecommendationLabel(item.judge?.recommendation)
+
+      return {
+        id: buildKey(item, index),
+        paperId: String(item.paper_id || "").trim() || null,
+        title: String(item.title || "Untitled paper"),
+        href: buildHref(item),
+        meta: String(item.subject_or_venue || item.venue || "Daily Brief"),
+        summary: buildSummary(item, recommendation),
+        tags: Array.from(
+          new Set(
+            [...(item.digest_card?.tags || []), ...(item.matched_keywords || [])]
+              .map((value) => String(value || "").trim())
+              .filter(Boolean),
+          ),
+        ).slice(0, 3),
+        metric: buildMetric(item),
+        recommendation,
+        authors: (item.authors || []).map((value) => String(value || "").trim()).filter(Boolean),
+        year: typeof item.year === "number" ? item.year : null,
+        paperSource: inferPaperSource(item),
+      }
+    }),
+    trendRows: (report.llm_analysis?.query_trends || [])
+      .map((row) => ({
+        query: String(row.query || "").trim(),
+        analysis: String(row.analysis || "").trim(),
+      }))
+      .filter((row) => row.query && row.analysis)
+      .slice(0, 3),
   }
 }
 
 async function resolveReportDirectory(): Promise<string | null> {
-  const candidates = [
-    path.join(process.cwd(), "reports", "dailypaper"),
-    path.join(process.cwd(), "..", "reports", "dailypaper"),
+  const cwd = process.cwd()
+  const envCandidate = process.env.PAPERBOT_DAILYPAPER_OUTPUT_DIR?.trim() || null
+  const fallbackCandidates = [
+    path.join(cwd, "reports", "dailypaper"),
+    path.join(cwd, "..", "reports", "dailypaper"),
+    path.join(cwd, "..", "output", "reports"),
+    path.join(cwd, "output", "reports"),
   ]
 
-  for (const candidate of candidates) {
+  if (envCandidate) {
+    try {
+      const stats = await fs.stat(envCandidate)
+      if (stats.isDirectory()) return envCandidate
+      console.warn(`PAPERBOT_DAILYPAPER_OUTPUT_DIR is not a directory: ${envCandidate}`)
+    } catch (error) {
+      console.warn(`Unable to access PAPERBOT_DAILYPAPER_OUTPUT_DIR at ${envCandidate}:`, error)
+    }
+  }
+
+  for (const candidate of fallbackCandidates) {
     try {
       const stats = await fs.stat(candidate)
       if (stats.isDirectory()) return candidate
@@ -282,7 +254,7 @@ async function resolveReportDirectory(): Promise<string | null> {
   return null
 }
 
-async function readLatestDailyReport(): Promise<DailyReport | null> {
+async function readLatestReport(): Promise<DailyReport | null> {
   const reportDir = await resolveReportDirectory()
   if (!reportDir) return null
 
@@ -297,20 +269,18 @@ async function readLatestDailyReport(): Promise<DailyReport | null> {
     jsonFiles.map(async (name) => {
       const fullPath = path.join(reportDir, name)
       const stats = await fs.stat(fullPath)
-      return {
-        fullPath,
-        mtimeMs: stats.mtimeMs,
-      }
+      return { fullPath, mtimeMs: stats.mtimeMs }
     }),
   )
 
   filesWithMtime.sort((left, right) => right.mtimeMs - left.mtimeMs)
 
-  for (const entry of filesWithMtime) {
+  for (const file of filesWithMtime) {
     try {
-      const raw = await fs.readFile(entry.fullPath, "utf-8")
+      const raw = await fs.readFile(file.fullPath, "utf-8")
       return JSON.parse(raw) as DailyReport
-    } catch {
+    } catch (error) {
+      console.warn(`Unable to parse DailyPaper report at ${file.fullPath}:`, error)
       continue
     }
   }
@@ -318,8 +288,8 @@ async function readLatestDailyReport(): Promise<DailyReport | null> {
   return null
 }
 
-export async function fetchLatestDashboardDailyBrief(): Promise<DashboardDailyBrief | null> {
-  const report = await readLatestDailyReport()
+export async function fetchLatestDashboardBrief(): Promise<DashboardBriefSnapshot | null> {
+  const report = await readLatestReport()
   if (!report) return null
-  return buildDashboardDailyBrief(report)
+  return buildDashboardBrief(report)
 }

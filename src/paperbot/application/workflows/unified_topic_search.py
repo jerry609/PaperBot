@@ -6,6 +6,10 @@ import re
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
+from paperbot.application.services.candidate_search import (
+    resolve_candidate_paper_id,
+    search_candidate_papers,
+)
 from paperbot.application.services.paper_search_service import PaperSearchService, SearchResult
 
 
@@ -116,27 +120,7 @@ def _score_paper(paper: Dict[str, Any], query_tokens: List[str], matched: List[s
 
 
 def _paper_id_from_item(item: Dict[str, Any]) -> str:
-    if item.get("canonical_id"):
-        return str(item["canonical_id"])
-
-    identities = item.get("identities") or []
-    if isinstance(identities, list):
-        preferred = ["semantic_scholar", "arxiv", "openalex", "papers_cool", "hf_daily", "doi"]
-        by_source: Dict[str, str] = {}
-        for ident in identities:
-            if not isinstance(ident, dict):
-                continue
-            source = str(ident.get("source") or "").strip().lower()
-            external_id = str(ident.get("external_id") or "").strip()
-            if source and external_id and source not in by_source:
-                by_source[source] = external_id
-        for source in preferred:
-            if source in by_source:
-                return by_source[source]
-        if by_source:
-            return next(iter(by_source.values()))
-
-    return ""
+    return resolve_candidate_paper_id(item)
 
 
 def _search_result_to_items(
@@ -268,8 +252,9 @@ async def run_unified_topic_search(
     max_results = max(1, int(show_per_branch))
 
     tasks = [
-        service.search(
-            spec["normalized_query"],
+        search_candidate_papers(
+            service,
+            query=spec["normalized_query"],
             sources=normalized_sources,
             max_results=max_results,
             persist=bool(persist),

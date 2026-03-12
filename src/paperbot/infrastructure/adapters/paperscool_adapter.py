@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from typing import List, Optional
 
 from paperbot.domain.identity import PaperIdentity
@@ -28,8 +27,7 @@ class PapersCoolAdapter:
         year_from: Optional[int] = None,
         year_to: Optional[int] = None,
     ) -> List[PaperCandidate]:
-        records = await asyncio.to_thread(
-            self._connector.search,
+        records = await self._connector.search(
             branch="arxiv",
             query=query,
             highlight=True,
@@ -53,4 +51,4 @@ class PapersCoolAdapter:
         )
 
     async def close(self) -> None:
-        pass
+        await self._connector.close()

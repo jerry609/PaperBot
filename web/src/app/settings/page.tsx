@@ -16,6 +16,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 
+import { EmbeddingSettingsPanel } from "@/components/settings/EmbeddingSettingsPanel"
 import { ScholarSubscriptionsPanel } from "@/components/settings/ScholarSubscriptionsPanel"
 
 type ModelEndpoint = {
@@ -272,7 +273,7 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="flex-1 space-y-4 p-8 pt-6 max-w-3xl">
+    <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col space-y-4 p-8 pt-6">
       <h2 className="text-2xl font-bold tracking-tight">Settings</h2>
 
       <div>
@@ -372,6 +373,10 @@ export default function SettingsPage() {
             ))}
           </div>
         </div>
+      </div>
+
+      <div className="pt-4 border-t">
+        <EmbeddingSettingsPanel />
       </div>
 
       <div className="pt-4 border-t">

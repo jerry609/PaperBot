@@ -1,50 +1,57 @@
-import sys
-from unittest.mock import MagicMock
+"""Compatibility tests for the current repro code-generation layer."""
 
-# Mock dependencies before importing modules under test
-sys.modules["docker"] = MagicMock()
-sys.modules["docker.errors"] = MagicMock()
-sys.modules["claude_agent_sdk"] = MagicMock()
-sys.modules["anthropic"] = MagicMock()
+from __future__ import annotations
 
-import unittest
-from unittest.mock import patch
-from repro.generation_agent import GenerationAgent
-from repro.models import PaperContext, ReproductionPlan, ImplementationSpec
+from repro import Blueprint, GenerationNode, ImplementationSpec, ReproductionPlan
 
-class TestGenerationAgent(unittest.TestCase):
-    def setUp(self):
-        self.agent = GenerationAgent()
-        self.ctx = PaperContext(title="Test", abstract="Abs")
-        self.plan = ReproductionPlan(
-            project_name="test",
-            description="desc",
-            file_structure={"main.py": "Main file"},
-            entry_point="main.py"
-        )
-        self.spec = ImplementationSpec(model_type="mlp")
 
-    def test_fallback_template(self):
-        # Test fallback templates
-        code = self.agent._fallback_template("main.py", "Main", self.plan, self.spec)
-        self.assertIn("import argparse", code)
-        
-        code = self.agent._fallback_template("unknown.py", "Unknown", self.plan, self.spec)
-        self.assertIn("# TODO: Implement", code)
+def test_generation_node_fallback_templates_cover_known_and_generic_files():
+    node = GenerationNode()
+    plan = ReproductionPlan(
+        project_name="test",
+        description="desc",
+        file_structure={"main.py": "Main file"},
+        entry_point="main.py",
+        dependencies=["torch", "numpy"],
+    )
+    spec = ImplementationSpec(model_type="mlp")
 
-    def test_generate_requirements(self):
-        reqs = self.agent._generate_requirements(self.plan)
-        self.assertIn("torch", reqs)
-        self.assertIn("numpy", reqs)
+    main_code = node._fallback_template("main.py", "Main file", plan, spec)
+    generic_code = node._fallback_template("unknown.py", "Unknown file", plan, spec)
 
-    def test_clean_code_response(self):
-        raw = "```python\nprint('hello')\n```"
-        clean = self.agent._clean_code_response(raw)
-        self.assertEqual(clean, "print('hello')")
-        
-        raw2 = "print('hello')"
-        clean2 = self.agent._clean_code_response(raw2)
-        self.assertEqual(clean2, "print('hello')")
+    assert "import argparse" in main_code
+    assert "# TODO: Implement unknown" in generic_code
 
-if __name__ == "__main__":
-    unittest.main()
+
+def test_generation_node_generate_requirements_uses_plan_dependencies():
+    node = GenerationNode()
+    plan = ReproductionPlan(
+        project_name="test",
+        description="desc",
+        dependencies=["torch", "numpy"],
+    )
+
+    requirements = node._generate_requirements(plan)
+
+    assert requirements.splitlines() == ["torch", "numpy"]
+
+
+def test_generation_node_clean_code_strips_markdown_fences():
+    node = GenerationNode()
+
+    assert node._clean_code("```python\nprint('hello')\n```") == "print('hello')"
+    assert node._clean_code("print('hello')") == "print('hello')"
+
+
+def test_generation_node_retrieves_patterns_from_blueprint_hints():
+    node = GenerationNode(use_rag=True)
+    blueprint = Blueprint(
+        architecture_type="transformer",
+        framework_hints=["pytorch"],
+        domain="nlp",
+    )
+
+    patterns = node._retrieve_patterns("model.py", "Model implementation", blueprint)
+
+    assert patterns
+    assert any(pattern.name for pattern in patterns)

@@ -152,11 +152,11 @@ def test_track_feed_route_with_pagination_and_feedback_boost(tmp_path, monkeypat
 
     with TestClient(api_main.app) as client:
         page1 = client.get(
-            f"/api/research/tracks/{int(track[id])}/feed",
+            f"/api/research/tracks/{int(track['id'])}/feed",
             params={"user_id": "u-feed", "limit": 1, "offset": 0},
         )
         page2 = client.get(
-            f"/api/research/tracks/{int(track[id])}/feed",
+            f"/api/research/tracks/{int(track['id'])}/feed",
             params={"user_id": "u-feed", "limit": 1, "offset": 1},
         )
 
@@ -186,6 +186,14 @@ def test_deadline_radar_route_returns_workflow_query_and_track_match(tmp_path, m
         keywords=["llm", "retrieval"],
         activate=True,
     )
+    research_store.create_track(
+        user_id="u-deadline",
+        name="acl-track",
+        keywords=[],
+        venues=["ACL"],
+        methods=["retrieval"],
+        activate=False,
+    )
 
     monkeypatch.setattr(research_route, "_research_store", research_store)
 
@@ -205,3 +213,9 @@ def test_deadline_radar_route_returns_workflow_query_and_track_match(tmp_path, m
 
     matched_any = any(item.get("matched_tracks") for item in payload["items"])
     assert matched_any
+
+    acl_item = next(item for item in payload["items"] if item["name"] == "ACL 2026")
+    acl_match = next(
+        match for match in acl_item["matched_tracks"] if match["track_name"] == "acl-track"
+    )
+    assert "acl" in acl_match["matched_terms"]

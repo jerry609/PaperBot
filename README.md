@@ -46,7 +46,7 @@ AI-powered research workflow: paper discovery → LLM analysis → scholar track
 <summary><b>Web Dashboard</b></summary>
 <br>
 
-Current dashboard layout is organized as a daily brief: hot picks, trend radar, and a decision rail, with the full workflow console moved back to `/workflows`.
+Current dashboard layout focused on the active research question, the workflow console, and decision-critical alerts.
 
 ![Dashboard](asset/ui/dashboard.png)
 
@@ -312,6 +312,7 @@ python -m black . && python -m isort .
 | [`docs/benchmark/MEMORYBENCH_EPIC_283_COMPLETION.md`](docs/benchmark/MEMORYBENCH_EPIC_283_COMPLETION.md) | MemoryBench Epic completion report |
 | [`docs/benchmark/MEMORYBENCH_RUNTIME_REPORT_2026-03-07.md`](docs/benchmark/MEMORYBENCH_RUNTIME_REPORT_2026-03-07.md) | Live ROI + 1M memory runtime report |
 | [`docs/search_eval.md`](docs/search_eval.md) | Retrieval benchmark guide |
+| [`docs/document_evidence_eval.md`](docs/document_evidence_eval.md) | Document evidence retrieval benchmark guide |
 | [`docs/context_engine_eval.md`](docs/context_engine_eval.md) | Context extraction benchmark guide |
 | [`docs/memory_performance_eval.md`](docs/memory_performance_eval.md) | Memory performance benchmark guide |
 | [`docs/p2c/P2C_ROI_BENCHMARK.md`](docs/p2c/P2C_ROI_BENCHMARK.md) | ROI benchmark guide |

@@ -202,3 +202,24 @@ class TestSearchMemoriesBatch:
         )
 
         assert captured["scope_ids"] == ["t1", "t2"]
+
+    def test_batch_search_auto_touches_hits_once(self, tmp_path):
+        store = _store_with_data(tmp_path)
+
+        results = store.search_memories_batch(
+            user_id="u1",
+            query="vision",
+            scope_ids=["t2"],
+            scope_type="track",
+        )
+
+        assert len(results["t2"]) == 1
+
+        items = store.list_memories(
+            user_id="u1",
+            scope_type="track",
+            scope_id="t2",
+            limit=10,
+        )
+        assert items[0]["use_count"] == 1
+        assert items[0]["last_used_at"] is not None

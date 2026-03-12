@@ -5,13 +5,12 @@ Paper Analysis API Route
 from typing import Optional
 
 from fastapi import APIRouter
-from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from paperbot.application.collaboration.message_schema import new_run_id, new_trace_id
 from paperbot.core.abstractions import AgentRunContext, LegacyMethodRuntime
 
-from ..streaming import StreamEvent, wrap_generator
+from ..streaming import StreamEvent, sse_response
 
 router = APIRouter()
 
@@ -116,16 +115,9 @@ async def analyze_paper(request: AnalyzeRequest):
     """
     run_id = new_run_id()
     trace_id = new_trace_id()
-    return StreamingResponse(
-        wrap_generator(
-            analyze_paper_stream(request, run_id=run_id, trace_id=trace_id),
-            workflow="analyze",
-            run_id=run_id,
-            trace_id=trace_id,
-        ),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-        },
+    return sse_response(
+        analyze_paper_stream(request, run_id=run_id, trace_id=trace_id),
+        workflow="analyze",
+        run_id=run_id,
+        trace_id=trace_id,
     )

@@ -24,6 +24,7 @@ interface LibraryPaper {
     title: string
     abstract?: string
     authors?: string[]
+    researchAreas?: string[]
     venue?: string
 }
 
@@ -64,13 +65,28 @@ export function NewPaperModal({ open, onOpenChange }: NewPaperModalProps) {
             const res = await fetch('/api/papers/library')
             if (res.ok) {
                 const data = await res.json()
-                const papers = (data.papers || []).map((item: { paper: Record<string, unknown> }) => ({
-                    id: String(item.paper.id || item.paper.paper_id),
-                    title: String(item.paper.title || "Untitled"),
-                    abstract: String(item.paper.abstract || ""),
-                    authors: Array.isArray(item.paper.authors) ? item.paper.authors : [],
-                    venue: String(item.paper.venue || ""),
-                }))
+                const papers = (data.papers || []).map((item: { paper: Record<string, unknown> }) => {
+                    const raw = item.paper
+                    const rawAreas = (
+                        raw.research_areas ||
+                        raw.researchAreas ||
+                        raw.keywords ||
+                        raw.fields ||
+                        []
+                    )
+                    return {
+                        id: String(raw.id || raw.paper_id),
+                        title: String(raw.title || "Untitled"),
+                        abstract: String(raw.abstract || ""),
+                        authors: Array.isArray(raw.authors) ? raw.authors : [],
+                        researchAreas: Array.isArray(rawAreas)
+                            ? rawAreas
+                                .map((area) => String(area || "").trim())
+                                .filter(Boolean)
+                            : [],
+                        venue: String(raw.venue || ""),
+                    }
+                })
                 setLibraryPapers(papers)
             }
         } catch (e) {
@@ -135,6 +151,8 @@ export function NewPaperModal({ open, onOpenChange }: NewPaperModalProps) {
             addPaper({
                 title: paper.title,
                 abstract: paper.abstract || "",
+                authors: paper.authors || [],
+                researchAreas: paper.researchAreas || [],
             })
             existingTitles.add(normalizedTitle)
             importedCount++

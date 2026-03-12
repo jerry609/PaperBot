@@ -56,3 +56,8 @@ reports/
 node_modules/
 cli/dist/
 npm-debug.log
+
+# Local tooling and secrets
+.codex/
+auth.json
+config.toml

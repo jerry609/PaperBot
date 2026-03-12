@@ -16,7 +16,14 @@ from typing import Dict, Any, Optional, List, Tuple, TYPE_CHECKING
 from pathlib import Path
 from dataclasses import dataclass, field
 
-from .collaboration.score_bus import ScoreShareBus, StageScore, create_research_score, create_code_score
+from .collaboration.score_bus import (
+    ScoreShareBus,
+    StageScore,
+    create_code_score,
+    create_influence_score,
+    create_quality_score,
+    create_research_score,
+)
 from .fail_fast import FailFastEvaluator, FailFastConfig
 
 logger = logging.getLogger(__name__)
@@ -190,6 +197,18 @@ class ScholarWorkflowCoordinator:
             
             # P3: 发布研究评分
             self._publish_research_score(ctx)
+
+            if self.enable_fail_fast:
+                early_exit = self.fail_fast_evaluator.evaluate_early_exit(score_bus)
+                if early_exit.should_skip:
+                    logger.info(f"⚡ Fail-Fast: 提前终止流水线 - {early_exit.reason}")
+                    for stage in early_exit.skipped_stages:
+                        if stage not in ctx.skipped_stages:
+                            ctx.skipped_stages.append(stage)
+                        ctx.stages[stage] = {"status": "skipped", "reason": early_exit.reason}
+                    ctx.influence_result = self._create_default_influence()
+                    ctx.status = "success"
+                    return None, ctx.influence_result, self._build_pipeline_data(ctx)
             
             # 检查是否有代码
             has_code = bool(paper.github_url or getattr(paper, 'has_code', False))
@@ -202,6 +221,10 @@ class ScholarWorkflowCoordinator:
                     if skip_decision.should_skip:
                         logger.info(f"⚡ Fail-Fast: 跳过代码分析 - {skip_decision.reason}")
                         ctx.skipped_stages.append("code")
+                        ctx.stages["code_analysis"] = {
+                            "status": "skipped",
+                            "reason": skip_decision.reason,
+                        }
                     else:
                         ctx = await self._run_code_analysis_stage(ctx)
                         self._publish_code_score(ctx)
@@ -215,13 +238,17 @@ class ScholarWorkflowCoordinator:
                 if skip_decision.should_skip:
                     logger.info(f"⚡ Fail-Fast: 跳过质量评估 - {skip_decision.reason}")
                     ctx.skipped_stages.append("quality")
+                    ctx.stages["quality"] = {"status": "skipped", "reason": skip_decision.reason}
                 else:
                     ctx = await self._run_quality_stage(ctx)
+                    self._publish_quality_score(ctx)
             else:
                 ctx = await self._run_quality_stage(ctx)
+                self._publish_quality_score(ctx)
             
             # 4. 影响力计算
             ctx = await self._run_influence_stage(ctx)
+            self._publish_influence_score(ctx)
             
             # 5. 报告生成
             report_path = None
@@ -264,6 +291,68 @@ class ScholarWorkflowCoordinator:
         
         score = create_code_score(has_code, health_score, is_empty)
         ctx.score_bus.publish_score(score)
+
+    def _publish_quality_score(self, ctx: PipelineContext) -> None:
+        """发布质量阶段评分到总线"""
+        if not ctx.score_bus:
+            return
+
+        quality_result = ctx.quality_result or {}
+        quality_scores = quality_result.get("quality_scores") or {}
+        primary_score = {}
+        if isinstance(quality_scores, dict) and quality_scores:
+            first_score = next(iter(quality_scores.values()))
+            if isinstance(first_score, dict):
+                primary_score = first_score
+
+        raw_overall = quality_result.get("quality_score")
+        if raw_overall is None:
+            raw_overall = primary_score.get("overall_score", 0.0)
+
+        overall_score = float(raw_overall or 0.0)
+        if overall_score <= 1.0:
+            overall_score *= 100.0
+
+        metric_scores = primary_score.get("scores") or {}
+        maintainability = float(metric_scores.get("maintainability", 0.0) or 0.0)
+        test_coverage = float(metric_scores.get("test_coverage", 0.0) or 0.0)
+        if maintainability <= 1.0:
+            maintainability *= 100.0
+        if test_coverage <= 1.0:
+            test_coverage *= 100.0
+
+        ctx.score_bus.publish_score(
+            create_quality_score(
+                overall_score,
+                maintainability=maintainability,
+                test_coverage=test_coverage,
+            )
+        )
+
+    def _publish_influence_score(self, ctx: PipelineContext) -> None:
+        """发布影响力阶段评分到总线"""
+        if not ctx.score_bus or ctx.influence_result is None:
+            return
+
+        influence = ctx.influence_result
+        total_score = float(getattr(influence, "total_score", 0.0) or 0.0)
+        academic_score = float(getattr(influence, "academic_score", 0.0) or 0.0)
+        engineering_score = float(getattr(influence, "engineering_score", 0.0) or 0.0)
+        metrics_breakdown = getattr(influence, "metrics_breakdown", {}) or {}
+        momentum_score = 0.0
+        if isinstance(metrics_breakdown, dict):
+            academic_metrics = metrics_breakdown.get("academic") or {}
+            if isinstance(academic_metrics, dict):
+                momentum_score = float(academic_metrics.get("momentum_score", 0.0) or 0.0)
+
+        ctx.score_bus.publish_score(
+            create_influence_score(
+                total_score=total_score,
+                academic_score=academic_score,
+                engineering_score=engineering_score,
+                momentum_score=momentum_score,
+            )
+        )
     
     async def _run_research_stage(self, ctx: PipelineContext) -> PipelineContext:
         """运行研究分析阶段"""
@@ -442,4 +531,3 @@ class ScholarWorkflowCoordinator:
             )
             results.append(result)
         return results
-
