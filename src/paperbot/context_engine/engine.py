@@ -16,9 +16,15 @@ from paperbot.utils.logging_config import Logger, LogFiles
 
 # Optional: PaperSearchService for unified search
 try:
+    from paperbot.application.services.candidate_search import (
+        search_candidate_papers,
+        search_result_to_candidate_dicts,
+    )
     from paperbot.application.services.paper_search_service import PaperSearchService
 except ImportError:  # pragma: no cover
     PaperSearchService = None  # type: ignore
+    search_candidate_papers = None  # type: ignore
+    search_result_to_candidate_dicts = None  # type: ignore
 
 # Optional: AnchorService for personalized author boosts
 try:
@@ -893,7 +899,11 @@ class ContextEngine:
                 fetch_limit = max(30, int(self.config.paper_limit) * 3)
 
                 # Prefer PaperSearchService if available
-                if self.search_service is not None:
+                if (
+                    self.search_service is not None
+                    and search_candidate_papers is not None
+                    and search_result_to_candidate_dicts is not None
+                ):
                     selected_sources = [
                         str(x).strip() for x in (self.config.search_sources or []) if str(x).strip()
                     ]
@@ -939,22 +949,19 @@ class ContextEngine:
                         f"Using PaperSearchService for query='{merged_query}'",
                         file=LogFiles.HARVEST,
                     )
-                    search_result = await self.search_service.search(
-                        merged_query,
+                    search_result = await search_candidate_papers(
+                        self.search_service,
+                        query=merged_query,
                         sources=selected_sources,
                         max_results=fetch_limit,
                         year_from=self.config.year_from,
                         year_to=self.config.year_to,
-                        persist=True,
                         source_weights=learned_source_weights,
                     )
-                    raw = [p.to_dict() for p in search_result.papers]
-                    # Inject paper_id from canonical_id or first identity
-                    for p_dict, p_obj in zip(raw, search_result.papers):
-                        pid = str(p_obj.canonical_id or "")
-                        if not pid:
-                            pid = p_obj.get_identity("semantic_scholar") or ""
-                        p_dict["paper_id"] = pid
+                    raw = search_result_to_candidate_dicts(
+                        search_result,
+                        registry=self.paper_store,
+                    )
                     Logger.info(
                         f"PaperSearchService returned {len(raw)} papers",
                         file=LogFiles.HARVEST,

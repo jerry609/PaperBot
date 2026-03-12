@@ -152,11 +152,11 @@ def test_track_feed_route_with_pagination_and_feedback_boost(tmp_path, monkeypat
 
     with TestClient(api_main.app) as client:
         page1 = client.get(
-            f"/api/research/tracks/{int(track[id])}/feed",
+            f"/api/research/tracks/{int(track['id'])}/feed",
             params={"user_id": "u-feed", "limit": 1, "offset": 0},
         )
         page2 = client.get(
-            f"/api/research/tracks/{int(track[id])}/feed",
+            f"/api/research/tracks/{int(track['id'])}/feed",
             params={"user_id": "u-feed", "limit": 1, "offset": 1},
         )
 

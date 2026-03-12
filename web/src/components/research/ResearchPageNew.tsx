@@ -26,6 +26,7 @@ import {
 import {
   Sheet,
   SheetContent,
+  SheetDescription,
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet"
@@ -429,6 +430,15 @@ export default function ResearchPageNew() {
     return qs ? `/dashboard?${qs}` : "/dashboard"
   }, [query, activeTrack, activeTrackId])
 
+  const workflowHref = useMemo(() => {
+    const params = new URLSearchParams()
+    if (query.trim()) {
+      params.set("query", query.trim())
+    }
+    const qs = params.toString()
+    return qs ? `/workflows?${qs}` : "/workflows"
+  }, [query])
+
   return (
     <div
       className={cn(
@@ -586,30 +596,46 @@ export default function ResearchPageNew() {
         {hasSearched && (
           <div className="space-y-4">
             <Card className="border-border/70 bg-card/80 backdrop-blur-sm">
-              <CardContent className="flex flex-wrap items-center justify-between gap-3 p-3 sm:p-4">
-                <div className="flex flex-wrap items-center gap-2">
-                  <Badge variant="outline">
-                    Track: {activeTrack?.name || "Global"}
-                  </Badge>
-                  <Badge variant="outline">
-                    Mode: {anchorPersonalized ? "Personalized" : "Global"}
-                  </Badge>
-                  <Badge variant="outline">Sources: {searchSources.length}</Badge>
-                  <Badge variant="secondary">Results: {papers.length}</Badge>
+              <CardContent className="space-y-3 p-3 sm:p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant="outline">
+                      Track: {activeTrack?.name || "Global"}
+                    </Badge>
+                    <Badge variant="outline">
+                      Mode: {anchorPersonalized ? "Personalized" : "Global"}
+                    </Badge>
+                    <Badge variant="outline">Sources: {searchSources.length}</Badge>
+                    <Badge variant="secondary">Results: {papers.length}</Badge>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button asChild size="sm" variant="outline" className="gap-1.5">
+                      <Link href={workflowHref}>
+                        Open Workflows
+                        <ArrowRight className="h-4 w-4" />
+                      </Link>
+                    </Button>
+                    <Button asChild size="sm" variant="outline" className="gap-1.5">
+                      <Link href={communityRadarHref}>
+                        Open Community Radar
+                        <ArrowRight className="h-4 w-4" />
+                      </Link>
+                    </Button>
+                    <Button asChild size="sm" className="gap-1.5">
+                      <Link href={discoveryHref}>
+                        Open Discovery Workspace
+                        <ArrowRight className="h-4 w-4" />
+                      </Link>
+                    </Button>
+                  </div>
                 </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <Button asChild size="sm" variant="outline" className="gap-1.5">
-                    <Link href={communityRadarHref}>
-                      Open Community Radar
-                      <ArrowRight className="h-4 w-4" />
-                    </Link>
-                  </Button>
-                  <Button asChild size="sm" className="gap-1.5">
-                    <Link href={discoveryHref}>
-                      Open Discovery Workspace
-                      <ArrowRight className="h-4 w-4" />
-                    </Link>
-                  </Button>
+                <div className="rounded-xl border border-border/60 bg-background/80 px-3 py-2.5 text-sm">
+                  <p className="font-medium text-foreground">
+                    Research is for fast context search. Workflow is for batch topics, DailyPaper, and Judge.
+                  </p>
+                  <p className="mt-1 text-muted-foreground">
+                    这里更适合单问题探索和即时反馈；需要把多个主题整理成 digest、评分和交付链路时，直接切到 Workflows。
+                  </p>
                 </div>
               </CardContent>
             </Card>
@@ -630,11 +656,20 @@ export default function ResearchPageNew() {
 
         {/* Memory Sheet Drawer */}
         <Sheet open={memoryOpen} onOpenChange={setMemoryOpen}>
-          <SheetContent className="w-full sm:max-w-lg overflow-y-auto">
-            <SheetHeader>
+          <SheetContent className="w-full p-0 sm:max-w-xl">
+            <SheetHeader className="border-b border-slate-200 bg-slate-50/80 px-5 py-4 pr-12">
               <SheetTitle>Track Memory</SheetTitle>
+              <SheetDescription>
+                {activeTrack
+                  ? `${activeTrack.name} · ${anchorPersonalized ? "Personalized" : "Global"} mode`
+                  : `Global scope · ${anchorPersonalized ? "Personalized" : "Global"} mode`}
+              </SheetDescription>
+              <div className="flex flex-wrap gap-2 pt-2">
+                <Badge variant="outline">{activeTrack?.name || "Global scope"}</Badge>
+                <Badge variant="outline">Query: {query.trim() || "No active query"}</Badge>
+              </div>
             </SheetHeader>
-            <div className="mt-4">
+            <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-5 pt-4">
               <MemoryTab userId={userId} trackId={activeTrackId} />
             </div>
           </SheetContent>

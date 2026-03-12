@@ -31,6 +31,11 @@ function buildResearchLink(query: string, trackId?: number): string {
   return `/research?${qs.toString()}`
 }
 
+function buildWorkflowConsoleLink(query: string): string {
+  const qs = new URLSearchParams({ query })
+  return `/workflows?${qs.toString()}`
+}
+
 export default async function ScholarProfilePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   const [scholar, tracks] = await Promise.all([
@@ -53,6 +58,7 @@ export default async function ScholarProfilePage({ params }: { params: Promise<{
   const evidenceTopicLink = buildResearchLink(`${scholar.name} ${primaryTopic}`, activeTrack?.id)
   const evidenceTrendLink = buildResearchLink(`${scholar.name} recent papers`, activeTrack?.id)
   const actionLink = buildResearchLink(`${scholar.keywords?.[0] || scholar.name}`, activeTrack?.id)
+  const workflowConsoleLink = buildWorkflowConsoleLink(`${scholar.keywords?.[0] || scholar.name}`)
 
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 p-4 pb-10 sm:p-6">
@@ -93,7 +99,7 @@ export default async function ScholarProfilePage({ params }: { params: Promise<{
             <Link href={actionLink}>Open in Research</Link>
           </Button>
           <Button asChild variant="outline">
-            <Link href="/workflows">Run Tracking Workflow</Link>
+            <Link href={workflowConsoleLink}>Open Workflows</Link>
           </Button>
         </div>
       </div>
@@ -356,7 +362,7 @@ export default async function ScholarProfilePage({ params }: { params: Promise<{
                   Trigger recurring digest and keyword alerts from workflow orchestration.
                 </p>
                 <Button asChild size="sm" variant="outline">
-                  <Link href="/workflows">
+                  <Link href={workflowConsoleLink}>
                     <Workflow className="mr-1 h-3.5 w-3.5" />
                     Configure Workflows
                   </Link>
