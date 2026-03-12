@@ -2,13 +2,22 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 import yaml
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from paperbot.application.ports.vault_exporter_port import VaultExporterPort
+from paperbot.infrastructure.obsidian import (
+    PAPER_MANAGED_HEADINGS,
+    TRACK_MANAGED_HEADINGS,
+    detect_managed_conflict,
+    hash_markdown,
+    merge_user_sections,
+    parse_note_text,
+)
 
 
 DEFAULT_PAPER_TEMPLATE = """# {{ title }}
@@ -56,10 +65,13 @@ DEFAULT_PAPER_TEMPLATE = """# {{ title }}
 """
 
 _FRONTMATTER_EXPR = re.compile(r"\{\{\-?\s*frontmatter\s*\-?\}\}")
+DEFAULT_PENDING_DIRNAME = ".paperbot-pending"
 
 
 def _slugify(value: str) -> str:
-    normalized = unicodedata.normalize("NFKD", value or "").encode("ascii", "ignore").decode("ascii")
+    normalized = (
+        unicodedata.normalize("NFKD", value or "").encode("ascii", "ignore").decode("ascii")
+    )
     normalized = normalized.lower().strip()
     tokens: list[str] = []
     token: list[str] = []
@@ -210,31 +222,34 @@ class ObsidianFilesystemExporter(VaultExporterPort):
         reference_links = self._paper_entry_links(entries=reference_entries, root_dir=root_dir)
         cited_by_links = self._paper_entry_links(entries=citation_entries, root_dir=root_dir)
 
-        frontmatter = _yaml_frontmatter(
-            {
-                "paperbot_type": "paper",
-                "paperbot_id": paper.get("id"),
-                "title": paper.get("title"),
-                "authors": list(paper.get("authors") or []),
-                "year": paper.get("year"),
-                "venue": paper.get("venue"),
-                "doi": paper.get("doi"),
-                "arxiv_id": paper.get("arxiv_id"),
-                "semantic_scholar_id": paper.get("semantic_scholar_id"),
-                "openalex_id": paper.get("openalex_id"),
-                "citation_count": paper.get("citation_count"),
-                "saved_at": saved_at,
-                "track": track.get("name") if track else None,
-                "tags": self._paper_tags(paper, track),
-                "related_papers": related_titles,
-                "cites": reference_links,
-                "cited_by": cited_by_links,
-            }
+        managed_tags = self._paper_tags(paper, track)
+        managed_links = self._dedupe_strings(
+            [track_link] + related_links + reference_links + cited_by_links
         )
+        frontmatter_payload = {
+            "paperbot_type": "paper",
+            "paperbot_id": paper.get("id"),
+            "title": paper.get("title"),
+            "authors": list(paper.get("authors") or []),
+            "year": paper.get("year"),
+            "venue": paper.get("venue"),
+            "doi": paper.get("doi"),
+            "arxiv_id": paper.get("arxiv_id"),
+            "semantic_scholar_id": paper.get("semantic_scholar_id"),
+            "openalex_id": paper.get("openalex_id"),
+            "citation_count": paper.get("citation_count"),
+            "saved_at": saved_at,
+            "track": track.get("name") if track else None,
+            "tags": managed_tags,
+            "paperbot_managed_tags": managed_tags,
+            "paperbot_managed_links": managed_links,
+            "related_papers": related_titles,
+            "cites": reference_links,
+            "cited_by": cited_by_links,
+        }
 
         body = self._render_paper_note(
             template_path=template_path,
-            frontmatter=frontmatter,
             title=note_title,
             abstract=str(paper.get("abstract") or "_No abstract available._"),
             metadata_rows=[
@@ -253,7 +268,13 @@ class ObsidianFilesystemExporter(VaultExporterPort):
             related_titles=related_titles,
         )
 
-        note_path.write_text(body.rstrip() + "\n", encoding="utf-8")
+        self._write_managed_note(
+            note_path=note_path,
+            root_path=papers_dir.parent,
+            frontmatter_payload=frontmatter_payload,
+            managed_body=body,
+            managed_headings=PAPER_MANAGED_HEADINGS,
+        )
         return {
             "title": note_title,
             "path": str(note_path),
@@ -286,23 +307,7 @@ class ObsidianFilesystemExporter(VaultExporterPort):
             group_tracks_in_folders=group_tracks_in_folders,
         )
 
-        frontmatter = _yaml_frontmatter(
-            {
-                "paperbot_type": "track",
-                "track_id": track.get("id"),
-                "user_id": track.get("user_id"),
-                "name": track.get("name"),
-                "moc_note": note_filename,
-                "paper_count": len(paper_refs),
-                "keywords": list(track.get("keywords") or []),
-                "methods": list(track.get("methods") or []),
-                "venues": list(track.get("venues") or []),
-                "is_active": track.get("is_active"),
-            }
-        )
-
         lines = [
-            frontmatter,
             f"# {track.get('name') or 'Untitled Track'}",
             "",
             str(track.get("description") or "_No description provided._"),
@@ -323,10 +328,12 @@ class ObsidianFilesystemExporter(VaultExporterPort):
         else:
             lines.append("- _No tracked tasks._")
 
-        lines.extend([
-            "",
-            "## Milestones",
-        ])
+        lines.extend(
+            [
+                "",
+                "## Milestones",
+            ]
+        )
         milestones = list(track.get("milestones") or [])
         if milestones:
             for milestone in milestones:
@@ -336,14 +343,18 @@ class ObsidianFilesystemExporter(VaultExporterPort):
         else:
             lines.append("- _No milestones defined._")
 
-        lines.extend([
-            "",
-            "## Tracked Scholars",
-        ])
+        lines.extend(
+            [
+                "",
+                "## Tracked Scholars",
+            ]
+        )
         scholars = list(track.get("scholars") or track.get("tracked_scholars") or [])
         if scholars:
             for scholar in scholars:
-                name = str(scholar.get("name") or scholar.get("scholar_name") or "Unknown scholar").strip()
+                name = str(
+                    scholar.get("name") or scholar.get("scholar_name") or "Unknown scholar"
+                ).strip()
                 affiliation = str(scholar.get("affiliation") or "").strip()
                 if affiliation:
                     lines.append(f"- {name} ({affiliation})")
@@ -352,16 +363,38 @@ class ObsidianFilesystemExporter(VaultExporterPort):
         else:
             lines.append("- _No linked scholars._")
 
-        lines.extend([
-            "",
-            "## Saved Papers",
-        ])
+        lines.extend(
+            [
+                "",
+                "## Saved Papers",
+            ]
+        )
         if paper_refs:
             lines.extend([f"- {ref['link']}" for ref in paper_refs])
         else:
             lines.append("- _No saved papers exported._")
 
-        note_path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+        frontmatter_payload = {
+            "paperbot_type": "track",
+            "track_id": track.get("id"),
+            "user_id": track.get("user_id"),
+            "name": track.get("name"),
+            "moc_note": note_filename,
+            "paper_count": len(paper_refs),
+            "keywords": list(track.get("keywords") or []),
+            "methods": list(track.get("methods") or []),
+            "venues": list(track.get("venues") or []),
+            "is_active": track.get("is_active"),
+            "paperbot_managed_tags": [],
+            "paperbot_managed_links": self._dedupe_strings(ref["link"] for ref in paper_refs),
+        }
+        self._write_managed_note(
+            note_path=note_path,
+            root_path=tracks_dir.parent,
+            frontmatter_payload=frontmatter_payload,
+            managed_body="\n".join(lines).rstrip() + "\n",
+            managed_headings=TRACK_MANAGED_HEADINGS,
+        )
         return {
             "title": str(track.get("name") or "Track"),
             "path": str(note_path),
@@ -487,7 +520,6 @@ class ObsidianFilesystemExporter(VaultExporterPort):
         self,
         *,
         template_path: Optional[Path],
-        frontmatter: str,
         title: str,
         abstract: str,
         metadata_rows: List[str],
@@ -504,12 +536,12 @@ class ObsidianFilesystemExporter(VaultExporterPort):
         environment = self._build_template_environment()
         if template_path:
             resolved = template_path.expanduser().resolve()
-            environment = self._build_template_environment(loader=FileSystemLoader(str(resolved.parent)))
+            environment = self._build_template_environment(
+                loader=FileSystemLoader(str(resolved.parent))
+            )
             template_source = resolved.read_text(encoding="utf-8")
 
-        body = environment.from_string(
-            self._strip_frontmatter_expression(template_source)
-        ).render(
+        body = environment.from_string(self._strip_frontmatter_expression(template_source)).render(
             title=title,
             abstract=abstract,
             metadata_rows=metadata_rows,
@@ -522,7 +554,7 @@ class ObsidianFilesystemExporter(VaultExporterPort):
             track=track,
             related_titles=related_titles,
         )
-        return f"{frontmatter}{body}"
+        return body.rstrip() + "\n"
 
     def _sync_paper_citation_backlinks(
         self,
@@ -571,16 +603,34 @@ class ObsidianFilesystemExporter(VaultExporterPort):
         if not note_path.exists() or not note_path.is_file():
             return
 
-        frontmatter, body = self._read_note(note_path)
-        values = [str(item).strip() for item in list(frontmatter.get(frontmatter_key) or []) if str(item).strip()]
+        parsed = parse_note_text(
+            note_path.read_text(encoding="utf-8"),
+            managed_headings=PAPER_MANAGED_HEADINGS,
+        )
+        frontmatter = dict(parsed.frontmatter)
+        values = [
+            str(item).strip()
+            for item in list(frontmatter.get(frontmatter_key) or [])
+            if str(item).strip()
+        ]
         if link not in values:
             values.append(link)
         frontmatter[frontmatter_key] = values
+        frontmatter["paperbot_managed_links"] = self._dedupe_strings(
+            list(frontmatter.get("paperbot_managed_links") or []) + [link]
+        )
 
-        updated_body = self._upsert_markdown_section(body=body, heading=heading, links=values)
-        note_path.write_text(
-            f"{_yaml_frontmatter(frontmatter)}{updated_body.rstrip()}\n",
-            encoding="utf-8",
+        updated_body = self._upsert_markdown_section(
+            body=parsed.managed_body,
+            heading=heading,
+            links=values,
+        )
+        self._write_managed_note(
+            note_path=note_path,
+            root_path=note_path.parents[1],
+            frontmatter_payload=frontmatter,
+            managed_body=updated_body,
+            managed_headings=PAPER_MANAGED_HEADINGS,
         )
 
     @staticmethod
@@ -591,7 +641,7 @@ class ObsidianFilesystemExporter(VaultExporterPort):
             if match:
                 payload = yaml.safe_load(match.group(1)) or {}
                 if isinstance(payload, dict):
-                    return payload, text[match.end():]
+                    return payload, text[match.end() :]
         return {}, text
 
     @staticmethod
@@ -606,9 +656,7 @@ class ObsidianFilesystemExporter(VaultExporterPort):
         section_text = "\n".join(section_lines).rstrip()
 
         trimmed = body.rstrip()
-        pattern = re.compile(
-            rf"(?ms)^## {re.escape(heading)}\n.*?(?=^## |\Z)"
-        )
+        pattern = re.compile(rf"(?ms)^## {re.escape(heading)}\n.*?(?=^## |\Z)")
         if pattern.search(trimmed):
             updated = pattern.sub(section_text + "\n", trimmed)
         else:
@@ -775,3 +823,100 @@ class ObsidianFilesystemExporter(VaultExporterPort):
         if label:
             return f"[[{target}|{label}]]"
         return f"[[{target}]]"
+
+    def _write_managed_note(
+        self,
+        *,
+        note_path: Path,
+        root_path: Path,
+        frontmatter_payload: Dict[str, Any],
+        managed_body: str,
+        managed_headings: Sequence[str],
+        pending_dirname: str = DEFAULT_PENDING_DIRNAME,
+    ) -> None:
+        note_path.parent.mkdir(parents=True, exist_ok=True)
+        existing_note = (
+            parse_note_text(
+                note_path.read_text(encoding="utf-8"),
+                managed_headings=managed_headings,
+            )
+            if note_path.exists()
+            else None
+        )
+        conflict = (
+            detect_managed_conflict(
+                note_path=note_path,
+                frontmatter=existing_note.frontmatter,
+                managed_body=existing_note.managed_body,
+            )
+            if existing_note is not None
+            else None
+        )
+
+        merged_body = merge_user_sections(
+            managed_body,
+            existing_note.user_sections if existing_note is not None else [],
+        )
+        payload = dict(frontmatter_payload)
+        payload["paperbot_exported_at"] = datetime.now(timezone.utc).isoformat()
+        payload["paperbot_managed_hash"] = hash_markdown(managed_body)
+
+        if conflict is not None:
+            pending_path = self._pending_note_path(
+                note_path=note_path,
+                root_path=root_path,
+                pending_dirname=pending_dirname,
+            )
+            pending_path.parent.mkdir(parents=True, exist_ok=True)
+            pending_payload = dict(payload)
+            pending_payload.update(
+                {
+                    "paperbot_status": "pending",
+                    "paperbot_pending_for": str(note_path),
+                    "paperbot_conflict_reason": conflict.reason,
+                    "paperbot_expected_managed_hash": conflict.expected_hash,
+                    "paperbot_actual_managed_hash": conflict.actual_hash,
+                    "paperbot_conflict_detected_at": conflict.detected_at,
+                }
+            )
+            pending_path.write_text(
+                f"{_yaml_frontmatter(pending_payload)}{merged_body.rstrip()}\n",
+                encoding="utf-8",
+            )
+            return
+
+        note_path.write_text(
+            f"{_yaml_frontmatter(payload)}{merged_body.rstrip()}\n",
+            encoding="utf-8",
+        )
+        pending_path = self._pending_note_path(
+            note_path=note_path,
+            root_path=root_path,
+            pending_dirname=pending_dirname,
+        )
+        if pending_path.exists():
+            pending_path.unlink()
+
+    @staticmethod
+    def _pending_note_path(
+        *,
+        note_path: Path,
+        root_path: Path,
+        pending_dirname: str,
+    ) -> Path:
+        return root_path / pending_dirname / note_path.relative_to(root_path)
+
+    @staticmethod
+    def _dedupe_strings(values: Iterable[Optional[str]]) -> List[str]:
+        items: List[str] = []
+        seen: set[str] = set()
+        for raw_value in values:
+            value = str(raw_value or "").strip()
+            if not value:
+                continue
+            key = value.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            items.append(value)
+        return items

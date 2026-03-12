@@ -71,6 +71,7 @@ python-multipart>=0.0.6  # Required for file uploads
 starlette>=0.37.2,<0.39.0
 uvicorn[standard]>=0.32.0
 sse-starlette>=2.1.0
+watchdog>=4.0.0
 
 # Run/Event persistence (Phase 1A)
 SQLAlchemy>=2.0.0
