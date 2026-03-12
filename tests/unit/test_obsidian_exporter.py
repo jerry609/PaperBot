@@ -26,6 +26,20 @@ def test_export_library_snapshot_writes_paper_track_and_moc_notes(tmp_path: Path
                 "keywords": ["ICL", "Compression"],
                 "fields_of_study": ["Natural Language Processing"],
                 "url": "https://example.com/uniicl",
+                "references": [
+                    {
+                        "paperId": "prior",
+                        "title": "Prior Compression Work",
+                        "year": 2025,
+                    }
+                ],
+                "citations": [
+                    {
+                        "paperId": "future",
+                        "title": "Future Compression Follow-up",
+                        "year": 2027,
+                    }
+                ],
             },
         }
     ]
@@ -38,6 +52,9 @@ def test_export_library_snapshot_writes_paper_track_and_moc_notes(tmp_path: Path
         "methods": ["retrieval"],
         "venues": ["ICLR"],
         "is_active": True,
+        "tasks": [{"title": "Benchmark prompt compression", "status": "doing"}],
+        "milestones": [{"name": "Submit workshop paper", "status": "todo"}],
+        "scholars": [{"name": "Alice Smith", "affiliation": "PaperBot Lab"}],
     }
 
     result = exporter.export_library_snapshot(
@@ -57,18 +74,31 @@ def test_export_library_snapshot_writes_paper_track_and_moc_notes(tmp_path: Path
     paper_body = paper_note.read_text(encoding="utf-8")
     assert "paperbot_type: paper" in paper_body
     assert "# UniICL" in paper_body
-    assert "[[PaperBot/Tracks/icl-compression|ICL Compression]]" in paper_body
+    assert "[[PaperBot/Tracks/icl-compression/_MOC|ICL Compression]]" in paper_body
     assert "[DOI](https://doi.org/10.1000/uniicl)" in paper_body
+    assert "cites:" in paper_body
+    assert "cited_by:" in paper_body
+    assert "## References" in paper_body
+    assert "[[PaperBot/Papers/2025-prior-compression-work-prior|Prior Compression Work]]" in paper_body
+    assert "## Cited By" in paper_body
+    assert "[[PaperBot/Papers/2027-future-compression-follow-up-future|Future Compression Follow-up]]" in paper_body
 
     track_body = track_note.read_text(encoding="utf-8")
     assert "paperbot_type: track" in track_body
     assert "# ICL Compression" in track_body
+    assert "## Research Tasks" in track_body
+    assert "- [doing] Benchmark prompt compression" in track_body
+    assert "## Milestones" in track_body
+    assert "- [todo] Submit workshop paper" in track_body
+    assert "## Tracked Scholars" in track_body
+    assert "- Alice Smith (PaperBot Lab)" in track_body
     assert "[[PaperBot/Papers/2026-uniicl-2601-12345|UniICL]]" in track_body
 
     moc_body = moc_note.read_text(encoding="utf-8")
     assert "# PaperBot MOC" in moc_body
-    assert "[[PaperBot/Tracks/icl-compression|ICL Compression]]" in moc_body
+    assert "[[PaperBot/Tracks/icl-compression/_MOC|ICL Compression]]" in moc_body
     assert "[[PaperBot/Papers/2026-uniicl-2601-12345|UniICL]]" in moc_body
+    assert track_note == vault / "PaperBot" / "Tracks" / "icl-compression" / "_MOC.md"
 
 
 def test_export_library_snapshot_supports_custom_template_and_related_links(tmp_path: Path):
@@ -126,8 +156,57 @@ def test_export_library_snapshot_supports_custom_template_and_related_links(tmp_
     assert "Contains &lt;script&gt;alert(1)&lt;/script&gt; &amp; evidence." in paper_note
     assert "[[PaperBot/Papers/2025-prompt-compression-survey|Prompt Compression Survey]]" in paper_note
     assert "[[PaperBot/Papers/context-distillation-for-llms|Context Distillation for LLMs]]" in paper_note
-    assert "[[PaperBot/Tracks/icl-compression|ICL Compression]]" in paper_note
+    assert "[[PaperBot/Tracks/icl-compression/_MOC|ICL Compression]]" in paper_note
     assert paper_note.count("paperbot_type: paper") == 1
+
+
+def test_export_library_snapshot_backfills_existing_cited_by_links(tmp_path: Path):
+    exporter = ObsidianFilesystemExporter()
+    vault = tmp_path / "vault"
+    vault.mkdir()
+
+    exporter.export_library_snapshot(
+        vault_path=vault,
+        saved_items=[
+            {
+                "paper": {
+                    "id": "prior",
+                    "title": "Prior Compression Work",
+                    "year": 2025,
+                }
+            }
+        ],
+    )
+
+    exporter.export_library_snapshot(
+        vault_path=vault,
+        saved_items=[
+            {
+                "paper": {
+                    "id": 1,
+                    "title": "UniICL",
+                    "year": 2026,
+                    "references": [
+                        {
+                            "paperId": "prior",
+                            "title": "Prior Compression Work",
+                            "year": 2025,
+                        }
+                    ],
+                }
+            }
+        ],
+    )
+
+    prior_note = (
+        vault
+        / "PaperBot"
+        / "Papers"
+        / "2025-prior-compression-work-prior.md"
+    ).read_text(encoding="utf-8")
+    assert "cited_by:" in prior_note
+    assert "## Cited By" in prior_note
+    assert "[[PaperBot/Papers/2026-uniicl-1|UniICL]]" in prior_note
 
 
 def test_export_library_snapshot_requires_existing_vault_directory(tmp_path: Path):

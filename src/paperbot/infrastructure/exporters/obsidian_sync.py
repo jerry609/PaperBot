@@ -23,6 +23,20 @@ def obsidian_auto_export_enabled(*, for_tracks: bool = False) -> bool:
     return config.auto_sync_tracks if for_tracks else config.auto_export_on_save
 
 
+def _list_track_items(
+    store: SqlAlchemyResearchStore,
+    *,
+    user_id: str,
+    track_id: int,
+    attr_name: str,
+) -> list[dict[str, Any]]:
+    list_method = getattr(store, attr_name, None)
+    if not callable(list_method):
+        return []
+    items = list_method(user_id=user_id, track_id=track_id, limit=100)
+    return list(items) if isinstance(items, list) else []
+
+
 def export_track_snapshot(
     *,
     user_id: str,
@@ -56,6 +70,19 @@ def export_track_snapshot(
             track_id=track_id,
             limit=max(1, int(config.export_limit)),
         )
+        track_payload = dict(track)
+        track_payload["tasks"] = _list_track_items(
+            current_store,
+            user_id=user_id,
+            track_id=track_id,
+            attr_name="list_tasks",
+        )
+        track_payload["milestones"] = _list_track_items(
+            current_store,
+            user_id=user_id,
+            track_id=track_id,
+            attr_name="list_milestones",
+        )
         exporter = ObsidianFilesystemExporter()
         template_path = (
             Path(config.paper_template_path).expanduser()
@@ -65,9 +92,11 @@ def export_track_snapshot(
         result = exporter.export_library_snapshot(
             vault_path=vault_path,
             saved_items=saved_items,
-            track=track,
+            track=track_payload,
             root_dir=config.root_dir,
             paper_template_path=template_path,
+            track_moc_filename=getattr(config, "track_moc_filename", "_MOC.md"),
+            group_tracks_in_folders=getattr(config, "group_tracks_in_folders", True),
         )
         Logger.info(
             f"Exported track {track_id} snapshot to Obsidian vault {vault_path}",

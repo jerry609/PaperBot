@@ -73,6 +73,8 @@ class _FakeExporter:
         track=None,
         root_dir="PaperBot",
         paper_template_path=None,
+        track_moc_filename="_MOC.md",
+        group_tracks_in_folders=True,
     ):
         assert Path(vault_path) == Path("/tmp/my-vault")
         assert len(saved_items) == 1
@@ -80,12 +82,14 @@ class _FakeExporter:
         assert track["name"] == "ICL Compression"
         assert root_dir == "PaperBot"
         assert paper_template_path is None
+        assert track_moc_filename == "_MOC.md"
+        assert group_tracks_in_folders is True
         return {
             "vault_path": str(vault_path),
             "root_dir": root_dir,
             "paper_count": 1,
             "paper_notes": ["/tmp/my-vault/PaperBot/Papers/2026-uniicl-2601-12345.md"],
-            "track_note": "/tmp/my-vault/PaperBot/Tracks/icl-compression.md",
+            "track_note": "/tmp/my-vault/PaperBot/Tracks/icl-compression/_MOC.md",
             "moc_note": "/tmp/my-vault/PaperBot/MOC.md",
         }
 
@@ -141,7 +145,7 @@ def test_cli_obsidian_export_json_output(monkeypatch, capsys):
     assert exit_code == 0
     payload = json.loads(captured.out)
     assert payload["paper_count"] == 1
-    assert payload["track_note"].endswith("icl-compression.md")
+    assert payload["track_note"].endswith("icl-compression/_MOC.md")
     assert payload["moc_note"].endswith("MOC.md")
 
 
@@ -161,6 +165,8 @@ def test_cli_obsidian_export_uses_settings_defaults(monkeypatch, capsys):
                 vault_path="/tmp/my-vault",
                 root_dir="PaperBot",
                 paper_template_path=None,
+                track_moc_filename="_MOC.md",
+                group_tracks_in_folders=True,
             )
         ),
     )

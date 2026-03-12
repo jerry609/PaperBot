@@ -21,6 +21,18 @@ class _FakeResearchStore:
         assert limit == 25
         return [{"paper": {"id": 1, "title": "UniICL"}}]
 
+    def list_tasks(self, *, user_id: str, track_id: int, limit: int):
+        assert user_id == "default"
+        assert track_id == 7
+        assert limit == 100
+        return [{"title": "Benchmark prompt compression", "status": "doing"}]
+
+    def list_milestones(self, *, user_id: str, track_id: int, limit: int):
+        assert user_id == "default"
+        assert track_id == 7
+        assert limit == 100
+        return [{"name": "Submit workshop paper", "status": "todo"}]
+
     def close(self) -> None:
         self.closed = True
 
@@ -39,12 +51,16 @@ def test_export_track_snapshot_uses_obsidian_settings(monkeypatch, tmp_path: Pat
             track,
             root_dir,
             paper_template_path=None,
+            track_moc_filename="_MOC.md",
+            group_tracks_in_folders=True,
         ):
             captured["vault_path"] = Path(vault_path)
             captured["saved_items"] = saved_items
             captured["track"] = track
             captured["root_dir"] = root_dir
             captured["template_path"] = paper_template_path
+            captured["track_moc_filename"] = track_moc_filename
+            captured["group_tracks_in_folders"] = group_tracks_in_folders
             return {"paper_count": len(saved_items)}
 
     monkeypatch.setattr(
@@ -59,6 +75,8 @@ def test_export_track_snapshot_uses_obsidian_settings(monkeypatch, tmp_path: Pat
                 export_limit=25,
                 auto_export_on_save=True,
                 auto_sync_tracks=True,
+                track_moc_filename="_TRACK.md",
+                group_tracks_in_folders=False,
             )
         ),
     )
@@ -70,9 +88,17 @@ def test_export_track_snapshot_uses_obsidian_settings(monkeypatch, tmp_path: Pat
     assert result == {"paper_count": 1}
     assert captured["vault_path"] == vault_dir
     assert captured["root_dir"] == "PaperBot Notes"
-    assert captured["track"] == {"id": 7, "user_id": "default", "name": "ICL Compression"}
+    assert captured["track"] == {
+        "id": 7,
+        "user_id": "default",
+        "name": "ICL Compression",
+        "tasks": [{"title": "Benchmark prompt compression", "status": "doing"}],
+        "milestones": [{"name": "Submit workshop paper", "status": "todo"}],
+    }
     assert captured["saved_items"] == [{"paper": {"id": 1, "title": "UniICL"}}]
     assert captured["template_path"] == (tmp_path / "paper.md.j2")
+    assert captured["track_moc_filename"] == "_TRACK.md"
+    assert captured["group_tracks_in_folders"] is False
 
 
 def test_obsidian_auto_export_enabled_requires_vault_path(monkeypatch):
