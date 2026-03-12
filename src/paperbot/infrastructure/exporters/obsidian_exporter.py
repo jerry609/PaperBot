@@ -1,18 +1,17 @@
 from __future__ import annotations
 
+import re
 import unicodedata
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import yaml
 from jinja2 import Environment, FileSystemLoader, select_autoescape
-from markupsafe import Markup
 
 from paperbot.application.ports.vault_exporter_port import VaultExporterPort
 
 
-DEFAULT_PAPER_TEMPLATE = """{{ frontmatter }}
-# {{ title }}
+DEFAULT_PAPER_TEMPLATE = """# {{ title }}
 
 ## Summary
 {{ abstract }}
@@ -41,6 +40,8 @@ DEFAULT_PAPER_TEMPLATE = """{{ frontmatter }}
 {% endfor %}
 {% endif %}
 """
+
+_FRONTMATTER_EXPR = re.compile(r"\{\{\-?\s*frontmatter\s*\-?\}\}")
 
 
 def _slugify(value: str) -> str:
@@ -369,6 +370,11 @@ class ObsidianFilesystemExporter(VaultExporterPort):
             lstrip_blocks=False,
         )
 
+    @staticmethod
+    def _strip_frontmatter_expression(template_source: str) -> str:
+        stripped = _FRONTMATTER_EXPR.sub("", template_source)
+        return stripped.lstrip("\n")
+
     def _render_paper_note(
         self,
         *,
@@ -384,27 +390,16 @@ class ObsidianFilesystemExporter(VaultExporterPort):
         track: Optional[Dict[str, Any]],
         related_titles: List[str],
     ) -> str:
+        template_source = DEFAULT_PAPER_TEMPLATE
+        environment = self._build_template_environment()
         if template_path:
             resolved = template_path.expanduser().resolve()
-            environment = self._build_template_environment(
-                loader=FileSystemLoader(str(resolved.parent))
-            )
-            template = environment.get_template(resolved.name)
-            return template.render(
-                frontmatter=Markup(frontmatter),
-                title=title,
-                abstract=abstract,
-                metadata_rows=metadata_rows,
-                track_link=track_link,
-                external_links=external_links,
-                related_links=related_links,
-                paper=paper,
-                track=track,
-                related_titles=related_titles,
-            )
+            environment = self._build_template_environment(loader=FileSystemLoader(str(resolved.parent)))
+            template_source = resolved.read_text(encoding="utf-8")
 
-        return self._build_template_environment().from_string(DEFAULT_PAPER_TEMPLATE).render(
-            frontmatter=Markup(frontmatter),
+        body = environment.from_string(
+            self._strip_frontmatter_expression(template_source)
+        ).render(
             title=title,
             abstract=abstract,
             metadata_rows=metadata_rows,
@@ -415,6 +410,7 @@ class ObsidianFilesystemExporter(VaultExporterPort):
             track=track,
             related_titles=related_titles,
         )
+        return f"{frontmatter}{body}"
 
     def _paper_related_links(self, *, paper: Dict[str, Any], root_dir: str) -> List[str]:
         links: List[str] = []

@@ -127,6 +127,7 @@ def test_export_library_snapshot_supports_custom_template_and_related_links(tmp_
     assert "[[PaperBot/Papers/2025-prompt-compression-survey|Prompt Compression Survey]]" in paper_note
     assert "[[PaperBot/Papers/context-distillation-for-llms|Context Distillation for LLMs]]" in paper_note
     assert "[[PaperBot/Tracks/icl-compression|ICL Compression]]" in paper_note
+    assert paper_note.count("paperbot_type: paper") == 1
 
 
 def test_export_library_snapshot_requires_existing_vault_directory(tmp_path: Path):
