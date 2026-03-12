@@ -106,7 +106,7 @@ type StepStatus = "pending" | "running" | "done" | "error" | "skipped"
 
 /* ── Helpers ──────────────────────────────────────────── */
 
-const DEFAULT_QUERIES = ["ICL压缩", "ICL隐式偏置", "KV Cache加速"]
+const DEFAULT_QUERIES = ["In-context compression", "Implicit bias in ICL", "KV cache acceleration"]
 const DAILY_STREAM_IDLE_TIMEOUT_MS = 90_000
 
 const REC_COLORS: Record<string, string> = {
@@ -135,12 +135,12 @@ const BRANCH_LABELS: Record<string, string> = {
 }
 
 const PHASE_COPY: Record<WorkflowPhase, string> = {
-  idle: "未开始",
-  searching: "检索中",
-  searched: "候选已就绪",
-  reporting: "生成中",
-  reported: "报告已就绪",
-  error: "需要处理",
+  idle: "Idle",
+  searching: "Searching",
+  searched: "Candidates ready",
+  reporting: "Building brief",
+  reported: "Brief ready",
+  error: "Blocked",
 }
 
 type WorkflowWorkspaceTab = "candidates" | "insights" | "judge" | "report" | "delivery" | "log"
@@ -171,6 +171,20 @@ const WORKFLOW_REFERENCE_LINKS: Array<{
   },
 ]
 
+function normalizeWorkflowQueries(values: string[]): string[] {
+  return values.map((value) => value.trim()).filter(Boolean)
+}
+
+function shouldPersistWorkflowQueries(queries: string[]): boolean {
+  const normalizedQueries = normalizeWorkflowQueries(queries)
+  if (normalizedQueries.length === 0) return false
+
+  const normalizedDefaults = normalizeWorkflowQueries(DEFAULT_QUERIES)
+  if (normalizedQueries.length !== normalizedDefaults.length) return true
+
+  return normalizedQueries.some((value, index) => value !== normalizedDefaults[index])
+}
+
 function getNextWorkflowAction(args: {
   hasSearchData: boolean
   hasReportData: boolean
@@ -178,15 +192,15 @@ function getNextWorkflowAction(args: {
   hasLLMContent: boolean
   isLoading: boolean
 }) {
-  if (args.isLoading) return "当前有任务在运行。先观察进度，再决定下一步交接。"
-  if (!args.hasSearchData) return "先运行 Search，基于当前主题建立候选池。"
-  if (!args.hasReportData) return "接着运行 DailyPaper，把候选整理成可读报告和产物。"
-  if (!args.hasJudgeContent && !args.hasLLMContent) return "然后运行 Analyze，补齐 Judge 评分、趋势和洞察。"
-  return "回看最强候选，必要时补仓仓库信息，然后送入 Research 或 Wiki。"
+  if (args.isLoading) return "A run is in progress."
+  if (!args.hasSearchData) return "Run Search."
+  if (!args.hasReportData) return "Run DailyPaper."
+  if (!args.hasJudgeContent && !args.hasLLMContent) return "Run Analyze."
+  return "Review the shortlist and hand off the winners."
 }
 
 function formatTimestamp(value?: string | null) {
-  if (!value) return "尚未运行"
+  if (!value) return "Not run yet"
   const parsed = new Date(value)
   if (Number.isNaN(parsed.getTime())) return value
   return parsed.toLocaleString()
@@ -300,7 +314,7 @@ function WorkflowStageCard({
 }: {
   eyebrow: string
   title: string
-  description: string
+  description?: string
   metric: string
   status: StepStatus
   icon: React.ReactNode
@@ -326,7 +340,7 @@ function WorkflowStageCard({
           {presentation.label}
         </span>
       </div>
-      <p className="mt-3 text-sm leading-relaxed text-slate-600">{description}</p>
+      {description ? <p className="mt-3 text-sm leading-relaxed text-slate-600">{description}</p> : null}
       <p className="mt-4 text-sm font-semibold text-slate-800">{metric}</p>
     </div>
   )
@@ -366,7 +380,7 @@ function WorkflowTogglePanel({
   compact = false,
 }: {
   title: string
-  description: string
+  description?: string
   checked: boolean
   onCheckedChange: (value: boolean) => void
   icon: React.ReactNode
@@ -381,7 +395,7 @@ function WorkflowTogglePanel({
               <span className="rounded-lg bg-slate-50 p-1.5 text-slate-600">{icon}</span>
               {title}
             </div>
-            <p className="text-xs leading-5 text-slate-500">{description}</p>
+            {description ? <p className="text-xs leading-5 text-slate-500">{description}</p> : null}
           </div>
           <Switch checked={checked} onCheckedChange={onCheckedChange} />
         </div>
@@ -397,7 +411,7 @@ function WorkflowTogglePanel({
             <span className="rounded-lg bg-white p-1.5 text-slate-600 shadow-sm">{icon}</span>
             {title}
           </div>
-          <p className="text-xs leading-relaxed text-slate-500">{description}</p>
+          {description ? <p className="text-xs leading-relaxed text-slate-500">{description}</p> : null}
         </div>
         <Switch checked={checked} onCheckedChange={onCheckedChange} />
       </div>
@@ -412,7 +426,7 @@ function WorkflowReferenceCard({
   external = false,
 }: {
   title: string
-  description: string
+  description?: string
   href: string
   external?: boolean
 }) {
@@ -420,7 +434,7 @@ function WorkflowReferenceCard({
     <>
       <div>
         <p className="text-sm font-semibold text-slate-800">{title}</p>
-        <p className="mt-1 text-xs leading-relaxed text-slate-500">{description}</p>
+        {description ? <p className="mt-1 text-xs leading-relaxed text-slate-500">{description}</p> : null}
       </div>
       <ArrowUpRightIcon className="size-4 text-slate-400 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5 group-hover:text-indigo-600" />
     </>
@@ -1809,38 +1823,35 @@ export default function TopicWorkflowDashboard({
   })
   const deliveryChannels = [notifyEnabled ? "Email" : null, resendEnabled ? "Resend" : null].filter(Boolean) as string[]
   const compactRetrievalSummary = [
-    activeSourceLabels.length ? activeSourceLabels.join(" · ") : "未选择检索来源",
-    activeBranchLabels.length ? activeBranchLabels.join(" + ") : "未选择结果分支",
+    activeSourceLabels.length ? activeSourceLabels.join(" · ") : "No sources",
+    activeBranchLabels.length ? activeBranchLabels.join(" + ") : "No branches",
   ]
   const compactAnalysisSummary = [
-    enableLLM ? "LLM 开" : "LLM 关",
-    enableJudge ? "Judge 开" : "Judge 关",
-    saveDaily ? "保存产物 开" : "保存产物 关",
+    enableLLM ? "LLM on" : "LLM off",
+    enableJudge ? "Judge on" : "Judge off",
+    saveDaily ? "Save on" : "Save off",
   ].join(" · ")
   const compactDeliverySummary = deliveryChannels.length
-    ? `${deliveryChannels.join(" + ")} 已开启`
-    : "仅手动复核"
+    ? `${deliveryChannels.join(" + ")} on`
+    : "Manual review"
   const showCompactOptions = compact && (compactOptionsOpen || !canSearch || notifyEnabled)
   const controlStateHint = canSearch
     ? compact
-      ? "当前配置已经可以直接运行 Search。"
-      : "Ready to search across the selected topic set."
+      ? "Ready to run Search."
+      : "Ready to run."
     : compact
-      ? "至少保留一个主题、来源和分支后才能执行。"
-      : "At least one topic, source, and branch must stay enabled before execution."
-  const storageBoundaryHint = compact
-    ? "Search 先建立候选池；DailyPaper 会把排序后的结果回写到 registry，再交给 Research / Papers 继续沉淀。"
-    : "Search previews the candidate pool first; DailyPaper persists ranked results back into the registry before Research / Papers handoff."
+      ? "Pick at least one topic, source, and branch."
+      : "Pick at least one topic, source, and branch."
   const emailOverrideField = notifyEnabled ? (
     <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4">
       <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
         <div>
           <p className="text-sm font-semibold text-slate-800">
-            {compact ? "邮件接收地址" : "Direct email override"}
+            {compact ? "Email recipient" : "Direct email override"}
           </p>
           <p className="mt-1 text-xs text-slate-500">
             {compact
-              ? "本次运行可覆盖默认后端收件人。"
+              ? "Override the default recipient for this run."
               : "This address overrides the default backend recipient for the next digest run."}
           </p>
         </div>
@@ -1863,7 +1874,7 @@ export default function TopicWorkflowDashboard({
       return sum
     }, 0) / 3 * 100,
   )
-  const workflowPageHref = queries.length
+  const workflowPageHref = shouldPersistWorkflowQueries(queries)
     ? `/workflows?query=${encodeURIComponent(queries.join(","))}`
     : "/workflows"
   const snapshotHighlights = (
@@ -1891,14 +1902,9 @@ export default function TopicWorkflowDashboard({
                 </div>
                 <h2 className="mt-3 text-2xl font-bold tracking-tight text-slate-900">
                   {dashboardContext?.activeTrackName
-                    ? `${dashboardContext.activeTrackName} 的今日研究简报`
-                    : "首页只保留一份今日研究简报"}
+                    ? `${dashboardContext.activeTrackName} brief`
+                    : "One brief for today"}
                 </h2>
-                <p className="mt-2 text-sm leading-6 text-slate-600">
-                  首页主区现在只保留最近一次 workflow 的热点、交接状态和下一步建议。
-                  完整的 Search、DailyPaper、Analyze 与交付工作台已经回到独立的
-                  `/workflows` 页面。
-                </p>
               </div>
 
               <div className="flex flex-wrap gap-2">
@@ -2084,8 +2090,7 @@ export default function TopicWorkflowDashboard({
                     })
                   ) : (
                     <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-6 text-sm leading-6 text-slate-600 xl:col-span-3">
-                      暂时还没有可上浮到首页的候选或 digest。打开完整 workbench
-                      跑一轮 Search 或 DailyPaper 之后，这里会自动显示最近的热点摘要。
+                      No brief snapshot yet. Run Search or DailyPaper from the full workbench.
                     </div>
                   )}
                 </div>
@@ -2132,12 +2137,8 @@ export default function TopicWorkflowDashboard({
                       No Snapshot Yet
                     </p>
                     <h3 className="mt-2 text-xl font-bold text-slate-900">
-                      还没有最近一次 workflow 运行结果
+                      No recent workflow run
                     </h3>
-                    <p className="mt-2 text-sm leading-6 text-slate-600">
-                      首页现在只负责展示快照，不再承载完整控制台。去 `/workflows`
-                      跑一轮 Search 或 DailyPaper，回来这里就能看到热点摘要、最近进度和研究交接状态。
-                    </p>
                   </div>
 
                   <div className="flex flex-wrap gap-2">
@@ -2184,11 +2185,8 @@ export default function TopicWorkflowDashboard({
                     Research Workflow
                   </div>
                   <h2 className="mt-4 text-2xl font-bold tracking-tight text-slate-900 md:text-3xl">
-                    Turn topics into ranked digests, judge queues, and research handoffs.
+                    Run Search, DailyPaper, and Analyze.
                   </h2>
-                  <p className="mt-2 max-w-2xl text-sm leading-relaxed text-slate-600">
-                    Search, DailyPaper, Analyze, and delivery now share one control surface inside Dashboard. Topics stay editable here; advanced knobs live in the side sheet instead of being hidden behind a detached page.
-                  </p>
                   <div className="mt-4 flex flex-wrap gap-2">
                     {quickSummaryBadges.map((badge) => (
                       <Badge key={badge} variant="secondary" className="rounded-full border border-slate-200 bg-white/90 px-3 py-1 text-[11px] font-medium text-slate-600 shadow-sm">
@@ -2240,7 +2238,6 @@ export default function TopicWorkflowDashboard({
                 <WorkflowStageCard
                   eyebrow="01"
                   title="Search & collect"
-                  description="Query multiple sources and branches while keeping the topic list visible in the control deck."
                   metric={`${queries.length} topics · ${activeSourceLabels.length || 0} sources`}
                   status={searchStageState}
                   icon={<SearchIcon className="size-4" />}
@@ -2248,7 +2245,6 @@ export default function TopicWorkflowDashboard({
                 <WorkflowStageCard
                   eyebrow="02"
                   title="Build DailyPaper"
-                  description="Rank the candidate pool into a digest artifact that can be saved, inspected, and exported."
                   metric={hasReportData ? `Report date ${dailyResult?.report?.date || "-"}` : `Top N ${topN} · files ${saveDaily ? "saved" : "ephemeral"}`}
                   status={dailyStageState}
                   icon={<BookOpenIcon className="size-4" />}
@@ -2256,7 +2252,6 @@ export default function TopicWorkflowDashboard({
                 <WorkflowStageCard
                   eyebrow="03"
                   title="Analyze & hand off"
-                  description="Attach Judge and trend insight, then route the best papers to delivery channels and Research."
                   metric={`${judgedPapersCount} judged · ${deliveryChannels.length || 0} delivery channels`}
                   status={analysisStageState}
                   icon={<CompassIcon className="size-4" />}
@@ -2272,21 +2267,16 @@ export default function TopicWorkflowDashboard({
               <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                 <div>
                   <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-indigo-600">
-                    {compact ? "快速配置" : "Control Deck"}
+                    Run setup
                   </p>
                   <h3 className="mt-2 text-xl font-bold text-slate-900">
-                    {compact ? "组织一次工作流运行" : "Compose a workflow run"}
+                    Run setup
                   </h3>
-                  <p className="mt-1 text-sm text-slate-500">
-                    {compact
-                      ? "把主题、来源、增强开关和执行动作收在一起，避免来回跳页。"
-                      : "Put the driving questions, source mix, enrichment switches, and launch actions in one place."}
-                  </p>
                 </div>
                 <SheetTrigger asChild>
                   <Button size="sm" variant="outline" className="h-9 rounded-full border-slate-200 px-4 text-slate-700">
                     <SettingsIcon className="mr-1.5 size-4" />
-                    {compact ? "高级设置" : "Advanced settings"}
+                    Advanced settings
                   </Button>
                 </SheetTrigger>
               </div>
@@ -2295,12 +2285,11 @@ export default function TopicWorkflowDashboard({
                 <section className="space-y-3">
                   <div className="flex items-center justify-between gap-3">
                     <div>
-                      <p className="text-sm font-semibold text-slate-800">{compact ? "主题" : "Topics"}</p>
-                      <p className="text-xs text-slate-500">{compact ? "直接在这里维护本轮研究主题。" : "Edit the research questions directly inside the dashboard."}</p>
+                      <p className="text-sm font-semibold text-slate-800">Topics</p>
                     </div>
                     <Button type="button" variant="outline" size="sm" className="h-8 gap-1 rounded-full" onClick={addQuery}>
                       <PlusIcon className="size-3.5" />
-                      {compact ? "添加主题" : "Add topic"}
+                      Add topic
                     </Button>
                   </div>
                   <div className="space-y-2">
@@ -2312,7 +2301,7 @@ export default function TopicWorkflowDashboard({
                         <Input
                           value={query}
                           onChange={(event) => updateQuery(index, event.target.value)}
-                          placeholder={compact ? "输入主题、问题或线索" : "Enter a topic, problem, or question"}
+                          placeholder="Enter a topic, problem, or question"
                           className="h-9 border-none bg-transparent px-0 text-sm shadow-none focus-visible:ring-0"
                         />
                         {queryItems.length > 1 ? (
@@ -2335,10 +2324,7 @@ export default function TopicWorkflowDashboard({
                   <section className="rounded-2xl border border-slate-200 bg-slate-50/60 p-4">
                     <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                       <div>
-                        <p className="text-sm font-semibold text-slate-800">运行选项摘要</p>
-                        <p className="mt-1 text-xs text-slate-500">
-                          默认只显示本轮检索、分析和投递摘要，需要调整时再展开详细配置。
-                        </p>
+                        <p className="text-sm font-semibold text-slate-800">Run summary</p>
                       </div>
                       <Button
                         type="button"
@@ -2349,7 +2335,7 @@ export default function TopicWorkflowDashboard({
                         onClick={() => setCompactOptionsOpen((prev) => !prev)}
                       >
                         {showCompactOptions ? <ChevronDownIcon className="mr-1.5 size-4" /> : <ChevronRightIcon className="mr-1.5 size-4" />}
-                        {showCompactOptions ? "收起选项" : "编辑选项"}
+                        {showCompactOptions ? "Hide options" : "Edit options"}
                       </Button>
                     </div>
 
@@ -2363,18 +2349,17 @@ export default function TopicWorkflowDashboard({
                           </div>
                         </div>
                         <div className="flex flex-col gap-1 border-b border-slate-100 pb-3 md:flex-row md:items-start md:justify-between md:gap-4">
-                          <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">分析增强</div>
+                          <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Analysis</div>
                           <div className="text-sm font-medium text-slate-700">
                             <div>{compactAnalysisSummary}</div>
-                            <div className="mt-1 text-xs text-slate-500">需要更细的 LLM feature、judge budget 或输出策略时，再展开详细配置。</div>
                           </div>
                         </div>
                         <div className="flex flex-col gap-1 md:flex-row md:items-start md:justify-between md:gap-4">
-                          <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">投递方式</div>
+                          <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Delivery</div>
                           <div className="text-sm font-medium text-slate-700">
                             <div>{compactDeliverySummary}</div>
                             <div className="mt-1 text-xs text-slate-500">
-                              {notifyEnabled && notifyEmail.trim() ? notifyEmail.trim() : "Dashboard 提醒默认保留在当前页面内。"}
+                              {notifyEnabled && notifyEmail.trim() ? notifyEmail.trim() : "Dashboard only"}
                             </div>
                           </div>
                         </div>
@@ -2385,13 +2370,11 @@ export default function TopicWorkflowDashboard({
                       <div className="mt-4 space-y-4 border-t border-slate-200 pt-4">
                         <section className="space-y-3">
                           <div>
-                            <p className="text-sm font-semibold text-slate-800">检索范围</p>
-                            <p className="mt-1 text-xs text-slate-500">先确认来源和分支，再发起本轮搜索。</p>
+                            <p className="text-sm font-semibold text-slate-800">Retrieval</p>
                           </div>
                           <div className="grid gap-3 lg:grid-cols-2">
                             <div className="rounded-2xl border border-slate-200 bg-white p-3.5">
-                              <p className="text-sm font-semibold text-slate-800">来源</p>
-                              <p className="mt-1 text-xs text-slate-500">选择本轮检索来源。</p>
+                              <p className="text-sm font-semibold text-slate-800">Sources</p>
                               <div className="mt-3 flex flex-wrap gap-2">
                                 <WorkflowChip label="papers.cool" active={usePapersCool} onToggle={() => setUsePapersCool(!usePapersCool)} />
                                 <WorkflowChip label="arXiv API" active={useArxivApi} onToggle={() => setUseArxivApi(!useArxivApi)} />
@@ -2399,8 +2382,7 @@ export default function TopicWorkflowDashboard({
                               </div>
                             </div>
                             <div className="rounded-2xl border border-slate-200 bg-white p-3.5">
-                              <p className="text-sm font-semibold text-slate-800">分支</p>
-                              <p className="mt-1 text-xs text-slate-500">控制结果更贴近 arXiv、Venue 或两者结合。</p>
+                              <p className="text-sm font-semibold text-slate-800">Branches</p>
                               <div className="mt-3 flex flex-wrap gap-2">
                                 <WorkflowChip label="arXiv" active={useArxiv} onToggle={() => setUseArxiv(!useArxiv)} />
                                 <WorkflowChip label="Venue" active={useVenue} onToggle={() => setUseVenue(!useVenue)} />
@@ -2411,29 +2393,25 @@ export default function TopicWorkflowDashboard({
 
                         <section className="space-y-3">
                           <div>
-                            <p className="text-sm font-semibold text-slate-800">分析增强</p>
-                            <p className="mt-1 text-xs text-slate-500">只保留最常用的高层开关，重型参数继续放在高级设置里。</p>
+                            <p className="text-sm font-semibold text-slate-800">Analysis</p>
                           </div>
                           <div className="grid gap-3 md:grid-cols-3">
                             <WorkflowTogglePanel
-                              title="LLM 分析"
-                              description="补充摘要、趋势和洞察增强。"
+                              title="LLM analysis"
                               checked={enableLLM}
                               onCheckedChange={setEnableLLM}
                               icon={<SparklesIcon className="size-4" />}
                               compact
                             />
                             <WorkflowTogglePanel
-                              title="Judge 评分"
-                              description="补充多维度 Judge 分数和推荐标签。"
+                              title="Judge scoring"
                               checked={enableJudge}
                               onCheckedChange={setEnableJudge}
                               icon={<StarIcon className="size-4" />}
                               compact
                             />
                             <WorkflowTogglePanel
-                              title="保存产物"
-                              description="保留 Markdown 和 JSON 结果。"
+                              title="Save artifacts"
                               checked={saveDaily}
                               onCheckedChange={setSaveDaily}
                               icon={<BookOpenIcon className="size-4" />}
@@ -2444,21 +2422,18 @@ export default function TopicWorkflowDashboard({
 
                         <section className="space-y-3">
                           <div>
-                            <p className="text-sm font-semibold text-slate-800">投递方式</p>
-                            <p className="mt-1 text-xs text-slate-500">Dashboard 提醒默认保留，外部推送按需开启。</p>
+                            <p className="text-sm font-semibold text-slate-800">Delivery</p>
                           </div>
                           <div className="grid gap-3 md:grid-cols-2">
                             <WorkflowTogglePanel
-                              title="邮件摘要"
-                              description="把结果直接发送到指定邮箱。"
+                              title="Email digest"
                               checked={notifyEnabled}
                               onCheckedChange={store.setNotifyEnabled}
                               icon={<MailIcon className="size-4" />}
                               compact
                             />
                             <WorkflowTogglePanel
-                              title="Newsletter 推送"
-                              description="通过 Resend 推送给订阅用户。"
+                              title="Newsletter push"
                               checked={resendEnabled}
                               onCheckedChange={store.setResendEnabled}
                               icon={<WorkflowIcon className="size-4" />}
@@ -2475,9 +2450,6 @@ export default function TopicWorkflowDashboard({
                     <section className="grid gap-4 lg:grid-cols-2">
                       <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4">
                         <p className="text-sm font-semibold text-slate-800">Sources</p>
-                        <p className="mt-1 text-xs text-slate-500">
-                          Mix APIs and curated feeds without leaving the console.
-                        </p>
                         <div className="mt-3 flex flex-wrap gap-2">
                           <WorkflowChip label="papers.cool" active={usePapersCool} onToggle={() => setUsePapersCool(!usePapersCool)} />
                           <WorkflowChip label="arXiv API" active={useArxivApi} onToggle={() => setUseArxivApi(!useArxivApi)} />
@@ -2486,9 +2458,6 @@ export default function TopicWorkflowDashboard({
                       </div>
                       <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4">
                         <p className="text-sm font-semibold text-slate-800">Branches</p>
-                        <p className="mt-1 text-xs text-slate-500">
-                          Choose whether ranking stays closer to arXiv, venues, or both.
-                        </p>
                         <div className="mt-3 flex flex-wrap gap-2">
                           <WorkflowChip label="arXiv" active={useArxiv} onToggle={() => setUseArxiv(!useArxiv)} />
                           <WorkflowChip label="Venue" active={useVenue} onToggle={() => setUseVenue(!useVenue)} />
@@ -2499,35 +2468,30 @@ export default function TopicWorkflowDashboard({
                     <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                       <WorkflowTogglePanel
                         title="LLM analysis"
-                        description="Enable summary, trend, and insight enrichment on top of ranked papers."
                         checked={enableLLM}
                         onCheckedChange={setEnableLLM}
                         icon={<SparklesIcon className="size-4" />}
                       />
                       <WorkflowTogglePanel
                         title="Judge scoring"
-                        description="Attach five-dimensional judge scores and recommendation labels."
                         checked={enableJudge}
                         onCheckedChange={setEnableJudge}
                         icon={<StarIcon className="size-4" />}
                       />
                       <WorkflowTogglePanel
                         title="Save artifacts"
-                        description="Persist Markdown and JSON output for downstream sharing or review."
                         checked={saveDaily}
                         onCheckedChange={setSaveDaily}
                         icon={<BookOpenIcon className="size-4" />}
                       />
                       <WorkflowTogglePanel
                         title="Email digest"
-                        description="Send the resulting digest to a direct email recipient."
                         checked={notifyEnabled}
                         onCheckedChange={store.setNotifyEnabled}
                         icon={<MailIcon className="size-4" />}
                       />
                       <WorkflowTogglePanel
                         title="Newsletter push"
-                        description="Broadcast the digest to newsletter subscribers via Resend."
                         checked={resendEnabled}
                         onCheckedChange={store.setResendEnabled}
                         icon={<WorkflowIcon className="size-4" />}
@@ -2539,10 +2503,7 @@ export default function TopicWorkflowDashboard({
                 )}
 
                 <div className="flex flex-col gap-3 border-t border-slate-100 pt-4">
-                  <div className="space-y-1">
-                    <p className="text-sm text-slate-500">{controlStateHint}</p>
-                    <p className="text-xs leading-5 text-slate-400">{storageBoundaryHint}</p>
-                  </div>
+                  <p className="text-sm text-slate-500">{controlStateHint}</p>
                   <div className={`${compact ? "grid gap-2 sm:grid-cols-2 xl:grid-cols-4" : "flex flex-wrap gap-2"}`}>
                     <Button
                       size="sm"
@@ -2581,7 +2542,7 @@ export default function TopicWorkflowDashboard({
                       onClick={() => { store.clearAll(); setError(null) }}
                     >
                       <Trash2Icon className={`${compact ? "mr-1.5 size-4" : "size-4"}`} />
-                      {compact ? "清空结果" : null}
+                      {compact ? "Clear" : null}
                     </Button>
                   </div>
                 </div>
@@ -2591,7 +2552,7 @@ export default function TopicWorkflowDashboard({
                     <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                       <div>
                         <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-indigo-600">Run Status</p>
-                        <h4 className="mt-2 text-base font-semibold text-slate-900">当前运行状态</h4>
+                        <h4 className="mt-2 text-base font-semibold text-slate-900">Current state</h4>
                         <p className="mt-1 text-sm leading-6 text-slate-600">{nextStepLabel}</p>
                       </div>
                       <Badge variant="secondary" className="rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-medium text-slate-600">

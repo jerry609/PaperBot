@@ -24,14 +24,17 @@ from .routes import (
     research,
     paperscool,
     newsletter,
+    obsidian,
     harvest,
     model_endpoints,
+    embedding_settings,
     studio_chat,
     repro_context,
     feed,
     intelligence,
     push_commands,
     agent_board,
+    auth,
 )
 from paperbot.api.error_handling import install_api_error_handling
 from paperbot.infrastructure.event_log.logging_event_log import LoggingEventLog
@@ -80,14 +83,17 @@ app.include_router(memory.router, prefix="/api", tags=["Memory"])
 app.include_router(research.router, prefix="/api", tags=["Research"])
 app.include_router(paperscool.router, prefix="/api", tags=["PapersCool"])
 app.include_router(newsletter.router, prefix="/api", tags=["Newsletter"])
+app.include_router(obsidian.router, prefix="/api", tags=["Obsidian"])
 app.include_router(harvest.router, prefix="/api", tags=["Harvest"])
 app.include_router(model_endpoints.router, prefix="/api", tags=["Model Endpoints"])
+app.include_router(embedding_settings.router, prefix="/api", tags=["Embedding Settings"])
 app.include_router(studio_chat.router, prefix="/api", tags=["Studio Chat"])
 app.include_router(repro_context.router, prefix="/api/research/repro/context", tags=["P2C"])
 app.include_router(feed.router, prefix="/api", tags=["Feed"])
 app.include_router(intelligence.router, prefix="/api", tags=["Intelligence"])
 app.include_router(push_commands.router, prefix="/api", tags=["Push"])
 app.include_router(agent_board.router, tags=["Agent Board"])
+app.include_router(auth.router)
 
 
 @app.on_event("startup")
@@ -99,6 +105,12 @@ async def _startup_eventlog():
     except Exception:
         # If SQLAlchemy isn't available or DB init fails, fall back to logging only.
         app.state.event_log = LoggingEventLog()
+    obsidian.initialize_obsidian_runtime(app)
+
+
+@app.on_event("shutdown")
+async def _shutdown_obsidian_runtime():
+    obsidian.shutdown_obsidian_runtime(app)
 
 
 if __name__ == "__main__":

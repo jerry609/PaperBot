@@ -47,6 +47,10 @@ def test_from_dict_loads_obsidian_section() -> None:
                 "vault_path": "/tmp/vault",
                 "root_dir": "Research Notes",
                 "paper_template_path": "/tmp/paper.md.j2",
+                "sync_state_filename": ".sync-state.json",
+                "pending_dirname": ".pending",
+                "sync_debounce_seconds": 2.5,
+                "auto_watch": True,
             }
         }
     )
@@ -55,6 +59,10 @@ def test_from_dict_loads_obsidian_section() -> None:
     assert settings.obsidian.vault_path == "/tmp/vault"
     assert settings.obsidian.root_dir == "Research Notes"
     assert settings.obsidian.paper_template_path == "/tmp/paper.md.j2"
+    assert settings.obsidian.sync_state_filename == ".sync-state.json"
+    assert settings.obsidian.pending_dirname == ".pending"
+    assert settings.obsidian.sync_debounce_seconds == 2.5
+    assert settings.obsidian.auto_watch is True
 
 
 def test_load_from_file_merges_partial_nested_dicts(tmp_path: Path) -> None:
@@ -112,6 +120,10 @@ def test_load_environment_variables_overrides_obsidian(monkeypatch: pytest.Monke
     monkeypatch.setenv("PAPERBOT_OBSIDIAN_AUTO_EXPORT", "false")
     monkeypatch.setenv("PAPERBOT_OBSIDIAN_AUTO_SYNC_TRACKS", "false")
     monkeypatch.setenv("PAPERBOT_OBSIDIAN_EXPORT_LIMIT", "42")
+    monkeypatch.setenv("PAPERBOT_OBSIDIAN_SYNC_STATE_FILE", ".sync-state.json")
+    monkeypatch.setenv("PAPERBOT_OBSIDIAN_PENDING_DIRNAME", ".pending")
+    monkeypatch.setenv("PAPERBOT_OBSIDIAN_SYNC_DEBOUNCE_SECONDS", "2.5")
+    monkeypatch.setenv("PAPERBOT_OBSIDIAN_AUTO_WATCH", "true")
 
     settings.load_environment_variables()
 
@@ -122,6 +134,10 @@ def test_load_environment_variables_overrides_obsidian(monkeypatch: pytest.Monke
     assert settings.obsidian.auto_export_on_save is False
     assert settings.obsidian.auto_sync_tracks is False
     assert settings.obsidian.export_limit == 42
+    assert settings.obsidian.sync_state_filename == ".sync-state.json"
+    assert settings.obsidian.pending_dirname == ".pending"
+    assert settings.obsidian.sync_debounce_seconds == 2.5
+    assert settings.obsidian.auto_watch is True
 
 
 def test_load_environment_variables_warns_on_invalid_obsidian_export_limit(

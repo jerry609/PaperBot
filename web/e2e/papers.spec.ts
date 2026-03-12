@@ -16,8 +16,8 @@ test.describe("Papers Page E2E", () => {
     expect(hasPapersContent).toBeTruthy();
   });
 
-  test("papers page has import/export options", async ({ page }) => {
-    const exportButton = page.getByRole("button", { name: /export/i });
-    await expect(exportButton).toBeVisible();
+  test("papers page has library import actions", async ({ page }) => {
+    await expect(page.getByRole("button", { name: /import bibtex/i })).toBeVisible();
+    await expect(page.getByRole("button", { name: /zotero sync/i })).toBeVisible();
   });
 });

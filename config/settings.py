@@ -142,6 +142,12 @@ class ObsidianConfig(BaseModel):
     auto_export_on_save: bool = True
     auto_sync_tracks: bool = True
     export_limit: int = 200
+    track_moc_filename: str = "_MOC.md"
+    group_tracks_in_folders: bool = True
+    sync_state_filename: str = ".paperbot-sync-state.json"
+    pending_dirname: str = ".paperbot-pending"
+    sync_debounce_seconds: float = 1.0
+    auto_watch: bool = False
 
 
 class CollabHostConfig(BaseModel):
@@ -334,6 +340,12 @@ class Settings(BaseModel):
         obsidian_auto_export = os.getenv("PAPERBOT_OBSIDIAN_AUTO_EXPORT")
         obsidian_auto_sync_tracks = os.getenv("PAPERBOT_OBSIDIAN_AUTO_SYNC_TRACKS")
         obsidian_export_limit = os.getenv("PAPERBOT_OBSIDIAN_EXPORT_LIMIT")
+        obsidian_track_moc_filename = os.getenv("PAPERBOT_OBSIDIAN_TRACK_MOC_FILENAME")
+        obsidian_group_tracks = os.getenv("PAPERBOT_OBSIDIAN_GROUP_TRACKS_IN_FOLDERS")
+        obsidian_sync_state_file = os.getenv("PAPERBOT_OBSIDIAN_SYNC_STATE_FILE")
+        obsidian_pending_dirname = os.getenv("PAPERBOT_OBSIDIAN_PENDING_DIRNAME")
+        obsidian_sync_debounce = os.getenv("PAPERBOT_OBSIDIAN_SYNC_DEBOUNCE_SECONDS")
+        obsidian_auto_watch = os.getenv("PAPERBOT_OBSIDIAN_AUTO_WATCH")
         if re_enabled is not None:
             self.report_engine.enabled = re_enabled.lower() in ("1", "true", "yes", "on")
         if re_api:
@@ -393,6 +405,34 @@ class Settings(BaseModel):
                     "Ignoring invalid PAPERBOT_OBSIDIAN_EXPORT_LIMIT=%r; expected an integer",
                     obsidian_export_limit,
                 )
+        if obsidian_track_moc_filename:
+            self.obsidian.track_moc_filename = obsidian_track_moc_filename
+        if obsidian_group_tracks is not None:
+            self.obsidian.group_tracks_in_folders = obsidian_group_tracks.lower() in (
+                "1",
+                "true",
+                "yes",
+                "on",
+            )
+        if obsidian_sync_state_file:
+            self.obsidian.sync_state_filename = obsidian_sync_state_file
+        if obsidian_pending_dirname:
+            self.obsidian.pending_dirname = obsidian_pending_dirname
+        if obsidian_sync_debounce:
+            try:
+                self.obsidian.sync_debounce_seconds = max(0.0, float(obsidian_sync_debounce))
+            except ValueError:
+                logger.warning(
+                    "Ignoring invalid PAPERBOT_OBSIDIAN_SYNC_DEBOUNCE_SECONDS=%r; expected a float",
+                    obsidian_sync_debounce,
+                )
+        if obsidian_auto_watch is not None:
+            self.obsidian.auto_watch = obsidian_auto_watch.lower() in (
+                "1",
+                "true",
+                "yes",
+                "on",
+            )
 
         # Collab host LLM
         host_api = os.getenv("PAPERBOT_HOST_API_KEY")

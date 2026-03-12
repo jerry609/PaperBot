@@ -18,4 +18,6 @@ class VaultExporterPort(Protocol):
         track: Optional[Dict[str, Any]] = None,
         root_dir: str = "PaperBot",
         paper_template_path: Optional[Path] = None,
+        track_moc_filename: str = "_MOC.md",
+        group_tracks_in_folders: bool = True,
     ) -> Dict[str, Any]: ...

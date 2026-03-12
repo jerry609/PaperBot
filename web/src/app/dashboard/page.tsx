@@ -1,83 +1,76 @@
 import Link from "next/link"
+import { unstable_noStore as noStore } from "next/cache"
 import {
   ArrowRight,
-  FileText,
-  FlaskConical,
-  Settings,
+  BellDot,
+  BookOpen,
+  CalendarDays,
+  Clock3,
+  Layers,
   type LucideIcon,
+  TrendingUp,
 } from "lucide-react"
 
-import TopicWorkflowDashboard from "@/components/research/TopicWorkflowDashboard"
-import { fetchDeadlineRadar, fetchLLMUsage, fetchPapers, fetchPipelineTasks } from "@/lib/api"
+import DashboardReadingQueuePanel from "@/components/dashboard/DashboardReadingQueuePanel"
+import { fetchDeadlineRadar, fetchPapers } from "@/lib/api"
+import { fetchLatestDashboardBrief } from "@/lib/dashboard-brief"
 import {
   buildDashboardIntelligenceCards,
   type DashboardIntelligenceCard,
 } from "@/lib/dashboard-intelligence"
+import type { DashboardReadingQueueItem, DashboardReadingQueuePriority } from "@/lib/dashboard-reading-queue"
 import {
   fetchDashboardReadingQueue,
   fetchDashboardTrackFeed,
   fetchDashboardTracks,
   fetchIntelligenceFeed,
 } from "@/lib/dashboard-api"
+import { safeHref, safeInternalHref } from "@/lib/utils"
 import type {
   DeadlineRadarItem,
-  LLMUsageSummary,
   Paper,
-  PipelineTask,
   ReadingQueueItem,
   ResearchTrackSummary,
+  TrackFeedItem,
 } from "@/lib/types"
 
-type DashboardPageProps = {
-  searchParams?: Promise<Record<string, string | string[] | undefined>>
-}
+export const dynamic = "force-dynamic"
+export const revalidate = 0
 
-type PriorityLevel = "high" | "medium" | "low"
-type Tone = "good" | "warn" | "bad" | "info"
-
-type QueuePreview = {
+type DashboardRecommendationCardData = {
   id: string
+  paperRef: string | null
+  internalPaperId: number | null
   title: string
-  venue: string
+  href: string
+  meta: string
+  summary: string
   tags: string[]
-  time: string
-  priority: PriorityLevel
-  href: string
-}
-
-type LaneItemData = {
-  title: string
-  copy: string
-  metaLeft: string
-  metaRight: string
-  tone: Tone
-  href?: string
-}
-
-type DestinationCardData = {
-  title: string
-  description: string
   metric: string
-  href: string
-  icon: LucideIcon
+  recommendation?: string | null
+  authors: string[]
+  year?: number | null
+  paperSource?: "arxiv" | "semantic_scholar" | "openalex" | null
+  isSaved?: boolean
 }
 
-const TONE_PILL_CLASSES: Record<Tone, string> = {
-  good: "border-emerald-200 bg-emerald-50 text-emerald-700",
-  warn: "border-amber-200 bg-amber-50 text-amber-700",
-  bad: "border-rose-200 bg-rose-50 text-rose-700",
-  info: "border-indigo-200 bg-indigo-50 text-indigo-700",
+type TrackSpotlightItem = {
+  id: number
+  name: string
+  updateCount: number
+  latestPaper: string
+  href: string
 }
 
 function getGreeting(): string {
   const hour = new Date().getHours()
-  if (hour < 12) return "早上好"
-  if (hour < 18) return "下午好"
-  return "晚上好"
+  if (hour < 12) return "Good morning"
+  if (hour < 18) return "Good afternoon"
+  return "Good evening"
 }
 
 function formatRelativeTime(value?: string | null): string {
-  if (!value) return "刚刚"
+  if (!value) return "just now"
 
   const parsed = new Date(value)
   if (Number.isNaN(parsed.getTime())) return value
@@ -87,15 +80,33 @@ function formatRelativeTime(value?: string | null): string {
   const diffHours = Math.floor(diffMinutes / 60)
   const diffDays = Math.floor(diffHours / 24)
 
-  if (diffMinutes < 60) return `${diffMinutes} 分钟前`
-  if (diffHours < 24) return `${diffHours} 小时前`
-  if (diffDays === 1) return "昨天"
-  if (diffDays < 7) return `${diffDays} 天前`
+  if (diffMinutes < 60) return `${diffMinutes}m ago`
+  if (diffHours < 24) return `${diffHours}h ago`
+  if (diffDays === 1) return "yesterday"
+  if (diffDays < 7) return `${diffDays}d ago`
 
-  return parsed.toLocaleDateString("zh-CN", { month: "numeric", day: "numeric" })
+  return parsed.toLocaleDateString("en-US", { month: "short", day: "numeric" })
 }
 
-function getQueuePriority(item: ReadingQueueItem, index: number): PriorityLevel {
+function formatRecommendationLabel(value?: string | null): string | null {
+  const normalized = String(value || "").trim()
+  if (!normalized) return null
+
+  switch (normalized) {
+    case "must_read":
+      return "Must read"
+    case "worth_reading":
+      return "Worth reading"
+    case "skim":
+      return "Skim"
+    case "skip":
+      return "Skip"
+    default:
+      return normalized
+  }
+}
+
+function getQueuePriority(item: ReadingQueueItem, index: number): DashboardReadingQueuePriority {
   if (typeof item.priority === "number") {
     if (item.priority <= 2) return "high"
     if (item.priority <= 4) return "medium"
@@ -107,272 +118,309 @@ function getQueuePriority(item: ReadingQueueItem, index: number): PriorityLevel 
   return "low"
 }
 
-function formatCurrency(value: number): string {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(value)
+function getRecommendationPriority(
+  recommendation?: string | null,
+  index = 0,
+): DashboardReadingQueuePriority {
+  switch (String(recommendation || "").trim().toLowerCase()) {
+    case "must read":
+    case "must_read":
+      return "high"
+    case "worth reading":
+    case "worth_reading":
+      return "medium"
+    case "skim":
+    case "skip":
+      return "low"
+    default:
+      return index < 2 ? "high" : "medium"
+  }
 }
 
-function buildQueuePreviewItems(
-  readingQueue: ReadingQueueItem[],
-  paperMap: Map<string, Paper>,
-  activeTrack: ResearchTrackSummary | null,
-): QueuePreview[] {
+function isExternalUrl(value: string): boolean {
+  return /^https?:\/\//.test(value)
+}
+
+function normalizePaperRef(value: unknown): string | null {
+  const normalized = String(value ?? "").trim()
+  return normalized || null
+}
+
+function parseInternalPaperId(value: unknown): number | null {
+  if (typeof value === "number") {
+    return Number.isInteger(value) && value >= 0 ? value : null
+  }
+
+  if (typeof value !== "string") return null
+
+  const normalized = value.trim()
+  if (!normalized) return null
+
+  const parsed = Number(normalized)
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : null
+}
+
+function buildRecommendationCards(args: {
+  trackFeedItems: TrackFeedItem[]
+  activeTrack: ResearchTrackSummary | null
+}): DashboardRecommendationCardData[] {
+  const { trackFeedItems, activeTrack } = args
+
+  return trackFeedItems.slice(0, 4).map((item, index) => {
+    const recommendation = formatRecommendationLabel(item.latest_judge?.recommendation)
+    const judgeScore = item.latest_judge?.overall
+    const metric = judgeScore != null
+      ? `Judge ${Number(judgeScore).toFixed(1)}`
+      : `Feed ${item.feed_score.toFixed(1)}`
+    const paperRef = normalizePaperRef(item.paper.id)
+
+    return {
+      id: paperRef || `track-feed-${index}`,
+      paperRef,
+      internalPaperId: parseInternalPaperId(item.paper.id),
+      title: item.paper.title,
+      href: `/papers/${item.paper.id}`,
+      meta: item.paper.venue || activeTrack?.name || "Recommendation",
+      summary: recommendation
+        ? `${recommendation} in the active track feed.`
+        : "Pulled into today’s shortlist.",
+      tags: item.matched_terms.slice(0, 3),
+      metric,
+      recommendation,
+      authors: [],
+      year: item.paper.year ?? null,
+      paperSource: null,
+      isSaved: String(item.latest_feedback_action || "").trim().toLowerCase() === "save",
+    }
+  })
+}
+
+function buildReadingQueueCards(args: {
+  recommendations: DashboardRecommendationCardData[]
+  readingQueue: ReadingQueueItem[]
+  paperMap: Map<string, Paper>
+  activeTrack: ResearchTrackSummary | null
+  latestBriefTime?: string | null
+  latestBriefSource?: string | null
+}): DashboardReadingQueueItem[] {
+  const {
+    recommendations,
+    readingQueue,
+    paperMap,
+    activeTrack,
+    latestBriefTime,
+    latestBriefSource,
+  } = args
+
+  if (recommendations.length > 0) {
+    const sourceLabel = latestBriefSource ? `${latestBriefSource} brief` : "Workflow brief"
+    const timeLabel = formatRelativeTime(latestBriefTime)
+
+    return recommendations.slice(0, 3).map((item, index) => ({
+      id: item.id,
+      paperRef: item.paperRef,
+      internalPaperId: item.internalPaperId,
+      title: item.title,
+      venue: item.meta,
+      summary: item.summary,
+      tags: item.tags,
+      sourceLabel,
+      priority: getRecommendationPriority(item.recommendation, index),
+      timeLabel,
+      href: item.href,
+      researchHref: activeTrack ? `/research?track_id=${activeTrack.id}` : "/research",
+      isExternal: isExternalUrl(item.href),
+      metric: item.metric,
+      recommendation: item.recommendation,
+      authors: item.authors,
+      year: item.year,
+      paperSource: item.paperSource,
+      isSaved: Boolean(item.isSaved),
+      canSave: !item.isSaved && (item.internalPaperId !== null || Boolean(item.paperRef)),
+    }))
+  }
+
   const fallbackTags = (activeTrack?.keywords || []).slice(0, 2)
 
   return readingQueue.slice(0, 3).map((item, index) => {
-    const paper = paperMap.get(String(item.paper_id || item.id))
+    const paperRef = normalizePaperRef(item.paper_id)
+    const paper = paperMap.get(paperRef || String(item.id))
+    const internalPaperId = parseInternalPaperId(item.paper_id)
     const tags = (
       paper?.tags?.length
         ? paper.tags
         : fallbackTags.length
           ? fallbackTags
-          : ["Reading Queue"]
-    ).slice(0, 2)
+          : ["Reading queue"]
+    ).slice(0, 3)
 
     return {
       id: item.id,
+      paperRef,
+      internalPaperId,
       title: item.title,
       venue:
         paper?.venue ||
-        (item.authors
-          ? `${item.authors.split(",").slice(0, 2).join(", ")}`
-          : "Paper Library"),
+        (item.authors ? item.authors.split(",").slice(0, 2).join(", ") : "Paper library"),
+      summary: activeTrack
+        ? `Queued for ${activeTrack.name}.`
+        : "Queued for review.",
       tags,
-      time: formatRelativeTime(item.saved_at),
+      sourceLabel: activeTrack ? `${activeTrack.name} queue` : "Reading queue",
       priority: getQueuePriority(item, index),
-      href: item.paper_id ? `/papers/${item.paper_id}` : "/papers",
+      timeLabel: formatRelativeTime(item.saved_at),
+      href: paperRef ? `/papers/${paperRef}` : "/papers",
+      researchHref: activeTrack ? `/research?track_id=${activeTrack.id}` : "/research",
+      authors: item.authors ? item.authors.split(",").map((value) => value.trim()).filter(Boolean) : [],
+      year: null,
+      paperSource: null,
+      isSaved: true,
+      canSave: false,
     }
   })
 }
 
-function buildActionLanes(args: {
-  tasks: PipelineTask[]
-  deadlines: DeadlineRadarItem[]
-  queueItems: QueuePreview[]
-  usageSummary: LLMUsageSummary
-  signalCount: number
-  tracks: ResearchTrackSummary[]
-}): { now: LaneItemData[]; later: LaneItemData[] } {
-  const { tasks, deadlines, queueItems, usageSummary, signalCount, tracks } = args
-  const failedTask = tasks.find((task) => task.status === "failed")
-  const urgentDeadline = deadlines.find((deadline) => deadline.days_left <= 14)
-  const highPriorityItem = queueItems.find((item) => item.priority === "high")
-
-  const now: LaneItemData[] = []
-  const later: LaneItemData[] = []
-
-  if (failedTask) {
-    now.push({
-      title: `修复 ${failedTask.paper_title}`,
-      copy: "后台抓取或预处理失败会直接影响下午的候选与 digest 质量。",
-      metaLeft: failedTask.started_at,
-      metaRight: "阻塞主流程",
-      tone: "bad",
-      href: "#workflow",
-    })
-  }
-
-  if (urgentDeadline) {
-    now.push({
-      title: `${urgentDeadline.name} 还有 ${urgentDeadline.days_left} 天`,
-      copy: "补齐材料和对照实验，避免 deadline 信息继续漂浮在首页边缘而没有真正进入行动队列。",
-      metaLeft: urgentDeadline.field,
-      metaRight: "高优先级",
-      tone: "warn",
-      href: urgentDeadline.matched_tracks[0]
-        ? `/research?track_id=${urgentDeadline.matched_tracks[0].track_id}`
-        : "/research",
-    })
-  }
-
-  if (highPriorityItem) {
-    now.push({
-      title: `处理高优候选《${highPriorityItem.title}》`,
-      copy: "把最接近当前焦点的问题优先决策，避免候选堆进长列表里继续增加认知负担。",
-      metaLeft: highPriorityItem.venue,
-      metaRight: highPriorityItem.time,
-      tone: "warn",
-      href: highPriorityItem.href,
-    })
-  }
-
-  if (now.length === 0) {
-    now.push({
-      title: "今天没有立即阻塞项",
-      copy: "可以直接回到主工作台跑 Search 或 DailyPaper，把注意力留给当前的 Focus Track。",
-      metaLeft: "Calm mode",
-      metaRight: "继续工作",
-      tone: "good",
-      href: "#workflow",
-    })
-  }
-
-  if (usageSummary.totals.calls > 0 || usageSummary.totals.total_cost_usd > 0) {
-    later.push({
-      title: `近 ${usageSummary.window_days} 天完成 ${usageSummary.totals.calls} 次模型调用`,
-      copy: `累计成本 ${formatCurrency(usageSummary.totals.total_cost_usd)}。模型使用概览被收进次级页，只在它影响决策时再回到首页。`,
-      metaLeft: "Usage",
-      metaRight: "Settings",
-      tone: "info",
-      href: "/settings",
-    })
-  }
-
-  if (signalCount > 0) {
-    later.push({
-      title: `${signalCount} 条社区信号已压缩进证据快照`,
-      copy: "首页只保留会影响当前判断的摘要，完整动态继续留在 Research 页面。",
-      metaLeft: "Signals",
-      metaRight: "Evidence",
-      tone: "info",
-      href: "#signals",
-    })
-  }
-
-  if (tracks.length > 1) {
-    later.push({
-      title: `${tracks.length - 1} 个非焦点 Track 等待回顾`,
-      copy: "这些 Track 继续存在，但不会再在首页和当前焦点争夺同一层级的注意力。",
-      metaLeft: "Research",
-      metaRight: "稍后处理",
-      tone: "info",
-      href: "/research",
-    })
-  }
-
-  if (later.length === 0) {
-    later.push({
-      title: "当前没有额外维护项",
-      copy: "今天可以把注意力完全集中在主工作台，不需要切换到别的页面清理配置或状态。",
-      metaLeft: "Workspace",
-      metaRight: "清爽",
-      tone: "info",
-      href: "/research",
-    })
-  }
-
-  return {
-    now: now.slice(0, 3),
-    later: later.slice(0, 3),
-  }
-}
-
-function getLaneTone(items: LaneItemData[]): Tone {
-  if (items.some((item) => item.tone === "bad")) return "bad"
-  if (items.some((item) => item.tone === "warn")) return "warn"
-  if (items.some((item) => item.tone === "good")) return "good"
-  return "info"
-}
-
-function getEvidenceStyles(source: string): {
-  badgeClassName: string
-  chipClassName: string
-} {
-  switch (source) {
-    case "github":
-      return {
-        badgeClassName: "border-slate-200 bg-slate-50 text-slate-700",
-        chipClassName: "border-slate-200 bg-slate-50 text-slate-600",
-      }
-    case "reddit":
-      return {
-        badgeClassName: "border-amber-200 bg-amber-50 text-amber-700",
-        chipClassName: "border-amber-200 bg-amber-50 text-amber-700",
-      }
-    case "huggingface":
-      return {
-        badgeClassName: "border-sky-200 bg-sky-50 text-sky-700",
-        chipClassName: "border-sky-200 bg-sky-50 text-sky-700",
-      }
-    default:
-      return {
-        badgeClassName: "border-emerald-200 bg-emerald-50 text-emerald-700",
-        chipClassName: "border-slate-200 bg-slate-50 text-slate-600",
-      }
-  }
-}
-
-function SectionIntro({
-  eyebrow,
+function SectionHeader({
   title,
-  copy,
-  actionHref,
   actionLabel,
+  actionHref,
 }: {
-  eyebrow: string
   title: string
-  copy: string
-  actionHref?: string
   actionLabel?: string
+  actionHref?: string
 }) {
   return (
-    <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-      <div className="max-w-3xl">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-indigo-600">{eyebrow}</p>
-        <h2 className="mt-2 text-2xl font-bold tracking-tight text-slate-900">
-          {title}
-        </h2>
-        <p className="mt-2 text-sm leading-6 text-slate-600">{copy}</p>
-      </div>
-
-      {actionHref && actionLabel ? (
+    <div className="mb-4 flex items-center justify-between gap-3">
+      <h2 className="text-sm font-bold uppercase tracking-[0.18em] text-slate-500">
+        {title}
+      </h2>
+      {actionLabel && actionHref ? (
         <Link
           href={actionHref}
-          className="inline-flex items-center gap-1.5 text-sm font-semibold text-indigo-600 transition-colors hover:text-indigo-700"
+          className="inline-flex items-center gap-1 text-sm font-medium text-indigo-600 transition-colors hover:text-indigo-700"
         >
           {actionLabel}
-          <ArrowRight size={15} />
+          <ArrowRight className="size-4" />
         </Link>
       ) : null}
     </div>
   )
 }
 
-function TonePill({ tone, children }: { tone: Tone; children: React.ReactNode }) {
+function OverviewStat({
+  label,
+  value,
+  helper,
+  alert = false,
+  icon: Icon,
+}: {
+  label: string
+  value: string | number
+  helper: string
+  alert?: boolean
+  icon: LucideIcon
+}) {
   return (
-    <span
-      className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold ${TONE_PILL_CLASSES[tone]}`}
-    >
-      {children}
-    </span>
+    <div className="group flex items-center justify-between rounded-2xl border border-slate-100 bg-white p-5 shadow-sm transition-all hover:shadow-md">
+      <div>
+        <p className="text-sm font-medium text-slate-500">{label}</p>
+        <div className="mt-1 flex items-baseline gap-2">
+          <span className="text-2xl font-bold text-slate-800">{value}</span>
+          <span className={`text-xs font-medium ${alert ? "text-rose-600" : "text-emerald-600"}`}>
+            {helper}
+          </span>
+        </div>
+      </div>
+      <div className={`rounded-xl p-3 transition-colors ${alert ? "bg-rose-50 text-rose-600 group-hover:bg-rose-100" : "bg-indigo-50 text-indigo-600 group-hover:bg-indigo-100"}`}>
+        <Icon className="size-5" />
+      </div>
+    </div>
   )
 }
 
-function EvidencePreviewCard({
-  item,
-  compact = false,
+function ActionLink({
+  href,
+  label,
+  primary = false,
+  external = false,
 }: {
-  item: DashboardIntelligenceCard
-  compact?: boolean
+  href: string
+  label: string
+  primary?: boolean
+  external?: boolean
 }) {
-  const styles = getEvidenceStyles(item.source)
+  const safeLink = external ? safeHref(href) : safeInternalHref(href)
+  const className = primary
+    ? "inline-flex items-center rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-indigo-700"
+    : "inline-flex items-center rounded-lg px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900"
+
+  if (!safeLink) {
+    return (
+      <span className={`${className} cursor-not-allowed opacity-60`}>
+        {label}
+      </span>
+    )
+  }
+
+  if (external) {
+    return (
+      <a href={safeLink} target="_blank" rel="noreferrer" className={className}>
+        {label}
+      </a>
+    )
+  }
 
   return (
-    <article className={`flex h-full flex-col rounded-2xl border border-slate-200 bg-white shadow-sm ${compact ? "p-3.5" : "p-4"}`}>
+    <Link href={safeLink} className={className}>
+      {label}
+    </Link>
+  )
+}
+
+function TrackSpotlightCard({ item }: { item: TrackSpotlightItem }) {
+  return (
+    <Link
+      href={item.href}
+      className="group block rounded-2xl border border-slate-100 bg-white p-5 shadow-sm transition-all hover:border-indigo-200 hover:shadow-md"
+    >
       <div className="flex items-start justify-between gap-3">
-        <span
-          className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] ${styles.badgeClassName}`}
-        >
+        <div className="rounded-xl bg-violet-50 p-2 text-violet-600 transition-colors group-hover:bg-violet-100">
+          <Layers className="size-4.5" />
+        </div>
+        <span className="rounded-full border border-rose-100 bg-rose-50 px-2.5 py-1 text-[11px] font-medium text-rose-700">
+          {item.updateCount > 0 ? `${item.updateCount} updates` : "Watching"}
+        </span>
+      </div>
+      <h3 className="mt-4 text-base font-bold text-slate-800 transition-colors group-hover:text-indigo-600">
+        {item.name}
+      </h3>
+      <div className="mt-4 border-t border-slate-50 pt-3">
+        <span className="block text-xs text-slate-400">Latest capture</span>
+        <span className="mt-1 block text-sm font-medium text-slate-700">{item.latestPaper}</span>
+      </div>
+    </Link>
+  )
+}
+
+function SignalCard({ item }: { item: DashboardIntelligenceCard }) {
+  return (
+    <article className="rounded-2xl border border-slate-100 bg-white p-5 shadow-sm">
+      <div className="flex items-center justify-between gap-3">
+        <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-medium text-slate-600">
           {item.sourceLabel}
         </span>
-        <span className="text-xs text-slate-500">{formatRelativeTime(item.timestamp)}</span>
+        <span className="text-xs text-slate-400">{formatRelativeTime(item.timestamp)}</span>
       </div>
 
-      <h3 className={`font-semibold text-slate-900 ${compact ? "mt-2 text-base leading-6" : "mt-3 text-lg leading-7"}`}>
-        {item.title}
-      </h3>
-      <p className={`text-sm text-slate-600 ${compact ? "mt-1.5 leading-5" : "mt-2 leading-6"}`}>{item.summary}</p>
+      <h3 className="mt-3 text-base font-bold leading-6 text-slate-800">{item.title}</h3>
+      <p className="mt-2 text-sm leading-6 text-slate-600">{item.summary}</p>
 
       {item.reasonChips.length > 0 ? (
-        <div className={`flex flex-wrap gap-2 ${compact ? "mt-3" : "mt-4"}`}>
-          {item.reasonChips.slice(0, compact ? 2 : 3).map((reason) => (
+        <div className="mt-4 flex flex-wrap gap-2">
+          {item.reasonChips.slice(0, 3).map((reason) => (
             <span
               key={`${item.id}-${reason}`}
-              className={`rounded-full border px-2.5 py-1 text-[11px] font-medium ${styles.chipClassName}`}
+              className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-medium text-slate-600"
             >
               {reason}
             </span>
@@ -380,380 +428,314 @@ function EvidencePreviewCard({
         </div>
       ) : null}
 
-      <div className={`mt-auto flex items-center justify-between gap-3 border-t border-slate-100 ${compact ? "pt-3" : "pt-4"}`}>
+      <div className="mt-4 flex items-center justify-between gap-3 border-t border-slate-50 pt-4">
         <span className="text-xs text-slate-500">{item.metricLabel}</span>
-        <div className="flex items-center gap-3">
-          <Link
-            href={item.researchHref}
-            className="inline-flex items-center gap-1 text-sm font-semibold text-indigo-600 transition-colors hover:text-indigo-700"
-          >
-            {item.researchLabel}
-            <ArrowRight size={15} />
-          </Link>
-          {item.isExternal ? (
-            <Link
-              href={item.href}
-              target="_blank"
-              rel="noreferrer"
-              className="text-xs font-medium text-slate-500 transition-colors hover:text-slate-900"
-            >
-              原始来源
-            </Link>
-          ) : null}
+        <div className="flex items-center gap-2">
+          <ActionLink href={item.researchHref} label={item.researchLabel} />
+          <ActionLink href={item.href} label="Source" external={item.isExternal} />
         </div>
       </div>
     </article>
   )
 }
 
-function TodayRail({
-  nowItems,
-  laterItems,
-  destinations,
-  queueItems,
-  highPriorityQueue,
-}: {
-  nowItems: LaneItemData[]
-  laterItems: LaneItemData[]
-  destinations: DestinationCardData[]
-  queueItems: QueuePreview[]
-  highPriorityQueue: number
-}) {
-  function renderLaneItem(item: LaneItemData, key: string) {
-    const content = (
-      <div className="rounded-xl bg-slate-50 px-3.5 py-3 transition-colors hover:bg-slate-100">
-        <div className="flex items-center justify-between gap-3">
-          <TonePill tone={item.tone}>
-            {item.tone === "bad"
-              ? "阻塞"
-              : item.tone === "warn"
-                ? "注意"
-                : item.tone === "good"
-                  ? "清爽"
-                  : "信息"}
-          </TonePill>
-          <span className="text-xs text-slate-500">{item.metaRight}</span>
+function DeadlineCard({ item }: { item: DeadlineRadarItem }) {
+  const safeUrl = safeHref(item.url)
+  const className = "group flex items-center justify-between gap-3 rounded-2xl border border-slate-100 bg-white p-4 shadow-sm transition-all hover:border-indigo-200 hover:shadow-md"
+  const content = (
+    <>
+      <div className="flex items-center gap-3">
+        <div className="flex h-12 w-12 flex-col items-center justify-center rounded-xl bg-orange-50 text-orange-600 transition-colors group-hover:bg-orange-100">
+          <span className="text-[10px] font-bold uppercase">
+            {new Date(item.deadline).toLocaleDateString("en-US", { month: "short" })}
+          </span>
+          <span className="text-lg font-black">
+            {new Date(item.deadline).toLocaleDateString("en-US", { day: "2-digit" })}
+          </span>
         </div>
-        <h4 className="mt-3 text-sm font-semibold leading-6 text-slate-900">{item.title}</h4>
-        <p className="mt-1 text-sm leading-6 text-slate-600">{item.copy}</p>
-        <div className="mt-3 flex items-center justify-between gap-3 text-xs text-slate-500">
-          <span>{item.metaLeft}</span>
-          {item.href ? (
-            <span className="inline-flex items-center gap-1 font-semibold text-indigo-600">
-              打开
-              <ArrowRight size={13} />
-            </span>
-          ) : null}
+        <div>
+          <h4 className="text-sm font-bold text-slate-800">{item.name}</h4>
+          <p className="text-xs text-slate-500">
+            {item.field} · {item.days_left} days left
+          </p>
         </div>
       </div>
-    )
+      {item.days_left <= 14 ? (
+        <div className="h-2 w-2 rounded-full bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.5)]" />
+      ) : null}
+    </>
+  )
 
-    return item.href ? (
-      <Link key={key} href={item.href} className="block">
-        {content}
-      </Link>
-    ) : (
-      <div key={key}>{content}</div>
-    )
+  if (!safeUrl) {
+    return <div className={`${className} cursor-not-allowed opacity-80`}>{content}</div>
   }
 
   return (
-    <aside className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-      <div>
-        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-indigo-600">Sidebar</p>
-        <h3 className="mt-2 text-xl font-bold tracking-tight text-slate-900">Today rail</h3>
-        <p className="mt-1 text-sm leading-6 text-slate-600">把提醒、交接入口和候选队列压进同一条侧栏，首页主区只保留简报和信号。</p>
-      </div>
-
-      <div className="mt-5 space-y-5">
-        <section>
-          <div className="flex items-center justify-between gap-3">
-            <h4 className="text-sm font-semibold text-slate-900">现在要处理</h4>
-            <TonePill tone={getLaneTone(nowItems)}>{nowItems.length} 项</TonePill>
-          </div>
-          <div className="mt-3 space-y-2">
-            {nowItems.map((item, index) => renderLaneItem(item, `now-${index}`))}
-          </div>
-        </section>
-
-        <section className="border-t border-slate-100 pt-5">
-          <div className="flex items-center justify-between gap-3">
-            <h4 className="text-sm font-semibold text-slate-900">稍后处理</h4>
-            <TonePill tone={getLaneTone(laterItems)}>{laterItems.length} 项</TonePill>
-          </div>
-          <div className="mt-3 space-y-2">
-            {laterItems.map((item, index) => renderLaneItem(item, `later-${index}`))}
-          </div>
-        </section>
-
-        <section className="border-t border-slate-100 pt-5">
-          <div className="flex items-center justify-between gap-3">
-            <h4 className="text-sm font-semibold text-slate-900">交接入口</h4>
-            <span className="text-xs text-slate-500">{destinations.length} 个空间</span>
-          </div>
-          <div className="mt-3 space-y-2">
-            {destinations.map((item) => {
-              const Icon = item.icon
-
-              return (
-                <Link
-                  key={item.title}
-                  href={item.href}
-                  className="flex items-start justify-between gap-3 rounded-xl bg-slate-50 px-3.5 py-3 transition-colors hover:bg-slate-100"
-                >
-                  <div className="flex items-start gap-3">
-                    <span className="mt-0.5 flex size-8 items-center justify-center rounded-xl bg-white text-indigo-600 shadow-sm">
-                      <Icon size={16} />
-                    </span>
-                    <div>
-                      <p className="text-sm font-semibold text-slate-900">{item.title}</p>
-                      <p className="mt-1 text-sm leading-6 text-slate-600">{item.description}</p>
-                    </div>
-                  </div>
-                  <span className="text-xs font-semibold text-slate-500">{item.metric}</span>
-                </Link>
-              )
-            })}
-          </div>
-        </section>
-
-        <section className="border-t border-slate-100 pt-5">
-          <div className="flex items-center justify-between gap-3">
-            <h4 className="text-sm font-semibold text-slate-900">今日队列</h4>
-            <TonePill tone={highPriorityQueue > 0 ? "warn" : "good"}>{highPriorityQueue} 篇高优</TonePill>
-          </div>
-          <div className="mt-3 space-y-2">
-            {queueItems.length > 0 ? (
-              queueItems.map((item) => (
-                <Link
-                  key={item.id}
-                  href={item.href}
-                  className="block rounded-xl bg-slate-50 px-3.5 py-3 transition-colors hover:bg-slate-100"
-                >
-                  <div className="flex items-center justify-between gap-3">
-                    <TonePill tone={item.priority === "high" ? "warn" : item.priority === "medium" ? "info" : "good"}>
-                      {item.priority === "high" ? "高优" : item.priority === "medium" ? "中优" : "低优"}
-                    </TonePill>
-                    <span className="text-xs text-slate-500">{item.time}</span>
-                  </div>
-                  <h4 className="mt-3 text-sm font-semibold leading-6 text-slate-900">{item.title}</h4>
-                  <p className="mt-1 text-sm leading-6 text-slate-600">{item.venue}</p>
-                </Link>
-              ))
-            ) : (
-              <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50/70 p-4 text-sm leading-6 text-slate-600">
-                队列里还没有候选。先从主工作台运行 Search，把今天的候选池建立起来。
-              </div>
-            )}
-          </div>
-        </section>
-      </div>
-    </aside>
+    <a
+      href={safeUrl}
+      target="_blank"
+      rel="noreferrer"
+      className={className}
+    >
+      {content}
+    </a>
   )
 }
 
-export default async function DashboardPage({ searchParams }: DashboardPageProps) {
-  const params = searchParams ? await searchParams : {}
-  const queryValue = Array.isArray(params?.query) ? params.query[0] : params?.query
-  const initialQueries = typeof queryValue === "string"
-    ? queryValue
-        .split(",")
-        .map((value) => value.trim())
-        .filter(Boolean)
-    : undefined
+export default async function DashboardPage() {
+  noStore()
 
   const [
     tracksResult,
-    tasksResult,
     readingQueueResult,
-    llmUsageResult,
-    deadlineResult,
     intelligenceResult,
     papersResult,
+    latestBriefResult,
+    deadlinesResult,
   ] = await Promise.allSettled([
     fetchDashboardTracks("default"),
-    fetchPipelineTasks(),
     fetchDashboardReadingQueue("default", 6),
-    fetchLLMUsage(14),
-    fetchDeadlineRadar("default"),
     fetchIntelligenceFeed("default", 6, { sortBy: "delta", sortOrder: "desc" }),
     fetchPapers(),
+    fetchLatestDashboardBrief(),
+    fetchDeadlineRadar("default"),
   ])
 
   const tracks = tracksResult.status === "fulfilled" ? tracksResult.value : []
-  const tasks = tasksResult.status === "fulfilled" ? tasksResult.value : []
   const readingQueue = readingQueueResult.status === "fulfilled" ? readingQueueResult.value : []
-  const usageSummary = llmUsageResult.status === "fulfilled"
-    ? llmUsageResult.value
-    : {
-        window_days: 14,
-        daily: [],
-        provider_models: [],
-        totals: { calls: 0, total_tokens: 0, total_cost_usd: 0 },
-      }
-  const deadlinesRaw = deadlineResult.status === "fulfilled" ? deadlineResult.value : []
   const intelligenceFeed = intelligenceResult.status === "fulfilled"
     ? intelligenceResult.value
     : { items: [], refreshed_at: null, refresh_scheduled: false, keywords: [], watch_repos: [], subreddits: [] }
   const papers = papersResult.status === "fulfilled" ? papersResult.value : []
+  const latestBrief = latestBriefResult.status === "fulfilled" ? latestBriefResult.value : null
+  const deadlinesRaw = deadlinesResult.status === "fulfilled" ? deadlinesResult.value : []
 
-  const deadlines = [...deadlinesRaw].sort((left, right) => left.days_left - right.days_left)
-  const activeTrack = tracks.find((track) => track.is_active) || tracks[0] || null
-  const activeTrackFeedResult = activeTrack
+  const orderedTracks = [...tracks].sort((left, right) => Number(Boolean(right.is_active)) - Number(Boolean(left.is_active)))
+  const activeTrack = orderedTracks[0] || null
+  const activeTrackFeed = activeTrack
     ? await fetchDashboardTrackFeed(activeTrack.id, "default", 4).catch(() => ({ items: [], total: 0 }))
     : { items: [], total: 0 }
-  const activeTrackFeedTotal = activeTrackFeedResult.total || 0
-  const intelligenceCards = buildDashboardIntelligenceCards(intelligenceFeed.items)
-  const featuredSignal = intelligenceCards[0] || null
-  const secondarySignals = intelligenceCards.slice(1, 4)
-  const queueItems = buildQueuePreviewItems(
+  const recommendationCards: DashboardRecommendationCardData[] = latestBrief?.recommendations.length
+    ? latestBrief.recommendations.map((item) => ({
+        id: item.id,
+        paperRef: normalizePaperRef(item.paperId),
+        internalPaperId: parseInternalPaperId(item.paperId),
+        title: item.title,
+        href: item.href,
+        meta: item.meta,
+        summary: item.summary,
+        tags: item.tags,
+        metric: item.metric,
+        recommendation: item.recommendation,
+        authors: item.authors,
+        year: item.year ?? null,
+        paperSource: item.paperSource ?? null,
+        isSaved: false,
+      }))
+    : buildRecommendationCards({
+        trackFeedItems: activeTrackFeed.items || [],
+        activeTrack,
+      })
+
+  const paperMap = new Map(papers.map((paper) => [String(paper.id), paper]))
+  const queueCards = buildReadingQueueCards({
+    recommendations: recommendationCards,
     readingQueue,
-    new Map(papers.map((paper) => [String(paper.id), paper])),
+    paperMap,
     activeTrack,
+    latestBriefTime: latestBrief?.generatedAt || latestBrief?.date || null,
+    latestBriefSource: latestBrief?.sourceLabel || null,
+  })
+
+  const spotlightSeeds = orderedTracks.slice(0, 3)
+  const spotlightItems: TrackSpotlightItem[] = await Promise.all(
+    spotlightSeeds.map(async (track) => {
+      const feed = await fetchDashboardTrackFeed(track.id, "default", 1).catch(() => ({ items: [], total: 0 }))
+      return {
+        id: track.id,
+        name: track.name,
+        updateCount: Number(feed.total || 0),
+        latestPaper: feed.items[0]?.paper.title || "No recent paper yet",
+        href: `/research?track_id=${track.id}`,
+      }
+    }),
   )
 
-  const highPriorityQueue = queueItems.filter((item) => item.priority === "high").length
-  const failedTasks = tasks.filter((task) => task.status === "failed")
-  const urgentDeadlines = deadlines.filter((deadline) => deadline.days_left <= 14)
-  const signalCount = intelligenceCards.length
-  const alertCount = failedTasks.length + urgentDeadlines.length + (highPriorityQueue > 0 ? 1 : 0)
+  const intelligenceCards = buildDashboardIntelligenceCards(intelligenceFeed.items)
+  const signalCards = intelligenceCards.slice(0, 3)
+  const deadlines = [...deadlinesRaw]
+    .sort((left, right) => left.days_left - right.days_left)
+    .slice(0, 3)
+
   const greeting = getGreeting()
   const libraryCount = papers.length
-
-  const lanes = buildActionLanes({
-    tasks,
-    deadlines,
-    queueItems,
-    usageSummary,
-    signalCount,
-    tracks,
-  })
-  const destinationCards: DestinationCardData[] = [
-    {
-      title: "Research Workspace",
-      description: activeTrack
-        ? `继续在 ${activeTrack.name} 里查看完整 Track feed、anchors 和深度研究上下文。`
-        : "在 Research 里建立 Track、整理上下文并继续深度探索。",
-      metric: activeTrack ? `${activeTrackFeedTotal} 条更新` : "创建焦点",
-      href: activeTrack ? `/research?track_id=${activeTrack.id}` : "/research",
-      icon: FlaskConical,
-    },
-    {
-      title: "Papers Library",
-      description: "保存库、导出和 BibTeX 继续留在 Papers，不再和首页主路径抢同一层级。",
-      metric: `${libraryCount} 篇文献`,
-      href: "/papers",
-      icon: FileText,
-    },
-    {
-      title: "Settings & Delivery",
-      description: "Provider、投递渠道和模型使用概览放回配置页，首页只保留会影响决策的摘要。",
-      metric: `${usageSummary.totals.calls} calls · ${formatCurrency(usageSummary.totals.total_cost_usd)}`,
-      href: "/settings",
-      icon: Settings,
-    },
-  ]
+  const urgentDeadlines = deadlinesRaw.filter((item) => item.days_left <= 14).length
 
   return (
-    <div className="min-h-screen bg-stone-50/50 pb-12 text-slate-900">
-      <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
-        <div className="space-y-4">
-          <header className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-            <div className="max-w-3xl">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-indigo-600">Dashboard</p>
-              <h1 className="mt-2 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">
-                {greeting}，把今天最重要的问题先推进到可决策状态。
-              </h1>
-              <p className="mt-3 text-sm leading-6 text-slate-600">
-                首页只保留一份今日研究简报、一段 Signals 和一条侧栏。完整 workflow、Research 深潜和文献管理都回到各自页面。
-              </p>
+    <div className="min-h-screen bg-stone-50/60 pb-12 text-slate-900">
+      <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+        <div className="space-y-10">
+          <header className="space-y-4">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-indigo-600">
+                  Dashboard
+                </p>
+                <h1 className="mt-2 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">
+                  {greeting}. Here is today&apos;s research queue.
+                </h1>
+                <p className="mt-2 text-sm text-slate-600">
+                  {queueCards.length} picks ready, {urgentDeadlines} urgent deadlines, {signalCards.length} fresh signals.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <Link
+                  href="/workflows"
+                  className="inline-flex min-h-11 items-center gap-2 rounded-full bg-slate-900 px-5 text-sm font-semibold text-white transition-colors hover:bg-slate-800"
+                >
+                  Open Workflows
+                  <ArrowRight className="size-4" />
+                </Link>
+                <Link
+                  href={activeTrack ? `/research?track_id=${activeTrack.id}` : "/research"}
+                  className="inline-flex min-h-11 items-center gap-2 rounded-full border border-slate-200 bg-white px-5 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50"
+                >
+                  Open Research
+                  <ArrowRight className="size-4" />
+                </Link>
+              </div>
             </div>
 
-            <div className="flex flex-wrap gap-2">
-              <span className="inline-flex min-h-10 items-center rounded-full border border-slate-200 bg-white px-4 text-xs font-medium text-slate-600">
-                Workspace / default
-              </span>
-              <span className="inline-flex min-h-10 items-center rounded-full border border-slate-200 bg-white px-4 text-xs font-medium text-slate-600">
-                {activeTrack ? activeTrack.name : "Focus 未设置"}
-              </span>
-              <span className="inline-flex min-h-10 items-center rounded-full border border-slate-200 bg-white px-4 text-xs font-medium text-slate-600">
-                {alertCount} 项提醒
-              </span>
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-3 lg:grid-cols-4">
+              <OverviewStat
+                label="Library"
+                value={libraryCount}
+                helper={`${Math.max(0, recommendationCards.length)} ready`}
+                icon={BookOpen}
+              />
+              <OverviewStat
+                label="Reading queue"
+                value={readingQueue.length}
+                helper={`${queueCards.filter((item) => item.priority === "high").length} high priority`}
+                alert={queueCards.some((item) => item.priority === "high")}
+                icon={Clock3}
+              />
+              <OverviewStat
+                label="Tracks"
+                value={tracks.length}
+                helper={`${spotlightItems.filter((item) => item.updateCount > 0).length} with updates`}
+                icon={Layers}
+              />
+              <OverviewStat
+                label="Signals"
+                value={signalCards.length}
+                helper={`${urgentDeadlines} deadlines soon`}
+                alert={urgentDeadlines > 0}
+                icon={BellDot}
+              />
             </div>
           </header>
 
-          <section className="mt-4 grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_360px]" id="workflow">
-            <div className="space-y-4">
-              <TopicWorkflowDashboard
-                initialQueries={initialQueries}
-                compact
-                dashboardContext={{
-                  activeTrackName: activeTrack?.name ?? null,
-                  activeTrackHref: activeTrack ? `/research?track_id=${activeTrack.id}` : "/research",
-                  readingQueueCount: readingQueue.length,
-                  urgentDeadlineCount: urgentDeadlines.length,
-                  signalCount,
-                }}
-              />
-            </div>
-
-            <TodayRail
-              nowItems={lanes.now}
-              laterItems={lanes.later}
-              destinations={destinationCards}
-              queueItems={queueItems}
-              highPriorityQueue={highPriorityQueue}
+          <section>
+            <SectionHeader
+              title="Reading Queue"
+              actionLabel="Open library"
+              actionHref="/papers"
+            />
+            <DashboardReadingQueuePanel
+              initialItems={queueCards}
+              activeTrackId={activeTrack?.id ?? null}
             />
           </section>
 
-          <section className="mt-4" id="signals">
-            <article className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-              <div className="grid gap-4 xl:grid-cols-[220px_minmax(0,1.15fr)_320px] xl:items-start">
-                <div>
-                  <SectionIntro
-                    eyebrow="Signals"
-                    title="证据快照"
-                    copy="只保留会影响当前判断的几条信号，让这一段更像工作流后的连续证据带。"
-                    actionHref="/research"
-                    actionLabel="查看完整动态"
-                  />
-
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-600">
-                      {signalCount} 条信号
-                    </span>
-                    <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-600">
-                      {intelligenceCards.filter((item) => item.source === "github").length} 条 GitHub
-                    </span>
-                    <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-600">
-                      最近刷新 {formatRelativeTime(intelligenceFeed.refreshed_at)}
-                    </span>
+          <section className="grid gap-8 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
+            <div>
+              <SectionHeader
+                title="Track Spotlight"
+                actionLabel="Manage tracks"
+                actionHref="/research"
+              />
+              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-1">
+                {spotlightItems.length > 0 ? (
+                  spotlightItems.map((item) => (
+                    <TrackSpotlightCard key={item.id} item={item} />
+                  ))
+                ) : (
+                  <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-6 text-sm text-slate-600 shadow-sm">
+                    No tracks yet.
                   </div>
-                </div>
+                )}
+              </div>
+            </div>
 
-                <div>
-                  {featuredSignal ? (
-                    <EvidencePreviewCard item={featuredSignal} />
-                  ) : (
-                    <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50/50 p-5 text-sm leading-6 text-slate-600">
-                      当前没有需要上浮到首页的社区信号。可以直接在主工作台继续推进当前问题。
-                    </div>
-                  )}
-                </div>
+            <div>
+              <SectionHeader
+                title="Signals"
+                actionLabel="Open research"
+                actionHref="/research"
+              />
+              <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-sm">
+                {latestBrief?.trendRows.length ? (
+                  <div className="mb-5 flex flex-wrap gap-2 border-b border-slate-100 pb-4">
+                    {latestBrief.trendRows.slice(0, 3).map((trend) => (
+                      <span
+                        key={trend.query}
+                        className="inline-flex items-center rounded-full border border-indigo-100 bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-700"
+                      >
+                        <TrendingUp className="mr-1.5 size-3.5" />
+                        {trend.query}
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
 
-                <div className="space-y-3">
-                  {secondarySignals.length > 0 ? (
-                    secondarySignals.map((item) => (
-                      <EvidencePreviewCard key={item.id} item={item} compact />
-                    ))
-                  ) : (
-                    <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50/50 p-5 text-sm leading-6 text-slate-600">
-                      目前还没有次级信号需要占据首页侧栏。等新的 repo、社区或论文动态上浮后，这里会补齐辅助证据流。
-                    </div>
-                  )}
+                <div className="space-y-4">
+                  {signalCards.map((item) => (
+                    <SignalCard key={item.id} item={item} />
+                  ))}
                 </div>
               </div>
-            </article>
+            </div>
+          </section>
+
+          <section>
+            <SectionHeader
+              title="Deadlines"
+              actionLabel="Open workflows"
+              actionHref="/workflows"
+            />
+            <div className="grid gap-4 lg:grid-cols-3">
+              {deadlines.length > 0 ? (
+                deadlines.map((item) => (
+                  <DeadlineCard key={`${item.name}-${item.deadline}`} item={item} />
+                ))
+              ) : (
+                <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-6 text-sm text-slate-600 shadow-sm lg:col-span-3">
+                  No nearby deadlines.
+                </div>
+              )}
+            </div>
+
+            <div className="mt-6 rounded-2xl border border-slate-100 bg-white px-5 py-4 shadow-sm">
+              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                <div className="flex items-center gap-3 text-sm text-slate-600">
+                  <CalendarDays className="size-4 text-orange-500" />
+                  <span>{urgentDeadlines} urgent deadlines</span>
+                  <span className="text-slate-300">/</span>
+                  <span>{latestBrief?.title || "Latest daily brief"}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Link
+                    href="/workflows"
+                    className="inline-flex items-center gap-1 text-sm font-medium text-indigo-600 transition-colors hover:text-indigo-700"
+                  >
+                    Run DailyPaper
+                    <ArrowRight className="size-4" />
+                  </Link>
+                </div>
+              </div>
+            </div>
           </section>
         </div>
       </main>
