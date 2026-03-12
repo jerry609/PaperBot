@@ -821,7 +821,7 @@ export default function SavedPapersList() {
         ) : (
           <>
             <div className="rounded-md border">
-              <Table>
+              <Table className="table-fixed w-full">
                 <TableHeader>
                   <TableRow>
                     <TableHead className="w-[50px]">
@@ -831,12 +831,12 @@ export default function SavedPapersList() {
                         aria-label="Select all"
                       />
                     </TableHead>
-                    <TableHead>Title</TableHead>
-                    <TableHead>Source</TableHead>
-                    <TableHead>Saved</TableHead>
-                    <TableHead>Judge</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
+                    <TableHead className="w-[40%]">Title</TableHead>
+                    <TableHead className="w-[14%]">Source</TableHead>
+                    <TableHead className="w-[16%] text-center">Saved</TableHead>
+                    <TableHead className="w-[10%] text-center">Judge</TableHead>
+                    <TableHead className="w-[10%] text-center">Status</TableHead>
+                    <TableHead className="w-[10%] text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -857,27 +857,29 @@ export default function SavedPapersList() {
                             aria-label={`Select ${paper.title}`}
                           />
                         </TableCell>
-                        <TableCell className="max-w-[480px]">
-                          <div className="font-medium">{paper.title}</div>
+                        <TableCell className="max-w-[480px] align-top">
+                          <div className="truncate text-sm font-medium" title={paper.title}>
+                            {paper.title}
+                          </div>
                           <div className="mt-1 text-xs text-muted-foreground">
                             {(paper.authors || []).slice(0, 4).join(", ") || "Unknown authors"}
                           </div>
                           {paper.venue ? <div className="mt-1 text-xs text-muted-foreground">{paper.venue}</div> : null}
                         </TableCell>
-                        <TableCell>
+                        <TableCell className="whitespace-nowrap">
                           <Badge variant="outline">{paper.primary_source || paper.source || "unknown"}</Badge>
                         </TableCell>
-                        <TableCell className="text-xs text-muted-foreground">
+                        <TableCell className="text-center text-xs text-muted-foreground">
                           <div>{formatDate(item.saved_at)}</div>
                           <div>Published: {formatDate(paper.publication_date || paper.published_at)}</div>
                         </TableCell>
-                        <TableCell>
+                        <TableCell className="text-center">
                           <div className="text-sm">{formatJudge(item.latest_judge?.overall)}</div>
                           {item.latest_judge?.recommendation ? (
                             <div className="text-xs text-muted-foreground">{item.latest_judge.recommendation}</div>
                           ) : null}
                         </TableCell>
-                        <TableCell>
+                        <TableCell className="text-center">
                           <Badge>{status}</Badge>
                         </TableCell>
                         <TableCell className="space-x-2 text-right">
