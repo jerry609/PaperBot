@@ -140,36 +140,23 @@ function DestinationCardItem({ item }: { item: DashboardDestinationCard }) {
   )
 }
 
-function ActionBand({
-  eyebrow,
+function SubsectionIntro({
   title,
   copy,
-  countLabel,
-  countTone,
-  children,
+  meta,
 }: {
-  eyebrow: string
   title: string
   copy: string
-  countLabel: string
-  countTone: DashboardDecisionTone
-  children: ReactNode
+  meta: ReactNode
 }) {
   return (
-    <article className="rounded-[28px] border border-slate-200 bg-white/95 p-5 shadow-sm">
-      <div className="grid gap-4 xl:grid-cols-[240px_minmax(0,1fr)] xl:items-start">
-        <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">{eyebrow}</p>
-          <div className="mt-2 flex flex-wrap items-center gap-3">
-            <h3 className="text-xl font-bold tracking-tight text-slate-900">{title}</h3>
-            <TonePill tone={countTone}>{countLabel}</TonePill>
-          </div>
-          <p className="mt-2 text-sm leading-6 text-slate-600">{copy}</p>
-        </div>
-
-        <div>{children}</div>
+    <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+      <div>
+        <h3 className="text-base font-semibold text-slate-900">{title}</h3>
+        <p className="mt-1 text-sm leading-6 text-slate-600">{copy}</p>
       </div>
-    </article>
+      <div>{meta}</div>
+    </div>
   )
 }
 
@@ -187,68 +174,85 @@ export default function DashboardActionBands({
   highPriorityQueue: number
 }) {
   return (
-    <section className="space-y-3" id="action-bands">
-      <ActionBand
-        eyebrow="Action Strip"
-        title="现在先推进什么"
-        copy="不再把提醒塞进一根右侧 rail，而是摊平成同一层级的动作卡片，让首页先回答“下一步做什么”。"
-        countLabel={`${nowItems.length} 项`}
-        countTone={getLaneTone(nowItems)}
-      >
-        <div className="grid gap-3 lg:grid-cols-2 2xl:grid-cols-3">
-          {nowItems.map((item, index) => (
-            <ActionCard key={`now-${index}`} item={item} />
-          ))}
-        </div>
-      </ActionBand>
-
-      <ActionBand
-        eyebrow="Watch Strip"
-        title="稍后再回看的事情"
-        copy="把成本、次级信号和非焦点主题压成第二层提醒，避免它们和主决策抢同一视觉优先级。"
-        countLabel={`${laterItems.length} 项`}
-        countTone={getLaneTone(laterItems)}
-      >
-        <div className="grid gap-3 lg:grid-cols-2 2xl:grid-cols-3">
-          {laterItems.map((item, index) => (
-            <ActionCard key={`later-${index}`} item={item} />
-          ))}
-        </div>
-      </ActionBand>
-
-      <ActionBand
-        eyebrow="Queue Strip"
-        title="今天要判断的候选"
-        copy="阅读队列继续存在，但只保留最需要你今天判断的几篇，不再占据单独侧栏。"
-        countLabel={`${highPriorityQueue} 篇高优`}
-        countTone={highPriorityQueue > 0 ? "warn" : "good"}
-      >
-        {queueItems.length > 0 ? (
-          <div className="grid gap-3 lg:grid-cols-2 2xl:grid-cols-3">
-            {queueItems.map((item) => (
-              <QueueCard key={item.id} item={item} />
-            ))}
+    <section id="action-bands">
+      <article className="rounded-[28px] border border-slate-200 bg-white/95 p-5 shadow-sm">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+          <div className="max-w-3xl">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Next Up</p>
+            <h2 className="mt-2 text-2xl font-bold tracking-tight text-slate-900">下一步只保留一个操作面板</h2>
+            <p className="mt-2 text-sm leading-6 text-slate-600">
+              首页不再拆成多条独立横栏，而是把“现在处理什么、候选队列、去哪继续做”压成一个统一模块。这样视线只需要顺着页面往下读，不需要在多个次级区块里来回切换。
+            </p>
           </div>
-        ) : (
-          <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50/70 p-5 text-sm leading-6 text-slate-600">
-            队列里还没有候选。先从 Workflows 或 Research 触发一轮搜索，把今天需要决策的论文拉起来。
+          <div className="flex flex-wrap gap-2">
+            <TonePill tone={getLaneTone(nowItems)}>{nowItems.length} 项当前动作</TonePill>
+            <TonePill tone={highPriorityQueue > 0 ? "warn" : "good"}>{highPriorityQueue} 篇高优候选</TonePill>
+            <TonePill tone="info">{destinations.length} 个工作台入口</TonePill>
           </div>
-        )}
-      </ActionBand>
-
-      <ActionBand
-        eyebrow="Workspace Strip"
-        title="下一跳去哪"
-        copy="Research、Papers 和 Settings 继续是完整工作台，但在首页只保留扁平的入口，而不是再做一列导航摘要。"
-        countLabel={`${destinations.length} 个空间`}
-        countTone="info"
-      >
-        <div className="grid gap-3 lg:grid-cols-2 2xl:grid-cols-3">
-          {destinations.map((item) => (
-            <DestinationCardItem key={item.title} item={item} />
-          ))}
         </div>
-      </ActionBand>
+
+        <div className="mt-5 space-y-5">
+          <section>
+            <SubsectionIntro
+              title="先做这些"
+              copy="主决策只保留最该先推进的动作卡片，避免提醒和导航入口混在一起。"
+              meta={<TonePill tone={getLaneTone(nowItems)}>{nowItems.length} 项</TonePill>}
+            />
+            <div className="mt-3 grid gap-3 lg:grid-cols-2 2xl:grid-cols-3">
+              {nowItems.map((item, index) => (
+                <ActionCard key={`now-${index}`} item={item} />
+              ))}
+            </div>
+          </section>
+
+          <section className="border-t border-slate-100 pt-5">
+            <SubsectionIntro
+              title="顺手留意"
+              copy="次级事项不再展开成第二个大模块，只保留成轻量卡片，提醒你稍后回看。"
+              meta={<TonePill tone={getLaneTone(laterItems)}>{laterItems.length} 项</TonePill>}
+            />
+            <div className="mt-3 grid gap-3 lg:grid-cols-2 2xl:grid-cols-3">
+              {laterItems.map((item, index) => (
+                <ActionCard key={`later-${index}`} item={item} />
+              ))}
+            </div>
+          </section>
+
+          <section className="border-t border-slate-100 pt-5">
+            <div className="grid gap-5 xl:grid-cols-2">
+              <div>
+                <SubsectionIntro
+                  title="今天的候选队列"
+                  copy="只保留最值得今天判断的几篇论文，减少“列表很多但不知道从哪篇开始”的负担。"
+                  meta={<TonePill tone={highPriorityQueue > 0 ? "warn" : "good"}>{highPriorityQueue} 篇高优</TonePill>}
+                />
+                <div className="mt-3 grid gap-3">
+                  {queueItems.length > 0 ? (
+                    queueItems.map((item) => <QueueCard key={item.id} item={item} />)
+                  ) : (
+                    <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50/70 p-5 text-sm leading-6 text-slate-600">
+                      队列里还没有候选。先从 Workflows 或 Research 触发一轮搜索，把今天需要决策的论文拉起来。
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <SubsectionIntro
+                  title="继续深入的入口"
+                  copy="完整工作台仍然在各自页面里，但这里只保留最常用的下一跳。"
+                  meta={<TonePill tone="info">{destinations.length} 个入口</TonePill>}
+                />
+                <div className="mt-3 grid gap-3">
+                  {destinations.map((item) => (
+                    <DestinationCardItem key={item.title} item={item} />
+                  ))}
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+      </article>
     </section>
   )
 }
