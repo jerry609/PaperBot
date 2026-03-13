@@ -3785,7 +3785,7 @@ def _find_top_level_char(text: str, token: str) -> int:
 
 def _clean_bibtex_text(value: str) -> str:
     text = str(value or "").strip()
-    text = re.sub(r"\s+", " ", text)
+    text = " ".join(text.split())
     text = text.replace("\\{", "{").replace("\\}", "}")
     text = text.replace("\\&", "&").replace("\\_", "_").replace("\\%", "%")
     text = text.replace("{", "").replace("}", "")
@@ -3796,7 +3796,22 @@ def _parse_bibtex_authors(raw: str) -> List[str]:
     normalized = str(raw or "").strip()
     if not normalized:
         return []
-    chunks = [part.strip() for part in re.split(r"\s+and\s+", normalized, flags=re.IGNORECASE)]
+
+    chunks: List[str] = []
+    current_tokens: List[str] = []
+    for token in normalized.split():
+        if token.lower() == "and":
+            chunk = " ".join(current_tokens).strip()
+            if chunk:
+                chunks.append(chunk)
+            current_tokens = []
+            continue
+        current_tokens.append(token)
+
+    tail = " ".join(current_tokens).strip()
+    if tail:
+        chunks.append(tail)
+
     authors: List[str] = []
     for chunk in chunks:
         if not chunk:
