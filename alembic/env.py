@@ -6,7 +6,7 @@ from pathlib import Path
 from logging.config import fileConfig
 
 from alembic import context
-from sqlalchemy import engine_from_config, pool
+from sqlalchemy import engine_from_config, event, pool, text
 
 # Alembic Config object
 config = context.config
@@ -41,6 +41,47 @@ def _ensure_sqlite_parent_dir(db_url: str) -> None:
         return
     Path(path).expanduser().resolve().parent.mkdir(parents=True, exist_ok=True)
 
+
+def _configure_sqlite_extensions(connectable, db_url: str) -> None:
+    if not db_url.startswith("sqlite"):
+        return
+
+    try:
+        import sqlite_vec  # type: ignore
+    except Exception:
+        return
+
+    @event.listens_for(connectable, "connect")
+    def _load_vec(dbapi_conn, _):
+        dbapi_conn.enable_load_extension(True)
+        try:
+            sqlite_vec.load(dbapi_conn)
+        finally:
+            dbapi_conn.enable_load_extension(False)
+
+
+def _validate_sqlite_extensions(connection, db_url: str) -> None:
+    if not db_url.startswith("sqlite"):
+        return
+
+    rows = connection.execute(
+        text(
+            "SELECT name, sql FROM sqlite_master "
+            "WHERE sql IS NOT NULL AND sql LIKE '%vec0(%'"
+        )
+    ).fetchall()
+    if not rows:
+        return
+
+    try:
+        connection.execute(text("SELECT vec_version()"))
+    except Exception as exc:  # pragma: no cover - depends on local sqlite extension state.
+        object_names = ", ".join(row.name for row in rows)
+        raise RuntimeError(
+            "SQLite schema depends on sqlite-vec objects "
+            f"({object_names}), but the Alembic connection could not load sqlite_vec. "
+            "Install sqlite-vec or ensure the extension can be loaded before running migrations."
+        ) from exc
 
 def get_target_metadata():
     # Import here so env.py doesn't import app code unless needed.
@@ -82,8 +123,10 @@ def run_migrations_online() -> None:
         poolclass=pool.NullPool,
         connect_args=connect_args,
     )
+    _configure_sqlite_extensions(connectable, db_url)
 
     with connectable.connect() as connection:
+        _validate_sqlite_extensions(connection, db_url)
         context.configure(
             connection=connection,
             target_metadata=target_metadata,
