@@ -18,7 +18,7 @@ export function TrackSpotlightSection({
   initialActiveTrack,
   initialFeedItems,
   initialFeedTotal,
-  initialAnchors = "default",
+  initialAnchors = [],
 }: TrackSpotlightSectionProps) {
   const [tracks] = useState(initialTracks)
   const [activeTrack, setActiveTrack] = useState(initialActiveTrack)

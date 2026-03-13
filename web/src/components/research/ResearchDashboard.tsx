@@ -1,7 +1,6 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { useSession } from "next-auth/react"
 
 import { fetchJson, getErrorMessage } from "@/lib/fetch"
 import { Badge } from "@/components/ui/badge"
@@ -97,7 +96,6 @@ function clampNumber(value: number, min: number, max: number, fallback: number) 
 }
 
 export default function ResearchDashboard() {
-  const { data: session } = useSession()
   const [tracks, setTracks] = useState<Track[]>([])
   const [activeTrackId, setActiveTrackId] = useState<number | null>(null)
   const [query, setQuery] = useState("")
@@ -195,8 +193,12 @@ export default function ResearchDashboard() {
 
   async function refreshInbox(trackId?: number | null) {
     const tid = trackId ?? activeTrackId
+    const qs = new URLSearchParams()
     if (tid) qs.set("track_id", String(tid))
-    const data = await fetchJson<{ items: MemoryItem[] }>(`/api/research/memory/inbox`)
+    const query = qs.toString()
+    const data = await fetchJson<{ items: MemoryItem[] }>(
+      `/api/research/memory/inbox${query ? `?${query}` : ""}`
+    )
     setInbox(data.items || [])
     setSelectedInboxIds(new Set())
   }
@@ -204,7 +206,9 @@ export default function ResearchDashboard() {
   async function refreshEval() {
     const qs = new URLSearchParams({ days: String(evalDays) })
     if (activeTrackId) qs.set("track_id", String(activeTrackId))
-    const data = await fetchJson<{ summary: EvalSummary }>(`/api/research/evals/summary`)
+    const data = await fetchJson<{ summary: EvalSummary }>(
+      `/api/research/evals/summary?${qs.toString()}`
+    )
     setEvalSummary(data.summary)
   }
 
@@ -493,13 +497,9 @@ export default function ResearchDashboard() {
           <h2 className="text-3xl font-bold tracking-tight">Research</h2>
           <p className="text-muted-foreground">Tracks, memory inbox, and personalized paper recommendations</p>
         </div>
-        <div className="flex items-center gap-3">
-          <Label className="text-sm text-muted-foreground">user_id</Label>
-          <Input value={userId} onChange={(e) => setUserId(e.target.value)} className="w-[200px]" />
-          <Button variant="secondary" onClick={() => refreshTracks()} disabled={loading}>
-            Refresh
-          </Button>
-        </div>
+        <Button variant="secondary" onClick={() => refreshTracks()} disabled={loading}>
+          Refresh
+        </Button>
       </div>
 
       {error ? (

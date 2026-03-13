@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { Suspense, useState } from "react"
 import { signIn } from "next-auth/react"
 import { useRouter, useSearchParams } from "next/navigation"
 import Link from "next/link"
@@ -11,6 +11,20 @@ import { Label } from "@/components/ui/label"
 import { Separator } from "@/components/ui/separator"
 
 export default function LoginPage() {
+  return (
+    <Suspense fallback={<LoginPageContent callbackUrl="/dashboard" />}>
+      <LoginPageWithSearchParams />
+    </Suspense>
+  )
+}
+
+function LoginPageWithSearchParams() {
+  const searchParams = useSearchParams()
+  const callbackUrl = searchParams.get("callbackUrl") || "/dashboard"
+  return <LoginPageContent callbackUrl={callbackUrl} />
+}
+
+function LoginPageContent({ callbackUrl }: { callbackUrl: string }) {
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [showPassword, setShowPassword] = useState(false)
@@ -18,8 +32,6 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false)
   const [githubLoading, setGithubLoading] = useState(false)
   const router = useRouter()
-  const searchParams = useSearchParams()
-  const callbackUrl = searchParams.get("callbackUrl") || "/dashboard"
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
