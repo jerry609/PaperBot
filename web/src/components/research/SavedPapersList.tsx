@@ -24,7 +24,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Textarea } from "@/components/ui/textarea"
 import {
   currentFeedbackFromRequestAction,
@@ -145,6 +144,117 @@ function formatJudge(value?: number | null): string {
 function normalizeStatus(value?: string | null): ReadingStatus {
   if (value === "reading" || value === "read" || value === "archived") return value
   return "unread"
+}
+
+type SavedPaperListItemProps = {
+  item: SavedPaperItem
+  status: ReadingStatus
+  selected: boolean
+  togglingRead: boolean
+  unsaving: boolean
+  onToggleSelect: (paperId: number) => void
+  onToggleReadStatus: (paperId: number, currentStatus: ReadingStatus) => void
+  onUnsave: (paperId: number, externalId: string | null) => void
+}
+
+function SavedPaperListItem({
+  item,
+  status,
+  selected,
+  togglingRead,
+  unsaving,
+  onToggleSelect,
+  onToggleReadStatus,
+  onUnsave,
+}: SavedPaperListItemProps) {
+  const { paper, latest_judge } = item
+  const rowUpdating = togglingRead || unsaving
+  const authorsText = (paper.authors || []).slice(0, 4).join(", ") || "Unknown authors"
+  const source = paper.primary_source || paper.source || "unknown"
+  const savedDate = formatDate(item.saved_at)
+  const publishedDate = formatDate(paper.publication_date || paper.published_at)
+  const judgeScore = formatJudge(latest_judge?.overall)
+  const judgeRecommendation = latest_judge?.recommendation
+
+  const handleUnsave = () => {
+    onUnsave(paper.id, paper.external_url || paper.url || null)
+  }
+
+  return (
+    <div className="flex gap-3 border-b border-border px-3 py-3 last:border-b-0 hover:bg-muted">
+      <div className="pt-1">
+        <Checkbox
+          checked={selected}
+          onCheckedChange={() => onToggleSelect(paper.id)}
+          aria-label={`Select ${paper.title}`}
+        />
+      </div>
+      <div className="flex-1 space-y-1.5">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div
+              className="line-clamp-2 text-sm md:text-base font-semibold leading-snug"
+              title={paper.title}
+            >
+              {paper.title}
+            </div>
+          </div>
+          <div className="flex shrink-0 items-center gap-1.5">
+            <Button asChild size="sm" variant="outline">
+              <Link href={`/papers/${paper.id}`}>Detail</Link>
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={rowUpdating}
+              onClick={() => onToggleReadStatus(paper.id, status)}
+            >
+              {togglingRead ? (
+                <Loader2 className="h-3 w-3 animate-spin" />
+              ) : status === "read" ? (
+                "Reading"
+              ) : (
+                "Mark Read"
+              )}
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={rowUpdating}
+              onClick={handleUnsave}
+            >
+              {unsaving ? <Loader2 className="h-3 w-3 animate-spin" /> : "Unsave"}
+            </Button>
+          </div>
+        </div>
+
+        <div className="text-xs text-muted-foreground">{authorsText}</div>
+        {paper.venue ? (
+          <div className="text-xs text-muted-foreground">{paper.venue}</div>
+        ) : null}
+
+        <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] md:text-xs text-muted-foreground">
+          <Badge variant="outline" className="text-[11px] md:text-xs">
+            {source}
+          </Badge>
+          {savedDate !== "-" ? <span>Saved · {savedDate}</span> : null}
+          {publishedDate !== "-" ? <span>Published · {publishedDate}</span> : null}
+          {judgeScore !== "-" ? (
+            <Badge variant="secondary" className="text-[11px] md:text-xs">
+              Judge {judgeScore}
+            </Badge>
+          ) : null}
+          <Badge variant="outline" className="text-[11px] md:text-xs">
+            {status}
+          </Badge>
+        </div>
+
+        {judgeRecommendation ? (
+          <div className="text-[11px] md:text-xs text-muted-foreground">{judgeRecommendation}</div>
+        ) : null}
+      </div>
+    </div>
+  )
 }
 
 export default function SavedPapersList() {
@@ -846,94 +956,43 @@ export default function SavedPapersList() {
           <div className="py-8 text-sm text-muted-foreground">No saved papers yet.</div>
         ) : (
           <>
-            <div className="rounded-md border">
-              <Table className="table-fixed w-full">
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-[50px]">
-                      <Checkbox
-                        checked={isAllSelected}
-                        onCheckedChange={toggleSelectAll}
-                        aria-label="Select all"
-                      />
-                    </TableHead>
-                    <TableHead className="w-[40%]">Title</TableHead>
-                    <TableHead className="w-[14%]">Source</TableHead>
-                    <TableHead className="w-[16%] text-center">Saved</TableHead>
-                    <TableHead className="w-[10%] text-center">Judge</TableHead>
-                    <TableHead className="w-[10%] text-center">Status</TableHead>
-                    <TableHead className="w-[10%] text-right">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {pagedItems.map((item) => {
-                    const paper = item.paper
-                    const status = normalizeStatus(item.reading_status?.status)
-                    const togglingRead =
-                      updatingAction?.paperId === paper.id && updatingAction?.action === "toggleRead"
-                    const unsaving =
-                      updatingAction?.paperId === paper.id && updatingAction?.action === "unsave"
-                    const rowUpdating = togglingRead || unsaving
-                    return (
-                      <TableRow key={paper.id}>
-                        <TableCell>
-                          <Checkbox
-                            checked={selectedIds.has(paper.id)}
-                            onCheckedChange={() => toggleSelect(paper.id)}
-                            aria-label={`Select ${paper.title}`}
-                          />
-                        </TableCell>
-                        <TableCell className="max-w-[480px] align-top">
-                          <div className="truncate text-sm font-medium" title={paper.title}>
-                            {paper.title}
-                          </div>
-                          <div className="mt-1 text-xs text-muted-foreground">
-                            {(paper.authors || []).slice(0, 4).join(", ") || "Unknown authors"}
-                          </div>
-                          {paper.venue ? <div className="mt-1 text-xs text-muted-foreground">{paper.venue}</div> : null}
-                        </TableCell>
-                        <TableCell className="whitespace-nowrap">
-                          <Badge variant="outline">{paper.primary_source || paper.source || "unknown"}</Badge>
-                        </TableCell>
-                        <TableCell className="text-center text-xs text-muted-foreground">
-                          <div>{formatDate(item.saved_at)}</div>
-                          <div>Published: {formatDate(paper.publication_date || paper.published_at)}</div>
-                        </TableCell>
-                        <TableCell className="text-center">
-                          <div className="text-sm">{formatJudge(item.latest_judge?.overall)}</div>
-                          {item.latest_judge?.recommendation ? (
-                            <div className="text-xs text-muted-foreground">{item.latest_judge.recommendation}</div>
-                          ) : null}
-                        </TableCell>
-                        <TableCell className="text-center">
-                          <Badge>{status}</Badge>
-                        </TableCell>
-                        <TableCell className="space-x-2 text-right">
-                          <Button asChild size="sm" variant="outline">
-                            <Link href={`/papers/${paper.id}`}>Detail</Link>
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="secondary"
-                            disabled={rowUpdating}
-                            onClick={() => toggleReadStatus(paper.id, status)}
-                          >
-                            {togglingRead ? <Loader2 className="h-3 w-3 animate-spin" /> : status === "read" ? "Reading" : "Mark Read"}
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            disabled={rowUpdating}
-                            onClick={() => unsavePaper(paper.id, paper.external_url || paper.url || null)}
-                          >
-                            {unsaving ? <Loader2 className="h-3 w-3 animate-spin" /> : "Unsave"}
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    )
-                  })}
-                </TableBody>
-              </Table>
+            <div className="rounded-md border bg-card">
+              <div className="flex items-center justify-between border-b border-border px-3 py-2 text-xs text-muted-foreground">
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    checked={isAllSelected}
+                    onCheckedChange={toggleSelectAll}
+                    aria-label="Select all"
+                  />
+                  <span>Select all</span>
+                </div>
+                <div>
+                  <span>{items.length} papers</span>
+                </div>
+              </div>
+              <div>
+                {pagedItems.map((item) => {
+                  const paper = item.paper
+                  const status = normalizeStatus(item.reading_status?.status)
+                  const togglingRead =
+                    updatingAction?.paperId === paper.id && updatingAction?.action === "toggleRead"
+                  const unsaving =
+                    updatingAction?.paperId === paper.id && updatingAction?.action === "unsave"
+                  return (
+                    <SavedPaperListItem
+                      key={paper.id}
+                      item={item}
+                      status={status}
+                      selected={selectedIds.has(paper.id)}
+                      togglingRead={togglingRead}
+                      unsaving={unsaving}
+                      onToggleSelect={toggleSelect}
+                      onToggleReadStatus={toggleReadStatus}
+                      onUnsave={unsavePaper}
+                    />
+                  )
+                })}
+              </div>
             </div>
             <div className="mt-3 flex items-center justify-between text-sm text-muted-foreground">
               <span>
