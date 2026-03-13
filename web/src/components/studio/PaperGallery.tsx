@@ -430,9 +430,12 @@ export function PaperGallery() {
                         </div>
                     ) : (
                         /* Tiled catalog grid (Image-2 style) */
-                        <div className="grid grid-cols-1 gap-px border border-zinc-300 bg-zinc-300 md:grid-cols-2 xl:grid-cols-4">
+                        <div className="grid grid-cols-1 gap-0 md:grid-cols-2 xl:grid-cols-4">
                             {sortedPapers.map((paper, index) => {
                                 const rowIndex = Math.floor(index / gridColumns)
+                                const colIndex = index % gridColumns
+                                const isFirstRow = rowIndex === 0
+                                const isFirstCol = colIndex === 0
                                 return (
                                     <article
                                         key={paper.id}
@@ -445,7 +448,11 @@ export function PaperGallery() {
                                         }}
                                         role="button"
                                         tabIndex={0}
-                                        className="group relative flex min-h-[300px] cursor-pointer flex-col bg-background p-6 text-left transition-colors hover:bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 focus-visible:ring-offset-2"
+                                        className={cn(
+                                            "group relative flex min-h-[300px] cursor-pointer flex-col border-r border-b border-zinc-300 bg-background p-6 text-left transition-colors hover:bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 focus-visible:ring-offset-2",
+                                            isFirstRow && "border-t",
+                                            isFirstCol && "border-l",
+                                        )}
                                     >
                                         {/* Delete button */}
                                         <button
