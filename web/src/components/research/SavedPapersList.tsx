@@ -34,9 +34,9 @@ import {
 
 type SavedPaperSort = "saved_at" | "judge_score" | "published_at"
 
-type ReadingStatus = "unread" | "reading" | "read" | "archived"
+export type ReadingStatus = "unread" | "reading" | "read" | "archived"
 
-type SavedPaperItem = {
+export type SavedPaperItem = {
   paper: {
     id: number
     title: string
@@ -141,12 +141,12 @@ function formatJudge(value?: number | null): string {
   return `${value.toFixed(2)} / 5.0`
 }
 
-function normalizeStatus(value?: string | null): ReadingStatus {
+export function normalizeStatus(value?: string | null): ReadingStatus {
   if (value === "reading" || value === "read" || value === "archived") return value
   return "unread"
 }
 
-function formatReadingStatusLabel(status: ReadingStatus): string {
+export function formatReadingStatusLabel(status: ReadingStatus): string {
   if (status === "reading") return "Reading"
   if (status === "read") return "Read"
   if (status === "archived") return "Archived"
@@ -160,7 +160,7 @@ type SavedPaperListItemProps = {
   togglingRead: boolean
   unsaving: boolean
   onToggleSelect: (paperId: number) => void
-  onToggleReadStatus: (paperId: number, currentStatus: ReadingStatus) => void
+  onToggleReadStatus: (paperId: number, nextStatus: ReadingStatus) => void
   onUnsave: (paperId: number, externalId: string | null) => void
 }
 
