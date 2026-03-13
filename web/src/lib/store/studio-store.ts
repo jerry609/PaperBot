@@ -37,7 +37,7 @@ export interface Task {
     paperId?: string  // Link task to a paper
 }
 
-export type AgentTaskStatus = 'planning' | 'in_progress' | 'repairing' | 'done'
+export type AgentTaskStatus = 'planning' | 'in_progress' | 'ai_review' | 'human_review' | 'done'
 
 export type BlockType = "think" | "tool" | "diff" | "info" | "result"
 
