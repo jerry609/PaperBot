@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-import json
 from typing import List, Optional
-
-from sqlalchemy import desc, or_, select
 
 from paperbot.application.ports.wiki_concept_port import (
     GroundingSnapshot,
@@ -11,18 +8,8 @@ from paperbot.application.ports.wiki_concept_port import (
     TrackGroundingRecord,
     WikiConceptPort,
 )
-from paperbot.infrastructure.stores.models import PaperModel, ResearchTrackModel
-from paperbot.infrastructure.stores.sqlalchemy_db import SessionProvider, get_db_url
-
-
-def _load_list(raw: str) -> List[str]:
-    try:
-        values = json.loads(raw or "[]")
-        if isinstance(values, list):
-            return [str(value).strip() for value in values if str(value).strip()]
-    except Exception:
-        return []
-    return []
+from paperbot.infrastructure.stores.research_store import SqlAlchemyResearchStore
+from paperbot.infrastructure.stores.sqlalchemy_db import get_db_url
 
 
 class WikiConceptStore(WikiConceptPort):
@@ -30,7 +17,7 @@ class WikiConceptStore(WikiConceptPort):
 
     def __init__(self, db_url: Optional[str] = None):
         self.db_url = db_url or get_db_url()
-        self._provider = SessionProvider(self.db_url)
+        self._research_store = SqlAlchemyResearchStore(db_url=self.db_url)
 
     def load_grounding_snapshot(
         self,
@@ -39,62 +26,44 @@ class WikiConceptStore(WikiConceptPort):
         paper_limit: int = 250,
         track_limit: int = 100,
     ) -> GroundingSnapshot:
-        with self._provider.session() as session:
-            paper_rows = (
-                session.execute(
-                    select(PaperModel)
-                    .where(
-                        PaperModel.deleted_at.is_(None),
-                        or_(
-                            PaperModel.title != "",
-                            PaperModel.abstract != "",
-                        ),
-                    )
-                    .order_by(
-                        desc(PaperModel.citation_count),
-                        desc(PaperModel.updated_at),
-                        desc(PaperModel.created_at),
-                    )
-                    .limit(max(1, paper_limit))
-                )
-                .scalars()
-                .all()
-            )
-            track_rows = (
-                session.execute(
-                    select(ResearchTrackModel)
-                    .where(
-                        ResearchTrackModel.user_id == user_id,
-                        ResearchTrackModel.archived_at.is_(None),
-                    )
-                    .order_by(
-                        desc(ResearchTrackModel.is_active),
-                        desc(ResearchTrackModel.updated_at),
-                    )
-                    .limit(max(1, track_limit))
-                )
-                .scalars()
-                .all()
-            )
-
+        saved_rows = self._research_store.list_saved_papers(
+            user_id=user_id,
+            limit=max(1, paper_limit),
+            sort_by="saved_at",
+        )
+        track_rows = self._research_store.list_tracks(
+            user_id=user_id,
+            include_archived=False,
+            limit=max(1, track_limit),
+        )
         papers: List[PaperGroundingRecord] = [
             {
-                "title": str(row.title or "").strip(),
-                "abstract": str(row.abstract or "").strip(),
-                "keywords": row.get_keywords(),
-                "fields_of_study": row.get_fields_of_study(),
-                "citation_count": int(row.citation_count or 0),
-                "year": int(row.year) if row.year is not None else None,
+                "title": str((row.get("paper") or {}).get("title") or "").strip(),
+                "abstract": str((row.get("paper") or {}).get("abstract") or "").strip(),
+                "keywords": list((row.get("paper") or {}).get("keywords") or []),
+                "fields_of_study": list((row.get("paper") or {}).get("fields_of_study") or []),
+                "citation_count": int((row.get("paper") or {}).get("citation_count") or 0),
+                "year": (
+                    int((row.get("paper") or {}).get("year"))
+                    if (row.get("paper") or {}).get("year") is not None
+                    else None
+                ),
             }
-            for row in paper_rows
+            for row in saved_rows
+            if isinstance(row, dict) and isinstance(row.get("paper"), dict)
         ]
         tracks: List[TrackGroundingRecord] = [
             {
-                "name": str(row.name or "").strip(),
-                "description": str(row.description or "").strip(),
-                "keywords": _load_list(row.keywords_json),
-                "methods": _load_list(row.methods_json),
+                "name": str(row.get("name") or "").strip(),
+                "description": str(row.get("description") or "").strip(),
+                "keywords": [
+                    str(value).strip() for value in row.get("keywords") or [] if str(value).strip()
+                ],
+                "methods": [
+                    str(value).strip() for value in row.get("methods") or [] if str(value).strip()
+                ],
             }
             for row in track_rows
+            if isinstance(row, dict)
         ]
         return {"papers": papers, "tracks": tracks}

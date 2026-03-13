@@ -41,7 +41,7 @@ export default async function WikiPage({ searchParams }: { searchParams: WikiSea
                         Knowledge Base
                     </h2>
                     <p className="text-muted-foreground mt-1">
-                        Explore {concepts.length} grounded concepts across your library and active tracks.
+                        Explore {concepts.length} grounded concepts across your saved library and tracks.
                     </p>
                 </div>
                 <form method="get" className="flex w-full md:max-w-md items-center gap-2 bg-background p-1.5 rounded-lg border shadow-sm">

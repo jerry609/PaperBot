@@ -131,3 +131,21 @@ class WorkflowQueryGrounder:
         if _normalize_query(concept.canonical_query) == normalized_id:
             return query
         return _replace_id_term(query, term=concept.id, replacement=concept.canonical_query)
+
+
+def build_grounded_routing_query(
+    *,
+    original_query: str,
+    grounded_query: GroundedQuery | None,
+) -> str:
+    cleaned_original = _clean_query(original_query)
+    if grounded_query is None:
+        return cleaned_original
+    search_queries = getattr(grounded_query, "search_queries", None)
+    canonical_query = getattr(grounded_query, "canonical_query", "")
+    if search_queries is None and hasattr(grounded_query, "to_dict"):
+        payload = grounded_query.to_dict()
+        search_queries = payload.get("search_queries") if isinstance(payload, dict) else None
+        canonical_query = str(payload.get("canonical_query") or canonical_query)
+    values = _unique_preserve([cleaned_original, *list(search_queries or []), canonical_query])
+    return " ".join(values)
