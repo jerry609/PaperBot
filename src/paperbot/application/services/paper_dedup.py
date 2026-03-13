@@ -3,9 +3,18 @@
 from __future__ import annotations
 
 import re
+from difflib import SequenceMatcher
 from typing import Dict, List, Optional, Tuple
 
-from rapidfuzz import fuzz
+try:
+    from rapidfuzz import fuzz
+except Exception:  # pragma: no cover - fallback when optional dependency is unavailable.
+    class _FuzzFallback:
+        @staticmethod
+        def ratio(left: str, right: str) -> float:
+            return SequenceMatcher(None, left or "", right or "").ratio() * 100.0
+
+    fuzz = _FuzzFallback()
 
 from paperbot.domain.paper import PaperCandidate
 

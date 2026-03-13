@@ -5,7 +5,13 @@ import httpx
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel
+
+try:
+    import email_validator  # noqa: F401
+    from pydantic import EmailStr
+except Exception:  # pragma: no cover - exercised only in minimal test envs
+    EmailStr = str  # type: ignore[assignment]
 
 from paperbot.api.auth.password import hash_password
 from paperbot.api.auth.jwt import create_access_token
