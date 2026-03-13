@@ -949,7 +949,8 @@ def _sanitize_workspace_dir(raw_path: str) -> Path:
     if "\x00" in candidate_text:
         raise HTTPException(status_code=400, detail="workspace_dir contains invalid characters")
 
-    drive, tail = os.path.splitdrive(candidate_text)
+    expanded_text = os.path.expanduser(candidate_text)
+    drive, tail = os.path.splitdrive(expanded_text)
     if drive:
         if len(drive) != 2 or not drive[0].isalpha() or drive[1] != ":":
             raise HTTPException(status_code=400, detail="workspace_dir contains an invalid drive prefix")
@@ -957,19 +958,16 @@ def _sanitize_workspace_dir(raw_path: str) -> Path:
             raise HTTPException(status_code=400, detail="workspace_dir contains invalid characters")
         path_to_validate = drive[0] + tail
     else:
-        path_to_validate = candidate_text
+        path_to_validate = expanded_text
 
     if not _SAFE_WORKSPACE_PATH_RE.fullmatch(path_to_validate):
         raise HTTPException(status_code=400, detail="workspace_dir contains invalid characters")
 
-    segments = [segment for segment in re.split(r"[\\/]+", tail or candidate_text) if segment not in ("", ".")]
-    if any(segment == ".." for segment in segments):
-        raise HTTPException(status_code=400, detail="workspace_dir must not contain parent traversal")
-
-    candidate = Path(candidate_text).expanduser()
-    if not candidate.is_absolute():
-        candidate = Path.cwd() / candidate
-    candidate = candidate.resolve(strict=False)
+    segments = _workspace_segments(tail or expanded_text)
+    if _looks_absolute_workspace_path(expanded_text):
+        candidate = _workspace_from_absolute_input(expanded_text)
+    else:
+        candidate = _workspace_join(Path.cwd().resolve(strict=False), segments)
 
     for blocked_root in _DANGEROUS_WORKSPACE_ROOTS:
         blocked_root_resolved = blocked_root.resolve(strict=False)
@@ -1017,6 +1015,86 @@ def _workspace_allowed_roots() -> List[Path]:
         if root not in unique:
             unique.append(root)
     return unique
+
+
+def _workspace_segments(raw_path: str) -> List[str]:
+    segments = [segment for segment in re.split(r"[\\/]+", raw_path) if segment not in ("", ".")]
+    if any(segment == ".." for segment in segments):
+        raise HTTPException(status_code=400, detail="workspace_dir must not contain parent traversal")
+    return segments
+
+
+def _workspace_join(root: Path, segments: List[str]) -> Path:
+    root_real = os.path.realpath(str(root))
+    candidate_real = os.path.realpath(os.path.join(root_real, *segments))
+    if os.path.commonpath([root_real, candidate_real]) != root_real:
+        raise HTTPException(status_code=400, detail="workspace_dir must stay within an allowed root")
+    return Path(candidate_real)
+
+
+def _looks_absolute_workspace_path(value: str) -> bool:
+    return os.path.isabs(value) or value.startswith(("/", "\\"))
+
+
+def _normalized_workspace_text(value: str) -> str:
+    normalized = value.replace("\\", "/")
+    while "//" in normalized:
+        normalized = normalized.replace("//", "/")
+    if len(normalized) >= 2 and normalized[1] == ":":
+        normalized = normalized[0].upper() + normalized[1:]
+    if len(normalized) > 1:
+        normalized = normalized.rstrip("/")
+    return normalized
+
+
+def _workspace_root_variants(root: Path) -> List[str]:
+    normalized = _normalized_workspace_text(str(root))
+    variants = [normalized]
+    if len(normalized) >= 2 and normalized[1] == ":":
+        drive_less = normalized[2:] or "/"
+        variants.append(drive_less)
+    unique: List[str] = []
+    for value in variants:
+        if value not in unique:
+            unique.append(value)
+    return unique
+
+
+def _workspace_relative_suffix(normalized_input: str, normalized_root: str) -> Optional[str]:
+    if normalized_input == normalized_root:
+        return ""
+    prefix = normalized_root.rstrip("/") + "/"
+    if normalized_input.startswith(prefix):
+        return normalized_input[len(prefix):]
+    return None
+
+
+def _workspace_from_absolute_input(raw_path: str) -> Path:
+    normalized_input = _normalized_workspace_text(raw_path)
+
+    for blocked_root in _DANGEROUS_WORKSPACE_ROOTS:
+        for normalized_blocked in _workspace_root_variants(blocked_root):
+            if _workspace_relative_suffix(normalized_input, normalized_blocked) is not None:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"workspace_dir is not allowed: {raw_path}",
+                )
+
+    allowed_roots = _workspace_allowed_roots()
+    for root in allowed_roots:
+        for normalized_root in _workspace_root_variants(root):
+            suffix = _workspace_relative_suffix(normalized_input, normalized_root)
+            if suffix is None:
+                continue
+            suffix_segments = _workspace_segments(suffix)
+            return _workspace_join(root, suffix_segments)
+    raise HTTPException(
+        status_code=400,
+        detail=(
+            "workspace_dir must be under an allowed root: "
+            + ", ".join(str(root) for root in allowed_roots)
+        ),
+    )
 
 
 def _is_within(candidate: Path, root: Path) -> bool:
