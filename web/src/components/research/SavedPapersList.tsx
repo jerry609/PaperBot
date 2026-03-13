@@ -146,6 +146,13 @@ function normalizeStatus(value?: string | null): ReadingStatus {
   return "unread"
 }
 
+function formatReadingStatusLabel(status: ReadingStatus): string {
+  if (status === "reading") return "Reading"
+  if (status === "read") return "Read"
+  if (status === "archived") return "Archived"
+  return "To read"
+}
+
 type SavedPaperListItemProps = {
   item: SavedPaperItem
   status: ReadingStatus
@@ -205,20 +212,6 @@ function SavedPaperListItem({
             </Button>
             <Button
               size="sm"
-              variant="secondary"
-              disabled={rowUpdating}
-              onClick={() => onToggleReadStatus(paper.id, status)}
-            >
-              {togglingRead ? (
-                <Loader2 className="h-3 w-3 animate-spin" />
-              ) : status === "read" ? (
-                "Reading"
-              ) : (
-                "Mark Read"
-              )}
-            </Button>
-            <Button
-              size="sm"
               variant="ghost"
               disabled={rowUpdating}
               onClick={handleUnsave}
@@ -244,9 +237,55 @@ function SavedPaperListItem({
               Judge {judgeScore}
             </Badge>
           ) : null}
-          <Badge variant="outline" className="text-[11px] md:text-xs">
-            {status}
-          </Badge>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-6 px-2 text-[11px] md:text-xs"
+                disabled={rowUpdating}
+              >
+                {formatReadingStatusLabel(status)}
+                <ChevronDown className="ml-1 h-3 w-3" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-32">
+              <DropdownMenuItem
+                onClick={() => onToggleReadStatus(paper.id, "unread")}
+                className="flex items-center gap-2"
+              >
+                {status === "unread" ? (
+                  <Check className="h-3 w-3" />
+                ) : (
+                  <span className="h-3 w-3" />
+                )}
+                <span>To read</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => onToggleReadStatus(paper.id, "reading")}
+                className="flex items-center gap-2"
+              >
+                {status === "reading" ? (
+                  <Check className="h-3 w-3" />
+                ) : (
+                  <span className="h-3 w-3" />
+                )}
+                <span>Reading</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => onToggleReadStatus(paper.id, "read")}
+                className="flex items-center gap-2"
+              >
+                {status === "read" ? (
+                  <Check className="h-3 w-3" />
+                ) : (
+                  <span className="h-3 w-3" />
+                )}
+                <span>Read</span>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
 
         {judgeRecommendation ? (
@@ -441,10 +480,9 @@ export default function SavedPapersList() {
   )
 
   const toggleReadStatus = useCallback(
-    async (paperId: number, currentStatus: ReadingStatus) => {
+    async (paperId: number, nextStatus: ReadingStatus) => {
       setUpdatingAction({ paperId, action: "toggleRead" })
       setError(null)
-      const newStatus = currentStatus === "read" ? "reading" : "read"
       try {
         // Persist reading status so refreshes keep the latest state
         const res = await fetch(`/api/research/papers/${paperId}/status`, {
@@ -452,7 +490,7 @@ export default function SavedPapersList() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             user_id: "default",
-            status: newStatus,
+            status: nextStatus,
           }),
         })
 
@@ -471,7 +509,7 @@ export default function SavedPapersList() {
               ...row,
               reading_status: {
                 ...row.reading_status,
-                status: newStatus,
+                status: nextStatus,
                 updated_at: new Date().toISOString(),
               },
             }
