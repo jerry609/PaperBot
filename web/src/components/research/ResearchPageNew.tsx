@@ -41,7 +41,6 @@ import { SavedTab } from "./SavedTab"
 import { CreateTrackModal } from "./CreateTrackModal"
 import { EditTrackModal } from "./EditTrackModal"
 import { ManageTracksModal } from "./ManageTracksModal"
-import { ResearchTrackContextPanel } from "./ResearchTrackContextPanel"
 import type { Track } from "./TrackSelector"
 import type { Paper } from "./PaperCard"
 import type { ResearchTrackContextResponse } from "@/lib/types"
@@ -638,14 +637,7 @@ export default function ResearchPageNew() {
           />
         </div>
 
-        {trackContext ? (
-          <div className="mb-6 animate-in fade-in slide-in-from-bottom-2 duration-500">
-            <ResearchTrackContextPanel
-              context={trackContext}
-              onOpenMemory={() => setMemoryOpen(true)}
-            />
-          </div>
-        ) : null}
+        {/* Track context panel removed per request */}
 
         {/* Track Pills - only show before search */}
         {!hasSearched && tracks.length > 0 && (
