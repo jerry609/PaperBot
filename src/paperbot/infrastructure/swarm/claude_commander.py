@@ -99,7 +99,13 @@ class ClaudeCommander:
                 client.messages.create(
                     model=self.model,
                     max_tokens=4096,
-                    system=system,
+                    system=[
+                        {
+                            "type": "text",
+                            "text": system,
+                            "cache_control": {"type": "ephemeral"},
+                        }
+                    ],
                     messages=[{"role": "user", "content": prompt}],
                 ),
                 timeout=self.request_timeout_seconds,
@@ -156,6 +162,21 @@ class ClaudeCommander:
                 parts.append(f"- {criterion}")
             parts.append("")
 
+        subtasks = task.get("subtasks", [])
+        if isinstance(subtasks, list) and subtasks:
+            parts.append("## Subtasks (Acceptance Criteria)")
+            for subtask in subtasks:
+                if not isinstance(subtask, dict):
+                    continue
+                subtask_id = str(subtask.get("id", "subtask"))
+                title = str(subtask.get("title", "")).strip()
+                done = bool(subtask.get("done", False))
+                marker = "x" if done else " "
+                parts.append(f"- [{marker}] {subtask_id}: {title}")
+            parts.append("")
+            parts.append("Call update_subtask whenever you complete one criterion.")
+            parts.append("")
+
         # Inject accumulated wisdom
         if self.wisdom.learnings:
             parts.append("## Context from Previous Tasks")
@@ -177,9 +198,33 @@ class ClaudeCommander:
 
         parts.append(f"## Workspace\n{workspace}\n")
         parts.append(
-            "Write the code. Create or modify files as needed. " "Run tests to verify correctness."
+            "Use the provided tools to inspect the workspace, write code, verify behavior, "
+            "and then call task_done with a concise summary."
         )
 
+        return "\n".join(parts)
+
+    async def build_codex_repair_prompt(
+        self,
+        task: dict,
+        workspace: Path,
+        *,
+        verify_summary: str,
+        attempt: int,
+    ) -> str:
+        """Build a focused repair prompt from sandbox verification failures."""
+        base = await self.build_codex_prompt(task, workspace)
+        parts = [
+            base,
+            "",
+            f"## Repair Attempt {attempt}",
+            "The previous implementation failed sandbox verification.",
+            "",
+            "## Verification Failure Summary",
+            verify_summary or "(empty failure summary)",
+            "",
+            "Apply the minimal fix required to pass verification, then call task_done.",
+        ]
         return "\n".join(parts)
 
     async def review(self, task: dict, codex_output: str) -> ReviewResult:
@@ -207,10 +252,24 @@ class ClaudeCommander:
                 '{"approved": true/false, "feedback": "...", "suggestions": [...]}'
             )
 
+            review_system = (
+                "You are a senior code reviewer evaluating AI-generated code "
+                "for a paper reproduction. Assess correctness, completeness "
+                "relative to the task description, and code quality. "
+                "Return JSON only."
+            )
+
             response = await asyncio.wait_for(
                 client.messages.create(
                     model=self.model,
                     max_tokens=1024,
+                    system=[
+                        {
+                            "type": "text",
+                            "text": review_system,
+                            "cache_control": {"type": "ephemeral"},
+                        }
+                    ],
                     messages=[{"role": "user", "content": prompt}],
                 ),
                 timeout=self.request_timeout_seconds,
