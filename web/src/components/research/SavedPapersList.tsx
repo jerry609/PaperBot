@@ -284,6 +284,17 @@ function SavedPaperListItem({
                 )}
                 <span>Read</span>
               </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => onToggleReadStatus(paper.id, "archived")}
+                className="flex items-center gap-2"
+              >
+                {status === "archived" ? (
+                  <Check className="h-3 w-3" />
+                ) : (
+                  <span className="h-3 w-3" />
+                )}
+                <span>Archived</span>
+              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
