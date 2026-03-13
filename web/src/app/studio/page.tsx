@@ -11,6 +11,7 @@ import { MCPProvider } from "@/lib/mcp"
 import { useStudioStore, type StudioPaperStatus } from "@/lib/store/studio-store"
 import { useContextPackGeneration } from "@/hooks/useContextPackGeneration"
 import { normalizePack } from "@/lib/context-pack-utils"
+import { backendUrl } from "@/lib/backend-url"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable"
@@ -32,16 +33,21 @@ function StudioContent() {
         loadPapers,
         papers,
         selectedPaperId,
+        contextPack,
+        contextPackLoading,
         lastGenCodeResult,
         setContextPack,
         setContextPackLoading,
         setContextPackError,
         clearGenerationProgress,
+        updatePaper,
     } = useStudioStore()
     const { generate } = useContextPackGeneration()
     const searchParams = useSearchParams()
     const router = useRouter()
     const hasProcessedParams = useRef(false)
+    const latestContextLookupRef = useRef<Set<string>>(new Set())
+    const contextFetchInFlightRef = useRef(false)
     const [viewMode, setViewMode] = useState<ReproductionViewMode>("log")
 
     // Load papers from localStorage on mount
@@ -125,6 +131,99 @@ function StudioContent() {
         setContextPack,
         setContextPackError,
         setContextPackLoading,
+    ])
+
+    useEffect(() => {
+        if (!selectedPaperId || contextFetchInFlightRef.current) return
+        const selected = papers.find((paper) => paper.id === selectedPaperId)
+        if (!selected) return
+
+        let cancelled = false
+
+        const fetchContextPack = async (contextPackId: string) => {
+            contextFetchInFlightRef.current = true
+            setContextPackLoading(true)
+            setContextPackError(null)
+            try {
+                const res = await fetch(`/api/research/repro/context/${contextPackId}`)
+                if (!res.ok) {
+                    throw new Error(`Failed to load context pack (${res.status})`)
+                }
+                const payload = await res.json()
+                if (cancelled) return
+                const pack = normalizePack(payload)
+                if (pack) setContextPack(pack)
+            } catch (err) {
+                if (!cancelled) {
+                    setContextPackError(err instanceof Error ? err.message : String(err))
+                }
+            } finally {
+                contextFetchInFlightRef.current = false
+                if (!cancelled) {
+                    setContextPackLoading(false)
+                }
+            }
+        }
+
+        const lookupLatestSessionForContext = async () => {
+            if (latestContextLookupRef.current.has(selectedPaperId)) return
+            latestContextLookupRef.current.add(selectedPaperId)
+            try {
+                const latestResp = await fetch(
+                    backendUrl(`/api/agent-board/sessions/latest/by-paper?paper_id=${encodeURIComponent(selectedPaperId)}`),
+                )
+                if (!latestResp.ok) return
+                const latestPayload = (await latestResp.json()) as {
+                    session_id?: unknown
+                    context_pack_id?: unknown
+                }
+                if (cancelled) return
+
+                const latestContextPackId =
+                    typeof latestPayload.context_pack_id === "string"
+                        ? latestPayload.context_pack_id.trim()
+                        : ""
+                const latestBoardSessionId =
+                    typeof latestPayload.session_id === "string" ? latestPayload.session_id.trim() : ""
+
+                if (latestContextPackId || latestBoardSessionId) {
+                    updatePaper(selectedPaperId, {
+                        ...(latestContextPackId ? { contextPackId: latestContextPackId } : {}),
+                        ...(!selected.boardSessionId && latestBoardSessionId
+                            ? { boardSessionId: latestBoardSessionId }
+                            : {}),
+                    })
+                }
+
+                if (latestContextPackId && contextPack?.context_pack_id !== latestContextPackId) {
+                    await fetchContextPack(latestContextPackId)
+                }
+            } catch {
+                // Keep current UI state; user can still regenerate manually.
+            }
+        }
+
+        const currentContextPackId = selected.contextPackId?.trim() || ""
+        if (currentContextPackId) {
+            if (contextPack?.context_pack_id !== currentContextPackId) {
+                void fetchContextPack(currentContextPackId)
+            }
+        } else {
+            void lookupLatestSessionForContext()
+        }
+
+        return () => {
+            cancelled = true
+            contextFetchInFlightRef.current = false
+        }
+    }, [
+        contextPack?.context_pack_id,
+        papers,
+        selectedPaperId,
+        setContextPack,
+        setContextPackError,
+        setContextPackLoading,
+        updatePaper,
     ])
 
     // Gallery view — no paper selected
