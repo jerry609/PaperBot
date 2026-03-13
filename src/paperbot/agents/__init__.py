@@ -1,26 +1,10 @@
-# src/paperbot/agents/__init__.py
-"""
-PaperBot Agent 模块。
+"""PaperBot agent exports.
 
-提供各类 AI Agent 实现：
-- BaseAgent: Agent 基类
-- ResearchAgent: 论文研究 Agent
-- CodeAnalysisAgent: 代码分析 Agent
-- QualityAgent: 质量评估 Agent
-- DocumentationAgent: 文档生成 Agent
-- ConferenceResearchAgent: 会议论文抓取 Agent
-- ReviewerAgent: 论文评审 Agent
-- VerificationAgent: 声明验证 Agent
+Keep imports lazy so routes that only need a lightweight scholar agent do not
+pull in optional report/PDF dependencies during package initialization.
 """
 
-from .base import BaseAgent
-from .research.agent import ResearchAgent
-from .code_analysis.agent import CodeAnalysisAgent
-from .quality.agent import QualityAgent
-from .documentation.agent import DocumentationAgent
-from .conference.agent import ConferenceResearchAgent
-from .review.agent import ReviewerAgent
-from .verification.agent import VerificationAgent
+from importlib import import_module
 
 __all__ = [
     "BaseAgent",
@@ -32,3 +16,29 @@ __all__ = [
     "ReviewerAgent",
     "VerificationAgent",
 ]
+
+_LAZY_EXPORTS = {
+    "BaseAgent": (".base", "BaseAgent"),
+    "ResearchAgent": (".research.agent", "ResearchAgent"),
+    "CodeAnalysisAgent": (".code_analysis.agent", "CodeAnalysisAgent"),
+    "QualityAgent": (".quality.agent", "QualityAgent"),
+    "DocumentationAgent": (".documentation.agent", "DocumentationAgent"),
+    "ConferenceResearchAgent": (".conference.agent", "ConferenceResearchAgent"),
+    "ReviewerAgent": (".review.agent", "ReviewerAgent"),
+    "VerificationAgent": (".verification.agent", "VerificationAgent"),
+}
+
+
+def __getattr__(name: str):
+    try:
+        module_name, attr_name = _LAZY_EXPORTS[name]
+    except KeyError as exc:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}") from exc
+
+    value = getattr(import_module(module_name, __name__), attr_name)
+    globals()[name] = value
+    return value
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | set(__all__))

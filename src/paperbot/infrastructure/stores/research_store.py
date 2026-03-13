@@ -6,7 +6,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Iterable, List, Optional
 
-from sqlalchemy import desc, func, or_, select
+from sqlalchemy import desc, func, inspect, or_, select
 from sqlalchemy.exc import IntegrityError
 
 from paperbot.application.ports.feedback_port import FeedbackPort
@@ -81,6 +81,7 @@ def _parse_datetime(value: Any) -> Optional[datetime]:
     except Exception:
         return None
 
+
 _FEEDBACK_ACTION_ALIASES: Dict[str, str] = {
     "not_relevant": "dislike",
     "not-relevant": "dislike",
@@ -106,6 +107,10 @@ _FEEDBACK_EFFECTIVE_ACTIONS: Dict[str, Optional[str]] = {
     "skip": "skip",
     "cite": "cite",
 }
+
+_LEGACY_GLOBAL_FEEDBACK_TRACK_NAME = "__paperbot_legacy_global_feedback__"
+
+
 class SqlAlchemyResearchStore(FeedbackPort):
     """
     Track/progress store for personalized paper recommendation.
@@ -162,6 +167,54 @@ class SqlAlchemyResearchStore(FeedbackPort):
             ),
             cls._feedback_group(normalized_action),
         )
+
+    @staticmethod
+    def _paper_feedback_track_is_nullable(session) -> bool:
+        try:
+            columns = inspect(session.bind).get_columns("paper_feedback")
+        except Exception:
+            return True
+
+        for column in columns:
+            if str(column.get("name")) == "track_id":
+                return bool(column.get("nullable"))
+        return True
+
+    def _ensure_legacy_global_feedback_track(
+        self,
+        *,
+        session,
+        user_id: str,
+        now: datetime,
+    ) -> int:
+        row = session.execute(
+            select(ResearchTrackModel).where(
+                ResearchTrackModel.user_id == user_id,
+                ResearchTrackModel.name == _LEGACY_GLOBAL_FEEDBACK_TRACK_NAME,
+            )
+        ).scalar_one_or_none()
+        if row is None:
+            row = ResearchTrackModel(
+                user_id=user_id,
+                name=_LEGACY_GLOBAL_FEEDBACK_TRACK_NAME,
+                description="System track for legacy global feedback compatibility.",
+                keywords_json="[]",
+                venues_json="[]",
+                methods_json="[]",
+                is_active=0,
+                archived_at=now,
+                created_at=now,
+                updated_at=now,
+            )
+            session.add(row)
+            session.flush()
+        else:
+            row.is_active = 0
+            row.archived_at = row.archived_at or now
+            row.updated_at = now
+            session.add(row)
+
+        return int(row.id)
 
     @classmethod
     def _collapse_effective_feedback_rows(
@@ -491,7 +544,7 @@ class SqlAlchemyResearchStore(FeedbackPort):
         self,
         *,
         user_id: str,
-        track_id: int,
+        track_id: Optional[int],
         paper_id: str,
         action: str,
         weight: float = 0.0,
@@ -502,14 +555,29 @@ class SqlAlchemyResearchStore(FeedbackPort):
         metadata = dict(metadata or {})
         normalized_action = self._normalize_feedback_action(action)
         with self._provider.session() as session:
-            track = session.execute(
-                select(ResearchTrackModel).where(
-                    ResearchTrackModel.user_id == user_id, ResearchTrackModel.id == track_id
+            track = None
+            resolved_track_id: Optional[int] = None
+            if track_id is not None:
+                track = session.execute(
+                    select(ResearchTrackModel).where(
+                        ResearchTrackModel.user_id == user_id, ResearchTrackModel.id == track_id
+                    )
+                ).scalar_one_or_none()
+                if track is None:
+                    Logger.error("Track not found", file=LogFiles.HARVEST)
+                    return None
+                resolved_track_id = int(track_id)
+            elif not self._paper_feedback_track_is_nullable(session):
+                Logger.info(
+                    "paper_feedback.track_id is still NOT NULL; using legacy global feedback track",
+                    file=LogFiles.HARVEST,
                 )
-            ).scalar_one_or_none()
-            if track is None:
-                Logger.error("Track not found", file=LogFiles.HARVEST)
-                return None
+                resolved_track_id = self._ensure_legacy_global_feedback_track(
+                    session=session,
+                    user_id=user_id,
+                    now=now,
+                )
+                metadata.setdefault("global_feedback_mode", "legacy_track_fallback")
 
             resolved_paper_ref_id = self._resolve_paper_ref_id(
                 session=session,
@@ -519,7 +587,7 @@ class SqlAlchemyResearchStore(FeedbackPort):
             Logger.info("Creating new feedback record", file=LogFiles.HARVEST)
             row = PaperFeedbackModel(
                 user_id=user_id,
-                track_id=track_id,
+                track_id=resolved_track_id,
                 paper_id=(paper_id or "").strip(),
                 paper_ref_id=resolved_paper_ref_id,
                 canonical_paper_id=resolved_paper_ref_id,  # dual-write
@@ -562,8 +630,9 @@ class SqlAlchemyResearchStore(FeedbackPort):
                         now=now,
                     )
 
-            track.updated_at = now
-            session.add(track)
+            if track is not None:
+                track.updated_at = now
+                session.add(track)
             session.commit()
             session.refresh(row)
             Logger.info("Feedback record created successfully", file=LogFiles.HARVEST)

@@ -1,3 +1,6 @@
+import importlib
+import sys
+
 from fastapi.testclient import TestClient
 
 from paperbot.api import main as api_main
@@ -300,3 +303,17 @@ def test_scholar_search_route(monkeypatch):
     assert payload["query"] == "alice"
     assert payload["total"] == 2
     assert payload["items"][0]["author_id"] == "1001"
+
+
+def test_scholar_profile_agent_import_is_lazy():
+    for module_name in [
+        "paperbot.agents",
+        "paperbot.agents.review.agent",
+        "paperbot.agents.scholar_tracking.scholar_profile_agent",
+    ]:
+        sys.modules.pop(module_name, None)
+
+    module = importlib.import_module("paperbot.agents.scholar_tracking.scholar_profile_agent")
+
+    assert hasattr(module, "ScholarProfileAgent")
+    assert "paperbot.agents.review.agent" not in sys.modules

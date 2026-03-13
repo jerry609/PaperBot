@@ -490,14 +490,19 @@ class ResearchMilestoneModel(Base):
 
 
 class PaperFeedbackModel(Base):
-    """User feedback on recommended/seen papers (track-scoped)."""
+    """User feedback on recommended/seen papers (track-scoped or global)."""
 
     __tablename__ = "paper_feedback"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
 
     user_id: Mapped[str] = mapped_column(String(64), index=True)
-    track_id: Mapped[int] = mapped_column(Integer, ForeignKey("research_tracks.id"), index=True)
+    track_id: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        ForeignKey("research_tracks.id"),
+        nullable=True,
+        index=True,
+    )
 
     paper_id: Mapped[str] = mapped_column(String(64), index=True)
     paper_ref_id: Mapped[Optional[int]] = mapped_column(
@@ -1055,9 +1060,7 @@ class DocumentIndexJobModel(Base):
     error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     enqueued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    finished_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
 
     paper = relationship("PaperModel")
@@ -1297,7 +1300,9 @@ class ReproContextPackModel(Base):
     paper_id: Mapped[str] = mapped_column(String(256), nullable=False, index=True)
     paper_title: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     version: Mapped[str] = mapped_column(String(16), nullable=False, default="v1")
-    depth: Mapped[str] = mapped_column(String(16), nullable=False, default="standard")  # fast/standard/deep
+    depth: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="standard"
+    )  # fast/standard/deep
     status: Mapped[str] = mapped_column(
         String(32), nullable=False, default="pending", index=True
     )  # pending/running/completed/failed
@@ -1340,7 +1345,9 @@ class ReproContextStageResultModel(Base):
         String(64), ForeignKey("repro_context_pack.id", ondelete="CASCADE"), index=True
     )
     stage_name: Mapped[str] = mapped_column(String(64), index=True)
-    status: Mapped[str] = mapped_column(String(16), default="completed", index=True)  # completed/failed/skipped
+    status: Mapped[str] = mapped_column(
+        String(16), default="completed", index=True
+    )  # completed/failed/skipped
     result_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     confidence: Mapped[float] = mapped_column(Float, default=0.0)
     duration_ms: Mapped[int] = mapped_column(Integer, default=0)
@@ -1359,7 +1366,9 @@ class ReproContextEvidenceModel(Base):
     context_pack_id: Mapped[str] = mapped_column(
         String(64), ForeignKey("repro_context_pack.id", ondelete="CASCADE"), index=True
     )
-    evidence_type: Mapped[str] = mapped_column(String(32), index=True)  # paper_span/table/figure/code_snippet/metadata
+    evidence_type: Mapped[str] = mapped_column(
+        String(32), index=True
+    )  # paper_span/table/figure/code_snippet/metadata
     ref: Mapped[str] = mapped_column(Text, default="")
     supports_json: Mapped[str] = mapped_column(Text, default="[]")  # JSON array of field names
     confidence: Mapped[float] = mapped_column(Float, default=0.0)
@@ -1426,6 +1435,7 @@ class ReproCodeExperienceModel(Base):
     content: Mapped[str] = mapped_column(Text, default="")
     code_snippet: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
 
 class IntelligenceEventModel(Base):
     """Cached community radar signal from external sources."""
@@ -1497,7 +1507,9 @@ class UserModel(Base):
     avatar_url: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    last_login_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_login_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
 
 # ============================================================================

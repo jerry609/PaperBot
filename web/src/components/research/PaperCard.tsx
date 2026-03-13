@@ -119,8 +119,12 @@ export function PaperCard({
     const requestAction = toggleSaveFeedbackAction(isSaved)
     setActionLoading("save")
     try {
-      await onFeedbackAction(requestAction)
-      setIsSaved((prev) => !prev)
+      const nextAction = await onFeedbackAction(requestAction)
+      if (nextAction !== undefined) {
+        setIsSaved(nextAction === "save")
+      }
+    } catch {
+      // Parent surface handles the user-facing error state.
     } finally {
       setActionLoading(null)
     }
@@ -131,8 +135,12 @@ export function PaperCard({
     const requestAction = togglePaperPreferenceAction(preferenceAction, targetAction)
     setActionLoading(targetAction)
     try {
-      await onFeedbackAction(requestAction)
-      setPreferenceAction(requestAction === targetAction ? targetAction : null)
+      const nextAction = await onFeedbackAction(requestAction)
+      if (nextAction !== undefined) {
+        setPreferenceAction(normalizePaperPreferenceAction(nextAction))
+      }
+    } catch {
+      // Parent surface handles the user-facing error state.
     } finally {
       setActionLoading(null)
     }
