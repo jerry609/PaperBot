@@ -1,4 +1,5 @@
 from fastapi.testclient import TestClient
+from types import SimpleNamespace
 
 from paperbot.api import main as api_main
 from paperbot.api.routes import paperscool as paperscool_route
@@ -76,19 +77,31 @@ class _FakeWorkflow:
         }
 
 
-async def _fake_run_topic_search(*, queries, sources, branches, top_k_per_query, show_per_branch, min_score=0.0):
+async def _fake_run_topic_search(
+    *, queries, sources, branches, top_k_per_query, show_per_branch, min_score=0.0
+):
     """Async fake that replaces _run_topic_search for tests."""
     return _FakeWorkflow().run(
-        queries=queries, sources=sources, branches=branches,
-        top_k_per_query=top_k_per_query, show_per_branch=show_per_branch, min_score=min_score,
+        queries=queries,
+        sources=sources,
+        branches=branches,
+        top_k_per_query=top_k_per_query,
+        show_per_branch=show_per_branch,
+        min_score=min_score,
     )
 
 
-async def _fake_run_topic_search_multi(*, queries, sources, branches, top_k_per_query, show_per_branch, min_score=0.0):
+async def _fake_run_topic_search_multi(
+    *, queries, sources, branches, top_k_per_query, show_per_branch, min_score=0.0
+):
     """Async fake returning multiple papers for filter testing."""
     return _FakeWorkflowMultiPaper().run(
-        queries=queries, sources=sources, branches=branches,
-        top_k_per_query=top_k_per_query, show_per_branch=show_per_branch, min_score=min_score,
+        queries=queries,
+        sources=sources,
+        branches=branches,
+        top_k_per_query=top_k_per_query,
+        show_per_branch=show_per_branch,
+        min_score=min_score,
     )
 
 
@@ -121,8 +134,98 @@ def test_paperscool_search_route_requires_queries():
     assert resp.json()["detail"] == "queries is required"
 
 
+def test_paperscool_curate_route_returns_report_without_ingest():
+    search_result = _FakeWorkflow().run(
+        queries=["ICL压缩"],
+        sources=["papers_cool"],
+        branches=["arxiv", "venue"],
+        top_k_per_query=5,
+        show_per_branch=25,
+    )
+
+    with TestClient(api_main.app) as client:
+        resp = client.post(
+            "/api/research/paperscool/curate",
+            json={"search_result": search_result, "title": "Curated Digest", "top_n": 5},
+        )
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["report"]["title"] == "Curated Digest"
+    assert "registry_ingest" not in payload["report"]
+    assert "UniICL" in payload["markdown"]
+
+
+def test_paperscool_ingest_route_wires_explicit_ingest(monkeypatch):
+    captured: list[str] = []
+    captured_index_triggers: list[str] = []
+
+    def _fake_ingest(*, report, persist_judge_scores=False):
+        payload = {
+            **report,
+            "registry_ingest": {"total": 1, "created": 1, "updated": 0},
+        }
+        if persist_judge_scores:
+            payload["judge_registry_ingest"] = {"total": 1, "created": 1, "updated": 0}
+        return SimpleNamespace(report=payload)
+
+    monkeypatch.setattr(paperscool_route, "ingest_curated_report", _fake_ingest)
+    monkeypatch.setattr(
+        paperscool_route,
+        "_enqueue_repo_enrichment_async",
+        lambda report: captured.append(str(report.get("title") or "")),
+    )
+    monkeypatch.setattr(
+        paperscool_route,
+        "_schedule_document_indexing_for_report",
+        lambda report, *, trigger_source: (
+            captured_index_triggers.append(trigger_source),
+            report.__setitem__(
+                "document_index_ingest",
+                {"total": 1, "queued": 1, "skipped": 0, "trigger_source": trigger_source},
+            ),
+            report["document_index_ingest"],
+        )[2],
+    )
+
+    with TestClient(api_main.app) as client:
+        resp = client.post(
+            "/api/research/paperscool/ingest",
+            json={
+                "report": {
+                    "title": "Curated Digest",
+                    "generated_at": "2026-03-12T00:00:00+00:00",
+                    "queries": [],
+                    "global_top": [],
+                },
+                "persist_judge_scores": True,
+            },
+        )
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["registry_ingest"]["total"] == 1
+    assert payload["judge_registry_ingest"]["created"] == 1
+    assert payload["document_index_ingest"]["queued"] == 1
+    assert captured == ["Curated Digest"]
+    assert captured_index_triggers == ["paperscool_ingest_api"]
+
+
 def test_paperscool_daily_route_success(monkeypatch, tmp_path):
     monkeypatch.setattr(paperscool_route, "_run_topic_search", _fake_run_topic_search)
+    captured_index_triggers: list[str] = []
+    monkeypatch.setattr(
+        paperscool_route,
+        "_schedule_document_indexing_for_report",
+        lambda report, *, trigger_source: (
+            captured_index_triggers.append(trigger_source),
+            report.__setitem__(
+                "document_index_ingest",
+                {"total": 1, "queued": 1, "skipped": 0, "trigger_source": trigger_source},
+            ),
+            report["document_index_ingest"],
+        )[2],
+    )
 
     with TestClient(api_main.app) as client:
         resp = client.post(
@@ -142,6 +245,8 @@ def test_paperscool_daily_route_success(monkeypatch, tmp_path):
     assert payload["report"]["stats"]["unique_items"] == 1
     assert payload["markdown_path"] is not None
     assert payload["json_path"] is not None
+    assert payload["report"]["document_index_ingest"]["queued"] == 1
+    assert captured_index_triggers == ["paperscool_daily_sync"]
 
 
 def test_paperscool_daily_route_with_llm_enrichment(monkeypatch):
@@ -822,11 +927,13 @@ def test_paperscool_daily_route_pending_approval_and_queue(monkeypatch, tmp_path
 
     calls = {"ingest": 0}
 
-    def _fake_ingest(report):
+    def _fake_ingest(*, report, persist_judge_scores=False):
         calls["ingest"] += 1
-        return {"saved": 1}
+        payload = dict(report)
+        payload["registry_ingest"] = {"saved": 1}
+        return SimpleNamespace(report=payload)
 
-    monkeypatch.setattr(paperscool_route, "ingest_daily_report_to_registry", _fake_ingest)
+    monkeypatch.setattr(paperscool_route, "ingest_curated_report", _fake_ingest)
     monkeypatch.setattr(
         paperscool_route,
         "_pipeline_session_store",
@@ -872,13 +979,14 @@ def test_paperscool_daily_approval_decisions(monkeypatch, tmp_path):
     )
     monkeypatch.setattr(
         paperscool_route,
-        "ingest_daily_report_to_registry",
-        lambda report: {"saved": len(report.get("queries") or [])},
-    )
-    monkeypatch.setattr(
-        paperscool_route,
-        "persist_judge_scores_to_registry",
-        lambda report: {"saved": 0},
+        "ingest_curated_report",
+        lambda *, report, persist_judge_scores=False: SimpleNamespace(
+            report={
+                **report,
+                "registry_ingest": {"saved": len(report.get("queries") or [])},
+                **({"judge_registry_ingest": {"saved": 0}} if persist_judge_scores else {}),
+            }
+        ),
     )
 
     repo_calls = {"count": 0}

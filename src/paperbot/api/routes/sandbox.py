@@ -13,10 +13,14 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request
-from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from ..streaming import StreamEvent, wrap_generator
+from ..error_handling import (
+    get_request_trace_id,
+    json_internal_error_response,
+    public_exception_message,
+)
+from ..streaming import StreamEvent, sse_response
 
 router = APIRouter()
 
@@ -30,6 +34,7 @@ class CancelResponse(BaseModel):
     status: str
     job_id: str
     message: str = ""
+    trace_id: Optional[str] = None
 
 
 class RetryResponse(BaseModel):
@@ -39,6 +44,7 @@ class RetryResponse(BaseModel):
     old_job_id: str
     new_job_id: Optional[str] = None
     message: str = ""
+    trace_id: Optional[str] = None
 
 
 # --- Queue Management ---
@@ -73,7 +79,18 @@ async def get_queue_status(
             "stats": {},
         }
     except Exception as e:
-        return {"error": str(e), "pending": [], "running": [], "completed": [], "stats": {}}
+        return json_internal_error_response(
+            http_request,
+            exc=e,
+            extra={
+                "error": public_exception_message(e),
+                "pending": [],
+                "running": [],
+                "completed": [],
+                "stats": {},
+            },
+            log_message="Failed to load sandbox queue status",
+        )
 
 
 @router.get("/sandbox/jobs/{job_id}")
@@ -94,7 +111,10 @@ async def get_job_info(job_id: str, http_request: Request):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(
+            status_code=500,
+            detail=public_exception_message(e),
+        ) from e
 
 
 @router.post("/sandbox/jobs/{job_id}/cancel")
@@ -124,7 +144,12 @@ async def cancel_job(job_id: str, http_request: Request) -> CancelResponse:
         finally:
             await manager.close()
     except Exception as e:
-        return CancelResponse(status="error", job_id=job_id, message=str(e))
+        return CancelResponse(
+            status="error",
+            job_id=job_id,
+            message=public_exception_message(e),
+            trace_id=get_request_trace_id(http_request),
+        )
 
 
 @router.post("/sandbox/jobs/{job_id}/retry")
@@ -153,7 +178,12 @@ async def retry_job(job_id: str, http_request: Request) -> RetryResponse:
         finally:
             await manager.close()
     except Exception as e:
-        return RetryResponse(status="error", old_job_id=job_id, message=str(e))
+        return RetryResponse(
+            status="error",
+            old_job_id=job_id,
+            message=public_exception_message(e),
+            trace_id=get_request_trace_id(http_request),
+        )
 
 
 # --- Log Streaming ---
@@ -181,13 +211,10 @@ async def stream_logs(run_id: str, http_request: Request):
 
     Returns Server-Sent Events with log entries.
     """
-    return StreamingResponse(
-        wrap_generator(_log_stream_generator(run_id), workflow="sandbox_logs"),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-        },
+    return sse_response(
+        _log_stream_generator(run_id),
+        workflow="sandbox_logs",
+        timeout_seconds=None,
     )
 
 
@@ -207,7 +234,16 @@ async def get_logs(
         logs = logger.get_logs_dict(run_id, level=level, limit=limit, offset=offset)
         return {"run_id": run_id, "logs": logs, "count": len(logs)}
     except Exception as e:
-        return {"run_id": run_id, "logs": [], "error": str(e)}
+        return json_internal_error_response(
+            http_request,
+            exc=e,
+            extra={
+                "run_id": run_id,
+                "logs": [],
+                "error": public_exception_message(e),
+            },
+            log_message="Failed to load sandbox logs",
+        )
 
 
 # --- Resource Metrics ---
@@ -235,13 +271,10 @@ async def stream_metrics(run_id: str, http_request: Request):
 
     Returns Server-Sent Events with CPU/memory metrics.
     """
-    return StreamingResponse(
-        wrap_generator(_metrics_stream_generator(run_id), workflow="sandbox_metrics"),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-        },
+    return sse_response(
+        _metrics_stream_generator(run_id),
+        workflow="sandbox_metrics",
+        timeout_seconds=None,
     )
 
 
@@ -258,7 +291,15 @@ async def get_metrics(run_id: str, http_request: Request):
         else:
             return {"run_id": run_id, "status": "not_found"}
     except Exception as e:
-        return {"run_id": run_id, "error": str(e)}
+        return json_internal_error_response(
+            http_request,
+            exc=e,
+            extra={
+                "run_id": run_id,
+                "error": public_exception_message(e),
+            },
+            log_message="Failed to load sandbox metrics",
+        )
 
 
 @router.get("/sandbox/runs/{run_id}/metrics/history")
@@ -279,7 +320,16 @@ async def get_metrics_history(
             "count": len(history),
         }
     except Exception as e:
-        return {"run_id": run_id, "metrics": [], "error": str(e)}
+        return json_internal_error_response(
+            http_request,
+            exc=e,
+            extra={
+                "run_id": run_id,
+                "metrics": [],
+                "error": public_exception_message(e),
+            },
+            log_message="Failed to load sandbox metrics history",
+        )
 
 
 # --- System Status ---
@@ -299,6 +349,14 @@ async def get_system_status(http_request: Request):
         status = await monitor.get_system_status()
         return status.to_dict()
     except Exception as e:
-        return {
-            "queue": {"status": "unknown", "error": str(e)},
-        }
+        return json_internal_error_response(
+            http_request,
+            exc=e,
+            extra={
+                "queue": {
+                    "status": "unknown",
+                    "error": public_exception_message(e),
+                },
+            },
+            log_message="Failed to load sandbox system status",
+        )

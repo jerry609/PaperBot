@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react"
 import { Check, Loader2, RefreshCw, X } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { getErrorMessage } from "@/lib/fetch"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 
 type ApprovalItem = {
@@ -35,7 +36,7 @@ export function ApprovalQueuePanel() {
       const payload = (await res.json()) as ApprovalQueueResponse
       setItems(payload.items || [])
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      setError(getErrorMessage(e))
       setItems([])
     } finally {
       setLoading(false)
@@ -62,7 +63,7 @@ export function ApprovalQueuePanel() {
       }
       await load()
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      setError(getErrorMessage(e))
     } finally {
       setActingId(null)
     }

@@ -60,7 +60,11 @@ export function TrackSelector({
           tracks.map((track) => (
             <DropdownMenuItem
               key={track.id}
-              onClick={() => onSelectTrack(track.id)}
+              onClick={() => {
+                if (!activeTrack || track.id !== activeTrack.id) {
+                  onSelectTrack(track.id)
+                }
+              }}
               className="flex items-center justify-between"
             >
               <span className="truncate">{track.name}</span>

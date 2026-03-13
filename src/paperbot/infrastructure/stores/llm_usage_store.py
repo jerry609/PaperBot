@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy import select
 
+from paperbot.application.ports.llm_usage_port import LLMUsagePort
 from paperbot.infrastructure.stores.models import Base, LLMUsageModel
 from paperbot.infrastructure.stores.sqlalchemy_db import SessionProvider, get_db_url
 
@@ -14,14 +15,14 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-class LLMUsageStore:
+class LLMUsageStore(LLMUsagePort):
     """Persist and aggregate LLM token/cost usage records."""
 
     def __init__(self, db_url: Optional[str] = None, *, auto_create_schema: bool = True):
         self.db_url = db_url or get_db_url()
         self._provider = SessionProvider(self.db_url)
         if auto_create_schema:
-            Base.metadata.create_all(self._provider.engine)
+            self._provider.ensure_tables(Base.metadata)
 
     def record_usage(
         self,

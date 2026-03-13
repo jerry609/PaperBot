@@ -22,9 +22,11 @@ numpy>=1.24.0
 # 配置管理
 pyyaml>=6.0
 python-dotenv>=0.19.0
+cryptography>=41.0.0
+keyring>=25.0.0
 
-# 配置模型
-pydantic>=2.0.0
+# 配置模型（需要 EmailStr 支持）
+pydantic[email]>=2.0.0
 
 # 日志和调试
 colorlog>=6.7.0
@@ -59,6 +61,8 @@ e2b-code-interpreter>=1.0.0
 # Report Engine
 weasyprint>=62.3
 json-repair>=0.22.0
+jinja2>=3.1.0
+markdown>=3.4.0
 
 # FastAPI backend for CLI/Web
 fastapi==0.115.0
@@ -67,6 +71,7 @@ python-multipart>=0.0.6  # Required for file uploads
 starlette>=0.37.2,<0.39.0
 uvicorn[standard]>=0.32.0
 sse-starlette>=2.1.0
+watchdog>=4.0.0
 
 # Run/Event persistence (Phase 1A)
 SQLAlchemy>=2.0.0
@@ -93,3 +98,11 @@ feedgen>=1.0.0
 
 # Vector search (optional — graceful fallback to FTS5 if unavailable)
 sqlite-vec>=0.1.6
+
+# Fuzzy string matching for paper deduplication
+rapidfuzz>=3.0.0
+
+# Authentication (JWT + password hashing)
+python-jose[cryptography]>=3.3.0
+bcrypt>=4.0.0
+resend>=0.7.0

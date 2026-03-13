@@ -61,7 +61,7 @@ class ExecutionLogger:
         self.db_url = db_url or get_db_url()
         self._provider = SessionProvider(self.db_url)
         if auto_create_schema:
-            Base.metadata.create_all(self._provider.engine)
+            self._provider.ensure_tables(Base.metadata)
 
         # In-memory buffer for real-time streaming
         self._buffers: Dict[str, asyncio.Queue[LogEntry]] = {}

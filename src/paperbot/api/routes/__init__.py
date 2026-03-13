@@ -14,9 +14,14 @@ from . import (
     research,
     paperscool,
     newsletter,
+    obsidian,
     model_endpoints,
+    embedding_settings,
     repro_context,
+    feed,
+    intelligence,
     push_commands,
+    agent_board,
 )
 
 __all__ = [
@@ -33,7 +38,12 @@ __all__ = [
     "research",
     "paperscool",
     "newsletter",
+    "obsidian",
     "model_endpoints",
+    "embedding_settings",
     "repro_context",
+    "feed",
+    "intelligence",
     "push_commands",
+    "agent_board",
 ]

@@ -19,6 +19,18 @@ def test_client(tmp_path, monkeypatch):
     monkeypatch.setenv("PAPERBOT_DB_URL", f"sqlite:///{tmp_path / 'test.db'}")
 
     from paperbot.api import main as api_main
+    from paperbot.api.routes import memory as memory_module
+    from paperbot.api.routes import research as research_module
+    from paperbot.memory.eval.collector import MemoryMetricCollector
+
+    memory_module._metric_collector = MemoryMetricCollector()
+    monkeypatch.setattr(research_module, "_metric_collector", None)
+    monkeypatch.setattr(research_module, "_research_store", None)
+    monkeypatch.setattr(research_module, "_memory_store", None)
+    monkeypatch.setattr(research_module, "_track_router", None)
+    monkeypatch.setattr(research_module, "_workflow_metric_store", None)
+    monkeypatch.setattr(research_module, "_paper_store", None)
+    monkeypatch.setattr(research_module, "_paper_search_service", None)
 
     with TestClient(api_main.app) as client:
         yield client

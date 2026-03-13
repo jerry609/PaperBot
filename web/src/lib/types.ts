@@ -241,6 +241,7 @@ export interface DeadlineRadarItem {
         track_id: number
         track_name: string
         matched_keywords: string[]
+        matched_terms?: string[]
     }>
 }
 
@@ -279,4 +280,84 @@ export interface AnchorPreviewItem {
     anchor_score: number
     anchor_level?: string
     user_action?: "follow" | "ignore" | null
+}
+
+export interface ResearchTrackContextTask {
+    id: number
+    track_id: number
+    title: string
+    status?: string
+    priority?: number
+    paper_id?: string | null
+    paper_url?: string | null
+    metadata?: Record<string, unknown>
+    created_at?: string | null
+    updated_at?: string | null
+    done_at?: string | null
+}
+
+export interface ResearchTrackContextMilestone {
+    id: number
+    track_id: number
+    name: string
+    status?: string
+    notes?: string
+    due_at?: string | null
+    created_at?: string | null
+    updated_at?: string | null
+}
+
+export interface ResearchTrackContextMemorySummary {
+    total_items: number
+    approved_items: number
+    pending_items: number
+    top_tags: string[]
+    latest_memory_at?: string | null
+}
+
+export interface ResearchTrackContextFeedbackItem {
+    id: number
+    track_id: number
+    paper_id: string
+    action: string
+    ts?: string | null
+    metadata?: Record<string, unknown>
+}
+
+export interface ResearchTrackContextFeedbackSummary {
+    total_items: number
+    actions: Record<string, number>
+    latest_feedback_at?: string | null
+    recent_items: ResearchTrackContextFeedbackItem[]
+}
+
+export interface ResearchTrackSavedPaperPreview {
+    paper?: TrackFeedPaper & {
+        authors?: string[]
+        abstract?: string | null
+        url?: string | null
+    }
+    saved_at?: string | null
+    latest_judge?: {
+        overall?: number | null
+        recommendation?: string | null
+    } | null
+}
+
+export interface ResearchTrackContextSavedPapersSummary {
+    total_items: number
+    latest_saved_at?: string | null
+    recent_items: ResearchTrackSavedPaperPreview[]
+}
+
+export interface ResearchTrackContextResponse {
+    user_id: string
+    track_id: number
+    track: ResearchTrackSummary
+    tasks: ResearchTrackContextTask[]
+    milestones: ResearchTrackContextMilestone[]
+    memory: ResearchTrackContextMemorySummary
+    feedback: ResearchTrackContextFeedbackSummary
+    saved_papers: ResearchTrackContextSavedPapersSummary
+    eval_summary: Record<string, unknown>
 }

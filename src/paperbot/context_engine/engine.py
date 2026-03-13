@@ -6,9 +6,10 @@ import math
 import random
 import re
 import time
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
+from paperbot.application.ports.document_intelligence_port import EvidenceRetrieverPort
 from paperbot.context_engine.track_router import TrackRouter, TrackRouterConfig
 from paperbot.infrastructure.stores.memory_store import SqlAlchemyMemoryStore
 from paperbot.infrastructure.stores.research_store import SqlAlchemyResearchStore
@@ -16,9 +17,15 @@ from paperbot.utils.logging_config import Logger, LogFiles
 
 # Optional: PaperSearchService for unified search
 try:
+    from paperbot.application.services.candidate_search import (
+        search_candidate_papers,
+        search_result_to_candidate_dicts,
+    )
     from paperbot.application.services.paper_search_service import PaperSearchService
 except ImportError:  # pragma: no cover
     PaperSearchService = None  # type: ignore
+    search_candidate_papers = None  # type: ignore
+    search_result_to_candidate_dicts = None  # type: ignore
 
 # Optional: AnchorService for personalized author boosts
 try:
@@ -499,6 +506,7 @@ class ContextEngineConfig:
     personalized: bool = True
     year_from: Optional[int] = None
     year_to: Optional[int] = None
+    evidence_limit: int = 6
     track_router: TrackRouterConfig = field(default_factory=TrackRouterConfig)
 
 
@@ -510,6 +518,7 @@ class ContextEngine:
         memory_store: Optional[SqlAlchemyMemoryStore] = None,
         paper_store: Optional[Any] = None,
         search_service: Optional[Any] = None,
+        evidence_retriever: Optional[EvidenceRetrieverPort] = None,
         track_router: Optional[TrackRouter] = None,
         config: Optional[ContextEngineConfig] = None,
     ):
@@ -517,6 +526,7 @@ class ContextEngine:
         self.memory_store = memory_store or SqlAlchemyMemoryStore()
         self.paper_store = paper_store
         self.search_service = search_service
+        self.evidence_retriever = evidence_retriever
         self.config = config or ContextEngineConfig()
         self.track_router = track_router or TrackRouter(
             research_store=self.research_store,
@@ -524,7 +534,7 @@ class ContextEngine:
             config=self.config.track_router,
         )
         self._layer0_cache: Dict[str, Dict[str, Any]] = {}  # keyed by user_id
-        self._layer0_cache_ts: Dict[str, float] = {}      # keyed by user_id
+        self._layer0_cache_ts: Dict[str, float] = {}  # keyed by user_id
         self._layer0_ttl: float = 300.0  # 5 minutes
 
     def _attach_latest_judge(self, papers: List[Dict[str, Any]]) -> None:
@@ -591,9 +601,7 @@ class ContextEngine:
         self._layer0_cache_ts[user_id] = now
         return prefs
 
-    def _load_layer1_track(
-        self, user_id: str, track: Optional[Dict[str, Any]]
-    ) -> Dict[str, Any]:
+    def _load_layer1_track(self, user_id: str, track: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         """Layer 1: track context — goals, keywords, tasks, milestones (~500 tokens)."""
         tasks: List[Dict[str, Any]] = []
         milestones: List[Dict[str, Any]] = []
@@ -637,10 +645,6 @@ class ContextEngine:
                 mmr_lambda=self.config.memory_search_mmr_lambda,
                 half_life_days=self.config.memory_search_half_life_days,
             )
-            self.memory_store.touch_usage(
-                item_ids=[int(i["id"]) for i in relevant_memories if i.get("id")],
-                actor_id="context_engine",
-            )
 
         if include_cross_track and track_id is None:
             tracks = self.research_store.list_tracks(
@@ -670,19 +674,12 @@ class ContextEngine:
                     mmr_lambda=self.config.memory_search_mmr_lambda,
                     half_life_days=self.config.memory_search_half_life_days,
                 )
-                cross_hit_ids: List[int] = []
                 for sid, hits in batch_results.items():
                     t = scope_id_to_track.get(sid)
                     for h in hits:
                         h["track_id"] = t.get("id") if t else None
                         h["track_name"] = t.get("name") if t else None
-                        if h.get("id"):
-                            cross_hit_ids.append(int(h["id"]))
                     cross_track_memories.extend(hits)
-                if cross_hit_ids:
-                    self.memory_store.touch_usage(
-                        item_ids=cross_hit_ids, actor_id="context_engine"
-                    )
 
         return {
             "relevant_memories": relevant_memories,
@@ -771,9 +768,7 @@ class ContextEngine:
 
         return prefs, task_list, milestone_list, relevant, cross_track, paper, layers, trimmed
 
-    def _load_layer3_paper(
-        self, user_id: str, paper_id: Optional[str]
-    ) -> List[Dict[str, Any]]:
+    def _load_layer3_paper(self, user_id: str, paper_id: Optional[str]) -> List[Dict[str, Any]]:
         """Layer 3: paper-scoped memories (on-demand, only when paper_id given)."""
         if not paper_id:
             return []
@@ -908,7 +903,11 @@ class ContextEngine:
                 fetch_limit = max(30, int(self.config.paper_limit) * 3)
 
                 # Prefer PaperSearchService if available
-                if self.search_service is not None:
+                if (
+                    self.search_service is not None
+                    and search_candidate_papers is not None
+                    and search_result_to_candidate_dicts is not None
+                ):
                     selected_sources = [
                         str(x).strip() for x in (self.config.search_sources or []) if str(x).strip()
                     ]
@@ -917,11 +916,23 @@ class ContextEngine:
 
                     if self.config.personalized and routed_track:
                         try:
-                            feedback_rows = self.research_store.list_paper_feedback(
-                                user_id=user_id,
-                                track_id=int(routed_track["id"]),
-                                limit=500,
+                            list_effective_feedback = getattr(
+                                self.research_store,
+                                "list_effective_paper_feedback",
+                                None,
                             )
+                            if callable(list_effective_feedback):
+                                feedback_rows = list_effective_feedback(
+                                    user_id=user_id,
+                                    track_id=int(routed_track["id"]),
+                                    limit=500,
+                                )
+                            else:
+                                feedback_rows = self.research_store.list_paper_feedback(
+                                    user_id=user_id,
+                                    track_id=int(routed_track["id"]),
+                                    limit=500,
+                                )
                             default_rrf_weights = getattr(
                                 self.search_service,
                                 "DEFAULT_SOURCE_WEIGHTS",
@@ -942,22 +953,19 @@ class ContextEngine:
                         f"Using PaperSearchService for query='{merged_query}'",
                         file=LogFiles.HARVEST,
                     )
-                    search_result = await self.search_service.search(
-                        merged_query,
+                    search_result = await search_candidate_papers(
+                        self.search_service,
+                        query=merged_query,
                         sources=selected_sources,
                         max_results=fetch_limit,
                         year_from=self.config.year_from,
                         year_to=self.config.year_to,
-                        persist=True,
                         source_weights=learned_source_weights,
                     )
-                    raw = [p.to_dict() for p in search_result.papers]
-                    # Inject paper_id from canonical_id or first identity
-                    for p_dict, p_obj in zip(raw, search_result.papers):
-                        pid = str(p_obj.canonical_id or "")
-                        if not pid:
-                            pid = p_obj.get_identity("semantic_scholar") or ""
-                        p_dict["paper_id"] = pid
+                    raw = search_result_to_candidate_dicts(
+                        search_result,
+                        registry=self.paper_store,
+                    )
                     Logger.info(
                         f"PaperSearchService returned {len(raw)} papers",
                         file=LogFiles.HARVEST,
@@ -1163,6 +1171,46 @@ class ContextEngine:
                 "post_guard_total_tokens": sum(context_layers.values()),
             }
 
+        evidence_hits: List[Dict[str, Any]] = []
+        if self.evidence_retriever is not None and self.config.evidence_limit > 0:
+            indexed_paper_ids: List[int] = []
+            for paper in papers:
+                candidate_ids = (
+                    paper.get("canonical_paper_id"),
+                    paper.get("canonical_id"),
+                    paper.get("paper_id"),
+                )
+                for candidate_id in candidate_ids:
+                    try:
+                        paper_id_value = int(candidate_id)
+                    except (TypeError, ValueError):
+                        continue
+                    if paper_id_value > 0 and paper_id_value not in indexed_paper_ids:
+                        indexed_paper_ids.append(paper_id_value)
+                        break
+
+            if indexed_paper_ids:
+                try:
+                    raw_hits = self.evidence_retriever.retrieve_evidence(
+                        query=merged_query,
+                        paper_ids=indexed_paper_ids,
+                        limit=int(self.config.evidence_limit),
+                    )
+                    evidence_hits = []
+                    for hit in raw_hits:
+                        if isinstance(hit, dict):
+                            evidence_hits.append(dict(hit))
+                            continue
+                        evidence_hits.append(asdict(hit))
+                except Exception as exc:
+                    Logger.warning(
+                        f"Failed to retrieve indexed evidence: {exc}",
+                        file=LogFiles.HARVEST,
+                    )
+                    evidence_hits = []
+            routing["evidence_hit_count"] = len(evidence_hits)
+            routing["indexed_evidence_paper_count"] = len(indexed_paper_ids)
+
         return {
             "user_id": user_id,
             "context_run_id": context_run_id,
@@ -1176,6 +1224,7 @@ class ContextEngine:
             "paper_recommendations": papers,
             "paper_recommendation_scores": paper_scores,
             "paper_recommendation_reasons": paper_reasons,
+            "evidence_hits": evidence_hits,
             "context_layers": context_layers,
         }
 
@@ -1187,14 +1236,35 @@ class ContextEngine:
                     maybe_coro = close_fn()
                     if asyncio.iscoroutine(maybe_coro):
                         await maybe_coro
-                except Exception:
-                    pass
+                except Exception as exc:  # pragma: no cover - best-effort cleanup
+                    Logger.warning(
+                        f"Failed to close search_service: {exc}",
+                        file=LogFiles.HARVEST,
+                    )
 
         if self.paper_store is not None:
             close_fn = getattr(self.paper_store, "close", None)
             if callable(close_fn):
                 try:
                     close_fn()
-                except Exception:
-                    pass
+                except Exception as exc:  # pragma: no cover - best-effort cleanup
+                    Logger.warning(
+                        f"Failed to close paper_store: {exc}",
+                        file=LogFiles.HARVEST,
+                    )
+
+        if (
+            self.evidence_retriever is not None
+            and self.evidence_retriever is not self.paper_store
+        ):
+            close_fn = getattr(self.evidence_retriever, "close", None)
+            if callable(close_fn):
+                try:
+                    close_fn()
+                except Exception as exc:  # pragma: no cover - best-effort cleanup
+                    Logger.warning(
+                        f"Failed to close evidence_retriever: {exc}",
+                        file=LogFiles.HARVEST,
+                    )
+
         return None

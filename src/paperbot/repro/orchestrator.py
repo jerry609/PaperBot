@@ -195,93 +195,119 @@ class Orchestrator:
         result = ReproductionResult(paper_title=paper_context.title)
 
         try:
-            # Stage 1: Planning
-            self._update_stage(PipelineStage.PLANNING)
-            planning_result = await self._run_planning()
-
-            if planning_result.status != AgentStatus.COMPLETED:
-                result.status = ReproPhase.FAILED
-                result.error = f"Planning failed: {planning_result.error}"
-                return self._finalize_result(result)
-
-            result.plan = self.context.get("plan")
-            result.phases_completed.append("planning")
-
-            # Stage 2: Coding
-            self._update_stage(PipelineStage.CODING)
-            coding_result = await self._run_coding()
-
-            if coding_result.status != AgentStatus.COMPLETED:
-                result.status = ReproPhase.FAILED
-                result.error = f"Coding failed: {coding_result.error}"
-                return self._finalize_result(result)
-
-            result.generated_files = self.context.get("generated_files", {})
-            result.spec = self.context.get("spec")
-            result.phases_completed.append("generation")
-
-            # Stage 3: Verification + Repair Loop
-            for repair_attempt in range(self.config.max_repair_loops + 1):
-                self.progress.repair_loop_count = repair_attempt
-
-                # Verify
-                self._update_stage(PipelineStage.VERIFICATION)
-                verification_result = await self._run_verification()
-
-                report = self.context.get("verification_report")
-                if report:
-                    result.verification = report.to_dict()
-
-                # Check if verification passed
-                if report and report.all_passed:
-                    result.phases_completed.append("verification")
-                    break
-
-                # Try to repair if we have errors and attempts remaining
-                error = self.context.get("error")
-                if error and repair_attempt < self.config.max_repair_loops:
-                    self._update_stage(PipelineStage.DEBUGGING)
-                    debug_result = await self._run_debugging()
-
-                    result.retry_count += 1
-
-                    if debug_result.status != AgentStatus.COMPLETED:
-                        logger.warning(f"Repair attempt {repair_attempt + 1} failed")
-                        result.errors.append(f"Repair failed: {debug_result.error}")
-
-                    # Update generated files if repairs were made
-                    if debug_result.data and debug_result.data.get("modified_files"):
-                        # Re-read files from disk
-                        if self.config.output_dir:
-                            for filepath in result.generated_files:
-                                file_path = self.config.output_dir / filepath
-                                if file_path.exists():
-                                    result.generated_files[filepath] = file_path.read_text()
-                else:
-                    # No error or no more repair attempts
-                    if error:
-                        result.errors.append(error)
-                    break
-
-            # Determine final status
-            if report and report.all_passed:
-                result.status = ReproPhase.COMPLETED
-            else:
-                result.status = ReproPhase.VERIFICATION
-                if not result.error:
-                    result.error = "Verification did not pass all checks"
-
-            return self._finalize_result(result)
+            timeout_seconds = self._pipeline_timeout_seconds()
+            if timeout_seconds is None:
+                return await self._run_pipeline(result)
+            return await asyncio.wait_for(self._run_pipeline(result), timeout=timeout_seconds)
 
         except asyncio.TimeoutError:
+            self._update_stage(PipelineStage.FAILED)
             result.status = ReproPhase.FAILED
-            result.error = "Pipeline timed out"
+            timeout_seconds = self._pipeline_timeout_seconds()
+            if timeout_seconds is None:
+                result.error = "Pipeline timed out"
+            else:
+                result.error = f"Pipeline timed out after {timeout_seconds:g}s"
             return self._finalize_result(result)
         except Exception as e:
+            self._update_stage(PipelineStage.FAILED)
             logger.error(f"Pipeline failed: {e}")
             result.status = ReproPhase.FAILED
             result.error = str(e)
             return self._finalize_result(result)
+
+    def _pipeline_timeout_seconds(self) -> Optional[float]:
+        """Return the configured pipeline timeout, or ``None`` when disabled."""
+        raw_timeout = self.config.timeout_seconds
+        if raw_timeout is None:
+            return None
+        try:
+            timeout = float(raw_timeout)
+        except (TypeError, ValueError):
+            return None
+        return timeout if timeout > 0 else None
+
+    async def _run_pipeline(self, result: ReproductionResult) -> ReproductionResult:
+        """Execute the Paper2Code pipeline body under the configured timeout."""
+        # Stage 1: Planning
+        self._update_stage(PipelineStage.PLANNING)
+        planning_result = await self._run_planning()
+
+        if planning_result.status != AgentStatus.COMPLETED:
+            result.status = ReproPhase.FAILED
+            result.error = f"Planning failed: {planning_result.error}"
+            return self._finalize_result(result)
+
+        result.plan = self.context.get("plan")
+        result.phases_completed.append("planning")
+
+        # Stage 2: Coding
+        self._update_stage(PipelineStage.CODING)
+        coding_result = await self._run_coding()
+
+        if coding_result.status != AgentStatus.COMPLETED:
+            result.status = ReproPhase.FAILED
+            result.error = f"Coding failed: {coding_result.error}"
+            return self._finalize_result(result)
+
+        result.generated_files = self.context.get("generated_files", {})
+        result.spec = self.context.get("spec")
+        result.phases_completed.append("generation")
+
+        report = None
+
+        # Stage 3: Verification + Repair Loop
+        for repair_attempt in range(self.config.max_repair_loops + 1):
+            self.progress.repair_loop_count = repair_attempt
+
+            # Verify
+            self._update_stage(PipelineStage.VERIFICATION)
+            await self._run_verification()
+
+            report = self.context.get("verification_report")
+            if report:
+                result.verification = report.to_dict()
+
+            # Check if verification passed
+            if report and report.all_passed:
+                result.phases_completed.append("verification")
+                break
+
+            # Try to repair if we have errors and attempts remaining
+            error = self.context.get("error")
+            if error and repair_attempt < self.config.max_repair_loops:
+                self._update_stage(PipelineStage.DEBUGGING)
+                debug_result = await self._run_debugging()
+
+                result.retry_count += 1
+
+                if debug_result.status != AgentStatus.COMPLETED:
+                    logger.warning(f"Repair attempt {repair_attempt + 1} failed")
+                    result.errors.append(f"Repair failed: {debug_result.error}")
+
+                # Update generated files if repairs were made
+                if debug_result.data and debug_result.data.get("modified_files"):
+                    # Re-read files from disk
+                    if self.config.output_dir:
+                        for filepath in result.generated_files:
+                            file_path = self.config.output_dir / filepath
+                            if file_path.exists():
+                                result.generated_files[filepath] = file_path.read_text()
+            else:
+                # No error or no more repair attempts
+                if error:
+                    result.errors.append(error)
+                break
+
+        # Determine final status
+        if report and report.all_passed:
+            result.status = ReproPhase.COMPLETED
+        else:
+            result.status = ReproPhase.VERIFICATION
+            if not result.error:
+                result.error = "Verification did not pass all checks"
+
+        return self._finalize_result(result)
 
     async def _run_planning(self) -> AgentResult:
         """Run planning agent."""

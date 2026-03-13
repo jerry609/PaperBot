@@ -11,6 +11,7 @@ from sqlalchemy import and_, desc, func, or_, select
 
 from paperbot.infrastructure.stores.models import (
     AuthorModel,
+    Base,
     PaperAuthorModel,
     PaperFeedbackModel,
     PaperModel,
@@ -69,11 +70,69 @@ def _safe_json_obj(text: str) -> dict[str, Any]:
     return {}
 
 
+_FEEDBACK_ACTION_ALIASES = {
+    "not_relevant": "dislike",
+    "not-relevant": "dislike",
+    "not related": "dislike",
+}
+_FEEDBACK_GROUP_BY_ACTION = {
+    "save": "save_state",
+    "unsave": "save_state",
+    "like": "preference_state",
+    "unlike": "preference_state",
+    "dislike": "preference_state",
+    "undislike": "preference_state",
+    "skip": "preference_state",
+    "cite": "cite_state",
+}
+_FEEDBACK_EFFECTIVE_ACTIONS = {
+    "save": "save",
+    "unsave": None,
+    "like": "like",
+    "unlike": None,
+    "dislike": "dislike",
+    "undislike": None,
+    "skip": "skip",
+    "cite": "cite",
+}
+
+
+def _normalize_feedback_action(value: str) -> str:
+    normalized = (value or "").strip().lower().replace(" ", "_")
+    return _FEEDBACK_ACTION_ALIASES.get(normalized, normalized)
+
+
+def _collapse_effective_feedback_actions(rows: list[PaperFeedbackModel]) -> list[str]:
+    effective_actions: list[str] = []
+    seen: set[tuple[int, str]] = set()
+    for row in rows:
+        paper_id = int(row.canonical_paper_id or row.paper_ref_id or 0)
+        if paper_id <= 0:
+            continue
+        normalized_action = _normalize_feedback_action(str(row.action or ""))
+        group = _FEEDBACK_GROUP_BY_ACTION.get(normalized_action, normalized_action)
+        state_key = (paper_id, group)
+        if state_key in seen:
+            continue
+        seen.add(state_key)
+
+        effective_action = _FEEDBACK_EFFECTIVE_ACTIONS.get(normalized_action, normalized_action)
+        if effective_action:
+            effective_actions.append(effective_action)
+    return effective_actions
+
+
 class AnchorService:
     """Discover anchor authors with intrinsic + relevance + network scoring."""
 
-    def __init__(self, db_url: Optional[str] = None):
-        self._provider = SessionProvider(db_url or get_db_url())
+    def __init__(
+        self,
+        db_url: Optional[str] = None,
+        *,
+        provider: Optional[SessionProvider] = None,
+    ):
+        self._provider = provider or SessionProvider(db_url or get_db_url())
+        self._provider.ensure_tables(Base.metadata)
 
     def discover(
         self,
@@ -158,6 +217,7 @@ class AnchorService:
                                     PaperFeedbackModel.paper_ref_id.in_(paper_ids),
                                 )
                             )
+                            .order_by(desc(PaperFeedbackModel.ts), desc(PaperFeedbackModel.id))
                         )
                         .scalars()
                         .all()
@@ -180,11 +240,14 @@ class AnchorService:
                     "dislike": -1.0,
                     "skip": -0.3,
                 }
+                effective_feedback_actions = _collapse_effective_feedback_actions(feedback_rows)
                 raw_feedback = 0.0
-                for row in feedback_rows:
-                    raw_feedback += action_weights.get((row.action or "").lower(), 0.0)
+                for action in effective_feedback_actions:
+                    raw_feedback += action_weights.get(action, 0.0)
                 feedback_signal = (
-                    (math.tanh(raw_feedback / 4.0) + 1.0) / 2.0 if feedback_rows else 0.0
+                    (math.tanh(raw_feedback / 4.0) + 1.0) / 2.0
+                    if effective_feedback_actions
+                    else 0.0
                 )
 
                 relevance_score = keyword_match_rate

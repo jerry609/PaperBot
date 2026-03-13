@@ -4,6 +4,12 @@ import { useEffect, useMemo, useState } from "react"
 import { Loader2, RefreshCw } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { getErrorMessage } from "@/lib/fetch"
+import {
+  normalizePaperPreferenceAction,
+  type PaperFeedbackAction,
+  type PaperFeedbackRequestAction,
+} from "@/lib/paper-feedback"
 import { Card, CardContent } from "@/components/ui/card"
 
 import { PaperCard, type Paper } from "./PaperCard"
@@ -21,6 +27,9 @@ type FeedItem = {
   }
   latest_judge?: Paper["latest_judge"]
   latest_feedback_action?: string | null
+  is_saved?: boolean
+  is_liked?: boolean
+  is_disliked?: boolean
 }
 
 type FeedResponse = {
@@ -33,13 +42,19 @@ type FeedResponse = {
 interface FeedTabProps {
   userId: string
   trackId: number | null
-  onLike?: (paperId: string, rank: number) => Promise<void> | void
-  onSave?: (paperId: string, rank: number, paper: Paper) => Promise<void> | void
-  onDislike?: (paperId: string, rank: number) => Promise<void> | void
+  onFeedbackAction?: (
+    paperId: string,
+    action: PaperFeedbackRequestAction,
+    rank: number,
+    paper: Paper
+  ) => Promise<PaperFeedbackAction | null | undefined> | PaperFeedbackAction | null | undefined
 }
 
 function toPaper(item: FeedItem): Paper {
   const id = String(item.paper.id || "")
+  const preferenceAction =
+    normalizePaperPreferenceAction(item.latest_feedback_action) ||
+    (item.is_liked ? "like" : item.is_disliked ? "dislike" : null)
   return {
     paper_id: id,
     title: item.paper.title || "Untitled",
@@ -50,11 +65,14 @@ function toPaper(item: FeedItem): Paper {
     citation_count: item.paper.citation_count || 0,
     url: item.paper.url,
     latest_judge: item.latest_judge,
-    is_saved: (item.latest_feedback_action || "").toLowerCase() === "save",
+    feedback_action: preferenceAction,
+    is_saved: Boolean(item.is_saved),
+    is_liked: preferenceAction === "like",
+    is_disliked: preferenceAction === "dislike",
   }
 }
 
-export function FeedTab({ userId, trackId, onLike, onSave, onDislike }: FeedTabProps) {
+export function FeedTab({ userId, trackId, onFeedbackAction }: FeedTabProps) {
   const [items, setItems] = useState<FeedItem[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -81,7 +99,7 @@ export function FeedTab({ userId, trackId, onLike, onSave, onDislike }: FeedTabP
       const payload = (await res.json()) as FeedResponse
       setItems(payload.items || [])
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      setError(getErrorMessage(e))
       setItems([])
     } finally {
       setLoading(false)
@@ -124,9 +142,11 @@ export function FeedTab({ userId, trackId, onLike, onSave, onDislike }: FeedTabP
               key={`${paper.paper_id}-${idx}`}
               paper={paper}
               rank={idx}
-              onLike={onLike ? () => onLike(paper.paper_id, idx) : undefined}
-              onSave={onSave ? () => onSave(paper.paper_id, idx, paper) : undefined}
-              onDislike={onDislike ? () => onDislike(paper.paper_id, idx) : undefined}
+              onFeedbackAction={
+                onFeedbackAction
+                  ? (action) => onFeedbackAction(paper.paper_id, action, idx, paper)
+                  : undefined
+              }
             />
           ))}
         </div>

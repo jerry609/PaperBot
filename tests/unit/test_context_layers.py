@@ -1,4 +1,5 @@
 """Tests for #165 — context layered loading."""
+
 from __future__ import annotations
 
 import time
@@ -6,10 +7,14 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from paperbot.application.ports.document_intelligence_port import EvidenceHit
+from paperbot.context_engine import engine as engine_module
 from paperbot.context_engine.engine import ContextEngine, ContextEngineConfig
+from paperbot.infrastructure.stores.memory_store import SqlAlchemyMemoryStore
+from paperbot.memory.schema import MemoryCandidate
 
 
-def _make_engine(*, memory_store=None, research_store=None, config=None):
+def _make_engine(*, memory_store=None, research_store=None, config=None, evidence_retriever=None):
     """Create a ContextEngine with faked stores."""
     rs = research_store or MagicMock()
     ms = memory_store or MagicMock()
@@ -25,17 +30,28 @@ def _make_engine(*, memory_store=None, research_store=None, config=None):
     rs.create_context_run.return_value = {"id": 1}
 
     # Default return values for memory_store methods.
-    ms.list_memories.return_value = [
-        {"id": 1, "content": "pref1", "confidence": 0.9, "created_at": "2025-01-01T00:00:00+00:00", "use_count": 0},
-    ]
-    ms.search_memories.return_value = []
-    ms.search_memories_batch.return_value = {}
-    ms.touch_usage.return_value = None
+    if hasattr(ms.list_memories, "return_value"):
+        ms.list_memories.return_value = [
+            {
+                "id": 1,
+                "content": "pref1",
+                "confidence": 0.9,
+                "created_at": "2025-01-01T00:00:00+00:00",
+                "use_count": 0,
+            },
+        ]
+    if hasattr(ms.search_memories, "return_value"):
+        ms.search_memories.return_value = []
+    if hasattr(ms.search_memories_batch, "return_value"):
+        ms.search_memories_batch.return_value = {}
+    if hasattr(ms.touch_usage, "return_value"):
+        ms.touch_usage.return_value = None
 
     config = config or ContextEngineConfig(offline=True, paper_limit=0)
     engine = ContextEngine(
         research_store=rs,
         memory_store=ms,
+        evidence_retriever=evidence_retriever,
         config=config,
         track_router=MagicMock(),
     )
@@ -132,6 +148,72 @@ class TestBuildContextPackLayers:
         assert "layer3_paper_tokens" in layers
 
     @pytest.mark.asyncio
+    async def test_context_pack_includes_evidence_hits_when_retriever_available(self):
+        class _FakeEvidenceRetriever:
+            def retrieve_evidence(self, *, query, paper_ids=None, limit=6):
+                return [
+                    EvidenceHit(
+                        paper_id=1,
+                        chunk_id=10,
+                        chunk_index=0,
+                        paper_title="Transformer Paper",
+                        section="abstract",
+                        heading="Abstract",
+                        snippet="Transformer retrieval evidence",
+                        score=0.9,
+                        source_type="paper_metadata",
+                        locator_url="https://example.com/paper",
+                        metadata={},
+                    )
+                ]
+
+        async def _fake_search_candidate_papers(*args, **kwargs):
+            return object()
+
+        def _fake_search_result_to_candidate_dicts(*args, **kwargs):
+            return [
+                {
+                    "paper_id": "1",
+                    "canonical_id": 1,
+                    "title": "Transformer Paper",
+                    "abstract": (
+                        "Transformer retrieval evidence is described in enough detail "
+                        "to pass the academic paper filter."
+                    ),
+                    "year": 2026,
+                    "citation_count": 5,
+                    "url": "https://example.com/paper",
+                }
+            ]
+
+        monkeypatch = pytest.MonkeyPatch()
+        try:
+            monkeypatch.setattr(
+                engine_module, "search_candidate_papers", _fake_search_candidate_papers
+            )
+            monkeypatch.setattr(
+                engine_module,
+                "search_result_to_candidate_dicts",
+                _fake_search_result_to_candidate_dicts,
+            )
+            engine, rs, ms = _make_engine(
+                evidence_retriever=_FakeEvidenceRetriever(),
+                config=ContextEngineConfig(offline=False, paper_limit=2, evidence_limit=3),
+            )
+            engine.search_service = MagicMock()
+
+            result = await engine.build_context_pack(
+                user_id="u1",
+                query="transformer retrieval",
+            )
+        finally:
+            monkeypatch.undo()
+
+        assert len(result["evidence_hits"]) == 1
+        assert result["evidence_hits"][0]["paper_id"] == 1
+        assert result["routing"]["evidence_hit_count"] == 1
+
+    @pytest.mark.asyncio
     async def test_no_paper_id_layer3_is_zero(self):
         engine, rs, ms = _make_engine()
         result = await engine.build_context_pack(
@@ -168,7 +250,7 @@ class TestBuildContextPackLayers:
         assert expected_keys.issubset(set(result.keys()))
 
     @pytest.mark.asyncio
-    async def test_cross_track_batch_hits_touch_usage(self):
+    async def test_cross_track_batch_hits_do_not_manual_touch_usage(self):
         engine, rs, ms = _make_engine()
         rs.get_active_track.return_value = {"id": 1, "name": "main"}
         rs.list_tracks.return_value = [
@@ -188,7 +270,43 @@ class TestBuildContextPackLayers:
         )
 
         touch_calls = [call.kwargs for call in ms.touch_usage.call_args_list]
-        assert any(201 in kwargs.get("item_ids", []) for kwargs in touch_calls)
+        assert not any(201 in kwargs.get("item_ids", []) for kwargs in touch_calls)
+
+    @pytest.mark.asyncio
+    async def test_relevant_memory_search_chain_touches_usage_once(self, tmp_path):
+        store = SqlAlchemyMemoryStore(
+            db_url=f"sqlite:///{tmp_path / 'context_memory_usage.db'}",
+            auto_create_schema=True,
+        )
+        _, _, rows = store.add_memories(
+            user_id="u1",
+            memories=[
+                MemoryCandidate(
+                    kind="fact",
+                    content="transformer retrieval memory",
+                    confidence=0.9,
+                    scope_type="track",
+                    scope_id="1",
+                    tags=["transformer"],
+                    evidence={},
+                )
+            ],
+            actor_id="test",
+        )
+
+        engine, rs, _ = _make_engine(memory_store=store)
+        rs.get_track.return_value = {"id": 1, "name": "main"}
+
+        await engine.build_context_pack(
+            user_id="u1",
+            query="transformer",
+            track_id=1,
+        )
+
+        stored = store.get_items_by_ids(user_id="u1", item_ids=[rows[0].id])
+        assert len(stored) == 1
+        assert stored[0]["use_count"] == 1
+        assert stored[0]["last_used_at"] is not None
 
     @pytest.mark.asyncio
     async def test_context_token_guard_trims_when_budget_exceeded(self):

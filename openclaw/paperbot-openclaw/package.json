@@ -1,0 +1,26 @@
+{
+  "name": "paperbot-openclaw",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "OpenClaw plugin shim that bridges PaperBot FastAPI capabilities into OpenClaw tools, hooks, CLI, and cron descriptors.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.json",
+    "test": "npm run build && node --test test/plugin.test.js"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3"
+  }
+}

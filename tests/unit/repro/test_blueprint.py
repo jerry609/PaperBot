@@ -1,269 +1,166 @@
-# tests/unit/repro/test_blueprint.py
-"""
-Unit tests for Blueprint and related models.
-"""
+"""Pytest coverage for repro data models and blueprint helpers."""
 
-import sys
-from unittest.mock import MagicMock
+from __future__ import annotations
 
-# Mock external dependencies
-sys.modules["docker"] = MagicMock()
-sys.modules["docker.errors"] = MagicMock()
-sys.modules["anthropic"] = MagicMock()
-
-import unittest
-from repro.models import (
-    Blueprint,
+from repro import (
     AlgorithmSpec,
+    Blueprint,
+    EnvironmentSpec,
+    ImplementationSpec,
     PaperContext,
     ReproductionPlan,
-    ImplementationSpec,
-    EnvironmentSpec,
     ReproductionResult,
     ReproPhase,
+    VerificationResult,
+    VerificationStep,
 )
 
 
-class TestAlgorithmSpec(unittest.TestCase):
-    """Tests for AlgorithmSpec dataclass."""
+def test_algorithm_spec_defaults():
+    spec = AlgorithmSpec(name="Attention", inputs=["query", "key"], outputs=["value"])
 
-    def test_creation(self):
-        spec = AlgorithmSpec(
-            name="Attention",
-            pseudocode="1. Compute Q, K, V\n2. Apply softmax",
-            inputs=["query", "key", "value"],
-            outputs=["attention_output"],
-        )
-
-        self.assertEqual(spec.name, "Attention")
-        self.assertEqual(len(spec.inputs), 3)
-        self.assertEqual(len(spec.outputs), 1)
+    assert spec.name == "Attention"
+    assert spec.complexity == ""
+    assert spec.inputs == ["query", "key"]
+    assert spec.outputs == ["value"]
 
 
-class TestBlueprint(unittest.TestCase):
-    """Tests for Blueprint dataclass."""
+def test_blueprint_to_compressed_context_includes_high_signal_sections():
+    blueprint = Blueprint(
+        architecture_type="transformer",
+        module_hierarchy={"model": ["encoder", "decoder"]},
+        key_hyperparameters={"d_model": 512, "n_heads": 8},
+        loss_functions=["cross_entropy"],
+        framework_hints=["pytorch"],
+        paper_title="Attention Is All You Need",
+        paper_year=2017,
+        domain="nlp",
+    )
 
-    def test_creation_minimal(self):
-        blueprint = Blueprint(
-            architecture_type="transformer",
-            domain="nlp",
-        )
+    context = blueprint.to_compressed_context()
 
-        self.assertEqual(blueprint.architecture_type, "transformer")
-        self.assertEqual(blueprint.domain, "nlp")
-
-    def test_creation_full(self):
-        algo = AlgorithmSpec(
-            name="Attention",
-            pseudocode="Attention mechanism",
-            inputs=["Q", "K", "V"],
-            outputs=["out"],
-        )
-
-        blueprint = Blueprint(
-            architecture_type="transformer",
-            domain="nlp",
-            core_algorithms=[algo],
-            key_hyperparameters={"d_model": 512, "n_heads": 8},
-            loss_functions=["cross_entropy"],
-            optimization_strategy="Adam with warmup",
-            framework_hints=["pytorch"],
-        )
-
-        self.assertEqual(len(blueprint.core_algorithms), 1)
-        self.assertEqual(blueprint.key_hyperparameters["d_model"], 512)
-        self.assertIn("pytorch", blueprint.framework_hints)
-
-    def test_to_compressed_context(self):
-        blueprint = Blueprint(
-            architecture_type="transformer",
-            domain="nlp",
-            key_hyperparameters={"d_model": 512},
-            loss_functions=["cross_entropy"],
-        )
-
-        context = blueprint.to_compressed_context()
-
-        self.assertIn("transformer", context)
-        self.assertIn("nlp", context)
-        self.assertIn("d_model", context)
+    assert "Attention Is All You Need" in context
+    assert "transformer" in context
+    assert "encoder" in context
+    assert "d_model" in context
+    assert "cross_entropy" in context
 
 
-class TestPaperContext(unittest.TestCase):
-    """Tests for PaperContext dataclass."""
+def test_blueprint_round_trips_through_dict_serialization():
+    original = Blueprint(
+        architecture_type="gnn",
+        module_hierarchy={"model": ["message_passing"]},
+        data_flow=[("input", "encoder")],
+        core_algorithms=[AlgorithmSpec(name="MessagePassing", pseudocode="aggregate")],
+        key_hyperparameters={"hidden_dim": 128},
+        input_output_spec={"input": "graph", "output": "logits"},
+        framework_hints=["pytorch"],
+        paper_title="Graph Networks",
+        paper_year=2020,
+        domain="cv",
+    )
 
-    def test_minimal_creation(self):
-        ctx = PaperContext(
-            title="Test Paper",
-            abstract="This is a test.",
-        )
+    restored = Blueprint.from_dict(original.to_dict())
 
-        self.assertEqual(ctx.title, "Test Paper")
-        self.assertEqual(ctx.abstract, "This is a test.")
-
-    def test_full_creation(self):
-        ctx = PaperContext(
-            title="Attention Is All You Need",
-            abstract="We propose a new architecture...",
-            method_section="The Transformer model...",
-            algorithm_blocks=["Algorithm 1: Attention"],
-            hyperparameters={"d_model": 512, "n_heads": 8},
-        )
-
-        self.assertEqual(len(ctx.algorithm_blocks), 1)
-        self.assertEqual(ctx.hyperparameters["d_model"], 512)
-
-    def test_to_prompt_context(self):
-        ctx = PaperContext(
-            title="Test Paper",
-            abstract="Abstract text here.",
-            method_section="Method details.",
-            hyperparameters={"lr": 0.001},
-        )
-
-        prompt = ctx.to_prompt_context()
-
-        self.assertIn("## Paper: Test Paper", prompt)
-        self.assertIn("Abstract text here", prompt)
-        self.assertIn("Method details", prompt)
-        self.assertIn("lr", prompt)
+    assert restored.architecture_type == "gnn"
+    assert restored.module_hierarchy == {"model": ["message_passing"]}
+    assert restored.core_algorithms[0].name == "MessagePassing"
+    assert restored.input_output_spec["output"] == "logits"
 
 
-class TestReproductionPlan(unittest.TestCase):
-    """Tests for ReproductionPlan dataclass."""
+def test_paper_context_to_prompt_context_renders_sections():
+    context = PaperContext(
+        title="Test Paper",
+        abstract="This is an abstract.",
+        method_section="Method details.",
+        algorithm_blocks=["for step in range(n): pass"],
+        hyperparameters={"lr": 0.01},
+    )
 
-    def test_creation(self):
-        plan = ReproductionPlan(
-            project_name="my_project",
-            description="A test project",
-            file_structure={"main.py": "entry", "model.py": "model"},
-            entry_point="main.py",
-            dependencies=["torch", "numpy"],
-            key_components=["Model", "Trainer"],
-        )
+    prompt = context.to_prompt_context()
 
-        self.assertEqual(plan.project_name, "my_project")
-        self.assertEqual(len(plan.file_structure), 2)
-        self.assertIn("torch", plan.dependencies)
-
-    def test_to_prompt_context(self):
-        plan = ReproductionPlan(
-            project_name="test_proj",
-            description="Test description",
-            file_structure={"main.py": "entry point"},
-            entry_point="main.py",
-            dependencies=["numpy"],
-            key_components=["Model"],
-        )
-
-        prompt = plan.to_prompt_context()
-
-        self.assertIn("test_proj", prompt)
-        self.assertIn("main.py", prompt)
-        self.assertIn("numpy", prompt)
+    assert "## Paper: Test Paper" in prompt
+    assert "This is an abstract." in prompt
+    assert "Method details." in prompt
+    assert "for step in range(n): pass" in prompt
+    assert "'lr': 0.01" in prompt
 
 
-class TestImplementationSpec(unittest.TestCase):
-    """Tests for ImplementationSpec dataclass."""
+def test_reproduction_plan_to_prompt_context_lists_files_and_dependencies():
+    plan = ReproductionPlan(
+        project_name="test_proj",
+        description="A test project",
+        file_structure={"main.py": "entry point", "model.py": "model code"},
+        entry_point="main.py",
+        dependencies=["numpy", "torch"],
+        key_components=["Model", "Trainer"],
+    )
 
-    def test_creation(self):
-        spec = ImplementationSpec(
-            model_type="transformer",
-            layers=[{"type": "Linear", "in": 512, "out": 512}],
-            optimizer="adam",
-            learning_rate=0.001,
-            batch_size=32,
-        )
+    prompt = plan.to_prompt_context()
 
-        self.assertEqual(spec.model_type, "transformer")
-        self.assertEqual(len(spec.layers), 1)
-        self.assertEqual(spec.learning_rate, 0.001)
-
-    def test_to_prompt_context(self):
-        spec = ImplementationSpec(
-            model_type="cnn",
-            optimizer="sgd",
-            batch_size=64,
-        )
-
-        prompt = spec.to_prompt_context()
-
-        self.assertIn("cnn", prompt)
-        self.assertIn("sgd", prompt)
+    assert "test_proj" in prompt
+    assert "`main.py`: entry point" in prompt
+    assert "torch" in prompt
+    assert "Trainer" in prompt
 
 
-class TestEnvironmentSpec(unittest.TestCase):
-    """Tests for EnvironmentSpec dataclass."""
+def test_implementation_spec_to_prompt_context_includes_layers_and_optimizer():
+    spec = ImplementationSpec(
+        model_type="transformer",
+        layers=[{"type": "Linear", "in": 512, "out": 512}],
+        optimizer="adamw",
+        learning_rate=3e-4,
+        batch_size=16,
+    )
 
-    def test_defaults(self):
-        spec = EnvironmentSpec()
+    prompt = spec.to_prompt_context()
 
-        self.assertEqual(spec.python_version, "3.10")
-        self.assertEqual(spec.base_image, "python:3.10-slim")
-
-    def test_generate_dockerfile(self):
-        spec = EnvironmentSpec(
-            python_version="3.9",
-            pip_requirements=["torch", "numpy"],
-        )
-
-        dockerfile = spec.generate_dockerfile()
-
-        self.assertIn("FROM python", dockerfile)
-        self.assertIn("pip install", dockerfile)
+    assert "transformer" in prompt
+    assert "adamw" in prompt
+    assert "Linear" in prompt
+    assert "Batch Size" in prompt
 
 
-class TestReproductionResult(unittest.TestCase):
-    """Tests for ReproductionResult dataclass."""
+def test_environment_spec_generates_dockerfile_and_conda_yaml():
+    spec = EnvironmentSpec(
+        python_version="3.9",
+        pytorch_version="2.2.0",
+        pip_requirements=["numpy", "pytest"],
+    )
 
-    def test_default_values(self):
-        result = ReproductionResult(paper_title="Test Paper")
+    dockerfile = spec.generate_dockerfile()
+    conda_yaml = spec.generate_conda_yaml()
 
-        self.assertEqual(result.paper_title, "Test Paper")
-        self.assertEqual(result.status, ReproPhase.PLANNING)
-        self.assertEqual(result.phases_completed, [])
-        self.assertEqual(result.generated_files, {})
-
-    def test_compute_score_with_results(self):
-        from repro.models import VerificationResult, VerificationStep
-
-        result = ReproductionResult(
-            paper_title="Test",
-            status=ReproPhase.COMPLETED,
-        )
-        result.verification_results = [
-            VerificationResult(step=VerificationStep.SYNTAX_CHECK, passed=True, message="OK"),
-            VerificationResult(step=VerificationStep.IMPORT_CHECK, passed=True, message="OK"),
-        ]
-
-        score = result.compute_score()
-        self.assertGreater(score, 0)
-
-    def test_compute_score_empty(self):
-        result = ReproductionResult(
-            paper_title="Test",
-            status=ReproPhase.FAILED,
-        )
-
-        score = result.compute_score()
-        self.assertEqual(score, 0)
-
-    def test_to_dict(self):
-        result = ReproductionResult(
-            paper_title="Test Paper",
-            status=ReproPhase.COMPLETED,
-            phases_completed=["planning"],
-            generated_files={"main.py": "# code"},
-            retry_count=1,
-        )
-
-        d = result.to_dict()
-
-        self.assertEqual(d["paper_title"], "Test Paper")
-        self.assertEqual(d["status"], "completed")
-        self.assertIn("planning", d["phases_completed"])
-        self.assertEqual(d["retry_count"], 1)
+    assert dockerfile.startswith("FROM ")
+    assert "pip install -r requirements.txt" in dockerfile
+    assert "python=3.9" in conda_yaml
+    assert "numpy" in conda_yaml
 
 
-if __name__ == "__main__":
-    unittest.main()
+def test_reproduction_result_compute_score_and_to_dict():
+    result = ReproductionResult(
+        paper_title="Test Paper",
+        status=ReproPhase.COMPLETED,
+        generated_files={"main.py": "print('hi')"},
+        phases_completed=["planning", "generation"],
+        retry_count=1,
+    )
+    result.verification_results = [
+        VerificationResult(step=VerificationStep.SYNTAX_CHECK, passed=True, message="OK"),
+        VerificationResult(step=VerificationStep.IMPORT_CHECK, passed=True, message="OK"),
+    ]
+
+    score = result.compute_score()
+    payload = result.to_dict()
+
+    assert score == 50
+    assert payload["paper_title"] == "Test Paper"
+    assert payload["status"] == "completed"
+    assert payload["generated_files"] == ["main.py"]
+    assert payload["retry_count"] == 1
+
+
+def test_reproduction_result_score_is_zero_without_verification():
+    result = ReproductionResult(paper_title="Test Paper", status=ReproPhase.FAILED)
+
+    assert result.compute_score() == 0

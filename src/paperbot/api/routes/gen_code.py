@@ -7,13 +7,12 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, Request
-from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from paperbot.application.collaboration.message_schema import new_run_id, new_trace_id
 from paperbot.core.abstractions import AgentRunContext
 
-from ..streaming import StreamEvent, wrap_generator
+from ..streaming import StreamEvent, sse_response
 
 router = APIRouter()
 
@@ -191,16 +190,9 @@ async def generate_code(request: GenCodeRequest, http_request: Request):
     event_log = getattr(http_request.app.state, "event_log", None)
     run_id = new_run_id()
     trace_id = new_trace_id()
-    return StreamingResponse(
-        wrap_generator(
-            gen_code_stream(request, event_log=event_log, run_id=run_id, trace_id=trace_id),
-            workflow="gen_code",
-            run_id=run_id,
-            trace_id=trace_id,
-        ),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-        },
+    return sse_response(
+        gen_code_stream(request, event_log=event_log, run_id=run_id, trace_id=trace_id),
+        workflow="gen_code",
+        run_id=run_id,
+        trace_id=trace_id,
     )

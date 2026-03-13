@@ -11,10 +11,12 @@ import asyncio
 import json
 import os
 import sys
+from pathlib import Path
 from typing import Optional
 
 from dotenv import find_dotenv, load_dotenv
 
+from config.settings import create_settings
 from paperbot.application.workflows.dailypaper import (
     DailyPaperReporter,
     apply_judge_scores_to_report,
@@ -209,6 +211,38 @@ def create_parser() -> argparse.ArgumentParser:
         help="从最近 checkpoint 恢复执行",
     )
 
+    export_parser = subparsers.add_parser("export", help="导出 PaperBot 数据")
+    export_subparsers = export_parser.add_subparsers(dest="export_target", help="导出目标")
+
+    obsidian_parser = export_subparsers.add_parser(
+        "obsidian", help="导出已保存论文到 Obsidian vault"
+    )
+    obsidian_parser.add_argument(
+        "--vault",
+        default=None,
+        help="Obsidian vault 目录（默认读取 obsidian.vault_path）",
+    )
+    obsidian_scope = obsidian_parser.add_mutually_exclusive_group()
+    obsidian_scope.add_argument("--track-id", type=int, default=None, help="按 track ID 导出")
+    obsidian_scope.add_argument(
+        "--track-name",
+        default=None,
+        help="按 track 名称导出（大小写不敏感）",
+    )
+    obsidian_parser.add_argument("--user-id", default="default", help="用户 ID")
+    obsidian_parser.add_argument("--limit", type=int, default=200, help="最多导出多少篇论文")
+    obsidian_parser.add_argument(
+        "--root-dir",
+        default=None,
+        help="vault 内的输出根目录（默认读取 obsidian.root_dir）",
+    )
+    obsidian_parser.add_argument(
+        "--paper-template",
+        default=None,
+        help="自定义论文笔记 Jinja2 模板路径（默认读取 obsidian.paper_template_path）",
+    )
+    obsidian_parser.add_argument("--json", action="store_true", help="输出 JSON 摘要")
+
     # version
     parser.add_argument("--version", "-v", action="store_true", help="显示版本")
 
@@ -268,6 +302,12 @@ def run_cli(args: Optional[list] = None) -> int:
 
         elif parsed.command == "daily-paper":
             return _run_daily_paper(parsed)
+
+        elif parsed.command == "export":
+            if parsed.export_target == "obsidian":
+                return _run_obsidian_export(parsed)
+            print("Error: export target is required", file=sys.stderr)
+            return 1
 
         return 0
 
@@ -526,6 +566,100 @@ def _run_daily_paper(parsed: argparse.Namespace) -> int:
         print(f"notify: {json.dumps(notify_result, ensure_ascii=False)}")
     print("\n" + markdown)
     return 0
+
+
+def _find_track_by_name(
+    store,
+    *,
+    user_id: str,
+    track_name: str,
+) -> Optional[dict]:
+    target = str(track_name or "").strip().casefold()
+    if not target:
+        return None
+
+    for track in store.list_tracks(user_id=user_id, include_archived=True, limit=500):
+        if str(track.get("name") or "").strip().casefold() == target:
+            return track
+    return None
+
+
+def _run_obsidian_export(parsed: argparse.Namespace) -> int:
+    from paperbot.infrastructure.exporters import ObsidianFilesystemExporter
+    from paperbot.infrastructure.stores.research_store import SqlAlchemyResearchStore
+
+    settings = create_settings()
+    obsidian_config = settings.obsidian
+    vault_value = parsed.vault or obsidian_config.vault_path
+    if not str(vault_value or "").strip():
+        print(
+            "Error: vault path is required. Pass --vault or configure obsidian.vault_path.",
+            file=sys.stderr,
+        )
+        return 1
+    root_dir = parsed.root_dir or obsidian_config.root_dir or "PaperBot"
+    paper_template_path = parsed.paper_template or obsidian_config.paper_template_path
+
+    store = SqlAlchemyResearchStore()
+    try:
+        track = None
+        track_id = None
+        if parsed.track_id is not None:
+            track = store.get_track(user_id=parsed.user_id, track_id=int(parsed.track_id))
+            if track is None:
+                print(f"Error: track not found: {parsed.track_id}", file=sys.stderr)
+                return 1
+            track_id = int(track["id"])
+        elif parsed.track_name:
+            track = _find_track_by_name(store, user_id=parsed.user_id, track_name=parsed.track_name)
+            if track is None:
+                print(f"Error: track not found: {parsed.track_name}", file=sys.stderr)
+                return 1
+            track_id = int(track["id"])
+
+        saved_items = store.list_saved_papers(
+            user_id=parsed.user_id,
+            track_id=track_id,
+            limit=max(1, int(parsed.limit)),
+        )
+        if not saved_items:
+            scope = f" for track {track['name']}" if track else ""
+            print(f"Error: no saved papers found{scope}", file=sys.stderr)
+            return 1
+
+        exporter = ObsidianFilesystemExporter()
+        template_path = (
+            Path(paper_template_path).expanduser() if paper_template_path else None
+        )
+        result = exporter.export_library_snapshot(
+            vault_path=Path(vault_value),
+            saved_items=saved_items,
+            track=track,
+            root_dir=root_dir,
+            paper_template_path=template_path,
+            track_moc_filename=getattr(obsidian_config, "track_moc_filename", "_MOC.md"),
+            group_tracks_in_folders=getattr(obsidian_config, "group_tracks_in_folders", True),
+        )
+
+        if parsed.json:
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0
+
+        print(f"vault: {result['vault_path']}")
+        print(f"root_dir: {result['root_dir']}")
+        print(f"paper_count: {result['paper_count']}")
+        if track is not None:
+            print(f"track: {track['name']}")
+        print(f"moc_note: {result['moc_note']}")
+        if result.get("track_note"):
+            print(f"track_note: {result['track_note']}")
+        return 0
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    finally:
+        if hasattr(store, "close"):
+            store.close()
 
 
 if __name__ == "__main__":

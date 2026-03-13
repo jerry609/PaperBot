@@ -5,10 +5,11 @@ Chat API Route - Interactive conversation with AI about papers
 from typing import List, Optional
 
 from fastapi import APIRouter
-from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 
-from ..streaming import StreamEvent, wrap_generator
+from ...application.collaboration.message_schema import new_trace_id
+from ..error_handling import GENERIC_STREAM_ERROR_MESSAGE, resolve_chat_max_history
+from ..streaming import StreamEvent, sse_response
 
 router = APIRouter()
 
@@ -21,11 +22,16 @@ class ChatMessage(BaseModel):
 class ChatRequest(BaseModel):
     user_id: Optional[str] = None
     message: str
-    history: List[ChatMessage] = []
+    history: List[ChatMessage] = Field(default_factory=list)
     use_memory: bool = False
 
+    @field_validator("history")
+    @classmethod
+    def _trim_history(cls, history: List[ChatMessage]) -> List[ChatMessage]:
+        return list(history or [])[-resolve_chat_max_history() :]
 
-async def chat_stream(request: ChatRequest):
+
+async def chat_stream(request: ChatRequest, *, trace_id: str):
     """Stream chat response"""
     try:
         yield StreamEvent(
@@ -106,13 +112,17 @@ Be concise and helpful. When discussing papers, cite specific details when avail
             data={"content": full_content},
         )
 
-    except Exception as e:
+    except Exception:
         # Fallback to simple response if LLM fails
         yield StreamEvent(
-            type="result",
+            type="error",
+            message=GENERIC_STREAM_ERROR_MESSAGE,
             data={
-                "content": f"I apologize, but I encountered an error: {str(e)}. "
-                "Please make sure the API server is properly configured with LLM credentials."
+                "content": (
+                    "I apologize, but I encountered an internal error. "
+                    "Please retry and provide the trace_id if this keeps failing."
+                ),
+                "trace_id": trace_id,
             },
         )
 
@@ -124,11 +134,5 @@ async def chat(request: ChatRequest):
 
     Returns Server-Sent Events with streaming text.
     """
-    return StreamingResponse(
-        wrap_generator(chat_stream(request), workflow="chat"),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-        },
-    )
+    trace_id = new_trace_id()
+    return sse_response(chat_stream(request, trace_id=trace_id), workflow="chat", trace_id=trace_id)

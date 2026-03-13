@@ -12,6 +12,7 @@ from paperbot.infrastructure.stores.memory_store import (
     _apply_mmr_rerank,
     _decay_score,
     _is_evergreen_memory,
+    _memory_relevance_score,
     _to_decay_lambda,
 )
 from paperbot.memory.schema import MemoryCandidate
@@ -20,6 +21,8 @@ from paperbot.memory.schema import MemoryCandidate
 def _make_item(
     *,
     confidence: float = 0.8,
+    hybrid_score: float | None = None,
+    vec_score: float | None = None,
     created_at: str | None = None,
     use_count: int = 0,
     scope_type: str = "track",
@@ -28,7 +31,7 @@ def _make_item(
     now = datetime.now(timezone.utc)
     if created_at is None:
         created_at = now.isoformat()
-    return {
+    item = {
         "id": 1,
         "confidence": confidence,
         "created_at": created_at,
@@ -36,6 +39,11 @@ def _make_item(
         "scope_type": scope_type,
         "kind": kind,
     }
+    if hybrid_score is not None:
+        item["hybrid_score"] = hybrid_score
+    if vec_score is not None:
+        item["vec_score"] = vec_score
+    return item
 
 
 class TestToDecayLambda:
@@ -69,6 +77,13 @@ class TestEvergreenMemory:
 
 
 class TestDecayScore:
+    def test_prefers_hybrid_score_over_confidence(self):
+        now = datetime.now(timezone.utc)
+        item = _make_item(confidence=0.95, hybrid_score=0.25, created_at=now.isoformat())
+        assert _memory_relevance_score(item) == pytest.approx(0.25)
+        score = _decay_score(item, now=now)
+        assert score == pytest.approx(0.375, abs=0.01)
+
     def test_fresh_high_confidence_scores_high(self):
         now = datetime.now(timezone.utc)
         item = _make_item(confidence=0.9, created_at=now.isoformat(), use_count=5)
@@ -153,6 +168,28 @@ class TestApplyDecayRanking:
         assert results[0]["id"] == 1
         assert results[1]["id"] == 2
         assert "decay_score" in results[0]
+
+    def test_ranking_uses_hybrid_score_before_confidence(self):
+        now = datetime.now(timezone.utc)
+        high_confidence_low_relevance = _make_item(
+            confidence=0.95,
+            hybrid_score=0.2,
+            created_at=now.isoformat(),
+        )
+        high_confidence_low_relevance["id"] = 1
+        lower_confidence_high_relevance = _make_item(
+            confidence=0.6,
+            hybrid_score=0.8,
+            created_at=now.isoformat(),
+        )
+        lower_confidence_high_relevance["id"] = 2
+
+        results = _apply_decay_ranking(
+            [high_confidence_low_relevance, lower_confidence_high_relevance],
+            now=now,
+        )
+
+        assert [item["id"] for item in results] == [2, 1]
 
     def test_empty_list_returns_empty(self):
         assert _apply_decay_ranking([]) == []

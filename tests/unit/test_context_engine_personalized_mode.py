@@ -96,7 +96,7 @@ async def test_personalized_mode_applies_saved_and_anchor_boosts(monkeypatch):
 async def test_global_mode_disables_personalization_boosts(monkeypatch):
     monkeypatch.setattr(engine_module, "_get_anchor_service", lambda: _FakeAnchorService())
 
-    engine = ContextEngine(
+    global_engine = ContextEngine(
         research_store=_FakeResearchStore(),
         memory_store=_FakeMemoryStore(),
         paper_store=None,
@@ -104,8 +104,23 @@ async def test_global_mode_disables_personalization_boosts(monkeypatch):
         track_router=_FakeTrackRouter(),
         config=ContextEngineConfig(personalized=False, paper_limit=5),
     )
+    personalized_engine = ContextEngine(
+        research_store=_FakeResearchStore(),
+        memory_store=_FakeMemoryStore(),
+        paper_store=None,
+        search_service=_FakeSearchService(),
+        track_router=_FakeTrackRouter(),
+        config=ContextEngineConfig(personalized=True, paper_limit=5),
+    )
 
-    pack = await engine.build_context_pack(user_id="u1", query="transformer", track_id=1)
-    score = float(pack["paper_recommendation_scores"]["1"])
+    global_pack = await global_engine.build_context_pack(user_id="u1", query="transformer", track_id=1)
+    personalized_pack = await personalized_engine.build_context_pack(
+        user_id="u1",
+        query="transformer",
+        track_id=1,
+    )
+    global_score = float(global_pack["paper_recommendation_scores"]["1"])
+    personalized_score = float(personalized_pack["paper_recommendation_scores"]["1"])
 
-    assert score < 0.30
+    assert global_score < personalized_score
+    assert (personalized_score - global_score) > 0.35

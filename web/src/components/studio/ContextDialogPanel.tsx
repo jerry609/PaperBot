@@ -1,0 +1,402 @@
+"use client"
+
+import { useMemo, useState, type ElementType, type ReactNode } from "react"
+import {
+  Activity,
+  AlertCircle,
+  Bot,
+  CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  ChevronUp,
+  Loader2,
+  Package,
+  Play,
+  Sparkles,
+  Wrench,
+} from "lucide-react"
+import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { ContextPackPanel } from "./ContextPackPanel"
+import { cn } from "@/lib/utils"
+import type {
+  ContextPackSession,
+  GenerationStatus,
+  ReproContextPack,
+  StageObservationsEvent,
+  StageProgressEvent,
+} from "@/lib/types/p2c"
+
+const STAGE_LABELS: Record<string, string> = {
+  literature_distill: "Literature Distill",
+  blueprint_extract: "Blueprint Extract",
+  environment_extract: "Environment Extract",
+  spec_extract: "Spec & Hyperparams",
+  roadmap_planning: "Roadmap Planning",
+  success_criteria: "Success Criteria",
+}
+
+const STAGE_ORDER = Object.keys(STAGE_LABELS)
+
+type PaperLite = {
+  id: string
+  title: string
+  abstract: string
+}
+
+type TimelineItem =
+  | { kind: "progress"; key: string; event: StageProgressEvent }
+  | { kind: "observations"; key: string; event: StageObservationsEvent }
+  | { kind: "summary"; key: string; stage: string; count: number }
+
+interface Props {
+  selectedPaper: PaperLite | null
+  generationStatus: GenerationStatus
+  generationProgress: StageProgressEvent[]
+  liveObservations: StageObservationsEvent[]
+  contextPack: ReproContextPack | null
+  contextPackLoading: boolean
+  contextPackError: string | null
+  onGenerate: (paper: PaperLite) => void
+  onSessionCreated?: (session: ContextPackSession) => void
+  onDeployToBoard?: () => void
+}
+
+function stageLabel(stage: string): string {
+  return STAGE_LABELS[stage] || stage
+}
+
+function stageRank(stage: string): number {
+  const index = STAGE_ORDER.indexOf(stage)
+  return index === -1 ? 99 : index
+}
+
+function Actor({
+  icon: Icon,
+  tone = "assistant",
+}: {
+  icon: ElementType
+  tone?: "assistant" | "tool" | "success" | "error" | "muted"
+}) {
+  return (
+    <Avatar
+      className={cn(
+        "mt-0.5 h-7 w-7 border",
+        tone === "assistant" && "border-primary/20 bg-primary/10 text-primary",
+        tone === "tool" && "border-amber-200 bg-amber-50 text-amber-700",
+        tone === "success" && "border-emerald-200 bg-emerald-50 text-emerald-700",
+        tone === "error" && "border-red-200 bg-red-50 text-red-600",
+        tone === "muted" && "border-border bg-muted text-muted-foreground",
+      )}
+    >
+      <AvatarFallback className="bg-transparent">
+        <Icon className="h-3.5 w-3.5" />
+      </AvatarFallback>
+    </Avatar>
+  )
+}
+
+function MessageShell({
+  icon,
+  actor,
+  badge,
+  tone = "assistant",
+  children,
+}: {
+  icon: ElementType
+  actor: string
+  badge?: string
+  tone?: "assistant" | "tool" | "success" | "error" | "muted"
+  children: ReactNode
+}) {
+  return (
+    <div className="flex items-start gap-3">
+      <Actor icon={icon} tone={tone} />
+      <div className="min-w-0 flex-1">
+        <div className="mb-1 flex items-center gap-2 text-[11px] text-muted-foreground">
+          <span className="font-medium">{actor}</span>
+          {badge ? (
+            <Badge variant="outline" className="h-5 px-1.5 text-[10px]">
+              {badge}
+            </Badge>
+          ) : null}
+        </div>
+        {children}
+      </div>
+    </div>
+  )
+}
+
+function TextCard({ children }: { children: ReactNode }) {
+  return (
+    <div className="rounded-xl border bg-card px-3.5 py-3 text-sm leading-6 text-foreground/90">
+      {children}
+    </div>
+  )
+}
+
+function ProgressFormCard({ event }: { event: StageProgressEvent }) {
+  const pct = Math.round(event.progress * 100)
+  const isDone = pct >= 100
+  return (
+    <MessageShell
+      icon={isDone ? CheckCircle2 : Activity}
+      actor="Extractor"
+      badge={stageLabel(event.stage)}
+      tone={isDone ? "success" : "tool"}
+    >
+      <div className="overflow-hidden rounded-xl border bg-muted/20">
+        <div className="border-b bg-background/70 px-3 py-2 text-sm font-medium">
+          {isDone ? "Stage completed" : "Stage running"}
+        </div>
+        <div className="px-3 py-2 text-sm text-foreground/90">
+          {event.message || "Running extraction..."}
+        </div>
+        <div className="px-3 pb-3">
+          <div className="mb-1 flex items-center justify-between text-xs text-muted-foreground">
+            <span>Progress</span>
+            <span>{pct}%</span>
+          </div>
+          <div className="h-1.5 overflow-hidden rounded-full bg-background/70">
+            <div
+              className={cn("h-full rounded-full transition-all", isDone ? "bg-emerald-500" : "bg-primary")}
+              style={{ width: `${Math.max(0, Math.min(100, pct))}%` }}
+            />
+          </div>
+        </div>
+      </div>
+    </MessageShell>
+  )
+}
+
+function ObservationFormCard({ event }: { event: StageObservationsEvent }) {
+  return (
+    <MessageShell icon={Wrench} actor="Tool Result" badge={stageLabel(event.stage)} tone="assistant">
+      <div className="overflow-hidden rounded-xl border bg-muted/20">
+        <div className="border-b bg-background/70 px-3 py-2 text-sm font-medium">
+          Extracted findings ({event.observations.length})
+        </div>
+        {event.observations.length === 0 ? (
+          <div className="px-3 py-2 text-sm text-muted-foreground">No observations emitted yet.</div>
+        ) : (
+          <div className="divide-y">
+            {event.observations.slice(0, 6).map((obs) => (
+              <div key={obs.id} className="flex items-center gap-2 px-3 py-2 text-sm">
+                <span className="text-muted-foreground">•</span>
+                <Badge variant="outline" className="text-[10px]">
+                  {obs.type}
+                </Badge>
+                <span className="min-w-0 flex-1 truncate text-foreground/90">{obs.title}</span>
+                <span className="text-xs text-muted-foreground">{Math.round(obs.confidence * 100)}%</span>
+                <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+              </div>
+            ))}
+            {event.observations.length > 6 ? (
+              <div className="px-3 py-2 text-xs text-muted-foreground">
+                +{event.observations.length - 6} more observations
+              </div>
+            ) : null}
+          </div>
+        )}
+      </div>
+    </MessageShell>
+  )
+}
+
+function StageSummaryText({ stage, count }: { stage: string; count: number }) {
+  return (
+    <MessageShell icon={Bot} actor="DeepCode" badge="Summary" tone="muted">
+      <TextCard>
+        Completed {stageLabel(stage)} and extracted {count} observation{count === 1 ? "" : "s"}.
+        Next stage will continue refining reproducibility signals.
+      </TextCard>
+    </MessageShell>
+  )
+}
+
+export function ContextDialogPanel({
+  selectedPaper,
+  generationStatus,
+  generationProgress,
+  liveObservations,
+  contextPack,
+  contextPackLoading,
+  contextPackError,
+  onGenerate,
+  onSessionCreated,
+  onDeployToBoard,
+}: Props) {
+  const [showFullPack, setShowFullPack] = useState(false)
+
+  const progressTimeline = useMemo(() => {
+    const reduced: StageProgressEvent[] = []
+    for (const event of generationProgress) {
+      const prev = reduced[reduced.length - 1]
+      const messageChanged = (event.message || "") !== (prev?.message || "")
+      const stageChanged = prev?.stage !== event.stage
+      const progressMoved = !prev || Math.abs(event.progress - prev.progress) >= 0.12
+      if (!prev || stageChanged || messageChanged || progressMoved) {
+        reduced.push(event)
+      }
+    }
+    return reduced
+  }, [generationProgress])
+
+  const sortedLiveObservations = useMemo(
+    () => [...liveObservations].sort((a, b) => stageRank(a.stage) - stageRank(b.stage)),
+    [liveObservations],
+  )
+
+  const timelineItems = useMemo<TimelineItem[]>(() => {
+    const items: TimelineItem[] = []
+    const obsByStage = new Map(sortedLiveObservations.map((entry) => [entry.stage, entry]))
+    const lastProgressIndexByStage = new Map<string, number>()
+    const renderedObservationStages = new Set<string>()
+
+    progressTimeline.forEach((event, index) => {
+      lastProgressIndexByStage.set(event.stage, index)
+    })
+
+    progressTimeline.forEach((event, index) => {
+      items.push({ kind: "progress", key: `progress-${event.stage}-${index}`, event })
+      const observationEvent = obsByStage.get(event.stage)
+      if (observationEvent && lastProgressIndexByStage.get(event.stage) === index) {
+        items.push({ kind: "observations", key: `obs-inline-${event.stage}`, event: observationEvent })
+        items.push({
+          kind: "summary",
+          key: `summary-inline-${event.stage}`,
+          stage: event.stage,
+          count: observationEvent.observations.length,
+        })
+        renderedObservationStages.add(event.stage)
+      }
+    })
+
+    sortedLiveObservations.forEach((event) => {
+      if (!renderedObservationStages.has(event.stage)) {
+        items.push({ kind: "observations", key: `obs-late-${event.stage}`, event })
+        items.push({
+          kind: "summary",
+          key: `summary-late-${event.stage}`,
+          stage: event.stage,
+          count: event.observations.length,
+        })
+      }
+    })
+
+    return items
+  }, [progressTimeline, sortedLiveObservations])
+
+  const hasTimelineActivity =
+    timelineItems.length > 0 || contextPackLoading || Boolean(contextPack) || Boolean(contextPackError)
+
+  return (
+    <div className="h-full overflow-auto bg-gradient-to-b from-muted/25 via-background to-background">
+      <div className="mx-auto flex w-full max-w-[860px] flex-col gap-4 px-3 py-4 md:px-4 md:py-5">
+        <MessageShell icon={Bot} actor="DeepCode" badge="Context Pipeline" tone="muted">
+          <TextCard>
+            Progress and context pack are now presented in a mixed format:
+            narrative text plus structured form cards.
+          </TextCard>
+        </MessageShell>
+
+        {!hasTimelineActivity ? (
+          <MessageShell icon={Sparkles} actor="DeepCode" badge="Action" tone="assistant">
+            <TextCard>
+              <div className="space-y-3">
+                <p>
+                  Start extraction for the selected paper. I will stream progress as form cards and add
+                  concise narrative summaries between steps.
+                </p>
+                {selectedPaper ? (
+                  <Button
+                    size="sm"
+                    onClick={() => onGenerate(selectedPaper)}
+                    disabled={generationStatus === "generating"}
+                  >
+                    {generationStatus === "generating" ? (
+                      <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                    ) : (
+                      <Play className="mr-1.5 h-4 w-4" />
+                    )}
+                    Generate Context Pack
+                  </Button>
+                ) : (
+                  <p>Select a paper to begin.</p>
+                )}
+              </div>
+            </TextCard>
+          </MessageShell>
+        ) : null}
+
+        {timelineItems.map((item) => {
+          if (item.kind === "progress") return <ProgressFormCard key={item.key} event={item.event} />
+          if (item.kind === "observations") return <ObservationFormCard key={item.key} event={item.event} />
+          return <StageSummaryText key={item.key} stage={item.stage} count={item.count} />
+        })}
+
+        {contextPackLoading ? (
+          <MessageShell icon={Loader2} actor="DeepCode" badge="Finalizing" tone="assistant">
+            <TextCard>
+              <span className="inline-flex items-center gap-2">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                Finalizing context pack payload and actions...
+              </span>
+            </TextCard>
+          </MessageShell>
+        ) : null}
+
+        {contextPackError ? (
+          <MessageShell icon={AlertCircle} actor="System" badge="Error" tone="error">
+            <TextCard>{contextPackError}</TextCard>
+          </MessageShell>
+        ) : null}
+
+        {contextPack ? (
+          <>
+            <MessageShell icon={Package} actor="DeepCode" badge="Result" tone="success">
+              <TextCard>
+                <div className="space-y-2">
+                  <p>{contextPack.paper.title}</p>
+                  <div className="flex flex-wrap gap-2">
+                    <Badge variant="outline">
+                      Confidence {Math.round(contextPack.confidence.overall * 100)}%
+                    </Badge>
+                    <Badge variant="outline">{contextPack.observations.length} observations</Badge>
+                    <Badge variant="outline">{contextPack.task_roadmap.length} roadmap steps</Badge>
+                  </div>
+                  <div className="pt-1">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setShowFullPack((value) => !value)}
+                    >
+                      {showFullPack ? (
+                        <ChevronUp className="mr-1.5 h-4 w-4" />
+                      ) : (
+                        <ChevronDown className="mr-1.5 h-4 w-4" />
+                      )}
+                      {showFullPack ? "Hide full context pack" : "Open full context pack"}
+                    </Button>
+                  </div>
+                </div>
+              </TextCard>
+            </MessageShell>
+
+            {showFullPack ? (
+              <div className="rounded-2xl border bg-card/70">
+                <ContextPackPanel
+                  pack={contextPack}
+                  onSessionCreated={onSessionCreated}
+                  onDeployToBoard={onDeployToBoard}
+                  className="h-auto overflow-visible p-4"
+                />
+              </div>
+            ) : null}
+          </>
+        ) : null}
+      </div>
+    </div>
+  )
+}

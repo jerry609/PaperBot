@@ -4,8 +4,15 @@ import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useSearchParams } from "next/navigation"
 
+import {
+  currentFeedbackFromRequestAction,
+  normalizePaperFeedbackAction,
+  type PaperFeedbackAction,
+  type PaperFeedbackRequestAction,
+} from "@/lib/paper-feedback"
 import { cn } from "@/lib/utils"
-import { ArrowRight, BookOpen, GitBranch, Search, Sparkles } from "lucide-react"
+import { fetchJson, getErrorMessage } from "@/lib/fetch"
+import { ArrowRight, BookOpen } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import {
@@ -19,20 +26,25 @@ import {
 import {
   Sheet,
   SheetContent,
+  SheetDescription,
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
 
 import { SearchBox } from "./SearchBox"
 import { TrackPills } from "./TrackPills"
 import { SearchResults } from "./SearchResults"
 import { MemoryTab } from "./MemoryTab"
+import { SavedTab } from "./SavedTab"
 import { CreateTrackModal } from "./CreateTrackModal"
 import { EditTrackModal } from "./EditTrackModal"
 import { ManageTracksModal } from "./ManageTracksModal"
+import { ResearchTrackContextPanel } from "./ResearchTrackContextPanel"
 import type { Track } from "./TrackSelector"
 import type { Paper } from "./PaperCard"
+import type { ResearchTrackContextResponse } from "@/lib/types"
 
 type ContextPack = {
   context_run_id?: number | null
@@ -45,53 +57,6 @@ type ContextPack = {
   paper_recommendations?: Paper[]
   paper_recommendation_reasons?: Record<string, string[]>
 }
-
-type UpstreamErrorBody = {
-  detail?: string
-  error?: string
-}
-
-function toFriendlyErrorMessage(status: number, rawText: string): string | null {
-  if (!rawText) return null
-
-  let parsed: UpstreamErrorBody | null = null
-  try {
-    parsed = JSON.parse(rawText) as UpstreamErrorBody
-  } catch {
-    parsed = null
-  }
-
-  const detail = parsed && typeof parsed.detail === "string" ? parsed.detail : undefined
-
-  if (detail && (detail.includes("Upstream API unreachable") || detail.includes("Upstream API timed out"))) {
-    if (detail.includes("timed out")) {
-      return "Unable to connect to service (request timed out). Please ensure the backend is running. Please try again."
-    }
-    return "Unable to connect to service. Please ensure the backend is running."
-  }
-
-  // Fallback: surface backend-provided detail when available
-  if (detail) return detail
-
-  return null
-}
-
-async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, init)
-  if (!res.ok) {
-    const text = await res.text().catch(() => "")
-    const friendly = toFriendlyErrorMessage(res.status, text)
-    if (friendly) {
-      throw new Error(friendly)
-    }
-    const statusLabel = `${res.status} ${res.statusText}`.trim()
-    const base = statusLabel || "Request failed"
-    const message = text ? `${base} ${text}`.trim() : base
-    throw new Error(message)
-  }
-  return res.json() as Promise<T>
-}
-
 function getGreeting(): string {
   const hour = new Date().getHours()
   if (hour < 12) return "Good morning"
@@ -108,6 +73,8 @@ export default function ResearchPageNew() {
   // Track state
   const [tracks, setTracks] = useState<Track[]>([])
   const [activeTrackId, setActiveTrackId] = useState<number | null>(null)
+  const [trackContext, setTrackContext] = useState<ResearchTrackContextResponse | null>(null)
+  const [trackContextLoading, setTrackContextLoading] = useState(false)
 
   // All available sources
   const ALL_SOURCES = ["semantic_scholar", "arxiv", "openalex", "papers_cool", "hf_daily"]
@@ -123,6 +90,7 @@ export default function ResearchPageNew() {
 
   // Memory drawer state
   const [memoryOpen, setMemoryOpen] = useState(false)
+  const [workspaceTab, setWorkspaceTab] = useState<"saved" | "memory">("saved")
 
   // Anchor mode state (used for search filtering)
   const [anchorPersonalized, setAnchorPersonalized] = useState(true)
@@ -141,8 +109,13 @@ export default function ResearchPageNew() {
 
   // Derived state
   const activeTrack = useMemo(
-    () => tracks.find((t) => t.id === activeTrackId) || null,
-    [tracks, activeTrackId]
+    () => {
+      if (trackContext?.track && trackContext.track.id === activeTrackId) {
+        return trackContext.track as Track
+      }
+      return tracks.find((t) => t.id === activeTrackId) || null
+    },
+    [trackContext, tracks, activeTrackId]
   )
 
   const papers = contextPack?.paper_recommendations || []
@@ -152,7 +125,7 @@ export default function ResearchPageNew() {
 
   // Load tracks on mount
   useEffect(() => {
-    refreshTracks().catch((e) => setError(e instanceof Error ? e.message : String(e)))
+    refreshTracks().catch((e) => setError(getErrorMessage(e)))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -169,6 +142,51 @@ export default function ResearchPageNew() {
     if (query === routeQuery) return
     setQuery(routeQuery)
   }, [routeQuery, query, hasSearched])
+
+  async function refreshTrackContext(trackId: number): Promise<void> {
+    const data = await fetchJson<ResearchTrackContextResponse>(
+      `/api/research/tracks/${trackId}/context?user_id=${encodeURIComponent(userId)}`
+    )
+    setTrackContext(data)
+  }
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadTrackContext(trackId: number) {
+      setTrackContextLoading(true)
+      try {
+        const data = await fetchJson<ResearchTrackContextResponse>(
+          `/api/research/tracks/${trackId}/context?user_id=${encodeURIComponent(userId)}`
+        )
+        if (!cancelled) {
+          setTrackContext(data)
+        }
+      } catch (e) {
+        if (!cancelled) {
+          setTrackContext(null)
+          setError(getErrorMessage(e))
+        }
+      } finally {
+        if (!cancelled) {
+          setTrackContextLoading(false)
+        }
+      }
+    }
+
+    if (!activeTrackId) {
+      setTrackContext(null)
+      setTrackContextLoading(false)
+      return () => {
+        cancelled = true
+      }
+    }
+
+    loadTrackContext(activeTrackId).catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [activeTrackId, userId])
 
   async function refreshTracks(): Promise<number | null> {
     const data = await fetchJson<{ tracks: Track[] }>(
@@ -194,7 +212,7 @@ export default function ResearchPageNew() {
       )
       await refreshTracks()
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      setError(getErrorMessage(e))
     } finally {
       setLoading(false)
     }
@@ -222,6 +240,7 @@ export default function ResearchPageNew() {
       const body = {
         user_id: userId,
         query,
+        track_id: activeTrackId ?? undefined,
         paper_limit: 10,
         memory_limit: 8,
         sources: searchSources,
@@ -244,7 +263,7 @@ export default function ResearchPageNew() {
 
       setContextPack(data.context_pack)
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      setError(getErrorMessage(e))
     } finally {
       setIsSearching(false)
     }
@@ -315,7 +334,7 @@ export default function ResearchPageNew() {
       await refreshTracks()
       return true
     } catch (e) {
-      const message = e instanceof Error ? e.message : String(e)
+      const message = getErrorMessage(e)
       if (message.startsWith("409")) {
         setCreateError(`Track "${name}" already exists.`)
       } else {
@@ -359,9 +378,12 @@ export default function ResearchPageNew() {
         headers: { "Content-Type": "application/json" },
       })
       await refreshTracks()
+      if (trackId === activeTrackId) {
+        await refreshTrackContext(trackId)
+      }
       return true
     } catch (e) {
-      const message = e instanceof Error ? e.message : String(e)
+      const message = getErrorMessage(e)
       if (message.startsWith("409")) {
         setEditError(`Track "${name}" already exists.`)
       } else {
@@ -392,10 +414,13 @@ export default function ResearchPageNew() {
           headers: { "Content-Type": "application/json" },
         }
       )
+      if (trackToClear === activeTrackId) {
+        await refreshTrackContext(trackToClear)
+      }
       setConfirmClearOpen(false)
       setTrackToClear(null)
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      setError(getErrorMessage(e))
     } finally {
       setLoading(false)
     }
@@ -403,10 +428,10 @@ export default function ResearchPageNew() {
 
   async function handleFeedback(
     paperId: string,
-    action: string,
+    action: PaperFeedbackRequestAction,
     rank?: number,
     paper?: Paper
-  ): Promise<void> {
+  ): Promise<PaperFeedbackAction | null> {
     // Don't set global loading - PaperCard handles its own loading state
     setError(null)
     const body: Record<string, unknown> = {
@@ -439,11 +464,12 @@ export default function ResearchPageNew() {
       body.paper_source = paper.source || "semantic_scholar"
     }
 
-    await fetchJson(`/api/research/papers/feedback`, {
+    const payload = await fetchJson<{ current_action?: string | null }>(`/api/research/papers/feedback`, {
       method: "POST",
       body: JSON.stringify(body),
       headers: { "Content-Type": "application/json" },
     })
+    return normalizePaperFeedbackAction(payload.current_action) ?? currentFeedbackFromRequestAction(action)
   }
 
   const trackToClearName = tracks.find((t) => t.id === trackToClear)?.name || "this track"
@@ -454,6 +480,28 @@ export default function ResearchPageNew() {
     const qs = params.toString()
     return qs ? `/research/discovery?${qs}` : "/research/discovery"
   }, [query, activeTrackId])
+
+  const communityRadarHref = useMemo(() => {
+    const params = new URLSearchParams()
+    if (activeTrackId) params.set("radar_track", String(activeTrackId))
+
+    const keywordSeed = query.trim() || activeTrack?.keywords?.[0] || ""
+    if (keywordSeed) {
+      params.set("radar_keyword", keywordSeed)
+    }
+
+    const qs = params.toString()
+    return qs ? `/dashboard?${qs}` : "/dashboard"
+  }, [query, activeTrack, activeTrackId])
+
+  const workflowHref = useMemo(() => {
+    const params = new URLSearchParams()
+    if (query.trim()) {
+      params.set("query", query.trim())
+    }
+    const qs = params.toString()
+    return qs ? `/workflows?${qs}` : "/workflows"
+  }, [query])
 
   return (
     <div
@@ -575,13 +623,29 @@ export default function ResearchPageNew() {
             disabled={loading}
             anchorMode={anchorPersonalized ? "personalized" : "global"}
             onAnchorModeChange={(mode) => setAnchorPersonalized(mode === "personalized")}
-            onOpenMemory={() => setMemoryOpen(true)}
+            onOpenLibrary={() => {
+              setWorkspaceTab("saved")
+              setMemoryOpen(true)
+            }}
+            onOpenMemory={() => {
+              setWorkspaceTab("memory")
+              setMemoryOpen(true)
+            }}
             yearFrom={yearFrom}
             yearTo={yearTo}
             onYearFromChange={setYearFrom}
             onYearToChange={setYearTo}
           />
         </div>
+
+        {trackContext ? (
+          <div className="mb-6 animate-in fade-in slide-in-from-bottom-2 duration-500">
+            <ResearchTrackContextPanel
+              context={trackContext}
+              onOpenMemory={() => setMemoryOpen(true)}
+            />
+          </div>
+        ) : null}
 
         {/* Track Pills - only show before search */}
         {!hasSearched && tracks.length > 0 && (
@@ -594,40 +658,6 @@ export default function ResearchPageNew() {
               disabled={loading}
             />
           </div>
-        )}
-
-        {!hasSearched && (
-          <Card className="mx-auto mb-8 max-w-3xl border-border/70 bg-card/80 backdrop-blur-sm">
-            <CardContent className="grid gap-3 p-4 sm:grid-cols-3 sm:p-5">
-              <div className="rounded-md border bg-background/70 p-3">
-                <p className="mb-2 flex items-center gap-2 text-sm font-medium">
-                  <Search className="h-4 w-4 text-primary" />
-                  Search
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  Start from a query with year window and source filters.
-                </p>
-              </div>
-              <div className="rounded-md border bg-background/70 p-3">
-                <p className="mb-2 flex items-center gap-2 text-sm font-medium">
-                  <Sparkles className="h-4 w-4 text-primary" />
-                  Rank
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  Capture like/save/dislike feedback to steer recommendations.
-                </p>
-              </div>
-              <div className="rounded-md border bg-background/70 p-3">
-                <p className="mb-2 flex items-center gap-2 text-sm font-medium">
-                  <GitBranch className="h-4 w-4 text-primary" />
-                  Discover
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  Expand with citation graph and timeline slices in one workspace.
-                </p>
-              </div>
-            </CardContent>
-          </Card>
         )}
 
         {/* Error Display */}
@@ -646,23 +676,54 @@ export default function ResearchPageNew() {
         {hasSearched && (
           <div className="space-y-4">
             <Card className="border-border/70 bg-card/80 backdrop-blur-sm">
-              <CardContent className="flex flex-wrap items-center justify-between gap-3 p-3 sm:p-4">
-                <div className="flex flex-wrap items-center gap-2">
-                  <Badge variant="outline">
-                    Track: {activeTrack?.name || "Global"}
-                  </Badge>
-                  <Badge variant="outline">
-                    Mode: {anchorPersonalized ? "Personalized" : "Global"}
-                  </Badge>
-                  <Badge variant="outline">Sources: {searchSources.length}</Badge>
-                  <Badge variant="secondary">Results: {papers.length}</Badge>
+              <CardContent className="space-y-3 p-3 sm:p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant="outline">
+                      Track: {activeTrack?.name || "Global"}
+                    </Badge>
+                    {trackContextLoading ? (
+                      <Badge variant="outline">Track snapshot: loading</Badge>
+                    ) : trackContext ? (
+                      <Badge variant="outline">
+                        Pending memory: {trackContext.memory.pending_items}
+                      </Badge>
+                    ) : null}
+                    <Badge variant="outline">
+                      Mode: {anchorPersonalized ? "Personalized" : "Global"}
+                    </Badge>
+                    <Badge variant="outline">Sources: {searchSources.length}</Badge>
+                    <Badge variant="secondary">Results: {papers.length}</Badge>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button asChild size="sm" variant="outline" className="gap-1.5">
+                      <Link href={workflowHref}>
+                        Open Workflows
+                        <ArrowRight className="h-4 w-4" />
+                      </Link>
+                    </Button>
+                    <Button asChild size="sm" variant="outline" className="gap-1.5">
+                      <Link href={communityRadarHref}>
+                        Open Community Radar
+                        <ArrowRight className="h-4 w-4" />
+                      </Link>
+                    </Button>
+                    <Button asChild size="sm" className="gap-1.5">
+                      <Link href={discoveryHref}>
+                        Open Discovery Workspace
+                        <ArrowRight className="h-4 w-4" />
+                      </Link>
+                    </Button>
+                  </div>
                 </div>
-                <Button asChild size="sm" className="gap-1.5">
-                  <Link href={discoveryHref}>
-                    Open Discovery Workspace
-                    <ArrowRight className="h-4 w-4" />
-                  </Link>
-                </Button>
+                <div className="rounded-xl border border-border/60 bg-background/80 px-3 py-2.5 text-sm">
+                  <p className="font-medium text-foreground">
+                    Research is for fast context search. Workflow is for batch topics, DailyPaper, and Judge.
+                  </p>
+                  <p className="mt-1 text-muted-foreground">
+                    这里更适合单问题探索和即时反馈；需要把多个主题整理成 digest、评分和交付链路时，直接切到 Workflows。
+                  </p>
+                </div>
               </CardContent>
             </Card>
 
@@ -673,21 +734,66 @@ export default function ResearchPageNew() {
               hasSearched={hasSearched}
               selectedSources={searchSources}
               onToggleSource={toggleSearchSource}
-              onLike={(paperId, rank, paper) => handleFeedback(paperId, "like", rank, paper)}
-              onSave={(paperId, rank, paper) => handleFeedback(paperId, "save", rank, paper)}
-              onDislike={(paperId, rank, paper) => handleFeedback(paperId, "dislike", rank, paper)}
+              onFeedbackAction={(paperId, action, rank, paper) =>
+                handleFeedback(paperId, action, rank, paper)
+              }
             />
           </div>
         )}
 
         {/* Memory Sheet Drawer */}
         <Sheet open={memoryOpen} onOpenChange={setMemoryOpen}>
-          <SheetContent className="w-full sm:max-w-lg overflow-y-auto">
-            <SheetHeader>
-              <SheetTitle>Track Memory</SheetTitle>
-            </SheetHeader>
-            <div className="mt-4">
-              <MemoryTab userId={userId} trackId={activeTrackId} />
+          <SheetContent className="w-full border-l border-border/70 p-0 sm:max-w-2xl">
+            <div className="flex h-full flex-col bg-gradient-to-b from-slate-50 via-white to-white">
+              <SheetHeader className="border-b border-border/70 bg-white/90 px-5 py-4 backdrop-blur">
+                <div className="flex flex-wrap items-center gap-2">
+                  <SheetTitle>Workspace Library</SheetTitle>
+                  <Badge variant="secondary">
+                    {activeTrack?.name ? `Track: ${activeTrack.name}` : "Global scope"}
+                  </Badge>
+                </div>
+                <SheetDescription>
+                  Review saved papers, trigger export handoffs, and inspect track memory without leaving the
+                  research workspace.
+                </SheetDescription>
+                <div className="flex flex-wrap gap-2 pt-2">
+                  <Badge variant="outline">{activeTrack?.name || "Global scope"}</Badge>
+                  <Badge variant="outline">
+                    Mode: {anchorPersonalized ? "Personalized" : "Global"}
+                  </Badge>
+                  <Badge variant="outline">Query: {query.trim() || "No active query"}</Badge>
+                </div>
+              </SheetHeader>
+              <div className="flex min-h-0 flex-1 flex-col px-5 pb-5 pt-4">
+                <Tabs
+                  value={workspaceTab}
+                  onValueChange={(value) => {
+                    if (value === "saved" || value === "memory") {
+                      setWorkspaceTab(value)
+                    }
+                  }}
+                  className="flex min-h-0 flex-1 flex-col"
+                >
+                  <TabsList className="grid h-auto w-full grid-cols-2 rounded-2xl bg-slate-100 p-1">
+                    <TabsTrigger value="saved" className="rounded-xl">
+                      Saved
+                    </TabsTrigger>
+                    <TabsTrigger value="memory" className="rounded-xl">
+                      Memory
+                    </TabsTrigger>
+                  </TabsList>
+                  <TabsContent value="saved" className="mt-4 min-h-0 flex-1 overflow-y-auto pr-1">
+                    <SavedTab
+                      userId={userId}
+                      trackId={activeTrackId}
+                      trackName={activeTrack?.name ?? null}
+                    />
+                  </TabsContent>
+                  <TabsContent value="memory" className="mt-4 min-h-0 flex-1 overflow-y-auto pr-1">
+                    <MemoryTab userId={userId} trackId={activeTrackId} />
+                  </TabsContent>
+                </Tabs>
+              </div>
             </div>
           </SheetContent>
         </Sheet>

@@ -17,10 +17,9 @@ from dataclasses import asdict as _asdict
 from typing import Literal, Optional
 
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from paperbot.api.streaming import StreamEvent, wrap_generator
+from paperbot.api.streaming import StreamEvent, sse_response
 from paperbot.application.services.p2c.models import (
     GenerateContextRequest as P2CRequest,
     RawPaperData,
@@ -34,7 +33,14 @@ _MAX_OBSERVATION_NARRATIVE = 400  # chars stored per memory item
 
 router = APIRouter()
 
-_store = SqlAlchemyReproContextStore()
+_store: Optional[SqlAlchemyReproContextStore] = None
+
+
+def _get_store() -> SqlAlchemyReproContextStore:
+    global _store
+    if _store is None:
+        _store = SqlAlchemyReproContextStore()
+    return _store
 
 
 # ------------------------------------------------------------------ #
@@ -73,7 +79,7 @@ async def _generate_stream(request: GenerateContextPackRequest):
     # Persist initial "running" record so the frontend can poll status.
     try:
         await asyncio.to_thread(
-            _store.save,
+            _get_store().save,
             pack_id=pack_id,
             user_id=request.user_id,
             paper_id=request.paper_id,
@@ -121,7 +127,7 @@ async def _generate_stream(request: GenerateContextPackRequest):
         ]
         try:
             await asyncio.to_thread(
-                _store.save_stage_result,
+                _get_store().save_stage_result,
                 pack_id=pack_id,
                 stage_name=stage_name,
                 status="completed",
@@ -211,7 +217,7 @@ async def _generate_stream(request: GenerateContextPackRequest):
             err = result_holder[0]
             err_message = err.get("message", "Generation failed") if isinstance(err, dict) else str(err)
             try:
-                await asyncio.to_thread(_store.update_status, pack_id, status="failed")
+                await asyncio.to_thread(_get_store().update_status, pack_id, status="failed")
             except Exception as exc:
                 Logger.warning(
                     f"[M2] store_update_status_failed pack_id={pack_id} "
@@ -240,7 +246,7 @@ async def _generate_stream(request: GenerateContextPackRequest):
 
     try:
         await asyncio.to_thread(
-            _store.update_status,
+            _get_store().update_status,
             pack_id,
             status="completed",
             pack_data=pack_dict,
@@ -331,14 +337,7 @@ async def generate_context_pack(request: GenerateContextPackRequest):
         f"[M2] generate_request trace_id={trace_id} paper_id={request.paper_id} user_id={request.user_id}",
         file=LogFiles.API,
     )
-    return StreamingResponse(
-        wrap_generator(
-            _generate_stream(request),
-            workflow="p2c_generate",
-        ),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
-    )
+    return sse_response(_generate_stream(request), workflow="p2c_generate")
 
 
 # ------------------------------------------------------------------ #
@@ -360,7 +359,7 @@ async def list_context_packs(
         file=LogFiles.API,
     )
     items, total = await asyncio.to_thread(
-        _store.list_by_user,
+        _get_store().list_by_user,
         user_id=user_id,
         paper_id=paper_id,
         project_id=project_id,
@@ -379,7 +378,7 @@ async def get_context_pack(pack_id: str):
     """Return the full context pack detail."""
     set_trace_id()
     Logger.info(f"[M2] get_pack pack_id={pack_id}", file=LogFiles.API)
-    pack = await asyncio.to_thread(_store.get, pack_id)
+    pack = await asyncio.to_thread(_get_store().get, pack_id)
     if pack is None:
         Logger.warning(f"[M2] pack_not_found pack_id={pack_id}", file=LogFiles.API)
         raise HTTPException(status_code=404, detail="Context pack not found.")
@@ -394,7 +393,7 @@ async def get_observation_detail(pack_id: str, observation_id: str):
         f"[M2] get_observation pack_id={pack_id} observation_id={observation_id}",
         file=LogFiles.API,
     )
-    observation = await asyncio.to_thread(_store.get_observation, pack_id, observation_id)
+    observation = await asyncio.to_thread(_get_store().get_observation, pack_id, observation_id)
     if observation is None:
         Logger.warning(
             f"[M2] observation_not_found pack_id={pack_id} observation_id={observation_id}",
@@ -415,7 +414,7 @@ async def create_repro_session(pack_id: str, request: CreateSessionRequest):
 
     TODO: integrate with existing runbook creation once Module 1 is wired.
     """
-    pack = await asyncio.to_thread(_store.get, pack_id)
+    pack = await asyncio.to_thread(_get_store().get, pack_id)
     if pack is None:
         Logger.warning(f"[M2] session_pack_not_found pack_id={pack_id}", file=LogFiles.API)
         raise HTTPException(status_code=404, detail="Context pack not found.")
@@ -458,7 +457,7 @@ async def delete_context_pack(pack_id: str):
     """Soft-delete a context pack."""
     set_trace_id()
     Logger.info(f"[M2] delete_pack pack_id={pack_id}", file=LogFiles.API)
-    deleted = await asyncio.to_thread(_store.soft_delete, pack_id)
+    deleted = await asyncio.to_thread(_get_store().soft_delete, pack_id)
     if not deleted:
         Logger.warning(f"[M2] delete_pack_not_found pack_id={pack_id}", file=LogFiles.API)
         raise HTTPException(status_code=404, detail="Context pack not found.")

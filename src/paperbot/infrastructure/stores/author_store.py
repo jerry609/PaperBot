@@ -8,6 +8,7 @@ from typing import Any, Iterable, Optional
 
 from sqlalchemy import delete, func, select
 
+from paperbot.application.ports.author_port import AuthorPort
 from paperbot.infrastructure.stores.models import AuthorModel, Base, PaperAuthorModel, PaperModel
 from paperbot.infrastructure.stores.sqlalchemy_db import SessionProvider, get_db_url
 
@@ -30,14 +31,14 @@ def _safe_int(value: Any, default: int = 0) -> int:
         return default
 
 
-class AuthorStore:
+class AuthorStore(AuthorPort):
     """CRUD helpers for `authors` and `paper_authors` tables."""
 
     def __init__(self, db_url: Optional[str] = None, *, auto_create_schema: bool = True):
         self.db_url = db_url or get_db_url()
         self._provider = SessionProvider(self.db_url)
         if auto_create_schema:
-            Base.metadata.create_all(self._provider.engine)
+            self._provider.ensure_tables(Base.metadata)
 
     def upsert_author(
         self,
@@ -111,6 +112,27 @@ class AuthorStore:
             session.commit()
             session.refresh(row)
             return self._author_to_dict(row)
+
+    def get_author(self, author_id: int) -> Optional[dict[str, Any]]:
+        with self._provider.session() as session:
+            row = session.execute(
+                select(AuthorModel).where(AuthorModel.id == int(author_id)).limit(1)
+            ).scalar_one_or_none()
+            return self._author_to_dict(row) if row else None
+
+    def list_authors(self, *, limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
+        with self._provider.session() as session:
+            rows = (
+                session.execute(
+                    select(AuthorModel)
+                    .order_by(func.lower(AuthorModel.name), AuthorModel.id)
+                    .offset(max(0, int(offset)))
+                    .limit(max(1, int(limit)))
+                )
+                .scalars()
+                .all()
+            )
+            return [self._author_to_dict(row) for row in rows]
 
     def replace_paper_authors(
         self, *, paper_id: int, authors: Iterable[Any]

@@ -1,13 +1,11 @@
 "use client"
 
-import { useState, useMemo } from "react"
-import { useStudioStore, type StudioPaperStatus } from "@/lib/store/studio-store"
+import { useState, useMemo, useEffect, type CSSProperties } from "react"
+import { useStudioStore, type StudioPaper } from "@/lib/store/studio-store"
 import { NewPaperModal } from "./NewPaperModal"
-import { PaperIcon } from "./PaperIcon"
 import { deleteProjectFiles } from "@/lib/runbook/deleteProjectFiles"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Card } from "@/components/ui/card"
 import {
     AlertDialog,
     AlertDialogAction,
@@ -19,16 +17,12 @@ import {
     AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { cn } from "@/lib/utils"
-import { Plus, Search, Loader2, Trash2, FlaskConical } from "lucide-react"
+import { Plus, Search, Trash2, FlaskConical, Loader2 } from "lucide-react"
 
-const statusConfig: Record<StudioPaperStatus, { label: string; className: string }> = {
-    draft: { label: "Draft", className: "bg-zinc-500/90 text-white" },
-    generating: { label: "Code", className: "bg-blue-500 text-white" },
-    ready: { label: "Ready", className: "bg-emerald-500 text-white" },
-    running: { label: "Run", className: "bg-violet-500 text-white" },
-    completed: { label: "Done", className: "bg-emerald-500 text-white" },
-    error: { label: "Error", className: "bg-red-500 text-white" },
-}
+const STOP_WORDS = new Set([
+    "a", "an", "the", "and", "or", "of", "for", "to", "in", "on", "with", "from", "by", "at", "is", "are",
+    "this", "that", "these", "those", "into", "through", "using", "use",
+])
 
 function formatRelativeTime(dateStr: string): string {
     const date = new Date(dateStr)
@@ -45,9 +39,104 @@ function formatRelativeTime(dateStr: string): string {
     return date.toLocaleDateString()
 }
 
+function PixelCornerIcon({
+    className,
+    style,
+    size = 108,
+    frame = 0,
+}: {
+    className?: string
+    style?: CSSProperties
+    size?: number
+    frame?: number
+}) {
+    return (
+        <div
+            className={cn(
+                "shrink-0 bg-no-repeat",
+                className,
+            )}
+            style={{
+                width: size,
+                height: size,
+                backgroundImage: "url('/icons/llama-sprite.png')",
+                backgroundSize: `${size * 6}px ${size}px`,
+                backgroundPosition: `${-frame * size}px 0`,
+                imageRendering: "pixelated",
+                ...style,
+            }}
+            aria-hidden="true"
+        />
+    )
+}
+
+function buildDisplayWords(title: string): string[] {
+    const cleaned = (title || "")
+        .replace(/[^A-Za-z0-9\s-]/g, " ")
+        .split(/\s+/)
+        .map((word) => word.trim())
+        .filter(Boolean)
+        .filter((word) => !STOP_WORDS.has(word.toLowerCase()))
+    if (cleaned.length === 0) return ["untitled"]
+    const words = cleaned.slice(0, 2).map((word) => word.toLowerCase())
+    return words
+}
+
+function summarizeAbstract(abstract: string): string {
+    const text = (abstract || "").trim()
+    if (!text) return "No abstract yet."
+
+    const sentences = text
+        .split(/(?<=[.!?])\s+/)
+        .map((part) => part.trim())
+        .filter(Boolean)
+
+    if (sentences.length === 0) return text.slice(0, 180)
+    const summary = sentences.slice(0, 2).join(" ")
+    if (summary.length <= 260) return summary
+    return `${summary.slice(0, 257).trimEnd()}...`
+}
+
+function inferAuthor(paper: StudioPaper): string {
+    const authors = Array.isArray(paper.authors) ? paper.authors : []
+    const normalized = authors
+        .map((name) => String(name || "").trim())
+        .filter(Boolean)
+    if (normalized.length > 0) return normalized[0]
+    return "Author unavailable"
+}
+
+function inferTags(paper: StudioPaper): { shown: string[]; extraCount: number } {
+    const directAreas = Array.isArray(paper.researchAreas)
+        ? paper.researchAreas
+            .map((area) => String(area || "").trim().toLowerCase())
+            .filter(Boolean)
+        : []
+
+    if (directAreas.length > 0) {
+        const uniq = Array.from(new Set(directAreas))
+        return { shown: uniq.slice(0, 3), extraCount: Math.max(0, uniq.length - 3) }
+    }
+
+    const source = `${paper.title} ${paper.abstract}`.toLowerCase()
+    const tokens = source
+        .replace(/[^a-z0-9\s-]/g, " ")
+        .split(/\s+/)
+        .map((token) => token.trim())
+        .filter((token) => token.length >= 4 && !STOP_WORDS.has(token))
+    const unique: string[] = []
+    for (const token of tokens) {
+        if (!unique.includes(token)) unique.push(token)
+    }
+    const shown = unique.slice(0, 3)
+    const extraCount = Math.max(0, unique.length - shown.length)
+    return { shown, extraCount }
+}
+
 export function PaperGallery() {
-    const { papers, selectPaper, deletePaper } = useStudioStore()
+    const { papers, selectPaper, deletePaper, updatePaper } = useStudioStore()
     const [query, setQuery] = useState("")
+    const [activeFilter, setActiveFilter] = useState<"all" | "draft" | "running" | "completed">("all")
     const [newPaperOpen, setNewPaperOpen] = useState(false)
     const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
     const [paperToDelete, setPaperToDelete] = useState<{
@@ -57,6 +146,115 @@ export function PaperGallery() {
     } | null>(null)
     const [deleting, setDeleting] = useState(false)
     const [deleteError, setDeleteError] = useState<string | null>(null)
+    const [gridColumns, setGridColumns] = useState(4)
+    const [spriteFrame, setSpriteFrame] = useState(0)
+
+    useEffect(() => {
+        // Drive all paper icons with one shared frame clock for stable, synchronized animation.
+        const interval = window.setInterval(() => {
+            setSpriteFrame((prev) => (prev + 1) % 6)
+        }, 140)
+        return () => window.clearInterval(interval)
+    }, [])
+
+    useEffect(() => {
+        const updateColumns = () => {
+            const width = window.innerWidth
+            if (width >= 1280) {
+                setGridColumns(4)
+                return
+            }
+            if (width >= 768) {
+                setGridColumns(2)
+                return
+            }
+            setGridColumns(1)
+        }
+
+        updateColumns()
+        window.addEventListener("resize", updateColumns)
+        return () => window.removeEventListener("resize", updateColumns)
+    }, [])
+
+    useEffect(() => {
+        const missingMetadata = papers.filter(
+            (paper) =>
+                (!Array.isArray(paper.authors) || paper.authors.length === 0) ||
+                (!Array.isArray(paper.researchAreas) || paper.researchAreas.length === 0),
+        )
+        if (missingMetadata.length === 0) return
+
+        let cancelled = false
+
+        const hydratePaperMetadata = async () => {
+            try {
+                const response = await fetch("/api/papers/library")
+                if (!response.ok) return
+                const payload = (await response.json()) as {
+                    papers?: Array<{ paper?: Record<string, unknown> }>
+                }
+                const libraryRows = Array.isArray(payload.papers) ? payload.papers : []
+                const byTitle = new Map<
+                    string,
+                    { authors: string[]; researchAreas: string[] }
+                >()
+
+                for (const row of libraryRows) {
+                    const raw = row.paper ?? {}
+                    const title = String(raw.title || "").trim().toLowerCase()
+                    if (!title) continue
+                    const authors = Array.isArray(raw.authors)
+                        ? raw.authors
+                            .map((author) => String(author || "").trim())
+                            .filter(Boolean)
+                        : []
+                    const areasSource =
+                        raw.research_areas ||
+                        raw.researchAreas ||
+                        raw.keywords ||
+                        raw.fields ||
+                        []
+                    const researchAreas = Array.isArray(areasSource)
+                        ? areasSource
+                            .map((area) => String(area || "").trim())
+                            .filter(Boolean)
+                        : []
+                    byTitle.set(title, { authors, researchAreas })
+                }
+
+                for (const paper of missingMetadata) {
+                    if (cancelled) break
+                    const key = paper.title.trim().toLowerCase()
+                    const match = byTitle.get(key)
+                    if (!match) continue
+
+                    const updates: Partial<StudioPaper> = {}
+                    if (
+                        (!Array.isArray(paper.authors) || paper.authors.length === 0) &&
+                        match.authors.length > 0
+                    ) {
+                        updates.authors = match.authors
+                    }
+                    if (
+                        (!Array.isArray(paper.researchAreas) || paper.researchAreas.length === 0) &&
+                        match.researchAreas.length > 0
+                    ) {
+                        updates.researchAreas = match.researchAreas
+                    }
+                    if (Object.keys(updates).length > 0) {
+                        updatePaper(paper.id, updates)
+                    }
+                }
+            } catch {
+                // Keep the gallery render stable if metadata hydration fails.
+            }
+        }
+
+        void hydratePaperMetadata()
+        return () => {
+            cancelled = true
+        }
+    }, [papers, updatePaper])
 
     const filteredPapers = useMemo(() => {
         const q = query.trim().toLowerCase()
@@ -68,12 +266,17 @@ export function PaperGallery() {
         )
     }, [papers, query])
 
+    const statusFilteredPapers = useMemo(() => {
+        if (activeFilter === "all") return filteredPapers
+        return filteredPapers.filter((paper) => paper.status === activeFilter)
+    }, [activeFilter, filteredPapers])
+
     const sortedPapers = useMemo(() => {
-        return [...filteredPapers].sort(
+        return [...statusFilteredPapers].sort(
             (a, b) =>
                 new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
         )
-    }, [filteredPapers])
+    }, [statusFilteredPapers])
 
     const handleDeleteClick = (
         e: React.MouseEvent,
@@ -118,13 +321,24 @@ export function PaperGallery() {
     }
 
     return (
-        <div className="flex h-full flex-col">
+        <div className="flex h-full flex-col bg-background">
+            <style jsx>{`
+                @keyframes paperRowSync {
+                    0%,
+                    100% {
+                        transform: translateY(0);
+                    }
+                    50% {
+                        transform: translateY(-2px);
+                    }
+                }
+            `}</style>
             {/* Header */}
-            <div className="border-b bg-background px-6 py-5 shrink-0">
-                <div className="mx-auto max-w-6xl flex items-center justify-between">
+            <div className="border-b border-zinc-300 bg-background px-6 py-5 shrink-0">
+                <div className="mx-auto w-full max-w-[1360px] flex items-center justify-between">
                     <div>
                         <h1 className="text-xl font-semibold">DeepCode Studio</h1>
-                        <p className="text-sm text-muted-foreground mt-0.5">
+                        <p className="mt-0.5 text-sm text-zinc-500">
                             Paper-to-code reproduction workspace
                         </p>
                     </div>
@@ -137,21 +351,62 @@ export function PaperGallery() {
 
             {/* Content */}
             <div className="flex-1 overflow-auto">
-                <div className="mx-auto max-w-6xl px-6 py-6">
+                <div className="mx-auto w-full max-w-[1360px] px-6 py-6">
                     {/* Search */}
-                    <div className="relative mb-6 max-w-md">
-                        <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+                    <div className="relative mb-5 max-w-[520px]">
+                        <Search className="absolute left-3 top-3 h-4 w-4 text-zinc-400" />
                         <Input
                             value={query}
                             onChange={(e) => setQuery(e.target.value)}
                             placeholder="Search papers..."
-                            className="pl-9 h-9"
+                            className="h-11 rounded-none border-zinc-300 bg-white pl-9"
                         />
+                    </div>
+
+                    {/* Filter strip to mirror catalog-like browsing */}
+                    <div className="mb-5 flex flex-wrap items-center gap-1 border-b border-zinc-300 pb-2 text-sm">
+                        <button
+                            onClick={() => setActiveFilter("all")}
+                            className={cn(
+                                "rounded px-2 py-1",
+                                activeFilter === "all" ? "font-medium text-zinc-900" : "text-zinc-600 hover:text-zinc-900",
+                            )}
+                        >
+                            All Papers ({filteredPapers.length})
+                        </button>
+                        <span className="px-1 text-zinc-300">|</span>
+                        <button
+                            onClick={() => setActiveFilter("draft")}
+                            className={cn(
+                                "rounded px-2 py-1",
+                                activeFilter === "draft" ? "font-medium text-zinc-900" : "text-zinc-600 hover:text-zinc-900",
+                            )}
+                        >
+                            Drafts ({filteredPapers.filter((paper) => paper.status === "draft").length})
+                        </button>
+                        <button
+                            onClick={() => setActiveFilter("running")}
+                            className={cn(
+                                "rounded px-2 py-1",
+                                activeFilter === "running" ? "font-medium text-zinc-900" : "text-zinc-600 hover:text-zinc-900",
+                            )}
+                        >
+                            Running ({filteredPapers.filter((paper) => paper.status === "running").length})
+                        </button>
+                        <button
+                            onClick={() => setActiveFilter("completed")}
+                            className={cn(
+                                "rounded px-2 py-1",
+                                activeFilter === "completed" ? "font-medium text-zinc-900" : "text-zinc-600 hover:text-zinc-900",
+                            )}
+                        >
+                            Completed ({filteredPapers.filter((paper) => paper.status === "completed").length})
+                        </button>
                     </div>
 
                     {sortedPapers.length === 0 ? (
                         /* Empty state */
-                        <div className="flex flex-col items-center justify-center py-24 text-center">
+                        <div className="flex flex-col items-center justify-center border border-zinc-300 bg-white py-24 text-center">
                             <div className="rounded-full bg-muted p-4 mb-4">
                                 <FlaskConical className="h-8 w-8 text-muted-foreground" />
                             </div>
@@ -174,70 +429,78 @@ export function PaperGallery() {
                             )}
                         </div>
                     ) : (
-                        /* Responsive grid */
-                        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                            {sortedPapers.map((paper) => {
-                                const config = statusConfig[paper.status]
-                                const isLoading =
-                                    paper.status === "generating" ||
-                                    paper.status === "running"
-
+                        /* Tiled catalog grid (Image-2 style) */
+                        <div className="grid grid-cols-1 gap-px border border-zinc-300 bg-zinc-300 md:grid-cols-2 xl:grid-cols-4">
+                            {sortedPapers.map((paper, index) => {
+                                const rowIndex = Math.floor(index / gridColumns)
                                 return (
-                                    <Card
+                                    <article
                                         key={paper.id}
                                         onClick={() => selectPaper(paper.id)}
-                                        className="group relative cursor-pointer gap-0 py-0 transition-all hover:shadow-md hover:border-primary/30"
+                                        onKeyDown={(event) => {
+                                            if (event.key === "Enter" || event.key === " ") {
+                                                event.preventDefault()
+                                                selectPaper(paper.id)
+                                            }
+                                        }}
+                                        role="button"
+                                        tabIndex={0}
+                                        className="group relative flex min-h-[300px] cursor-pointer flex-col bg-background p-6 text-left transition-colors hover:bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 focus-visible:ring-offset-2"
                                     >
                                         {/* Delete button */}
                                         <button
                                             onClick={(e) =>
                                                 handleDeleteClick(e, paper)
                                             }
-                                            className="absolute right-2 top-2 z-10 rounded-md p-1.5 opacity-0 group-hover:opacity-100 hover:bg-destructive/10 hover:text-destructive transition-all"
+                                            className="absolute right-3 top-3 z-10 rounded-md p-1.5 opacity-0 transition-all hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100"
                                             title="Delete paper"
                                         >
                                             <Trash2 className="h-3.5 w-3.5" />
                                         </button>
 
-                                        {/* Icon */}
-                                        <div className="flex items-center gap-3 px-4 pt-4">
-                                            <PaperIcon
-                                                paperId={paper.id}
-                                                title={paper.title}
-                                                size={44}
+                                        {/* Header row: icon + abbreviation */}
+                                        <div className="mb-4 flex items-center gap-4">
+                                            <PixelCornerIcon
+                                                frame={spriteFrame}
+                                                style={{
+                                                    animation: "paperRowSync 2.2s ease-in-out infinite",
+                                                    animationDelay: `${rowIndex * 140}ms`,
+                                                }}
                                             />
+                                            <div className="leading-[0.95]">
+                                                {buildDisplayWords(paper.title).map((word) => (
+                                                    <p
+                                                        key={`${paper.id}-${word}`}
+                                                        className="text-[18px] font-bold tracking-[-0.01em] text-zinc-900"
+                                                    >
+                                                        {word}
+                                                    </p>
+                                                ))}
+                                            </div>
                                         </div>
 
-                                        {/* Title */}
-                                        <div className="px-4 pt-3 pb-3">
-                                            <p className="text-sm font-medium leading-snug">
-                                                {paper.title || "Untitled"}
+                                        {/* Main content */}
+                                        <div className="flex-1 space-y-2">
+                                            <p className="line-clamp-4 text-[17px] leading-[1.4] text-zinc-500">
+                                                {summarizeAbstract(paper.abstract)}
+                                            </p>
+                                            <p className="line-clamp-1 text-[13px] leading-5 text-zinc-500">
+                                                {inferAuthor(paper)}
+                                            </p>
+                                            <p className="line-clamp-2 text-[13px] leading-5 text-zinc-500">
+                                                {(() => {
+                                                    const tags = inferTags(paper)
+                                                    if (tags.shown.length === 0) return "#research #paper"
+                                                    const prefix = tags.shown.map((tag) => `#${tag}`).join(" ")
+                                                    return tags.extraCount > 0 ? `${prefix} +${tags.extraCount} more` : prefix
+                                                })()}
                                             </p>
                                         </div>
 
-                                        {/* Footer: status + time */}
-                                        <div className="flex items-center gap-1.5 border-t px-4 py-2.5">
-                                            <span
-                                                className={cn(
-                                                    "inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium",
-                                                    config.className,
-                                                )}
-                                            >
-                                                {isLoading && (
-                                                    <Loader2 className="mr-1 h-2.5 w-2.5 animate-spin" />
-                                                )}
-                                                {config.label}
-                                            </span>
-                                            <span className="text-[10px] text-muted-foreground/60">
-                                                ·
-                                            </span>
-                                            <span className="text-[11px] text-muted-foreground/60">
-                                                {formatRelativeTime(
-                                                    paper.updatedAt,
-                                                )}
-                                            </span>
-                                        </div>
-                                    </Card>
+                                        <p className="mt-4 text-[12px] text-zinc-500">
+                                            Updated {formatRelativeTime(paper.updatedAt)}
+                                        </p>
+                                    </article>
                                 )
                             })}
                         </div>

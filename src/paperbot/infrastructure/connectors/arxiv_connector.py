@@ -3,12 +3,10 @@ from __future__ import annotations
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
-from urllib.parse import urlencode
-
-import requests
 
 from paperbot.application.collaboration.message_schema import make_event
 from paperbot.application.ports.event_log_port import EventLogPort
+from paperbot.infrastructure.crawling.request_layer import AsyncRequestLayer, RequestPolicy
 
 
 ARXIV_NS = {
@@ -51,11 +49,17 @@ class ArxivConnector:
     arXiv public API (https://info.arxiv.org/help/api/basics.html).
     """
 
-    def __init__(self, *, timeout_s: float = 30.0):
+    def __init__(
+        self,
+        *,
+        timeout_s: float = 30.0,
+        request_layer: Optional[AsyncRequestLayer] = None,
+    ):
         self.timeout_s = timeout_s
         self._headers = {"User-Agent": "PaperBot/2.0"}
+        self._request = request_layer or AsyncRequestLayer(RequestPolicy(timeout_s=timeout_s))
 
-    def search(
+    async def search(
         self,
         *,
         query: str,
@@ -70,10 +74,12 @@ class ArxivConnector:
             "sortBy": sort_by,
             "sortOrder": "descending",
         }
-        url = f"{ARXIV_API_URL}?{urlencode(params)}"
-        resp = requests.get(url, headers=self._headers, timeout=self.timeout_s)
-        resp.raise_for_status()
-        return self.parse_atom(resp.text)
+        xml_text = await self._request.get_text(
+            ARXIV_API_URL,
+            headers=self._headers,
+            params=params,
+        )
+        return self.parse_atom(xml_text)
 
     def parse_atom(self, xml_text: str) -> List[ArxivRecord]:
         root = ET.fromstring(xml_text)
@@ -150,4 +156,6 @@ class ArxivConnector:
                 )
             )
 
+    async def close(self) -> None:
+        await self._request.close()
 

@@ -169,7 +169,7 @@ class FailFastEvaluator:
             return SkipDecision(
                 should_skip=True,
                 reason=f"阶段 '{lowest.stage}' 评分过低 ({lowest.score:.1f}),提前终止",
-                skipped_stages=["influence", "report"]
+                skipped_stages=["code", "quality", "influence", "report"]
             )
         
         return SkipDecision(should_skip=False, reason="继续执行")

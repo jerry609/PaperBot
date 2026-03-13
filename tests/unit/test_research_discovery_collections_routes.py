@@ -78,10 +78,10 @@ def test_discovery_seed_route_returns_graph_and_items(tmp_path, monkeypatch):
             return None
 
     class _FakeOpenAlexConnector:
-        def resolve_work(self, **kwargs):
+        async def resolve_work(self, **kwargs):
             return {"id": "https://openalex.org/W1", "title": "Seed OA", "related_works": []}
 
-        def get_related_works(self, work, limit=20):
+        async def get_related_works(self, work, limit=20):
             return [
                 {
                     "id": "https://openalex.org/W3",
@@ -92,11 +92,14 @@ def test_discovery_seed_route_returns_graph_and_items(tmp_path, monkeypatch):
                 }
             ]
 
-        def get_referenced_works(self, work, limit=20):
+        async def get_referenced_works(self, work, limit=20):
             return []
 
-        def get_citing_works(self, work, limit=20):
+        async def get_citing_works(self, work, limit=20):
             return []
+
+        async def close(self):
+            return None
 
     monkeypatch.setattr(research_route, "SemanticScholarClient", _FakeS2Client)
     monkeypatch.setattr(

@@ -53,8 +53,14 @@ class SessionProvider:
 
     def __init__(self, db_url: Optional[str] = None):
         self.engine = create_db_engine(db_url)
+        self._db_url = db_url or get_db_url()
         self._factory = create_session_factory(self.engine)
 
     def session(self) -> Session:
         return self._factory()
+
+    def ensure_tables(self, metadata) -> None:
+        """Create tables for SQLite only (dev/test). PostgreSQL uses Alembic."""
+        if str(self._db_url).startswith("sqlite:") or ":memory:" in str(self._db_url):
+            metadata.create_all(self.engine, checkfirst=True)
 
