@@ -42,3 +42,4 @@ json-repair>=0.22.0
 uvicorn>=0.32.0
 watchdog>=4.0.0
 rapidfuzz>=3.0.0
+bcrypt>=4.0.0
