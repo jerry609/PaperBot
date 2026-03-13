@@ -3,8 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 
 from fastapi.testclient import TestClient
+from sqlalchemy import text
 
 from paperbot.api import main as api_main
+from paperbot.api.auth.dependencies import get_required_user_id
 from paperbot.api.routes import research as research_route
 from paperbot.infrastructure.stores.paper_store import SqlAlchemyPaperStore
 from paperbot.infrastructure.stores.research_store import SqlAlchemyResearchStore
@@ -216,3 +218,112 @@ def test_feedback_route_schedules_obsidian_export_using_persisted_track_owner(mo
     assert captured == [
         {"user_id": "persisted-owner", "track_id": 9, "for_tracks": False},
     ]
+
+
+def test_global_feedback_without_active_track_is_accepted(monkeypatch):
+    class _FakeResearchStore:
+        def get_active_track(self, *, user_id: str):
+            assert user_id == "u-feedback"
+            return None
+
+        def add_paper_feedback(self, **kwargs):
+            assert kwargs["user_id"] == "u-feedback"
+            assert kwargs["track_id"] is None
+            assert kwargs["paper_id"] == "paper-1"
+            return {"id": 1, "track_id": None, "paper_id": "paper-1", "action": "save"}
+
+        def _normalize_feedback_action(self, action: str) -> str:
+            return action
+
+        def _effective_feedback_action(self, action: str):
+            return action
+
+    monkeypatch.setattr(research_route, "_research_store", _FakeResearchStore())
+
+    captured: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        research_route,
+        "_schedule_obsidian_export_for_track",
+        lambda *args, **kwargs: captured.append({"called": True}),
+    )
+
+    api_main.app.dependency_overrides[get_required_user_id] = lambda: "u-feedback"
+    try:
+        with TestClient(api_main.app) as client:
+            response = client.post(
+                "/api/research/papers/feedback",
+                json={
+                    "paper_id": "paper-1",
+                    "action": "save",
+                    "paper_title": "Global Save",
+                },
+            )
+    finally:
+        api_main.app.dependency_overrides.pop(get_required_user_id, None)
+
+    assert response.status_code == 200
+    assert response.json()["current_action"] == "save"
+    assert captured == []
+
+
+def test_store_allows_global_feedback_without_track(tmp_path: Path):
+    store, paper, _ = _prepare_feedback_state_db(tmp_path)
+    paper_id = str(paper["id"])
+
+    feedback = store.add_paper_feedback(
+        user_id="u-feedback",
+        track_id=None,
+        paper_id=paper_id,
+        action="save",
+        metadata={"title": paper["title"]},
+    )
+
+    assert feedback is not None
+    assert feedback["track_id"] is None
+
+    saved = store.list_saved_papers(user_id="u-feedback", limit=10)
+    assert len(saved) == 1
+    assert str(saved[0]["id"]) == paper_id
+
+
+def test_store_falls_back_when_legacy_schema_still_requires_track(tmp_path: Path):
+    store, paper, _ = _prepare_feedback_state_db(tmp_path)
+    paper_id = str(paper["id"])
+
+    with store._provider.engine.begin() as conn:
+        conn.execute(text("DROP TABLE paper_feedback"))
+        conn.execute(text("""
+                CREATE TABLE paper_feedback (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id VARCHAR(64),
+                    track_id INTEGER NOT NULL,
+                    paper_id VARCHAR(64),
+                    paper_ref_id INTEGER,
+                    action VARCHAR(32),
+                    canonical_paper_id INTEGER,
+                    weight FLOAT,
+                    ts DATETIME,
+                    metadata_json TEXT,
+                    FOREIGN KEY(track_id) REFERENCES research_tracks (id),
+                    FOREIGN KEY(paper_ref_id) REFERENCES papers (id),
+                    FOREIGN KEY(canonical_paper_id) REFERENCES papers (id)
+                )
+                """))
+
+    feedback = store.add_paper_feedback(
+        user_id="u-feedback",
+        track_id=None,
+        paper_id=paper_id,
+        action="save",
+        metadata={"title": paper["title"]},
+    )
+
+    assert feedback is not None
+    assert feedback["track_id"] is not None
+
+    visible_tracks = store.list_tracks(user_id="u-feedback")
+    assert all(track["name"] != "__paperbot_legacy_global_feedback__" for track in visible_tracks)
+
+    saved = store.list_saved_papers(user_id="u-feedback", limit=10)
+    assert len(saved) == 1
+    assert str(saved[0]["id"]) == paper_id

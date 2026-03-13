@@ -1164,12 +1164,15 @@ def add_paper_feedback(
     track_id = req.track_id
     active_track: Optional[Dict[str, Any]] = None
     if track_id is None:
-        Logger.info("No track specified, getting active track", file=LogFiles.HARVEST)
+        Logger.info("No track specified, checking active track", file=LogFiles.HARVEST)
         active_track = research_store.get_active_track(user_id=user_id)
-        if not active_track:
-            Logger.error("No active track found", file=LogFiles.HARVEST)
-            raise HTTPException(status_code=400, detail="track_id missing and no active track")
-        track_id = int(active_track["id"])
+        if active_track:
+            track_id = int(active_track["id"])
+        else:
+            Logger.info(
+                "No active track found; recording global paper feedback",
+                file=LogFiles.HARVEST,
+            )
 
     meta: Dict[str, Any] = dict(req.metadata or {})
     if req.context_run_id is not None:
@@ -1243,7 +1246,7 @@ def add_paper_feedback(
     Logger.info("Paper feedback recorded successfully", file=LogFiles.HARVEST)
     normalized_action = research_store._normalize_feedback_action(req.action)
     current_action = research_store._effective_feedback_action(normalized_action)
-    if normalized_action in {"save", "unsave"}:
+    if normalized_action in {"save", "unsave"} and track_id is not None:
         export_track = active_track or research_store.get_track_by_id(track_id=int(track_id))
         _schedule_obsidian_export_for_track(
             background_tasks,
@@ -1429,7 +1432,9 @@ def list_saved_papers(
 
 
 @router.post("/research/discovery/seed", response_model=DiscoverySeedResponse)
-async def discover_from_seed(req: DiscoverySeedRequest, user_id: str = Depends(get_required_user_id)):
+async def discover_from_seed(
+    req: DiscoverySeedRequest, user_id: str = Depends(get_required_user_id)
+):
     if req.year_from and req.year_to and req.year_from > req.year_to:
         raise HTTPException(status_code=400, detail="year_from must be <= year_to")
 
@@ -1608,9 +1613,7 @@ async def discover_from_seed(req: DiscoverySeedRequest, user_id: str = Depends(g
         year_to=req.year_to,
     )
     feedback_profile = (
-        _build_feedback_profile(user_id=user_id, track_id=req.track_id)
-        if req.personalized
-        else {}
+        _build_feedback_profile(user_id=user_id, track_id=req.track_id) if req.personalized else {}
     )
     scored = _rank_discovery_candidates(
         filtered,
@@ -1680,7 +1683,9 @@ async def discover_from_seed(req: DiscoverySeedRequest, user_id: str = Depends(g
 
 
 @router.post("/research/collections", response_model=PaperCollectionResponse)
-def create_collection(req: PaperCollectionCreateRequest, user_id: str = Depends(get_required_user_id)):
+def create_collection(
+    req: PaperCollectionCreateRequest, user_id: str = Depends(get_required_user_id)
+):
     try:
         collection = _get_research_store().create_collection(
             user_id=user_id,
@@ -1710,7 +1715,11 @@ def list_collections(
 
 
 @router.patch("/research/collections/{collection_id}", response_model=PaperCollectionResponse)
-def update_collection(collection_id: int, req: PaperCollectionUpdateRequest, user_id: str = Depends(get_required_user_id)):
+def update_collection(
+    collection_id: int,
+    req: PaperCollectionUpdateRequest,
+    user_id: str = Depends(get_required_user_id),
+):
     try:
         collection = _get_research_store().update_collection(
             user_id=user_id,
@@ -1747,7 +1756,11 @@ def list_collection_items(
     "/research/collections/{collection_id}/items",
     response_model=PaperCollectionItemsResponse,
 )
-def upsert_collection_item(collection_id: int, req: PaperCollectionItemUpsertRequest, user_id: str = Depends(get_required_user_id)):
+def upsert_collection_item(
+    collection_id: int,
+    req: PaperCollectionItemUpsertRequest,
+    user_id: str = Depends(get_required_user_id),
+):
     item = _get_research_store().upsert_collection_item(
         user_id=user_id,
         collection_id=collection_id,
@@ -1757,17 +1770,22 @@ def upsert_collection_item(collection_id: int, req: PaperCollectionItemUpsertReq
     )
     if item is None:
         raise HTTPException(status_code=404, detail="Collection or paper not found")
-    items = _get_research_store().list_collection_items(user_id=user_id, collection_id=collection_id)
-    return PaperCollectionItemsResponse(
-        user_id=user_id, collection_id=collection_id, items=items
+    items = _get_research_store().list_collection_items(
+        user_id=user_id, collection_id=collection_id
     )
+    return PaperCollectionItemsResponse(user_id=user_id, collection_id=collection_id, items=items)
 
 
 @router.patch(
     "/research/collections/{collection_id}/items/{paper_id}",
     response_model=PaperCollectionItemsResponse,
 )
-def patch_collection_item(collection_id: int, paper_id: str, req: PaperCollectionItemPatchRequest, user_id: str = Depends(get_required_user_id)):
+def patch_collection_item(
+    collection_id: int,
+    paper_id: str,
+    req: PaperCollectionItemPatchRequest,
+    user_id: str = Depends(get_required_user_id),
+):
     item = _get_research_store().upsert_collection_item(
         user_id=user_id,
         collection_id=collection_id,
@@ -1777,14 +1795,16 @@ def patch_collection_item(collection_id: int, paper_id: str, req: PaperCollectio
     )
     if item is None:
         raise HTTPException(status_code=404, detail="Collection or paper not found")
-    items = _get_research_store().list_collection_items(user_id=user_id, collection_id=collection_id)
-    return PaperCollectionItemsResponse(
-        user_id=user_id, collection_id=collection_id, items=items
+    items = _get_research_store().list_collection_items(
+        user_id=user_id, collection_id=collection_id
     )
+    return PaperCollectionItemsResponse(user_id=user_id, collection_id=collection_id, items=items)
 
 
 @router.delete("/research/collections/{collection_id}/items/{paper_id}")
-def delete_collection_item(collection_id: int, paper_id: str, user_id: str = Depends(get_required_user_id)):
+def delete_collection_item(
+    collection_id: int, paper_id: str, user_id: str = Depends(get_required_user_id)
+):
     ok = _get_research_store().remove_collection_item(
         user_id=user_id,
         collection_id=collection_id,
@@ -2223,7 +2243,12 @@ def discover_track_anchors(
     "/research/tracks/{track_id}/anchors/{author_id}/action",
     response_model=AnchorActionResponse,
 )
-def set_anchor_action(track_id: int, author_id: int, req: AnchorActionRequest, user_id: str = Depends(get_required_user_id)):
+def set_anchor_action(
+    track_id: int,
+    author_id: int,
+    req: AnchorActionRequest,
+    user_id: str = Depends(get_required_user_id),
+):
     _ensure_anchor_feature_enabled()
 
     track = _get_research_store().get_track(user_id=user_id, track_id=track_id)

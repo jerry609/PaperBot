@@ -1,7 +1,6 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { useSession } from "next-auth/react"
 import Link from "next/link"
 import { useSearchParams } from "next/navigation"
 
@@ -58,6 +57,9 @@ type ContextPack = {
   paper_recommendations?: Paper[]
   paper_recommendation_reasons?: Record<string, string[]>
 }
+
+const RESULT_LIMIT_OPTIONS = [10, 25, 50] as const
+
 function getGreeting(): string {
   const hour = new Date().getHours()
   if (hour < 12) return "Good morning"
@@ -66,7 +68,6 @@ function getGreeting(): string {
 }
 
 export default function ResearchPageNew() {
-  const { data: session } = useSession()
   const searchParams = useSearchParams()
 
   // User state
@@ -86,6 +87,7 @@ export default function ResearchPageNew() {
   const [isSearching, setIsSearching] = useState(false)
   const [contextPack, setContextPack] = useState<ContextPack | null>(null)
   const [searchSources, setSearchSources] = useState<string[]>(ALL_SOURCES)
+  const [paperLimit, setPaperLimit] = useState<(typeof RESULT_LIMIT_OPTIONS)[number]>(25)
   const [yearFrom, setYearFrom] = useState("")
   const [yearTo, setYearTo] = useState("")
 
@@ -127,7 +129,6 @@ export default function ResearchPageNew() {
   // Load tracks on mount
   useEffect(() => {
     refreshTracks().catch((e) => setError(getErrorMessage(e)))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => {
@@ -241,7 +242,7 @@ export default function ResearchPageNew() {
       const body = {
         query,
         track_id: activeTrackId ?? undefined,
-        paper_limit: 10,
+        paper_limit: paperLimit,
         memory_limit: 8,
         sources: searchSources,
         offline: false,
@@ -292,7 +293,7 @@ export default function ResearchPageNew() {
 
     return () => clearTimeout(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchSources, anchorPersonalized, yearFrom, yearTo])
+  }, [searchSources, anchorPersonalized, paperLimit, yearFrom, yearTo])
 
   // If the page is opened with a query parameter, run it once automatically.
   useEffect(() => {
@@ -430,44 +431,54 @@ export default function ResearchPageNew() {
     action: PaperFeedbackRequestAction,
     rank?: number,
     paper?: Paper
-  ): Promise<PaperFeedbackAction | null> {
-    // Don't set global loading - PaperCard handles its own loading state
+  ): Promise<PaperFeedbackAction | null | undefined> {
     setError(null)
-    const body: Record<string, unknown> = {
-      track_id: activeTrackId,
-      paper_id: paperId,
-      action,
-      weight: 0.0,
-      context_run_id: contextPack?.context_run_id ?? null,
-      context_rank: typeof rank === "number" ? rank : undefined,
-      metadata: {
-        retrieval_sources: Array.isArray(paper?.retrieval_sources)
-          ? paper?.retrieval_sources
-          : [],
-        retrieval_score:
-          typeof paper?.retrieval_score === "number" ? paper.retrieval_score : undefined,
-        anchor_mode: anchorPersonalized ? "personalized" : "global",
-      },
-    }
+    try {
+      const body: Record<string, unknown> = {
+        track_id: activeTrackId,
+        paper_id: paperId,
+        action,
+        weight: 0.0,
+        context_run_id: contextPack?.context_run_id ?? null,
+        context_rank: typeof rank === "number" ? rank : undefined,
+        metadata: {
+          retrieval_sources: Array.isArray(paper?.retrieval_sources)
+            ? paper?.retrieval_sources
+            : [],
+          retrieval_score:
+            typeof paper?.retrieval_score === "number" ? paper.retrieval_score : undefined,
+          anchor_mode: anchorPersonalized ? "personalized" : "global",
+        },
+      }
 
-    // Include paper metadata for save action
-    if (action === "save" && paper) {
-      body.paper_title = paper.title
-      body.paper_abstract = paper.abstract || ""
-      body.paper_authors = paper.authors || []
-      body.paper_year = paper.year
-      body.paper_venue = paper.venue
-      body.paper_citation_count = paper.citation_count
-      body.paper_url = paper.url
-      body.paper_source = paper.source || "semantic_scholar"
-    }
+      if (action === "save" && paper) {
+        body.paper_title = paper.title
+        body.paper_abstract = paper.abstract || ""
+        body.paper_authors = paper.authors || []
+        body.paper_year = paper.year
+        body.paper_venue = paper.venue
+        body.paper_citation_count = paper.citation_count
+        body.paper_url = paper.url
+        body.paper_source = paper.source || "semantic_scholar"
+      }
 
-    const payload = await fetchJson<{ current_action?: string | null }>(`/api/research/papers/feedback`, {
-      method: "POST",
-      body: JSON.stringify(body),
-      headers: { "Content-Type": "application/json" },
-    })
-    return normalizePaperFeedbackAction(payload.current_action) ?? currentFeedbackFromRequestAction(action)
+      const payload = await fetchJson<{ current_action?: string | null }>(
+        `/api/research/papers/feedback`,
+        {
+          method: "POST",
+          body: JSON.stringify(body),
+          headers: { "Content-Type": "application/json" },
+        }
+      )
+
+      return (
+        normalizePaperFeedbackAction(payload.current_action) ??
+        currentFeedbackFromRequestAction(action)
+      )
+    } catch (e) {
+      setError(getErrorMessage(e))
+      return undefined
+    }
   }
 
   const trackToClearName = tracks.find((t) => t.id === trackToClear)?.name || "this track"
@@ -692,6 +703,22 @@ export default function ResearchPageNew() {
                     </Badge>
                     <Badge variant="outline">Sources: {searchSources.length}</Badge>
                     <Badge variant="secondary">Results: {papers.length}</Badge>
+                    <div className="flex flex-wrap items-center gap-1">
+                      <span className="text-xs text-muted-foreground">Cap</span>
+                      {RESULT_LIMIT_OPTIONS.map((limit) => (
+                        <Button
+                          key={limit}
+                          type="button"
+                          size="sm"
+                          variant={paperLimit === limit ? "default" : "outline"}
+                          className="h-7 px-2 text-xs"
+                          onClick={() => setPaperLimit(limit)}
+                          disabled={isSearching}
+                        >
+                          {limit}
+                        </Button>
+                      ))}
+                    </div>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
                     <Button asChild size="sm" variant="outline" className="gap-1.5">
