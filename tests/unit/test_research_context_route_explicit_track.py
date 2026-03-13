@@ -111,7 +111,7 @@ def test_router_suggest_uses_grounded_query(monkeypatch):
         )
 
     assert response.status_code == 200
-    assert captured["query"] == "retrieval augmented generation latency"
+    assert captured["query"] == "rag latency retrieval augmented generation latency"
     assert response.json()["suggestion"]["query_grounding"]["canonical_query"] == (
         "retrieval augmented generation latency"
     )

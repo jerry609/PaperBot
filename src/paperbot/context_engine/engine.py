@@ -20,6 +20,7 @@ if TYPE_CHECKING:
         GroundedQuery,
         WorkflowQueryGrounderPort,
     )
+from paperbot.application.services.workflow_query_grounder import build_grounded_routing_query
 
 # Optional: PaperSearchService for unified search
 try:
@@ -806,10 +807,18 @@ class ContextEngine:
     ) -> Dict[str, Any]:
         grounded_query: Optional["GroundedQuery"] = None
         resolved_query = query
+        routing_query = query
         if self.query_grounder is not None:
             grounded_query = self.query_grounder.ground_query(user_id=user_id, query=query)
             if grounded_query.canonical_query:
                 resolved_query = grounded_query.canonical_query
+            routing_query = (
+                build_grounded_routing_query(
+                    original_query=query,
+                    grounded_query=grounded_query,
+                )
+                or query
+            )
 
         active_track = self.research_store.get_active_track(user_id=user_id)
         routed_track = (
@@ -822,7 +831,7 @@ class ContextEngine:
         if track_id is None and active_track is not None:
             routing_suggestion = self.track_router.suggest_track(
                 user_id=user_id,
-                query=resolved_query,
+                query=routing_query,
                 active_track_id=int(active_track["id"]),
                 limit=50,
             )
@@ -1132,6 +1141,7 @@ class ContextEngine:
             "include_cross_track": bool(include_cross_track),
             "query": query,
             "resolved_query": resolved_query,
+            "routing_query": routing_query,
             "merged_query": merged_query,
             "stage": stage,
             "exploration_ratio": float(exploration_ratio),

@@ -280,6 +280,7 @@ class TestBuildContextPackLayers:
                 config=ContextEngineConfig(offline=False, paper_limit=1),
             )
             engine.search_service = MagicMock()
+            rs.get_active_track.return_value = {"id": 7, "name": "RAG Systems"}
 
             result = await engine.build_context_pack(
                 user_id="u1",
@@ -290,7 +291,13 @@ class TestBuildContextPackLayers:
 
         assert captured_queries == ["retrieval augmented generation latency"]
         assert result["routing"]["resolved_query"] == "retrieval augmented generation latency"
+        assert result["routing"]["routing_query"] == (
+            "rag latency retrieval augmented generation latency"
+        )
         assert result["routing"]["query_grounding"]["concepts"] == [{"id": "rag"}]
+        assert engine.track_router.suggest_track.call_args.kwargs["query"] == (
+            "rag latency retrieval augmented generation latency"
+        )
 
     @pytest.mark.asyncio
     async def test_no_paper_id_layer3_is_zero(self):

@@ -12,7 +12,10 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy.exc import IntegrityError
 
-from paperbot.application.services.workflow_query_grounder import WorkflowQueryGrounder
+from paperbot.application.services.workflow_query_grounder import (
+    WorkflowQueryGrounder,
+    build_grounded_routing_query,
+)
 from paperbot.application.services.research_track_context_service import (
     ResearchTrackContextService,
     TrackContextSnapshot,
@@ -2277,9 +2280,13 @@ def suggest_track(req: RouterSuggestRequest):
     grounded_query = _get_workflow_query_grounder().ground_query(
         user_id=req.user_id, query=req.query
     )
+    routing_query = build_grounded_routing_query(
+        original_query=req.query,
+        grounded_query=grounded_query,
+    )
     suggestion = _get_track_router().suggest_track(
         user_id=req.user_id,
-        query=grounded_query.canonical_query or req.query,
+        query=routing_query or req.query,
         active_track_id=int(active["id"]),
     )
     if suggestion is not None and grounded_query.concepts:
