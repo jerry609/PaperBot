@@ -174,7 +174,7 @@ export function SearchBox({
     >
       <div
         className={cn(
-          "relative rounded-2xl border bg-background shadow-md transition-all duration-200",
+          "relative overflow-hidden rounded-2xl border bg-background shadow-md transition-all duration-200",
           "focus-within:shadow-lg focus-within:border-primary/50",
           "hover:shadow-lg",
           disabled && "opacity-60"
@@ -189,7 +189,7 @@ export function SearchBox({
           placeholder={placeholder}
           disabled={disabled || isSearching}
           className={cn(
-            "min-h-[56px] max-h-[200px] resize-none border-0 bg-transparent",
+            "min-h-[56px] max-h-[200px] resize-none border-0 bg-transparent !rounded-none !border-0 !shadow-none",
             "px-5 sm:px-6 pt-4 pb-[56px]",
             "text-base placeholder:text-muted-foreground/50",
             "focus-visible:ring-0 focus-visible:ring-offset-0"
