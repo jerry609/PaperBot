@@ -29,17 +29,14 @@ test.describe("Research Page E2E", () => {
   test("post-search view renders without Track Snapshot panel", async ({ page }) => {
     // Navigate with a query to trigger post-search UI state
     await page.goto("/research?query=rag");
-    await page.waitForLoadState("networkidle");
 
-    // The old panel label should not appear anymore
-    const body = page.locator("body");
-    await expect(body).not.toContainText("Track Snapshot");
+    // 1) Wait for a stable post-search marker (auto-retrying)
+    await expect(page.getByRole("link", { name: "Open Workflows" })).toBeVisible();
 
-    // Basic sanity: post-search summary badges/cta remain
-    // We don't depend on backend success; the UI switches to post-search immediately
-    const summaryHints = ["Results:", "Mode:", "Sources:"];
-    const text = await body.textContent();
-    const anyPresent = summaryHints.some((t) => (text || "").includes(t));
-    expect(anyPresent).toBeTruthy();
+    // 2) Assert the old panel label is absent (auto-retrying)
+    await expect(page.locator("text=Track Snapshot")).toHaveCount(0);
+
+    // 3) Sanity: a summary badge/label remains visible (one is enough)
+    await expect(page.locator("text=Results:").first()).toBeVisible();
   });
 });
