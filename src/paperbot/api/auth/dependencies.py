@@ -6,7 +6,11 @@ from typing import Optional
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from jose import JWTError
+try:
+    from jose import JWTError
+except ImportError:  # pragma: no cover - exercised only in minimal test envs
+    class JWTError(Exception):
+        pass
 
 from paperbot.api.auth.jwt import decode_token
 from paperbot.infrastructure.stores.user_store import SqlAlchemyUserStore
@@ -31,7 +35,7 @@ def _resolve_user(credentials: Optional[HTTPAuthorizationCredentials]):
     try:
         user_id = decode_token(token)
         logger.debug("[auth] Token valid, user_id=%s", user_id)
-    except JWTError as e:
+    except (JWTError, RuntimeError, ValueError) as e:
         logger.warning("[auth] Invalid token: %s | token prefix: %s...", e, token[:20])
         if AUTH_OPTIONAL:
             return None
