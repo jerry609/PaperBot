@@ -39,6 +39,39 @@ async def test_codex_dispatch_timeout_returns_failure(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_codex_tool_dispatch_timeout_returns_failure(monkeypatch, tmp_path):
+    class _FakeCompletions:
+        async def create(self, **_kwargs):
+            await asyncio.sleep(1.2)
+            return types.SimpleNamespace(
+                choices=[
+                    types.SimpleNamespace(
+                        finish_reason="stop",
+                        message=types.SimpleNamespace(content="ok"),
+                    )
+                ]
+            )
+
+    class _FakeOpenAIClient:
+        def __init__(self, **_kwargs):
+            self.chat = types.SimpleNamespace(completions=_FakeCompletions())
+
+    fake_openai = types.SimpleNamespace(AsyncOpenAI=_FakeOpenAIClient)
+    monkeypatch.setitem(sys.modules, "openai", fake_openai)
+
+    dispatcher = CodexDispatcher(
+        api_key="test-key",
+        model="gpt-4o-mini",
+        dispatch_timeout_seconds=1,
+    )
+    result = await dispatcher.dispatch_with_tools("task-1b", "do work", tmp_path)
+
+    assert result.success is False
+    assert result.error is not None
+    assert "timed out" in result.error.lower()
+
+
+@pytest.mark.asyncio
 async def test_commander_review_timeout_rejects(monkeypatch):
     class _FakeMessages:
         async def create(self, **_kwargs):
