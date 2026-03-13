@@ -80,6 +80,37 @@ describe("dashboard-brief", () => {
     ])
   })
 
+  it("ignores untrusted lookalike hosts when inferring paper sources", () => {
+    const snapshot = buildDashboardBrief({
+      title: "Suspicious Links",
+      queries: [
+        {
+          normalized_query: "security",
+          top_items: [
+            {
+              paper_id: "suspicious-arxiv",
+              title: "Spoofed arXiv link",
+              external_url: "https://evil.example/redirect/arxiv.org/abs/2503.99999",
+            },
+            {
+              paper_id: "suspicious-s2",
+              title: "Spoofed Semantic Scholar link",
+              external_url: "https://semanticscholar.org.evil.example/paper/123",
+            },
+            {
+              paper_id: "suspicious-openalex",
+              title: "Spoofed OpenAlex link",
+              external_url: "https://openalex.org.evil.example/W123",
+            },
+          ],
+        },
+      ],
+    })
+
+    expect(snapshot.recommendations).toHaveLength(3)
+    expect(snapshot.recommendations.map((item) => item.paperSource)).toEqual([null, null, null])
+  })
+
   it("reads the newest report from PAPERBOT_DAILYPAPER_OUTPUT_DIR", async () => {
     const tempDir = await mkdtemp(path.join(os.tmpdir(), "paperbot-dashboard-brief-"))
     tempDirs.push(tempDir)

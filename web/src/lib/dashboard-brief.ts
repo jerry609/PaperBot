@@ -132,14 +132,29 @@ function buildHref(item: DailyReportItem): string {
   return href?.trim() || "/workflows"
 }
 
-function inferPaperSource(item: DailyReportItem): "arxiv" | "semantic_scholar" | "openalex" | null {
-  const rawUrls = [item.external_url, item.url, item.pdf_url]
-    .map((value) => String(value || "").trim().toLowerCase())
-    .filter(Boolean)
+function extractHostname(value: string | undefined): string | null {
+  const candidate = String(value || "").trim()
+  if (!candidate) return null
 
-  if (rawUrls.some((value) => value.includes("arxiv.org"))) return "arxiv"
-  if (rawUrls.some((value) => value.includes("semanticscholar.org"))) return "semantic_scholar"
-  if (rawUrls.some((value) => value.includes("openalex.org"))) return "openalex"
+  try {
+    return new URL(candidate).hostname.toLowerCase()
+  } catch {
+    return null
+  }
+}
+
+function isTrustedHost(hostname: string, expectedHost: string): boolean {
+  return hostname === expectedHost || hostname.endsWith(`.${expectedHost}`)
+}
+
+function inferPaperSource(item: DailyReportItem): "arxiv" | "semantic_scholar" | "openalex" | null {
+  const hostnames = [item.external_url, item.url, item.pdf_url]
+    .map(extractHostname)
+    .filter((value): value is string => Boolean(value))
+
+  if (hostnames.some((value) => isTrustedHost(value, "arxiv.org"))) return "arxiv"
+  if (hostnames.some((value) => isTrustedHost(value, "semanticscholar.org"))) return "semantic_scholar"
+  if (hostnames.some((value) => isTrustedHost(value, "openalex.org"))) return "openalex"
 
   const paperId = String(item.paper_id || "").trim()
   if (/^\d{4}\.\d{4,5}(v\d+)?$/i.test(paperId)) return "arxiv"

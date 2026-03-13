@@ -106,6 +106,21 @@ def test_create_session_rejects_dangerous_workspace_dir():
     assert "workspace_dir is not allowed" in resp.text
 
 
+def test_create_session_rejects_parent_traversal_workspace_dir():
+    with TestClient(api_main.app) as client:
+        resp = client.post(
+            "/api/agent-board/sessions",
+            json={
+                "paper_id": "paper-1",
+                "context_pack_id": "cp-1",
+                "workspace_dir": "tmp/../escape",
+            },
+        )
+
+    assert resp.status_code == 400
+    assert "parent traversal" in resp.text
+
+
 def test_run_rejects_dangerous_workspace_dir_override():
     session = agent_board_route.BoardSession(
         session_id="board-security-test",

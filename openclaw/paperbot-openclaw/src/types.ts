@@ -74,7 +74,7 @@ export function normalizeConfig(rawConfig: unknown): PaperBotOpenClawConfig {
   const config = rawConfig && typeof rawConfig === "object" ? (rawConfig as Record<string, unknown>) : {};
 
   return {
-    baseUrl: String(config.baseUrl ?? "http://127.0.0.1:8000").replace(/\/+$/, ""),
+    baseUrl: stripTrailingSlashes(String(config.baseUrl ?? "http://127.0.0.1:8000")),
     authToken: String(config.authToken ?? "").trim() || undefined,
     defaultUserId: String(config.defaultUserId ?? "default").trim() || "default",
     requestTimeoutMs: Math.max(1000, Number(config.requestTimeoutMs ?? 30000)),
@@ -96,4 +96,12 @@ function toStringList(value: unknown, fallback: string[]): string[] {
   }
   const items = value.map((item) => String(item ?? "").trim()).filter(Boolean);
   return items.length > 0 ? items : [...fallback];
+}
+
+function stripTrailingSlashes(value: string): string {
+  let end = value.length;
+  while (end > 0 && value.charCodeAt(end - 1) === 47) {
+    end -= 1;
+  }
+  return value.slice(0, end);
 }

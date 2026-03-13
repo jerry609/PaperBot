@@ -8,6 +8,7 @@ Codex API workers, reviews results, and manages the Kanban lifecycle.
 import asyncio
 import logging
 import os
+import re
 import tempfile
 import uuid
 from datetime import datetime, timezone
@@ -27,6 +28,8 @@ log = logging.getLogger(__name__)
 # Persistent session store
 # ---------------------------------------------------------------------------
 _DEFAULT_WORKSPACE_DIR = Path("/tmp/paperbot-workspace")
+_SAFE_WORKSPACE_PATH_RE = re.compile(r"^[A-Za-z0-9._/\\~ -]+$")
+
 _DANGEROUS_WORKSPACE_ROOTS = (
     Path("/etc"),
     Path("/root"),
@@ -945,6 +948,23 @@ def _sanitize_workspace_dir(raw_path: str) -> Path:
         raise HTTPException(status_code=400, detail="workspace_dir is required")
     if "\x00" in candidate_text:
         raise HTTPException(status_code=400, detail="workspace_dir contains invalid characters")
+
+    drive, tail = os.path.splitdrive(candidate_text)
+    if drive:
+        if len(drive) != 2 or not drive[0].isalpha() or drive[1] != ":":
+            raise HTTPException(status_code=400, detail="workspace_dir contains an invalid drive prefix")
+        if ":" in tail:
+            raise HTTPException(status_code=400, detail="workspace_dir contains invalid characters")
+        path_to_validate = drive[0] + tail
+    else:
+        path_to_validate = candidate_text
+
+    if not _SAFE_WORKSPACE_PATH_RE.fullmatch(path_to_validate):
+        raise HTTPException(status_code=400, detail="workspace_dir contains invalid characters")
+
+    segments = [segment for segment in re.split(r"[\\/]+", tail or candidate_text) if segment not in ("", ".")]
+    if any(segment == ".." for segment in segments):
+        raise HTTPException(status_code=400, detail="workspace_dir must not contain parent traversal")
 
     candidate = Path(candidate_text).expanduser()
     if not candidate.is_absolute():
