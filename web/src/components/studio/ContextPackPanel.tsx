@@ -90,7 +90,7 @@ export function ContextPackPanel({ pack, onSessionCreated, onDeployToBoard, clas
     setError(null)
     clearAgentTasks()
     try {
-      // 1. Create agent board session (direct to backend, bypasses Next.js rewrite buffering)
+      // 1. Create agent board session (direct to backend like SSE calls)
       const sessionRes = await fetch(backendUrl("/api/agent-board/sessions"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
