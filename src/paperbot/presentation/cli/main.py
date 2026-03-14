@@ -211,6 +211,25 @@ def create_parser() -> argparse.ArgumentParser:
         help="从最近 checkpoint 恢复执行",
     )
 
+    # mcp commands
+    mcp_parser = subparsers.add_parser("mcp", help="MCP server commands")
+    mcp_subparsers = mcp_parser.add_subparsers(dest="mcp_command", help="Available commands")
+
+    serve_parser = mcp_subparsers.add_parser("serve", help="Start MCP server")
+    serve_transport = serve_parser.add_mutually_exclusive_group(required=True)
+    serve_transport.add_argument(
+        "--stdio",
+        action="store_true",
+        help="stdio transport (for Claude Desktop / Claude Code)",
+    )
+    serve_transport.add_argument(
+        "--http",
+        action="store_true",
+        help="Streamable HTTP transport (for remote agents)",
+    )
+    serve_parser.add_argument("--host", default="127.0.0.1", help="HTTP host (default: 127.0.0.1)")
+    serve_parser.add_argument("--port", type=int, default=8001, help="HTTP port (default: 8001)")
+
     export_parser = subparsers.add_parser("export", help="导出 PaperBot 数据")
     export_subparsers = export_parser.add_subparsers(dest="export_target", help="导出目标")
 
@@ -308,6 +327,15 @@ def run_cli(args: Optional[list] = None) -> int:
                 return _run_obsidian_export(parsed)
             print("Error: export target is required", file=sys.stderr)
             return 1
+
+        elif parsed.command == "mcp":
+            if not getattr(parsed, "mcp_command", None):
+                print("Usage: paperbot mcp <command>\n\nCommands:\n  serve  Start MCP server")
+                return 0
+            if parsed.mcp_command == "serve":
+                return _run_mcp_serve(parsed)
+            print("Usage: paperbot mcp <command>\n\nCommands:\n  serve  Start MCP server")
+            return 0
 
         return 0
 
@@ -660,6 +688,17 @@ def _run_obsidian_export(parsed: argparse.Namespace) -> int:
     finally:
         if hasattr(store, "close"):
             store.close()
+
+
+def _run_mcp_serve(parsed: argparse.Namespace) -> int:
+    """Dispatch to the appropriate MCP transport based on CLI flags."""
+    from paperbot.mcp.serve import run_http, run_stdio
+
+    if parsed.stdio:
+        run_stdio()  # blocks until client disconnects
+    else:
+        run_http(host=parsed.host, port=parsed.port)  # blocks until Ctrl+C
+    return 0
 
 
 if __name__ == "__main__":
