@@ -97,16 +97,21 @@ class TestSaveToMemoryTool:
         assert event["workflow"] == "mcp"
 
     @pytest.mark.asyncio
-    async def test_rejects_out_of_range_confidence(self):
-        """_save_to_memory_impl rejects confidence outside the documented 0-1 range."""
+    async def test_returns_saved_false_when_store_skips_write(self):
+        """_save_to_memory_impl returns saved=False when no new memory row is created."""
         import paperbot.mcp.tools.save_to_memory as mod
 
-        mod._store = _FakeMemoryStore()
+        store = _FakeMemoryStore(created=0, skipped=1)
+        mod._store = store
         try:
-            with pytest.raises(ValueError, match="confidence must be between 0.0 and 1.0"):
-                await mod._save_to_memory_impl(
-                    content="Some content",
-                    confidence=1.5,
-                )
+            result = await mod._save_to_memory_impl(
+                content="Duplicate finding",
+                kind="note",
+                user_id="test_user",
+            )
         finally:
             mod._store = None
+
+        assert result["saved"] is False
+        assert result["created"] == 0
+        assert result["skipped"] == 1

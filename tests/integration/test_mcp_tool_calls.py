@@ -135,7 +135,12 @@ class _FakeContextEngine:
     """Fake ContextEngine returning a minimal context pack."""
 
     async def build_context_pack(self, user_id, query, track_id=None):
-        return {"papers": [], "memories": [], "track": None, "stage": "explore"}
+        return {
+            "paper_recommendations": [],
+            "relevant_memories": [],
+            "active_track": None,
+            "routing": {"stage": "explore", "suggestion": None},
+        }
 
 
 class _FakeMemoryStore:
@@ -676,7 +681,7 @@ class TestMCPToolInvocation:
 
     @pytest.mark.asyncio
     async def test_tool_call_get_research_context_via_impl(self):
-        """Calling get_research_context through _impl returns context pack with papers key."""
+        """Calling get_research_context through _impl returns normalized context aliases."""
         import paperbot.mcp.tools.get_research_context as grc_mod
 
         grc_mod._engine = _FakeContextEngine()
@@ -690,6 +695,7 @@ class TestMCPToolInvocation:
 
         assert isinstance(result, dict)
         assert "papers" in result
+        assert "paper_recommendations" in result
         assert result["stage"] == "explore"
 
     @pytest.mark.asyncio

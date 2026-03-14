@@ -33,6 +33,16 @@ class _FakeEmptyLLMService:
         return {"provider_name": "", "model_name": "", "cost_tier": 0}
 
 
+class _FakeConfiguredButEmptyLLMService:
+    """Simulates a configured provider that returns empty output."""
+
+    def complete(self, **kwargs):
+        return ""
+
+    def describe_task_provider(self, task_type="default"):
+        return {"provider_name": "fake", "model_name": "judge-model", "cost_tier": 2}
+
+
 _VALID_PAYLOAD = {
     "relevance": {"score": 5, "rationale": "direct"},
     "novelty": {"score": 4, "rationale": "new"},
@@ -151,3 +161,22 @@ class TestPaperJudgeTool:
         event = log.events[0]
         assert event["payload"]["tool"] == "paper_judge"
         assert event["workflow"] == "mcp"
+
+    @pytest.mark.asyncio
+    async def test_degraded_mode_when_provider_is_configured_but_returns_empty_output(self):
+        """paper_judge marks empty provider responses as degraded even when metadata exists."""
+        import paperbot.mcp.tools.paper_judge as pj_mod
+
+        judge = PaperJudge(llm_service=_FakeConfiguredButEmptyLLMService())
+        pj_mod._judge = judge
+
+        try:
+            result = await pj_mod._paper_judge_impl(
+                title="Test Paper",
+                abstract="Test abstract",
+            )
+        finally:
+            pj_mod._judge = None
+
+        assert result["degraded"] is True
+        assert result["judge_model"] == ""

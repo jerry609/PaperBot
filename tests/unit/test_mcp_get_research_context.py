@@ -8,11 +8,10 @@ from paperbot.infrastructure.event_log.memory_event_log import InMemoryEventLog
 
 
 _CANNED_CONTEXT = {
-    "papers": [{"title": "Test Paper", "abstract": "Test abstract"}],
-    "memories": [],
-    "track": None,
-    "stage": "explore",
-    "routing_suggestion": "default",
+    "paper_recommendations": [{"title": "Test Paper", "abstract": "Test abstract"}],
+    "relevant_memories": [{"id": 1, "content": "Remember this"}],
+    "active_track": {"id": 7, "name": "Transformers"},
+    "routing": {"stage": "explore", "suggestion": {"track_id": 7, "score": 0.9}},
 }
 
 
@@ -74,6 +73,10 @@ class TestGetResearchContextTool:
         assert result["stage"] == "explore"
         assert isinstance(result["papers"], list)
         assert result["papers"][0]["title"] == "Test Paper"
+        assert result["paper_recommendations"] == result["papers"]
+        assert result["memories"] == result["relevant_memories"]
+        assert result["track"] == result["active_track"]
+        assert result["routing_suggestion"] == {"track_id": 7, "score": 0.9}
 
     @pytest.mark.asyncio
     async def test_accepts_user_id_and_track_id(self):

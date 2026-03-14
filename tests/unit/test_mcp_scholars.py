@@ -26,10 +26,17 @@ class _FakeMissingConfigService:
         raise FileNotFoundError("config/scholar_subscriptions.yaml not found")
 
 
+class _FakeInvalidConfigService:
+    """SubscriptionService stub that raises ValueError for malformed config."""
+
+    def get_scholar_configs(self):
+        raise ValueError("Invalid YAML in config file: unexpected token")
+
+
 class TestScholarsResource:
     @pytest.mark.asyncio
     async def test_returns_scholar_list(self):
-        """_scholars_impl() returns a stable JSON envelope with scholar rows."""
+        """_scholars_impl() returns JSON list with name and semantic_scholar_id."""
         import paperbot.mcp.resources.scholars as mod
 
         mod._service = _FakeSubscriptionService()
@@ -39,10 +46,10 @@ class TestScholarsResource:
             mod._service = None
 
         data = json.loads(result)
-        assert data["error"] is None
-        assert len(data["scholars"]) == 2
-        assert data["scholars"][0]["name"] == "Dawn Song"
-        assert data["scholars"][0]["semantic_scholar_id"] == "123"
+        assert isinstance(data, list)
+        assert len(data) == 2
+        assert data[0]["name"] == "Dawn Song"
+        assert data[0]["semantic_scholar_id"] == "123"
 
     @pytest.mark.asyncio
     async def test_returns_error_json_when_config_not_found(self):
@@ -58,4 +65,19 @@ class TestScholarsResource:
         data = json.loads(result)
         assert "error" in data
         assert "scholars" in data
+        assert data["scholars"] == []
+
+    @pytest.mark.asyncio
+    async def test_returns_error_json_when_config_is_invalid(self):
+        """_scholars_impl() returns JSON error when config validation fails."""
+        import paperbot.mcp.resources.scholars as mod
+
+        mod._service = _FakeInvalidConfigService()
+        try:
+            result = await mod._scholars_impl()
+        finally:
+            mod._service = None
+
+        data = json.loads(result)
+        assert data["error"].startswith("Invalid YAML in config file:")
         assert data["scholars"] == []
