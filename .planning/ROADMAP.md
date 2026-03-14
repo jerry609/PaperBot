@@ -2,20 +2,20 @@
 
 ## Milestones
 
-- 🚧 **v1.0 MCP Server** - Phases 1-6 (in progress)
+- ✅ **v1.0 MCP Server** - Phases 1-6 (complete)
 - 📋 **v1.1 Agent Orchestration Dashboard** - Phases 7-11 (planned)
 - 📋 **v2.0 PostgreSQL Migration & Data Layer Refactoring** - Phases 12-17 (planned)
 
 ## Phases
 
 <details>
-<summary>v1.0 MCP Server (Phases 1-6) - In Progress</summary>
+<summary>v1.0 MCP Server (Phases 1-6) - Complete</summary>
 
 **Milestone Goal:** Complete the MCP server with all 9 tools, 4 resources, transport configuration, and Agent Skills — making PaperBot's full capability surface available to any MCP-compatible agent.
 
 - [x] **Phase 1: MCP Server Setup** - FastMCP instance, package structure (shipped)
 - [x] **Phase 2: Core Paper Tools** - paper_search, paper_judge, paper_summarize, relevance_assess + audit helper (shipped)
-- [ ] **Phase 3: Remaining MCP Tools** - analyze_trends, check_scholar, get_research_context, save_to_memory, export_to_obsidian
+- [x] **Phase 3: Remaining MCP Tools** - analyze_trends, check_scholar, get_research_context, save_to_memory, export_to_obsidian (completed 2026-03-14)
 - [x] **Phase 4: MCP Resources** - 4 resource URIs for track/scholar data access (completed 2026-03-14)
 - [x] **Phase 5: Transport & Entry Point** - stdio + Streamable HTTP transports, CLI command (completed 2026-03-14)
 - [x] **Phase 6: Agent Skills** - SKILL.md files for core workflows (completed 2026-03-14)
@@ -297,11 +297,11 @@ Phases execute in numeric order: 3 -> 4 -> 5 -> 6 (v1.0) -> 7 -> 8 -> ... -> 11 
 |-------|-----------|----------------|--------|-----------|
 | 1. MCP Server Setup | v1.0 | — | Complete | 2026-03-13 |
 | 2. Core Paper Tools | v1.0 | 3/3 | Complete | 2026-03-14 |
-| 3. Remaining MCP Tools | v1.0 | 2/3 | In Progress | - |
+| 3. Remaining MCP Tools | v1.0 | 3/3 | Complete | 2026-03-14 |
 | 4. MCP Resources | v1.0 | 2/2 | Complete | 2026-03-14 |
 | 5. Transport & Entry Point | v1.0 | 1/1 | Complete | 2026-03-14 |
-| 6. Agent Skills | 1/1 | Complete   | 2026-03-14 | - |
-| 7. EventBus + SSE Foundation | 2/2 | Complete   | 2026-03-14 | - |
+| 6. Agent Skills | v1.0 | 1/1 | Complete | 2026-03-14 |
+| 7. EventBus + SSE Foundation | v1.1 | 2/2 | Complete | 2026-03-14 |
 | 8. Agent Event Vocabulary | v1.1 | 0/? | Not started | - |
 | 9. Three-Panel Dashboard | v1.1 | 0/? | Not started | - |
 | 10. Agent Board + Codex Bridge | v1.1 | 0/? | Not started | - |
