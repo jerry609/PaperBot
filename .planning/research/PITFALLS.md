@@ -1,127 +1,478 @@
-# Domain Pitfalls
+# Pitfalls Research
 
-**Domain:** Agent orchestration dashboard + Codex subagent bridge
-**Researched:** 2026-03-14 (updated with verified Codex CLI and Claude Code agent findings)
+**Domain:** PostgreSQL migration + async data layer + model refactoring (v2.0)
+**Researched:** 2026-03-14
+**Confidence:** HIGH — grounded in codebase inspection + verified SQLAlchemy/Alembic/asyncpg official sources
+
+> This file covers pitfalls specific to the v2.0 milestone: SQLite → PostgreSQL migration,
+> sync Session → AsyncSession conversion across 17+ stores, FTS5 → tsvector,
+> sqlite-vec → pgvector, JSON Text → JSONB, and Alembic migration tooling.
+> It does NOT cover the v1.1 agent orchestration pitfalls (see PITFALLS.md history).
+
+---
 
 ## Critical Pitfalls
 
-Mistakes that cause rewrites or major architectural issues.
+Mistakes that cause rewrites, data loss, or silent behavioral regressions.
 
-### Pitfall 1: Building a Second Event System
+---
 
-**What goes wrong:** Creating separate "dashboard events" or "agent activity" models alongside the existing `AgentEventEnvelope` and `EventLogPort`. Two event streams diverge, one falls behind, dashboard shows stale data.
-**Why it happens:** It feels natural to create a "clean" event type for the dashboard rather than extending the existing one. The existing `AgentEventEnvelope` has 15+ fields and feels heavyweight.
-**Consequences:** Two sources of truth. Events logged to one system not visible in the other. Maintenance burden doubles. Debugging becomes "which event log did this go to?"
-**Prevention:** Extend `AgentEventEnvelope.type` with new string constants (`task_queued`, `agent_spawned`, etc.). Put structured data in the existing `payload` dict. The envelope is already flexible enough.
-**Detection:** If you find yourself writing a new `@dataclass` for events, stop. Use `make_event()` with a new `type` value.
+### Pitfall 1: MissingGreenletError on Lazy-Loaded Relationships
 
-### Pitfall 2: Making PaperBot an Agent Runtime
+**What goes wrong:**
+After converting stores to `AsyncSession`, any access to a SQLAlchemy relationship attribute that was not explicitly loaded in the original query raises `sqlalchemy.exc.MissingGreenlet: greenlet_spawn has not been called; can't call await_only() here`. This includes accessing `.events`, `.logs`, `.metrics`, `.runbook_steps`, `.artifacts` on `AgentRunModel`, or `.memories` on `MemorySourceModel`. The error is not raised in tests that use SQLite in-memory with sync sessions — it only appears in production-style async contexts.
 
-**What goes wrong:** Adding process management, agent spawning, retry logic, or scheduling to PaperBot's server. This turns PaperBot into a competing orchestration runtime alongside Claude Code.
-**Why it happens:** The `ClaudeCommander` and `CodexDispatcher` already hint at orchestration capabilities. It feels natural to extend them into a full runtime.
-**Consequences:** Architectural conflict with the "PaperBot = skill provider" principle. Claude Code and PaperBot fight over who owns agent lifecycle. Duplicated retry/scheduling logic. Test complexity explodes.
-**Prevention:** PaperBot observes and provides tools. The `.claude/agents/codex-worker.md` file lives in Claude Code's domain. PaperBot's API receives events about what happened, never sends commands about what to do next.
-**Detection:** If the server is calling `subprocess.Popen` for Codex CLI, or implementing retry/backoff for agent tasks, it has crossed the line.
+**Why it happens:**
+SQLAlchemy's default relationship loading strategy is lazy — it issues a synchronous SELECT when the attribute is first accessed. In an async context there is no greenlet in scope to proxy this synchronous I/O, so the ORM raises `MissingGreenlet` instead of silently blocking. The existing `models.py` has 30+ relationships all using the default `lazy="select"` strategy. None are annotated with `lazy="selectin"` or `lazy="raise"`.
 
-### Pitfall 3: SSE Connection Exhaustion
+**How to avoid:**
+- Add `lazy="raise"` to ALL relationships in `models.py` immediately. This converts silent runtime errors into loud errors that surface during development.
+- For each store query that needs a relationship, add explicit `.options(selectinload(...))` to the `select()` statement.
+- Use `expire_on_commit=False` in the `async_sessionmaker` factory. Without this, attributes accessed after a `commit()` will trigger an implicit reload — which also raises `MissingGreenlet`.
+- Never serialize a SQLAlchemy model object to a response dict outside of an `AsyncSession` scope without pre-loading all needed attributes.
 
-**What goes wrong:** Each browser tab opens an SSE connection. Each SSE connection holds an `asyncio.Queue` in the EventBus. With multiple tabs, multiple runs, or long-running dashboards, connections accumulate and consume memory.
-**Why it happens:** SSE connections are long-lived. Browsers have per-domain connection limits (6 in HTTP/1.1). EventBus queues grow if the consumer is slower than the producer.
-**Consequences:** Memory pressure on the server. Browser hits connection limit and cannot open new SSE streams. Dead connections linger.
-**Prevention:** (1) Bounded queues with backpressure -- drop oldest events if queue exceeds limit. (2) Connection cleanup on client disconnect using `request.is_disconnected()`. (3) Heartbeat timeout to kill stale connections. (4) The existing `wrap_generator` already has 30-minute timeout -- keep this.
-**Detection:** Monitor active SSE connection count. Alert if > 20 concurrent connections for a single-user app.
+**Warning signs:**
+- `MissingGreenlet` in logs pointing to a model `.attribute` access.
+- Tests pass with SQLite but requests fail in production.
+- Pydantic serialization of response models triggers the error.
 
-### Pitfall 4: Studio Page Regression
+**Phase to address:** Model schema phase (before any async session work begins). Add `lazy="raise"` to all relationships as the first step of the conversion so violations surface immediately.
 
-**What goes wrong:** Replacing the studio page with the agent dashboard breaks existing Paper2Code workflows that do not use agents. Users who launch "generate code" from the papers page find a Kanban board instead of the reproduction log.
-**Why it happens:** PROJECT.md says "replaces studio page" but existing studio functionality (PaperGallery, ReproductionLog, context pack generation) must be preserved.
-**Consequences:** Users cannot use Paper2Code without the agent board. Existing deep links (`/studio?paper_id=X&generate=true`) break.
-**Prevention:** The three-panel layout should be a new view mode within the existing studio page, not a complete replacement. The studio page already has `viewMode` state (`log`, `context`, `agent_board`). Add a `dashboard` mode that shows the three-panel layout. Keep other modes working.
-**Detection:** Existing URL params (`paper_id`, `context_pack_id`, `generate`) must still work after the change.
+---
 
-### Pitfall 5: Codex CLI Version Mismatch
+### Pitfall 2: is_active Stored as Integer, Compared as Boolean After Column Type Change
 
-**What goes wrong:** Agent definition assumes `codex exec` flags that exist in one version but not another. The Rust rewrite (v0.98+) changed the CLI surface significantly from the Node.js era.
-**Why it happens:** Blog posts, tutorials, and training data reference old Node.js Codex CLI syntax. Flag behavior, JSONL event schemas, and sandbox mechanics differ between versions. The codebase is now 95.7% Rust as of v0.98.0 (February 2026).
-**Consequences:** Codex subagent silently fails or produces unparseable output. Claude Code reports vague "command failed" errors.
-**Prevention:** (1) Pin minimum version in agent definition: require `codex --version` >= 0.98. (2) Use only flags from [official CLI reference](https://developers.openai.com/codex/cli/reference): `--json`, `--full-auto`, `--output-schema`, `--model`. (3) JSONL event types to expect: `thread.started`, `turn.started`, `turn.completed`, `turn.failed`, `item.*`, `error`. (4) Test the agent definition with a simple `codex exec --json "echo hello"` before complex tasks.
-**Detection:** JSONL parsing errors in codex-worker subagent output. Missing expected event types.
+**What goes wrong:**
+`ResearchTrackModel.is_active` is declared as `Mapped[int]` and queried with `ResearchTrackModel.is_active == 1` and `.values(is_active=0)` in `research_store.py` (lines 204, 261, 285, 326, 350). If the model refactoring phase changes this column to `Mapped[bool]` / `Boolean`, all 5 call sites must be updated to `True`/`False` simultaneously. Any site that is missed silently sends `1` to a `BOOLEAN` column in PostgreSQL — which PostgreSQL accepts — but reads back as `True`, not `1`. Code paths that did `bool(int(t.is_active or 0))` (research_store.py:1890) work, but code paths that compared `result == 1` break.
 
-## Moderate Pitfalls
+**Why it happens:**
+SQLite stores `Boolean` as `0`/`1` integers and Python code learned to treat the column as an integer. PostgreSQL has a native `BOOLEAN` type that returns Python `True`/`False`, not `1`/`0`. The mismatch is invisible in SQLite and explodes in PostgreSQL.
 
-### Pitfall 6: Overloading AgentEventEnvelope with UI Concerns
+**How to avoid:**
+- During model refactoring, grep for ALL `== 0`, `== 1`, `=0`, `=1` assignments to `is_active` before changing the column type. Change all 5 sites in `research_store.py` at the same time as the model change.
+- Treat `Boolean` columns and `Integer` flags as separate migration concerns — do not change types incrementally on different days.
+- After schema change, add an integration test that reads the `is_active` field back and asserts `isinstance(result, bool)`.
 
-**What goes wrong:** Adding UI-specific fields to the event envelope (color, icon, display_name, panel_position). The domain model becomes coupled to a specific frontend.
-**Prevention:** Keep `AgentEventEnvelope` as a domain-level data structure. Map to UI concerns in the frontend Zustand store or rendering components. The `tags` dict can carry hints, but do not add UI fields to the dataclass.
+**Warning signs:**
+- Any store file using `== 0` or `== 1` comparisons on columns declared as `Boolean`.
+- `bool(int(...))` wrapper calls indicate the column was not originally `bool`.
 
-### Pitfall 7: EventBus Memory Leak on Unsubscribe
+**Phase to address:** Model refactoring phase. Audit all `Integer`-as-boolean columns (also `pii_risk`, `priority` where used as flags) before declaring them `Boolean`.
 
-**What goes wrong:** Subscribers are added to EventBus but never removed when SSE connections close. Queue references accumulate.
-**Prevention:** Use `try/finally` in the SSE route handler to always unsubscribe. The existing `wrap_generator` finally block already closes the generator -- hook cleanup into that same pattern. Set max queue size per subscriber (e.g., 1000 events). Add a TTL sweep that removes stale subscribers.
+---
 
-### Pitfall 8: Codex Worker Agent Definition Scope Creep
+### Pitfall 3: LIKE is Case-Insensitive in SQLite, Case-Sensitive in PostgreSQL
 
-**What goes wrong:** The `.claude/agents/codex-worker.md` file grows to include complex decision-making logic, branching workflows, or Paper2Code-specific pipeline knowledge.
-**Why it happens:** Claude Code agent definitions support rich frontmatter fields (`tools`, `disallowedTools`, `model`, `permissionMode`, `mcpServers`, `hooks`, `maxTurns`, `skills`, `memory`). The temptation is to use all of them.
-**Prevention:** Keep the agent definition under 100 lines. Minimal frontmatter: `name`, `description`, `tools` (Bash, Read, Write, Glob), `model`. The system prompt body describes: (1) role, (2) how to invoke `codex exec`, (3) event reporting protocol via MCP tools, (4) output conventions. Pipeline-specific logic stays in PaperBot's Python services. The agent definition is reloaded by Claude Code at session start or via `/agents` command.
+**What goes wrong:**
+`paper_store.py` uses `ilike(pattern)` in 4 places (lines 668–690) and `func.lower(...).like(...)` in `research_store.py` (lines 964–968). The `ilike` calls are safe because `ilike` is portable via SQLAlchemy. The `func.lower(...).like(...)` pattern in `research_store.py` is also safe if the input is already `.lower()`. However, any remaining `.like(...)` without `.lower()` or `ilike` wrapping — whether in the stores or in raw SQL strings — will silently return fewer results after moving to PostgreSQL.
 
-### Pitfall 9: Ignoring Existing AgentBoard Component
+**Why it happens:**
+SQLite's `LIKE` is case-insensitive for ASCII by default. PostgreSQL's `LIKE` is case-sensitive. Developers test search on SQLite in dev/CI where "python" matches "Python", then the same query on PostgreSQL returns 0 results.
 
-**What goes wrong:** Building the dashboard from scratch instead of reusing `AgentBoard.tsx`, which already has Kanban columns, task cards, execution logs, human review, and SSE consumption.
-**Prevention:** The three-panel layout should embed `AgentBoard` as the left (tasks) panel. The existing component handles task CRUD, status transitions, and review workflows. Wrap it, do not rewrite it.
+**How to avoid:**
+- Audit all `.like(...)` calls across all stores. Any `.like(...)` that is NOT preceded by `func.lower(column)` and `func.lower(value)` must be changed to `.ilike(...)`.
+- The existing `ilike` usage in `paper_store.py` is already correct — do not change it.
+- The FTS search replacement (tsvector) is inherently case-insensitive via PostgreSQL's text search dictionaries — no action needed there.
 
-### Pitfall 10: SSE Reconnection Gap
+**Warning signs:**
+- Full-text search returns fewer results on PostgreSQL than SQLite for the same query with mixed-case input.
+- A search for "ArXiv" that finds papers on SQLite returns 0 on PostgreSQL.
 
-**What goes wrong:** Browser `EventSource` disconnects (network blip, laptop sleep) and misses events. No catch-up mechanism. Native `EventSource` auto-reconnects but starts from "now".
-**Prevention:** Track `seq` (sequence number) from the SSE envelope. On reconnect, pass `Last-Event-Id` header or query param `?after_seq=N`. Server replays missed events from SQLAlchemy store before switching to live EventBus.
+**Phase to address:** Store migration phase. Add a text search regression test with mixed-case inputs before and after migration.
 
-### Pitfall 11: Codex exec Timeout Handling
+---
 
-**What goes wrong:** `codex exec` hangs on a complex task. Claude Code subagent waits indefinitely.
-**Prevention:** Set explicit timeout in agent definition: `timeout 300 codex exec ...`. Handle timeout as a structured error event. The existing `CodexDispatcher.dispatch_timeout_seconds` (default 180s) is a good reference pattern.
+### Pitfall 4: Text → JSONB Column Migration Fails Without Explicit CAST
 
-## Minor Pitfalls
+**What goes wrong:**
+PaperBot has 84 `Text` columns storing JSON (`_json` suffix). The model refactoring plan converts these to `JSONB`. Alembic's `autogenerate` cannot automatically migrate `TEXT` data to `JSONB`. Running `alembic upgrade head` on an existing PostgreSQL database with data will fail with:
+```
+psycopg2.errors.DatatypeMismatch: column "payload_json" is of type jsonb
+but expression is of type text.
+HINT: You might need to add an explicit cast.
+```
+Data loss risk: if the migration drops and recreates the column instead of altering it, all JSON data is lost.
 
-### Pitfall 12: Timezone Inconsistencies in Event Display
+**Why it happens:**
+PostgreSQL will not implicitly cast `text` to `jsonb`. The `ALTER COLUMN ... TYPE jsonb` command requires an explicit `USING column::jsonb` clause. Alembic's autogenerate does not add this clause automatically.
 
-**What goes wrong:** `AgentEventEnvelope.ts` uses UTC. `agent_board.py` uses `datetime.utcnow()` (naive UTC). Frontend receives ISO strings and must format for user's timezone. Mixed naive/aware timestamps cause sorting bugs.
-**Prevention:** Always use `datetime.now(timezone.utc)` (aware UTC), never `datetime.utcnow()` (naive). The existing `utcnow()` helper in `message_schema.py` does this correctly -- use it consistently.
+**How to avoid:**
+- Write ALL `Text` → `JSONB` column migrations manually (not autogenerated). Use the pattern:
+  ```python
+  op.execute("ALTER TABLE agent_events ALTER COLUMN payload_json TYPE jsonb USING payload_json::jsonb")
+  ```
+- Test every migration in a staging PostgreSQL database with real row data, not just with an empty schema.
+- For any row where the JSON text is malformed, `::jsonb` cast will fail. Add a pre-migration validation step: `SELECT id FROM table WHERE payload_json IS NOT NULL AND payload_json::text !~ '^[{\\[]'`.
+- Never use `autogenerate` for type change migrations — always review and write by hand.
 
-### Pitfall 13: Breaking the DI Container Singleton Pattern
+**Warning signs:**
+- Alembic generates `sa.Column('payload_json', postgresql.JSONB(...))` in autogenerate output without a `USING` clause in `op.alter_column`.
+- CI migration tests pass on an empty schema but fail on a database with rows.
 
-**What goes wrong:** EventBus created outside the DI container, or multiple instances exist.
-**Prevention:** Register EventBus in `Container.instance()`. Access via DI, not module-level globals.
+**Phase to address:** Alembic migration authoring phase. The golden rule: every `Text → JSONB` alter must be hand-authored with `USING` clause and tested on a seeded database.
 
-### Pitfall 14: Codex Multi-Agent Feature Flag
+---
 
-**What goes wrong:** Assuming Codex multi-agent workflows are generally available. They are currently experimental and require explicit opt-in.
-**Prevention:** The codex-worker agent definition does NOT use Codex's built-in multi-agent features. It uses single-task `codex exec` invocations. Codex multi-agent (`/experimental` or `multi_agent` config flag) is orthogonal and should not be relied upon.
+### Pitfall 5: FTS5 Virtual Table and sqlite_master Queries Break on PostgreSQL Immediately
 
-### Pitfall 15: Zustand Store Size for Long Sessions
+**What goes wrong:**
+`memory_store.py` and `document_index_store.py` contain 20+ direct calls to `sqlite_master`:
+```python
+text("SELECT name FROM sqlite_master WHERE type IN ('table', 'shadow')")
+text("SELECT name FROM sqlite_master WHERE type='trigger'")
+text("PRAGMA table_info(memory_items)")
+```
+These queries will raise `ProgrammingError: relation "sqlite_master" does not exist` the first time any code path that calls `_ensure_fts5()` or `_ensure_vec_table()` runs against PostgreSQL. There are also raw FTS5 queries like `CREATE VIRTUAL TABLE ... USING fts5(...)` that have no PostgreSQL equivalent.
 
-**What goes wrong:** Long-running agent sessions accumulate thousands of events in the Zustand store, causing React re-render performance issues.
-**Prevention:** Ring buffer for events (keep last N, e.g., 500). Persist older events server-side only. Virtualize the activity feed list if performance degrades.
+**Why it happens:**
+The FTS5 and sqlite-vec tables are created lazily at runtime by the store constructors. They are deeply interleaved with the main store logic, not isolated in migrations. Moving to PostgreSQL requires replacing them entirely — `tsvector` with a GIN index for FTS, and `pgvector`'s `vector` type for ANN search.
 
-## Phase-Specific Warnings
+**How to avoid:**
+- Before writing a single async-migration line, wrap all SQLite-specific code paths in an `is_sqlite` guard:
+  ```python
+  if str(self._engine.url).startswith("sqlite"):
+      self._ensure_fts5(conn)
+  ```
+  This prevents crash-on-PostgreSQL during the transition period where both backends may be in use.
+- Create a `MemorySearchPort` interface that has `search_fts(...)` and `search_vec(...)` methods. Provide a `SqliteMemorySearch` implementation (existing code) and a `PostgresMemorySearch` implementation (tsvector + pgvector). Swap via the DI container based on DB URL.
+- The tsvector replacement is a separate migration file: add a `tsvector` column, create a GIN index, add an update trigger. This migration can ONLY run against PostgreSQL — gate it in `alembic/env.py` with `if "postgresql" in db_url`.
 
-| Phase Topic | Likely Pitfall | Mitigation |
-|---|---|---|
-| EventBus implementation | Memory leak from unsubscribed queues (#7) | Bounded queues + cleanup in finally block |
-| Event type extensions | Second event system temptation (#1) | Extend existing types only, no new models |
-| Three-panel layout | Studio page regression (#4) | New view mode, not page replacement |
-| Agent dashboard store | Re-implementing AgentBoard logic (#9) | Embed existing component, extend store |
-| Codex worker definition | Scope creep (#8), version mismatch (#5) | Keep under 100 lines, pin CLI version, test with simple task first |
-| Overflow delegation | Making PaperBot an agent runtime (#2) | Agent definition delegates, server observes |
-| SSE streaming | Connection exhaustion (#3), reconnection gaps (#10) | Bounded queues, cleanup, seq-based catch-up |
+**Warning signs:**
+- Any test that passes a PostgreSQL URL to a store constructor crashes with `sqlite_master does not exist`.
+- The `_ensure_fts5` method is called from `__init__` with no database-type guard.
+
+**Phase to address:** Store interface design phase (before PostgreSQL integration). FTS abstraction behind a port is non-negotiable.
+
+---
+
+### Pitfall 6: Alembic Autogenerate Loops Infinitely on tsvector GIN Indexes
+
+**What goes wrong:**
+Once tsvector columns and GIN indexes are added to the PostgreSQL schema, every subsequent `alembic revision --autogenerate` detects the GIN index as "changed" and generates a drop/recreate pair. This produces a stream of identical empty migrations and makes `alembic check` always report "schema out of date" even when nothing has changed.
+
+**Why it happens:**
+Alembic's autogenerate cannot correctly fingerprint `to_tsvector()`-based expression indexes. It sees the index definition as different on every comparison cycle, even if nothing changed. This is a confirmed upstream bug in Alembic 1.13+ (GitHub issue #1390).
+
+**How to avoid:**
+- After creating the initial tsvector GIN index migration, exclude it from autogenerate using `include_object` in `alembic/env.py`:
+  ```python
+  def include_object(object, name, type_, reflected, compare_to):
+      if type_ == "index" and name and "tsvector" in (name or ""):
+          return False
+      return True
+  ```
+- Alternatively, mark the index creation as `manual` (do not autogenerate it at all) and manage it through named migration files.
+- Register the `vector` type from pgvector in `env.py` to prevent similar false-positive autogenerate on vector columns:
+  ```python
+  from pgvector.sqlalchemy import Vector
+  connection.dialect.ischema_names["vector"] = Vector
+  ```
+
+**Warning signs:**
+- Every `alembic revision --autogenerate` produces a non-empty file for the same indexes.
+- `alembic check` reports detected changes but running the migration makes no visible difference.
+
+**Phase to address:** Alembic tooling setup phase. Add autogenerate exclusions BEFORE writing any tsvector or pgvector migrations.
+
+---
+
+### Pitfall 7: ARQ Worker Session Not Scoped to Individual Jobs
+
+**What goes wrong:**
+After converting stores to `AsyncSession`, the ARQ worker (`arq_worker.py`) uses a shared session across jobs. Two concurrent ARQ jobs both write to `agent_events` or `agent_runs` using the same session. One job's `commit()` commits the other job's uncommitted changes. Or worse, one job's `rollback()` rolls back both jobs' work.
+
+**Why it happens:**
+Unlike FastAPI (which scopes sessions per-request via `Depends`), ARQ has no dependency injection. The naive migration wraps the `WorkerSettings` startup in a single `async with async_session_factory() as session: ...` that lives for the entire worker lifetime. All jobs share it.
+
+**How to avoid:**
+- Use ARQ's `on_job_start` and `on_job_complete` lifecycle hooks to create and destroy a session per job.
+- Store the per-job session in the ARQ context dict (`ctx["db_session"]`) keyed to `ctx["job_id"]`.
+- The `startup` hook creates the engine and session factory only — not a session.
+- `on_job_start` creates `ctx["db_session"] = async_session_factory()`.
+- `on_job_complete` calls `await ctx["db_session"].close()`.
+
+**Warning signs:**
+- Jobs that succeed in isolation fail intermittently under concurrent load.
+- `IntegrityError` from concurrent jobs writing to the same rows.
+- Checking ARQ worker logs: a single session ID appears across multiple job log entries.
+
+**Phase to address:** ARQ worker migration phase. The ARQ session lifecycle must be explicitly designed before any store method is converted to async.
+
+---
+
+### Pitfall 8: anyio.to_thread.run_sync Wrappers Left in Place After AsyncSession Migration
+
+**What goes wrong:**
+Currently, 16 MCP tool functions call `anyio.to_thread.run_sync(sync_store_method, ...)` to bridge async MCP handlers to sync SQLAlchemy stores. After converting stores to `AsyncSession`, these bridges become unnecessary and harmful: the store method is now a coroutine, not a callable, so `anyio.to_thread.run_sync(coroutine_method)` silently returns a coroutine object instead of awaiting it. No error is raised; the tool returns empty data.
+
+**Why it happens:**
+`anyio.to_thread.run_sync` accepts any callable and runs it in a thread. Passing a coroutine-returning method (e.g., `async def search(...)`) returns the coroutine object itself to `run_sync`, which wraps it and returns a future that resolves to the coroutine object — not its result. This is a silent failure.
+
+**How to avoid:**
+- Convert MCP tools to `await store.method(...)` directly after converting each store.
+- Do NOT leave `anyio.to_thread.run_sync` wrappers in place "as a safety net" — they will silently break.
+- Write an integration test for each MCP tool that asserts the return value is populated data, not a coroutine object or empty list.
+
+**Warning signs:**
+- MCP tools return empty lists or `None` after store conversion.
+- No `MissingGreenlet` errors (the coroutine was never awaited — the error is silence, not crash).
+- Adding `print(result)` shows `<coroutine object ...>`.
+
+**Phase to address:** MCP tool update phase. Each tool must be updated immediately after its corresponding store is converted — not as a final sweep.
+
+---
+
+### Pitfall 9: Alembic Migration Squashing or Merge Breaks PostgreSQL-Specific Branches
+
+**What goes wrong:**
+The existing `alembic/versions/` directory has 28 migration files with a known branch conflict (`4c71b28a2f67_merge_structured_card_and_anchor_author_.py`). Adding new PostgreSQL-specific migrations creates additional branches. Running `alembic upgrade head` on a fresh PostgreSQL database with all branches active hits conflicts and either runs migrations in wrong order or fails outright.
+
+**Why it happens:**
+Alembic's dependency graph for heads gets confused when multiple "head" revisions exist simultaneously. The existing merge migration handles SQLite-era branches. Adding PostgreSQL-gated migrations (e.g., `CREATE EXTENSION vector`) that cannot run on SQLite creates a new branching problem.
+
+**How to avoid:**
+- Before v2.0 migration work starts, squash all existing migrations into a single "v1.x baseline" migration. Test this baseline on both SQLite and a fresh PostgreSQL schema.
+- Create a clean single-head starting point for v2.0 work.
+- For PostgreSQL-only migrations (tsvector, pgvector), use a dialect check in the migration body, NOT separate branch files:
+  ```python
+  def upgrade():
+      bind = op.get_bind()
+      if bind.dialect.name == "postgresql":
+          op.execute("CREATE EXTENSION IF NOT EXISTS vector")
+  ```
+
+**Warning signs:**
+- `alembic heads` shows more than 1 head.
+- `alembic upgrade head` on a fresh database takes an unexpected path or skips migrations.
+
+**Phase to address:** Pre-migration setup phase. Squash first, then add PostgreSQL migrations.
+
+---
+
+### Pitfall 10: Data Migration of Existing SQLite Database Loses Rows Due to FK Violations
+
+**What goes wrong:**
+The PaperBot SQLite database has 46 tables with foreign keys that SQLite historically did not enforce. When importing the SQLite data into PostgreSQL (where FK constraints are always enforced), rows with dangling FK references fail to insert. For example: `paper_feedback` rows referencing `papers.id` values that were cleaned up in SQLite but not deleted from `paper_feedback` due to missing CASCADE. The import fails mid-table, leaving PostgreSQL in a partially migrated state.
+
+**Why it happens:**
+SQLite's foreign key enforcement is opt-in (`PRAGMA foreign_keys = ON`). Most SQLite deployments run without it. PaperBot's models define `ondelete="CASCADE"` on some relationships but not all (e.g., `PaperFeedbackModel.paper_ref_id` has no explicit `ondelete`). Years of data in SQLite may contain orphaned rows that have never caused visible errors.
+
+**How to avoid:**
+- Before migration, validate FK integrity on SQLite with `PRAGMA foreign_keys = ON` and a `PRAGMA integrity_check`. Log all violations.
+- Use `pgloader` for the actual data transfer — it handles FK ordering and can generate a violation report.
+- Alternatively, use a custom Python migration script that inserts parent tables before child tables and collects FK violations to a separate log for manual triage.
+- After migration, run `SELECT * FROM information_schema.table_constraints WHERE constraint_type = 'FOREIGN KEY'` and spot-check a sample of FK relationships.
+
+**Warning signs:**
+- `pgloader` output shows "condition not verified" rows counted separately from "rows copied".
+- `INSERT` failures during migration referencing `foreign key constraint`.
+- Row counts differ between SQLite export and PostgreSQL import.
+
+**Phase to address:** Data migration tooling phase. Build validation-first, migrate-second.
+
+---
+
+### Pitfall 11: Prepared Statement Errors with asyncpg and Connection Poolers
+
+**What goes wrong:**
+If PostgreSQL is deployed behind PgBouncer (or similar) in transaction pooling mode, asyncpg's automatic use of prepared statements causes intermittent errors: `prepared statement "__asyncpg_stmt_XX__" does not exist` or `already exists`. The existing `sqlalchemy_db.py` already disables prepared statements for `psycopg` connections via `prepare_threshold=0`, but this does NOT apply to asyncpg.
+
+**Why it happens:**
+asyncpg prepares statements at the session level by default. PgBouncer in transaction mode does not guarantee the same backend connection across transactions. When a prepared statement exists on backend connection A, and the next query arrives on backend connection B, the statement does not exist on B.
+
+**How to avoid:**
+- Add `statement_cache_size=0` to the asyncpg `connect_args` in `create_async_engine`:
+  ```python
+  create_async_engine(url, connect_args={"statement_cache_size": 0})
+  ```
+  Note: this cannot be set in the connection URL string — it must be a Python kwarg.
+- The existing `prepare_threshold: 0` in `sqlalchemy_db.py` covers the sync `psycopg2` path; mirror it for asyncpg explicitly.
+- For local Docker development without PgBouncer, this is a non-issue — but production deployments with connection poolers will hit this.
+
+**Warning signs:**
+- Works in Docker dev, fails in production (or CI using a pooler).
+- Intermittent errors on high-concurrency endpoints like `POST /api/analyze` or `GET /api/track`.
+- Error message references `asyncpg_stmt`.
+
+**Phase to address:** AsyncSession setup phase. Set `statement_cache_size=0` from the first async engine created.
+
+---
+
+### Pitfall 12: SQLite In-Memory Tests No Longer Valid After AsyncSession Migration
+
+**What goes wrong:**
+The existing test suite uses `SessionProvider(db_url="sqlite:///:memory:")` for unit and integration tests (18+ test files). After converting stores to `AsyncSession`, these tests cannot use SQLite in-memory for two reasons: (1) the async driver for SQLite (`aiosqlite`) has different behavior than asyncpg for PostgreSQL, and (2) FTS5/tsvector and vec0/pgvector have no common interface in SQLite in-memory mode. Tests that use FTS or vector search will either skip silently or crash.
+
+**Why it happens:**
+SQLite's timezone handling is different from PostgreSQL (naive vs aware datetimes), LIKE case sensitivity differs, and the test infrastructure that imports `sqlite_vec` is optional (skipped if not installed). The tests were designed for sync SQLite — they are not valid validators of async PostgreSQL behavior.
+
+**How to avoid:**
+- Migrate tests to `testcontainers[postgres]` for any test that touches stores, sessions, or search.
+- Keep a SQLite in-memory path only for pure domain logic tests (no stores).
+- The testcontainers fixture pattern for pytest is a session-scoped PostgreSQL container that runs all store tests against real PostgreSQL.
+- CI must have Docker available. The existing `requirements-ci.txt` must add `testcontainers[postgres]` and `pytest-asyncio`.
+- Do NOT attempt to keep SQLite as a "fast" fallback for store tests — the behavioral differences are too large to trust.
+
+**Warning signs:**
+- Tests pass with `sqlite:///:memory:` but requests fail in production with different results.
+- Datetime comparison tests produce different results across environments.
+
+**Phase to address:** Test infrastructure phase. Establish testcontainers fixture BEFORE converting the first store to async.
+
+---
+
+### Pitfall 13: pgvector Extension Not Registered in Alembic env.py
+
+**What goes wrong:**
+After installing `pgvector` and defining `vector` type columns in models, `alembic revision --autogenerate` emits:
+```
+SAWarning: Did not recognize type 'vector' of column 'embedding'
+```
+and generates an empty migration that appears to detect no changes. Subsequent attempts to apply the migration fail because the `vector` column was never created.
+
+**Why it happens:**
+Alembic's schema introspection does not know about custom PostgreSQL types like `vector` by default. Without registering the type in `env.py`, autogenerate treats the column as unknown and omits it from the diff.
+
+**How to avoid:**
+- In `alembic/env.py`'s `run_migrations_online()`, before `context.configure(...)`, add:
+  ```python
+  from pgvector.sqlalchemy import Vector
+  connection.dialect.ischema_names["vector"] = Vector
+  ```
+- Also add `CREATE EXTENSION IF NOT EXISTS vector` in the first migration that uses the `vector` type.
+- Write the `vector` column migration by hand — do not rely on autogenerate for it.
+
+**Warning signs:**
+- `alembic revision --autogenerate` produces no change for a model with a new `vector` column.
+- `alembic check` says no changes detected even though `memory_items.embedding` is still `LargeBinary`.
+
+**Phase to address:** pgvector integration phase. Set up the extension registration before writing the embedding migration.
+
+---
+
+## Technical Debt Patterns
+
+| Shortcut | Immediate Benefit | Long-term Cost | When Acceptable |
+|----------|-------------------|----------------|-----------------|
+| Keep sync Session with `run_sync()` wrapper instead of native AsyncSession | No store rewrites, faster transition | Every DB call still blocks one greenlet thread; can't use true async DB features; still need asyncpg | Only as a temporary bridge during incremental migration; remove within same milestone |
+| Migrate schema but not data (leave SQLite file in production) | Simpler milestone scope | Dual-write or data gap in production; users lose history | Never — v2.0 must include a data migration path for existing installations |
+| Use SQLite in-memory for post-migration store tests | Test speed, no Docker dependency | Tests do not catch PostgreSQL-specific bugs (type coercion, LIKE sensitivity, FK enforcement) | Never after AsyncSession conversion |
+| Leave `anyio.to_thread.run_sync` wrappers in MCP tools | Zero MCP changes needed during store migration | Silent return of coroutine objects; MCP tools return empty data | Never — remove immediately when each store is converted |
+| Skip squashing old migrations before adding PG migrations | Saves 2-4 hours | Alembic head conflicts; harder to onboard new contributors; migration graph debugging nightmare | Never |
+
+---
+
+## Integration Gotchas
+
+| Integration | Common Mistake | Correct Approach |
+|-------------|----------------|------------------|
+| asyncpg + PgBouncer | Not disabling prepared statements | Pass `statement_cache_size=0` as a kwarg to `create_async_engine` connect_args |
+| pgvector + Alembic | Relying on autogenerate for `vector` column | Register type in `env.py`, write migration by hand, add `CREATE EXTENSION IF NOT EXISTS vector` |
+| tsvector + Alembic | Autogenerate loops on GIN expression indexes | Exclude tsvector indexes from autogenerate via `include_object` filter in `env.py` |
+| ARQ worker + AsyncSession | Sharing one session across concurrent jobs | Create per-job session in `on_job_start`, destroy in `on_job_complete` hooks |
+| Docker PG + asyncpg | Forgetting to wait for PG to be ready on container start | Use `pool_pre_ping=True` on engine + retry logic in startup hook |
+| SQLite → PG data copy via pgloader | Foreign key violations stopping import mid-table | Run `PRAGMA integrity_check` on SQLite first; use `pgloader` with `CONTINUE ON ERROR` + violation report |
+
+---
+
+## Performance Traps
+
+| Trap | Symptoms | Prevention | When It Breaks |
+|------|----------|------------|----------------|
+| Using `ilike` on unindexed large text columns (title, abstract) without tsvector | Full table scan; queries >500ms as papers table grows | Add tsvector GIN index; use `to_tsquery` for search instead of `ilike` | At ~50K papers rows |
+| No connection pool size limit on asyncpg engine | DB reports "too many connections"; asyncpg pool waits indefinitely | Set `pool_size=10, max_overflow=5` on `create_async_engine` | At high concurrency (>20 simultaneous requests) |
+| Returning full relationship graphs via `selectinload` on list endpoints | N+1 converted to single SELECT IN, but result set is huge | Use `selectinload` only for needed relationships; add explicit `limit()` | Immediately on large datasets |
+| Running Alembic migrations with `NullPool` in production | Each migration step opens and closes a connection; slow for 28 migrations | NullPool is correct for migrations; not a runtime concern | Migrations take >2 min but this is acceptable |
+| pgvector ANN search without an index | Sequential scan through all embeddings | Create HNSW or IVFFlat index on `vector` column before enabling ANN search | At ~10K embedding rows |
+
+---
+
+## Security Mistakes
+
+| Mistake | Risk | Prevention |
+|---------|------|------------|
+| Storing PostgreSQL credentials in `.env` committed to git | Credential leak | Use environment injection (Docker Compose env, CI secrets); `.env` is in `.gitignore` already |
+| Running Alembic with a superuser in production | Migration can drop tables it should not touch | Create a limited `paperbot_migrator` role with only `CONNECT, CREATE TABLE, ALTER TABLE` rights |
+| Not rotating `api_key_value` stored in `model_endpoints` table | Plaintext API key accessible to any DB reader | Encrypt with a master key or store only as `api_key_env` references; existing TODO in codebase |
+
+---
+
+## "Looks Done But Isn't" Checklist
+
+- [ ] **AsyncSession conversion:** Store methods return `await`-able results — verify each store has zero remaining `with self._provider.session()` sync context managers.
+- [ ] **Relationship loading:** `lazy="raise"` added to all relationships in `models.py` — verify by running the test suite and checking for no `MissingGreenlet` errors.
+- [ ] **FTS migration:** `memory_store._search_fts5` and `document_index_store._search_chunk_ids_with_fts` replaced with tsvector implementations — verify by running keyword search and checking result count matches SQLite baseline.
+- [ ] **sqlite-vec to pgvector:** `memory_store._search_vec` replaced with pgvector ANN search — verify by running vector search and checking cosine distances are plausible.
+- [ ] **sqlite_master queries removed:** grep for `sqlite_master` in `memory_store.py` and `document_index_store.py` returns 0 results.
+- [ ] **PRAGMA removed:** grep for `PRAGMA` in `src/` returns 0 results outside of test files.
+- [ ] **anyio.to_thread.run_sync removed from MCP tools:** grep for `anyio.to_thread.run_sync` in `mcp/tools/` and `mcp/resources/` returns 0 results.
+- [ ] **Text → JSONB with USING clause:** every migration file that changes a `_json` column from `Text` to `JSONB` contains `USING column::jsonb` in the `op.execute` call.
+- [ ] **JSONB autogenerate imports:** every autogenerated migration file that uses `postgresql.JSONB` has `from sqlalchemy.dialects import postgresql` at the top.
+- [ ] **ARQ worker lifecycle:** `WorkerSettings` has `on_job_start` and `on_job_complete` hooks; `startup` does NOT create a session, only a factory.
+- [ ] **testcontainers in CI:** `requirements-ci.txt` includes `testcontainers[postgres]`; CI runner has Docker socket accessible.
+- [ ] **pgvector extension registered:** `alembic/env.py` registers `Vector` in `connection.dialect.ischema_names` before any `context.configure` call.
+
+---
+
+## Recovery Strategies
+
+| Pitfall | Recovery Cost | Recovery Steps |
+|---------|---------------|----------------|
+| MissingGreenlet on lazy load in production | HIGH | Add `selectinload` to affected queries; redeploy; no data loss |
+| Text → JSONB migration failed mid-run | HIGH | Restore from backup; fix migration with `USING` clause; re-run from last successful step |
+| FK violation during SQLite → PG data import | MEDIUM | Identify orphaned rows from pgloader report; delete from SQLite; re-export; re-import |
+| ARQ worker shared session corruption | HIGH | Stop worker; identify affected jobs from logs; replay failed jobs; add per-job session lifecycle |
+| Alembic autogenerate loop on tsvector GIN index | LOW | Add `include_object` filter to `env.py`; delete spurious empty migration files |
+| SQLite in-memory tests passing but PG failing | MEDIUM | Add testcontainers fixture; run failing tests against PG to reveal type/behavior mismatches |
+| asyncpg prepared statement errors in production | MEDIUM | Add `statement_cache_size=0` to connect_args; redeploy; no data loss |
+
+---
+
+## Pitfall-to-Phase Mapping
+
+| Pitfall | Prevention Phase | Verification |
+|---------|------------------|--------------|
+| MissingGreenlet on lazy relationships (#1) | Model schema refactoring (add `lazy="raise"` to all relationships) | Run full test suite; zero `MissingGreenlet` errors |
+| is_active integer → boolean type change (#2) | Model refactoring (audit all `== 0` / `== 1` sites before column type change) | Integration test: read `is_active` field, assert `isinstance(result, bool)` |
+| LIKE case sensitivity (#3) | Store migration (audit all `.like()` calls, convert to `.ilike()`) | Search regression test with mixed-case input |
+| Text → JSONB without CAST (#4) | Alembic migration authoring (hand-write all type-change migrations) | Run migration against seeded test database; verify row counts unchanged |
+| FTS5 sqlite_master queries (#5) | Store interface design (add `is_sqlite` guard or FTS port abstraction) | Start store with PostgreSQL URL; no `sqlite_master` errors |
+| tsvector autogenerate loop (#6) | Alembic tooling setup (add `include_object` filter before writing tsvector migrations) | `alembic revision --autogenerate` produces empty file after stable schema |
+| ARQ worker session scope (#7) | ARQ worker migration (add `on_job_start`/`on_job_complete` hooks) | Two concurrent ARQ jobs; each sees only its own committed rows |
+| anyio.to_thread.run_sync left in MCP tools (#8) | MCP tool update (convert each tool immediately after its store) | MCP tool integration test returns populated data, not empty list |
+| Alembic branch conflicts (#9) | Pre-migration setup (squash existing migrations to single baseline) | `alembic heads` returns exactly 1 head |
+| Data migration FK violations (#10) | Data migration tooling (SQLite integrity check + pgloader with violation log) | Row counts match between SQLite export and PostgreSQL import |
+| asyncpg prepared statements (#11) | AsyncSession setup (set `statement_cache_size=0` on first async engine) | High-concurrency load test against PostgreSQL returns no prepared statement errors |
+| SQLite in-memory tests invalid (#12) | Test infrastructure (establish testcontainers fixture before first store conversion) | Store integration tests run against real PostgreSQL container in CI |
+| pgvector type not registered (#13) | pgvector integration (register in `env.py` before first embedding migration) | `alembic revision --autogenerate` detects `vector` column as unchanged |
+
+---
 
 ## Sources
 
-- Codebase: `agent_board.py` uses `datetime.utcnow()` (naive) vs `message_schema.py` uses `datetime.now(timezone.utc)` (aware)
-- Codebase: `streaming.py` has 30-minute timeout and heartbeat -- good defaults to preserve
-- Codebase: `studio/page.tsx` has `viewMode` state supporting multiple modes -- extend, do not replace
-- Codebase: `codex_dispatcher.py` has `dispatch_timeout_seconds` defaulting to 180s
-- Project: `.planning/PROJECT.md` constraints: "reuse existing", "PaperBot = skill provider"
-- [Codex CLI Reference](https://developers.openai.com/codex/cli/reference) -- verified CLI flags and JSONL event types
-- [Codex Non-Interactive Mode](https://developers.openai.com/codex/noninteractive/) -- `codex exec` behavior, --json output format
-- [Claude Code Custom Subagents](https://code.claude.com/docs/en/sub-agents) -- agent definition format, frontmatter fields, hot reload behavior
-- [Codex Multi-Agent Docs](https://developers.openai.com/codex/multi-agent/) -- experimental status of multi-agent feature
+- Codebase: `memory_store.py` — 20+ `sqlite_master` queries, `_ensure_fts5`, `_ensure_vec_table`, `sqlite_vec.load` calls
+- Codebase: `document_index_store.py` — `_ensure_fts5`, `sqlite_master` queries, `ilike` fallback search
+- Codebase: `paper_store.py` — `.ilike()` in 4 locations, `func.lower()` for title matching
+- Codebase: `research_store.py` — `func.lower().like()` for search, `is_active == 1` / `== 0` in 5 locations
+- Codebase: `sqlalchemy_db.py` — sync `sessionmaker`, `prepare_threshold: 0` for psycopg only
+- Codebase: `models.py` — 84 `Text` JSON columns, `is_active: Mapped[int]`, all relationships default to `lazy="select"`
+- Codebase: `alembic/versions/` — 28 migration files, existing branch merge at `4c71b28a2f67`
+- Codebase: `mcp/tools/` — 16 uses of `anyio.to_thread.run_sync` wrapping sync store calls
+- [SQLAlchemy AsyncIO docs](https://docs.sqlalchemy.org/en/20/orm/extensions/asyncio.html) — `expire_on_commit=False`, `selectinload`, `MissingGreenlet` behavior
+- [SQLAlchemy async discussion #9757](https://github.com/sqlalchemy/sqlalchemy/discussions/9757) — `greenlet_spawn has not been called`
+- [SQLAlchemy async discussion #5923](https://github.com/sqlalchemy/sqlalchemy/discussions/5923) — sync and async coexistence
+- [SQLAlchemy Boolean/SQLite docs](https://docs.sqlalchemy.org/en/20/dialects/sqlite.html) — type affinity, boolean storage as 0/1
+- [Alembic autogenerate docs](https://alembic.sqlalchemy.org/en/latest/autogenerate.html) — limitations: renames detected as add/drop, `compare_server_default` accuracy
+- [Alembic issue #1390](https://github.com/sqlalchemy/alembic/issues/1390) — tsvector GIN index autogenerate false positive loop
+- [Alembic issue #1324](https://github.com/sqlalchemy/alembic/discussions/1324) — pgvector type not recognized; `ischema_names` fix
+- [Alembic issue #697](https://github.com/sqlalchemy/alembic/issues/697) — Text → JSON migration data loss
+- [asyncpg FAQ](https://magicstack.github.io/asyncpg/current/faq.html) — prepared statement conflicts with PgBouncer
+- [asyncpg issue #1058](https://github.com/MagicStack/asyncpg/issues/1058) — prepared statements despite disabled
+- [ARQ + SQLAlchemy](https://wazaari.dev/blog/arq-sqlalchemy-done-right) — per-job session lifecycle with `on_job_start`/`on_job_complete`
+- [Testcontainers Python](https://testcontainers.com/guides/getting-started-with-testcontainers-for-python/) — PostgreSQL fixture pattern for pytest
+- [PostgreSQL case sensitivity](https://www.cybertec-postgresql.com/en/case-insensitive-pattern-matching-in-postgresql/) — LIKE vs ILIKE, migration implications
+- [pgloader SQLite → PostgreSQL docs](https://pgloader.readthedocs.io/en/latest/ref/sqlite.html) — FK ordering, type casting, violation handling
+
+---
+*Pitfalls research for: PostgreSQL migration + async data layer + model refactoring (PaperBot v2.0)*
+*Researched: 2026-03-14*
