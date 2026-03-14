@@ -6,6 +6,7 @@ Uses anyio.to_thread.run_sync() to wrap the synchronous store.add_memories() cal
 
 from __future__ import annotations
 
+import math
 import logging
 import time
 from typing import Any, Dict
@@ -73,6 +74,14 @@ async def _save_to_memory_impl(
     """
     start = time.monotonic()
 
+    args = {
+        "content_len": len(content),
+        "kind": kind,
+        "user_id": user_id,
+        "scope_type": scope_type,
+        "confidence": confidence,
+    }
+
     # Validate kind; default to "note" if invalid
     effective_kind = kind if kind in _ALLOWED_KINDS else "note"
     if kind not in _ALLOWED_KINDS:
@@ -83,20 +92,20 @@ async def _save_to_memory_impl(
             sorted(_ALLOWED_KINDS),
         )
 
-    args = {
-        "content_len": len(content),
-        "kind": effective_kind,
-        "user_id": user_id,
-        "scope_type": scope_type,
-    }
-
     try:
         from paperbot.memory.schema import MemoryCandidate
+
+        confidence_value = float(confidence)
+        if not math.isfinite(confidence_value) or not 0.0 <= confidence_value <= 1.0:
+            raise ValueError("confidence must be between 0.0 and 1.0")
+
+        args["kind"] = effective_kind
+        args["confidence"] = confidence_value
 
         candidate = MemoryCandidate(
             kind=effective_kind,
             content=content,
-            confidence=confidence,
+            confidence=confidence_value,
             scope_type=scope_type or None,
             scope_id=scope_id or None,
         )
@@ -150,7 +159,8 @@ def register(mcp) -> None:
 
         Persists content as a typed memory candidate. Use kind to categorize
         (e.g., 'note', 'hypothesis', 'decision', 'keyword_set'). Invalid kinds
-        default to 'note'. Returns created and skipped counts.
+        default to 'note'. Confidence must be between 0.0 and 1.0.
+        Returns created and skipped counts.
         """
         return await _save_to_memory_impl(
             content, kind, user_id, scope_type, scope_id, confidence, _run_id

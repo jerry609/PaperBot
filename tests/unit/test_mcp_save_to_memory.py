@@ -115,3 +115,22 @@ class TestSaveToMemoryTool:
         assert result["saved"] is False
         assert result["created"] == 0
         assert result["skipped"] == 1
+
+    @pytest.mark.asyncio
+    async def test_rejects_out_of_range_confidence(self):
+        """_save_to_memory_impl rejects invalid confidence values before persisting."""
+        import paperbot.mcp.tools.save_to_memory as mod
+
+        store = _FakeMemoryStore(created=1, skipped=0)
+        mod._store = store
+        try:
+            with pytest.raises(ValueError, match="confidence must be between 0.0 and 1.0"):
+                await mod._save_to_memory_impl(
+                    content="Confidence bug",
+                    confidence=1.5,
+                    user_id="test_user",
+                )
+        finally:
+            mod._store = None
+
+        assert store.calls == []
