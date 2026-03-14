@@ -161,7 +161,7 @@ const RUNTIME_STORAGE_KEY = 'paperbot-studio-runtime'
 const RUNTIME_STORAGE_VERSION = 1
 
 function generateId(): string {
-    return `paper-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
+    return `paper-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`
 }
 
 function loadPapersFromStorage(): StudioPaper[] {
@@ -266,6 +266,8 @@ function loadRuntimeStateFromStorage(): PersistedRuntimeState {
             typeof parsed.selectedPaperId === 'string' && parsed.selectedPaperId.trim()
                 ? parsed.selectedPaperId.trim()
                 : null
+        // LEGACY MIGRATION: Handle old `boardSessionId` stored at the root of the runtime state.
+        // This can be removed in a future version after users have migrated.
         if (legacyBoardSessionId && selectedPaperId && !boardSessionByPaper[selectedPaperId]) {
             boardSessionByPaper[selectedPaperId] = legacyBoardSessionId
         }
@@ -710,7 +712,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     },
 
     addAgentTask: (task) => {
-        const id = task.id?.trim() || `agent-task-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
+        const id = task.id?.trim() || `agent-task-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`
         const now = new Date().toISOString()
         set(state => ({
             agentTasks: [
@@ -759,7 +761,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     addAction: (taskId, action) => {
         const newAction: AgentAction = {
             ...action,
-            id: `action-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+            id: `action-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`,
             timestamp: new Date()
         }
         set(state => ({

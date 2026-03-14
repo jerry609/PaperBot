@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from paperbot.infrastructure.swarm.worker_tools import TASK_COMPLETE_SENTINEL, ToolExecutor
+from paperbot.infrastructure.swarm.worker_tools import TASK_COMPLETE_SENTINEL, LocalToolExecutor
 from paperbot.repro.base_executor import BaseExecutor
 from paperbot.repro.execution_result import ExecutionResult
 
@@ -49,7 +49,7 @@ class _RecordingExecutor(BaseExecutor):
 async def test_read_file_existing(tmp_path):
     file_path = tmp_path / "a.txt"
     file_path.write_text("hello", encoding="utf-8")
-    executor = ToolExecutor(workspace=tmp_path, sandbox=None)
+    executor = LocalToolExecutor(workspace=tmp_path, sandbox=None)
 
     result = await executor.execute("read_file", {"path": "a.txt"})
 
@@ -58,7 +58,7 @@ async def test_read_file_existing(tmp_path):
 
 @pytest.mark.asyncio
 async def test_read_file_not_found(tmp_path):
-    executor = ToolExecutor(workspace=tmp_path, sandbox=None)
+    executor = LocalToolExecutor(workspace=tmp_path, sandbox=None)
 
     result = await executor.execute("read_file", {"path": "missing.txt"})
 
@@ -67,7 +67,7 @@ async def test_read_file_not_found(tmp_path):
 
 @pytest.mark.asyncio
 async def test_read_file_path_traversal_blocked(tmp_path):
-    executor = ToolExecutor(workspace=tmp_path, sandbox=None)
+    executor = LocalToolExecutor(workspace=tmp_path, sandbox=None)
 
     result = await executor.execute("read_file", {"path": "../etc/passwd"})
 
@@ -76,7 +76,7 @@ async def test_read_file_path_traversal_blocked(tmp_path):
 
 @pytest.mark.asyncio
 async def test_write_file_creates_dirs_and_tracks_output(tmp_path):
-    executor = ToolExecutor(workspace=tmp_path, sandbox=None)
+    executor = LocalToolExecutor(workspace=tmp_path, sandbox=None)
 
     result = await executor.execute(
         "write_file",
@@ -90,7 +90,7 @@ async def test_write_file_creates_dirs_and_tracks_output(tmp_path):
 
 @pytest.mark.asyncio
 async def test_write_file_path_escape_blocked(tmp_path):
-    executor = ToolExecutor(workspace=tmp_path, sandbox=None)
+    executor = LocalToolExecutor(workspace=tmp_path, sandbox=None)
 
     result = await executor.execute("write_file", {"path": "../outside.py", "content": "x = 1"})
 
@@ -100,7 +100,7 @@ async def test_write_file_path_escape_blocked(tmp_path):
 
 @pytest.mark.asyncio
 async def test_list_files_empty_dir(tmp_path):
-    executor = ToolExecutor(workspace=tmp_path, sandbox=None)
+    executor = LocalToolExecutor(workspace=tmp_path, sandbox=None)
 
     result = await executor.execute("list_files", {"path": "."})
 
@@ -111,7 +111,7 @@ async def test_list_files_empty_dir(tmp_path):
 async def test_list_files_with_entries(tmp_path):
     (tmp_path / "src").mkdir(parents=True)
     (tmp_path / "src/main.py").write_text("print('x')\n", encoding="utf-8")
-    executor = ToolExecutor(workspace=tmp_path, sandbox=None)
+    executor = LocalToolExecutor(workspace=tmp_path, sandbox=None)
 
     result = await executor.execute("list_files", {"path": "."})
 
@@ -122,7 +122,7 @@ async def test_list_files_with_entries(tmp_path):
 @pytest.mark.asyncio
 async def test_run_command_with_sandbox(tmp_path, monkeypatch):
     monkeypatch.setenv("CODEX_ENABLE_RUN_COMMAND", "true")
-    executor = ToolExecutor(workspace=tmp_path, sandbox=_FakeExecutor())
+    executor = LocalToolExecutor(workspace=tmp_path, sandbox=_FakeExecutor())
 
     result = await executor.execute("run_command", {"command": "pytest -q"})
 
@@ -133,7 +133,7 @@ async def test_run_command_with_sandbox(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_run_command_no_sandbox_rejected(tmp_path, monkeypatch):
     monkeypatch.setenv("CODEX_ENABLE_RUN_COMMAND", "true")
-    executor = ToolExecutor(workspace=tmp_path, sandbox=None)
+    executor = LocalToolExecutor(workspace=tmp_path, sandbox=None)
 
     result = await executor.execute("run_command", {"command": "pytest -q"})
 
@@ -143,7 +143,7 @@ async def test_run_command_no_sandbox_rejected(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_run_command_disabled_rejected(tmp_path, monkeypatch):
     monkeypatch.setenv("CODEX_ENABLE_RUN_COMMAND", "false")
-    executor = ToolExecutor(workspace=tmp_path, sandbox=_FakeExecutor())
+    executor = LocalToolExecutor(workspace=tmp_path, sandbox=_FakeExecutor())
 
     result = await executor.execute("run_command", {"command": "pytest -q"})
 
@@ -154,7 +154,7 @@ async def test_run_command_disabled_rejected(tmp_path, monkeypatch):
 async def test_run_command_install_uses_extended_timeout(tmp_path, monkeypatch):
     monkeypatch.setenv("CODEX_ENABLE_RUN_COMMAND", "true")
     sandbox = _RecordingExecutor(logs="Successfully installed numpy-1.0")
-    executor = ToolExecutor(workspace=tmp_path, sandbox=sandbox)
+    executor = LocalToolExecutor(workspace=tmp_path, sandbox=sandbox)
 
     result = await executor.execute("run_command", {"command": "pip install numpy -q"})
 
@@ -166,7 +166,7 @@ async def test_run_command_install_uses_extended_timeout(tmp_path, monkeypatch):
 async def test_run_command_non_install_uses_default_timeout(tmp_path, monkeypatch):
     monkeypatch.setenv("CODEX_ENABLE_RUN_COMMAND", "true")
     sandbox = _RecordingExecutor()
-    executor = ToolExecutor(workspace=tmp_path, sandbox=sandbox)
+    executor = LocalToolExecutor(workspace=tmp_path, sandbox=sandbox)
 
     await executor.execute("run_command", {"command": "pytest -q"})
 
@@ -178,7 +178,7 @@ async def test_run_command_pip_allowlist_blocks_unapproved_packages(tmp_path, mo
     monkeypatch.setenv("CODEX_ENABLE_RUN_COMMAND", "true")
     monkeypatch.setenv("CODEX_PIP_ALLOWLIST", "numpy,pytest")
     sandbox = _RecordingExecutor()
-    executor = ToolExecutor(workspace=tmp_path, sandbox=sandbox)
+    executor = LocalToolExecutor(workspace=tmp_path, sandbox=sandbox)
 
     result = await executor.execute("run_command", {"command": "pip install numpy scipy"})
 
@@ -190,7 +190,7 @@ async def test_run_command_pip_allowlist_blocks_unapproved_packages(tmp_path, mo
 async def test_search_files_matches_and_no_matches(tmp_path):
     (tmp_path / "src").mkdir(parents=True)
     (tmp_path / "src/main.py").write_text("def train_model():\n    return 1\n", encoding="utf-8")
-    executor = ToolExecutor(workspace=tmp_path, sandbox=None)
+    executor = LocalToolExecutor(workspace=tmp_path, sandbox=None)
 
     result_match = await executor.execute(
         "search_files",
@@ -208,7 +208,7 @@ async def test_search_files_matches_and_no_matches(tmp_path):
 @pytest.mark.asyncio
 async def test_update_subtask(tmp_path):
     task = types.SimpleNamespace(subtasks=[{"id": "sub-1", "title": "Add API", "done": False}])
-    executor = ToolExecutor(workspace=tmp_path, sandbox=None, task=task)
+    executor = LocalToolExecutor(workspace=tmp_path, sandbox=None, task=task)
 
     result = await executor.execute("update_subtask", {"subtask_id": "sub-1", "done": True})
 
@@ -218,7 +218,7 @@ async def test_update_subtask(tmp_path):
 
 @pytest.mark.asyncio
 async def test_task_done_returns_sentinel(tmp_path):
-    executor = ToolExecutor(workspace=tmp_path, sandbox=None)
+    executor = LocalToolExecutor(workspace=tmp_path, sandbox=None)
 
     result = await executor.execute("task_done", {"summary": "done"})
 

@@ -141,7 +141,7 @@ CODING_WORKER_TOOLS: List[Dict[str, Any]] = [
 ]
 
 
-class ToolExecutor:
+class LocalToolExecutor:
     """Routes LLM tool calls into workspace and sandbox operations."""
 
     def __init__(
