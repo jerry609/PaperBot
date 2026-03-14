@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 
 from paperbot.api import main as api_main
+from paperbot.api.auth import dependencies as auth_deps
 from paperbot.api.routes import research as research_route
 
 
@@ -12,6 +13,13 @@ class _FakeWorkflowMetricStore:
 
     def record_metric(self, *, track_id=None, **kwargs) -> None:
         self.track_ids.append(track_id)
+
+
+def _override_user_id(user_id: str):
+    def _dep_override():
+        return user_id
+
+    return _dep_override
 
 
 def test_context_route_uses_explicit_track_id_without_activation(monkeypatch):
@@ -46,18 +54,22 @@ def test_context_route_uses_explicit_track_id_without_activation(monkeypatch):
     monkeypatch.setattr(research_route, "_workflow_metric_store", metric_store)
     monkeypatch.setattr(research_route, "ContextEngine", _FakeContextEngine)
 
-    with TestClient(api_main.app) as client:
-        response = client.post(
-            "/api/research/context",
-            json={
-                "user_id": "u-explicit",
-                "query": "agentic retrieval",
-                "track_id": 42,
-                "paper_limit": 0,
-                "offline": True,
-                "include_cross_track": False,
-            },
-        )
+    app = api_main.app
+    app.dependency_overrides[auth_deps.get_required_user_id] = _override_user_id("u-explicit")
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/research/context",
+                json={
+                    "query": "agentic retrieval",
+                    "track_id": 42,
+                    "paper_limit": 0,
+                    "offline": True,
+                    "include_cross_track": False,
+                },
+            )
+    finally:
+        app.dependency_overrides.clear()
 
     assert response.status_code == 200
     assert captured["track_id"] == 42
@@ -104,11 +116,16 @@ def test_router_suggest_uses_grounded_query(monkeypatch):
     monkeypatch.setattr(research_route, "_track_router", _FakeTrackRouter())
     monkeypatch.setattr(research_route, "_workflow_query_grounder", _FakeGrounder())
 
-    with TestClient(api_main.app) as client:
-        response = client.post(
-            "/api/research/router/suggest",
-            json={"user_id": "u1", "query": "rag latency"},
-        )
+    app = api_main.app
+    app.dependency_overrides[auth_deps.get_required_user_id] = _override_user_id("u1")
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/research/router/suggest",
+                json={"query": "rag latency"},
+            )
+    finally:
+        app.dependency_overrides.clear()
 
     assert response.status_code == 200
     assert captured["query"] == "rag latency retrieval augmented generation latency"
