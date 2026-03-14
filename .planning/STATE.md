@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: MCP Server
 status: planning
-stopped_at: Completed 04-mcp-resources/04-01-PLAN.md
-last_updated: "2026-03-14T05:03:42.871Z"
+stopped_at: Completed 04-mcp-resources/04-02-PLAN.md
+last_updated: "2026-03-14T05:07:21.813Z"
 last_activity: 2026-03-14 -- Roadmap created for v1.1 milestone (phases 7-11)
 progress:
   total_phases: 9
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 7
-  completed_plans: 4
+  completed_plans: 5
   percent: 50
 ---
 
@@ -52,6 +52,7 @@ Progress: [█████░░░░░] 50%
 | Phase 03-remaining-mcp-tools P02 | 2 | 1 tasks | 6 files |
 | Phase 03-remaining-mcp-tools P03 | 5 | 2 tasks | 2 files |
 | Phase 04-mcp-resources P01 | 3 | 2 tasks | 9 files |
+| Phase 04-mcp-resources P02 | 2 | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -72,6 +73,8 @@ Recent decisions affecting current work:
 - [Phase 04-mcp-resources]: Track resources use anyio.to_thread.run_sync() because SqlAlchemyResearchStore and SqlAlchemyMemoryStore are synchronous
 - [Phase 04-mcp-resources]: track_memory passes scope_type='track' and scope_id=str(tid) to filter memories to specific track (not global scope)
 - [Phase 04-mcp-resources]: scholars.py instantiates fresh SubscriptionService() each call (no singleton caching) for always-fresh YAML config reads
+- [Phase 04-mcp-resources]: Resources registered with same import+register pattern as tools in server.py try: block
+- [Phase 04-mcp-resources]: Integration tests use inspect.getsource() for resource registration verification (Python 3.9 FastMCP constraint)
 
 ### Pending Todos
 
@@ -84,6 +87,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-14T05:03:42.868Z
-Stopped at: Completed 04-mcp-resources/04-01-PLAN.md
+Last session: 2026-03-14T05:07:21.809Z
+Stopped at: Completed 04-mcp-resources/04-02-PLAN.md
 Resume file: None
