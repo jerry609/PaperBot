@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: MCP Server
 status: planning
-stopped_at: Completed 05-transport-entry-point/05-01-PLAN.md
-last_updated: "2026-03-14T05:53:56.301Z"
+stopped_at: Completed 06-agent-skills/06-01-PLAN.md
+last_updated: "2026-03-14T06:20:33.937Z"
 last_activity: 2026-03-14 -- v2.0 roadmap created (phases 12-17)
 progress:
   total_phases: 15
   completed_phases: 4
-  total_plans: 8
-  completed_plans: 6
-  percent: 33
+  total_plans: 9
+  completed_plans: 7
+  percent: 26
 ---
 
 # Project State
@@ -62,6 +62,7 @@ Progress: [████░░░░░░░░░░░░░] 26%
 **Recent Trend:**
 - Last 3 plans: 3min, 2min, 3min
 - Trend: Stable
+| Phase 06-agent-skills P01 | 3 | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -79,6 +80,8 @@ Recent decisions affecting current work:
 - [v1.1 init] Codex bridge is a .claude/agents/ file, not PaperBot server code
 - [Phase 04-mcp-resources]: Track resources use anyio.to_thread.run_sync() because stores are sync (v2.0 removes this)
 - [Phase 05-transport-entry-point]: default HTTP port 8001 avoids FastAPI conflict; serve.py redirects logging to stderr for stdio purity
+- [Phase 06-agent-skills]: Skill tool names copied verbatim from @mcp.tool() source to prevent name mismatch bugs
+- [Phase 06-agent-skills]: Degraded Mode section included in all four skills — LLM tools return degraded=True when API key missing
 
 ### Pending Todos
 
@@ -93,6 +96,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-14T05:53:56.301Z
-Stopped at: v2.0 roadmap created (phases 12-17)
+Last session: 2026-03-14T06:20:33.934Z
+Stopped at: Completed 06-agent-skills/06-01-PLAN.md
 Resume file: None

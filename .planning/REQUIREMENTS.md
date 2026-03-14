@@ -37,7 +37,7 @@ Requirements for MCP Server milestone. Phases 1-2 shipped; phases 3-6 remain.
 
 ### Agent Skills
 
-- [ ] **MCP-13**: Agent can discover and load PaperBot workflow skills via `.claude/skills/` SKILL.md files (literature-review, paper-reproduction, trend-analysis, scholar-monitoring)
+- [x] **MCP-13**: Agent can discover and load PaperBot workflow skills via `.claude/skills/` SKILL.md files (literature-review, paper-reproduction, trend-analysis, scholar-monitoring)
 
 ## v1.1 Requirements
 
@@ -165,7 +165,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | MCP-10 | Phase 5 | Complete |
 | MCP-11 | Phase 5 | Complete |
 | MCP-12 | Phase 5 | Complete |
-| MCP-13 | Phase 6 | Pending |
+| MCP-13 | Phase 6 | Complete |
 | EVNT-01 | Phase 8 | Pending |
 | EVNT-02 | Phase 8 | Pending |
 | EVNT-03 | Phase 8 | Pending |

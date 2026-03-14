@@ -18,7 +18,7 @@
 - [ ] **Phase 3: Remaining MCP Tools** - analyze_trends, check_scholar, get_research_context, save_to_memory, export_to_obsidian
 - [x] **Phase 4: MCP Resources** - 4 resource URIs for track/scholar data access (completed 2026-03-14)
 - [x] **Phase 5: Transport & Entry Point** - stdio + Streamable HTTP transports, CLI command (completed 2026-03-14)
-- [ ] **Phase 6: Agent Skills** - SKILL.md files for core workflows
+- [x] **Phase 6: Agent Skills** - SKILL.md files for core workflows (completed 2026-03-14)
 
 ### Phase 3: Remaining MCP Tools
 **Goal**: All 9 MCP tools are registered and callable, completing the tool surface
@@ -300,7 +300,7 @@ Phases execute in numeric order: 3 -> 4 -> 5 -> 6 (v1.0) -> 7 -> 8 -> ... -> 11 
 | 3. Remaining MCP Tools | v1.0 | 2/3 | In Progress | - |
 | 4. MCP Resources | v1.0 | 2/2 | Complete | 2026-03-14 |
 | 5. Transport & Entry Point | v1.0 | 1/1 | Complete | 2026-03-14 |
-| 6. Agent Skills | v1.0 | 0/1 | Planning complete | - |
+| 6. Agent Skills | 1/1 | Complete   | 2026-03-14 | - |
 | 7. EventBus + SSE Foundation | v1.1 | 0/2 | Planning complete | - |
 | 8. Agent Event Vocabulary | v1.1 | 0/? | Not started | - |
 | 9. Three-Panel Dashboard | v1.1 | 0/? | Not started | - |
