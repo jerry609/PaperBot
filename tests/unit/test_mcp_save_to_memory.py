@@ -1,5 +1,7 @@
 """Unit tests for the save_to_memory MCP tool."""
 
+import re
+
 import pytest
 
 from paperbot.core.di import Container
@@ -125,7 +127,10 @@ class TestSaveToMemoryTool:
         store = _FakeMemoryStore(created=1, skipped=0)
         mod._store = store
         try:
-            with pytest.raises(ValueError, match="confidence must be between 0.0 and 1.0"):
+            with pytest.raises(
+                ValueError,
+                match=re.escape("confidence must be between 0.0 and 1.0"),
+            ):
                 await mod._save_to_memory_impl(
                     content="Confidence bug",
                     confidence=1.5,

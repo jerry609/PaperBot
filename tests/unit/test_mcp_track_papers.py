@@ -30,7 +30,7 @@ class _FakeResearchStore:
             "archived_at": "2026-03-14T00:00:00+00:00" if self._archived else None,
         }
 
-    def list_track_feed(self, user_id: str, track_id: int, limit: int = 50):
+    def list_track_feed(self, *, user_id: str, track_id: int, limit: int = 50):
         self.calls.append(
             {"fn": "list_track_feed", "user_id": user_id, "track_id": track_id, "limit": limit}
         )

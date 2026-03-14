@@ -20,10 +20,12 @@ Thread-safety note:
     _fan_out() uses list(self._queues) snapshot to guard against concurrent
     unsubscribe() calls inside the same event-loop tick.
 """
+
 from __future__ import annotations
 
 import asyncio
 from collections import deque
+from copy import deepcopy
 from typing import Iterable, Set, Union
 
 from paperbot.application.collaboration.message_schema import AgentEventEnvelope
@@ -71,11 +73,11 @@ class EventBusEventLog:
         if isinstance(event, AgentEventEnvelope):
             data = event.to_dict()
         else:
-            # Already a dict; accept as-is
-            data = event
+            # Already a dict; snapshot it so caller-side mutations cannot leak into the bus.
+            data = deepcopy(event)
 
         # Store in ring buffer (oldest auto-evicted when deque is full)
-        self._ring.append(data)
+        self._ring.append(deepcopy(data))
 
         # Fan out to all subscriber queues (non-blocking)
         self._fan_out(data)
@@ -106,12 +108,13 @@ class EventBusEventLog:
         when the connection closes.
         """
         q: asyncio.Queue = asyncio.Queue(maxsize=self._client_queue_size)
-
-        # Catch-up burst: deliver ring buffer in order (deque is oldest-first)
-        for event in list(self._ring):
-            self._put_nowait_drop_oldest(q, event)
-
         self._queues.add(q)
+
+        # Register first, then replay a snapshot. This favors duplicate delivery
+        # over silent gaps if an append lands during subscribe().
+        ring_snapshot = list(self._ring)
+        for event in ring_snapshot:
+            self._put_nowait_drop_oldest(q, deepcopy(event))
         return q
 
     def unsubscribe(self, q: asyncio.Queue) -> None:
@@ -130,7 +133,7 @@ class EventBusEventLog:
         that modify _queues while we iterate.
         """
         for q in list(self._queues):
-            self._put_nowait_drop_oldest(q, data)
+            self._put_nowait_drop_oldest(q, deepcopy(data))
 
     @staticmethod
     def _put_nowait_drop_oldest(q: asyncio.Queue, data: dict) -> None:

@@ -105,7 +105,8 @@ class TestPaperJudgeTool:
         assert isinstance(result, dict)
         assert result["degraded"] is True
         assert "error" in result
-        assert "API_KEY" in result["error"] or "unavailable" in result["error"].lower()
+        assert "API_KEY" not in result["error"]
+        assert "unavailable" in result["error"].lower() or "invalid" in result["error"].lower()
         assert result["judge_model"] == ""
 
     @pytest.mark.asyncio
@@ -180,3 +181,5 @@ class TestPaperJudgeTool:
 
         assert result["degraded"] is True
         assert result["judge_model"] == ""
+        assert "API_KEY" not in result["error"]
+        assert "invalid" in result["error"].lower() or "unavailable" in result["error"].lower()

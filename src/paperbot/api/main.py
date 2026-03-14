@@ -106,21 +106,25 @@ async def _startup_eventlog():
     # Phase-0: create a single event log backend and store on app.state.
     # Per-request run_id/trace_id are generated in handlers.
     # Phase-7: EventBusEventLog added as third backend for SSE fan-out delivery.
+    bus = EventBusEventLog()
+    backends = [LoggingEventLog(), bus]
     try:
-        bus = EventBusEventLog()
-        app.state.event_log = CompositeEventLog([
-            LoggingEventLog(),
-            SqlAlchemyEventLog(),
-            bus,
-        ])
+        backends.insert(1, SqlAlchemyEventLog())
     except Exception:
-        # If SQLAlchemy isn't available or DB init fails, fall back to logging only.
-        app.state.event_log = LoggingEventLog()
+        # If SQLAlchemy isn't available or DB init fails, keep SSE available via the bus.
+        pass
+    app.state.event_log = CompositeEventLog(backends)
     obsidian.initialize_obsidian_runtime(app)
 
 
 @app.on_event("shutdown")
-async def _shutdown_obsidian_runtime():
+async def _shutdown_runtime():
+    event_log = getattr(app.state, "event_log", None)
+    if event_log is not None:
+        try:
+            event_log.close()
+        except Exception:
+            pass
     obsidian.shutdown_obsidian_runtime(app)
 
 

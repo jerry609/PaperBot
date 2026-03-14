@@ -7,6 +7,7 @@ registered names, and that each skill's name field matches its directory name.
 
 No async needed — file I/O only. Pure synchronous tests.
 """
+
 import pathlib
 
 import yaml
@@ -48,18 +49,19 @@ def _parse_skill(skill_name: str):
     content = path.read_text(encoding="utf-8")
     # Split on --- delimiter — parts[0] is empty, parts[1] is YAML, parts[2] is body
     parts = content.split("---", 2)
-    if len(parts) < 2:
-        raise ValueError(f"{skill_name}/SKILL.md: no YAML frontmatter found (missing --- delimiters)")
+    if len(parts) < 3:
+        raise ValueError(
+            f"{skill_name}/SKILL.md: no YAML frontmatter found (missing --- delimiters)"
+        )
     frontmatter = yaml.safe_load(parts[1])
-    body = parts[2] if len(parts) > 2 else ""
+    body = parts[2]
     return frontmatter, body
 
 
 def test_skills_directory_exists():
     """The .claude/skills/ directory must exist."""
     assert SKILLS_DIR.is_dir(), (
-        f"Skills directory not found: {SKILLS_DIR}. "
-        "Create .claude/skills/ at the repo root."
+        f"Skills directory not found: {SKILLS_DIR}. " "Create .claude/skills/ at the repo root."
     )
 
 
@@ -67,28 +69,24 @@ def test_skill_files_exist():
     """All four expected SKILL.md files must exist."""
     for name in EXPECTED_SKILLS:
         skill_file = SKILLS_DIR / name / "SKILL.md"
-        assert skill_file.is_file(), (
-            f"Missing skill file: .claude/skills/{name}/SKILL.md"
-        )
+        assert skill_file.is_file(), f"Missing skill file: .claude/skills/{name}/SKILL.md"
 
 
 def test_skill_frontmatter_valid():
     """Each SKILL.md must have valid YAML frontmatter with 'name' and 'description'."""
     for name in EXPECTED_SKILLS:
         frontmatter, _ = _parse_skill(name)
-        assert isinstance(frontmatter, dict), (
-            f"{name}/SKILL.md: frontmatter did not parse to a dict"
-        )
-        assert "name" in frontmatter, (
-            f"{name}/SKILL.md: missing 'name' field in frontmatter"
-        )
-        assert "description" in frontmatter, (
-            f"{name}/SKILL.md: missing 'description' field in frontmatter"
-        )
+        assert isinstance(
+            frontmatter, dict
+        ), f"{name}/SKILL.md: frontmatter did not parse to a dict"
+        assert "name" in frontmatter, f"{name}/SKILL.md: missing 'name' field in frontmatter"
+        assert (
+            "description" in frontmatter
+        ), f"{name}/SKILL.md: missing 'description' field in frontmatter"
         # description must be a non-empty string
-        assert isinstance(frontmatter["description"], str) and frontmatter["description"].strip(), (
-            f"{name}/SKILL.md: 'description' must be a non-empty string"
-        )
+        assert (
+            isinstance(frontmatter["description"], str) and frontmatter["description"].strip()
+        ), f"{name}/SKILL.md: 'description' must be a non-empty string"
 
 
 def test_skill_name_matches_directory():
@@ -119,6 +117,7 @@ def test_skill_description_has_trigger_phrases():
         description = frontmatter.get("description", "")
         # Count quoted phrases (single or double quotes)
         import re
+
         single_quoted = re.findall(r"'[^']{3,}'", description)
         double_quoted = re.findall(r'"[^"]{3,}"', description)
         total_phrases = len(single_quoted) + len(double_quoted)

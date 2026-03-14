@@ -183,3 +183,30 @@ class TestLogToolCall:
         assert payload["arguments"]["query"].endswith("...[truncated]")
         assert len(payload["arguments"]["query"]) > 1000
         assert payload["result_summary"].endswith("...[truncated]")
+
+    def test_redacts_sensitive_keys_inside_nested_collections(self):
+        """Nested list/dict payloads should still redact sensitive keys before storage."""
+        from paperbot.mcp.tools._audit import log_tool_call
+
+        log = self._register_event_log()
+
+        log_tool_call(
+            tool_name="test_tool",
+            arguments={
+                "batches": [
+                    {"token": "secret-token", "value": "ok"},
+                    {"nested": {"authorization": "Bearer secret"}},
+                ]
+            },
+            result_summary={
+                "steps": [
+                    {"password": "hidden", "status": "ok"},
+                ]
+            },
+            duration_ms=1.0,
+        )
+
+        payload = log.events[0]["payload"]
+        assert payload["arguments"]["batches"][0]["token"] == "***redacted***"
+        assert payload["arguments"]["batches"][1]["nested"]["authorization"] == "***redacted***"
+        assert payload["result_summary"]["steps"][0]["password"] == "***redacted***"
