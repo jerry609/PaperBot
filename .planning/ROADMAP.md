@@ -39,11 +39,11 @@ Phases 1-6 cover the MCP server milestone. See phase files in `.planning/phases/
   2. Multiple simultaneous SSE clients each receive all events independently
   3. Existing event_log.append() calls automatically push to SSE subscribers with zero changes to calling code
   4. SSE connections clean up gracefully on client disconnect (no leaked queues or background tasks)
-**Plans**: TBD
+**Plans**: 2 plans
 
 Plans:
-- [ ] 07-01: TBD
-- [ ] 07-02: TBD
+- [ ] 07-01-PLAN.md — EventBusEventLog TDD (ring buffer + fan-out + backpressure)
+- [ ] 07-02-PLAN.md — SSE endpoint + main.py wiring + integration tests
 
 ### Phase 8: Agent Event Vocabulary
 **Goal**: Users can see meaningful, structured agent activity as it happens
@@ -114,7 +114,7 @@ Phases execute in numeric order: 7 -> 7.x -> 8 -> 8.x -> ... -> 11
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
-| 7. EventBus + SSE Foundation | v1.1 | 0/? | Not started | - |
+| 7. EventBus + SSE Foundation | v1.1 | 0/2 | Planning complete | - |
 | 8. Agent Event Vocabulary | v1.1 | 0/? | Not started | - |
 | 9. Three-Panel Dashboard | v1.1 | 0/? | Not started | - |
 | 10. Agent Board + Codex Bridge | v1.1 | 0/? | Not started | - |
