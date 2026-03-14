@@ -16,8 +16,14 @@ try:
 
     # Register tools
     from paperbot.mcp.tools import paper_search
+    from paperbot.mcp.tools import paper_judge
+    from paperbot.mcp.tools import paper_summarize
+    from paperbot.mcp.tools import relevance
 
     paper_search.register(mcp)
+    paper_judge.register(mcp)
+    paper_summarize.register(mcp)
+    relevance.register(mcp)
 
 except ImportError:
     # FastMCP not available -- create a minimal stub so tool modules
