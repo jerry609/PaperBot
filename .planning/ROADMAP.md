@@ -48,10 +48,11 @@ Plans:
   3. Agent can read `paperbot://track/{id}/memory` and receive saved research memory
   4. Agent can read `paperbot://scholars` and receive scholar subscription list
   5. All 4 resources appear in MCP resources/list
-**Plans**: TBD
+**Plans**: 2 plans
 
 Plans:
-- [ ] 04-01: TBD
+- [ ] 04-01-PLAN.md — TDD resource implementations (track_metadata, track_papers, track_memory, scholars) with unit tests
+- [ ] 04-02-PLAN.md — Server registration + integration tests for all 4 resources
 
 ### Phase 5: Transport & Entry Point
 **Goal**: MCP server is runnable via stdio (local) and Streamable HTTP (remote) with a CLI command
@@ -185,7 +186,7 @@ Phases execute in numeric order: 3 -> 4 -> 5 -> 6 (v1.0) -> 7 -> 8 -> ... -> 11 
 | 1. MCP Server Setup | v1.0 | — | Complete | 2026-03-13 |
 | 2. Core Paper Tools | v1.0 | 3/3 | Complete | 2026-03-14 |
 | 3. Remaining MCP Tools | 2/3 | In Progress|  | - |
-| 4. MCP Resources | v1.0 | 0/? | Not started | - |
+| 4. MCP Resources | v1.0 | 0/2 | Planning complete | - |
 | 5. Transport & Entry Point | v1.0 | 0/? | Not started | - |
 | 6. Agent Skills | v1.0 | 0/? | Not started | - |
 | 7. EventBus + SSE Foundation | v1.1 | 0/2 | Planning complete | - |
