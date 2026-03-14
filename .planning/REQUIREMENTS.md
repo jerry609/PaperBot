@@ -73,11 +73,61 @@ Requirements for Agent Orchestration Dashboard milestone. Each maps to roadmap p
 - [ ] **VIZ-01**: User can view an agent task dependency DAG with real-time status color updates
 - [ ] **VIZ-02**: User can see cross-agent context sharing (ScoreShareBus data flow) in the dashboard
 
+## v2.0 Requirements
+
+Requirements for PostgreSQL Migration & Data Layer Refactoring milestone.
+
+### PG Infrastructure
+
+- [ ] **PGINFRA-01**: 开发者可以通过 docker-compose up 一键启动 PostgreSQL + pgvector 本地开发环境
+- [ ] **PGINFRA-02**: Alembic env.py 支持 async 执行路径和 PG/SQLite 双路径检测
+- [ ] **PGINFRA-03**: 用户可以通过 pgloader 脚本将现有 SQLite 数据无损迁移到 PostgreSQL
+- [ ] **PGINFRA-04**: 嵌入向量数据可以从 SQLite LargeBinary 迁移到 pgvector 列
+
+### Async Data Layer
+
+- [ ] **ASYNC-01**: 全局共享单个 AsyncEngine，替代 17+ 个独立 SessionProvider 的连接池
+- [ ] **ASYNC-02**: AsyncSessionProvider 提供统一的 async session 工厂，所有 store 通过 DI 注入
+- [ ] **ASYNC-03**: 全部 17 个 Store 类的 ~170 个方法完成 sync→async 转换
+- [ ] **ASYNC-04**: ARQ worker 通过 on_job_start/on_job_complete 管理 async session 生命周期
+- [ ] **ASYNC-05**: MCP 工具层移除 anyio.to_thread.run_sync 包装，直接 await async store 方法
+
+### PG-Native Features
+
+- [ ] **PGNAT-01**: memory_items 和 document_chunks 的全文搜索从 FTS5 迁移到 tsvector + GIN 索引
+- [ ] **PGNAT-02**: 84 个 Text JSON 列迁移到 JSONB 类型，支持原生查询和 GIN 索引
+- [ ] **PGNAT-03**: 向量搜索从 sqlite-vec LargeBinary 迁移到 pgvector Vector(N) + HNSW 索引
+
+### Model Refactoring
+
+- [ ] **MODEL-01**: 所有 relationship 设置 lazy="raise"，逐 store 审计并改为显式 selectinload/joinedload
+- [ ] **MODEL-02**: 添加 NOT NULL、CHECK、UNIQUE 约束，修复 is_active int→bool 等类型问题
+- [ ] **MODEL-03**: Author 去重、冗余列清理、表合并/拆分等 schema 规范化
+
+### Test Infrastructure
+
+- [ ] **TEST-01**: 建立 testcontainers[postgres] CI fixture，替代 SQLite in-memory 测试数据库
+- [ ] **TEST-02**: 现有测试套件在 PostgreSQL 上全部通过
+- [ ] **TEST-03**: async 测试基础设施：pytest-asyncio async fixture + 每测试事务回滚隔离
+- [ ] **TEST-04**: 关键查询路径的性能基准测试（全文搜索、向量搜索、JSONB 查询）
+
+### CI Integration
+
+- [ ] **CI-01**: GitHub Actions 配置 PostgreSQL service container，所有测试在 PG 上运行
+- [ ] **CI-02**: CI 流水线包含 Alembic 迁移验证（fresh DB upgrade head + downgrade 回退测试）
+- [ ] **CI-03**: CI 中运行 SQLite→PG 数据迁移冒烟测试，验证 pgloader 脚本正确性
+
+### Monitoring
+
+- [ ] **MON-01**: AsyncEngine 连接池指标暴露（pool_size、checkedout、overflow）可通过 API 查询
+- [ ] **MON-02**: 慢查询日志记录（超过阈值的 SQL 自动 warning 级别记录）
+- [ ] **MON-03**: 数据库健康检查端点（/api/health/db），验证连接可用性和迁移版本
+
 ## Future Requirements
 
 Deferred to future milestone. Tracked but not in current roadmap.
 
-(None -- all proposed features included in v1.1)
+(None)
 
 ## Out of Scope
 
@@ -131,6 +181,31 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CDX-03 | Phase 10 | Pending |
 | VIZ-01 | Phase 11 | Pending |
 | VIZ-02 | Phase 11 | Pending |
+| PGINFRA-01 | TBD | Pending |
+| PGINFRA-02 | TBD | Pending |
+| PGINFRA-03 | TBD | Pending |
+| PGINFRA-04 | TBD | Pending |
+| ASYNC-01 | TBD | Pending |
+| ASYNC-02 | TBD | Pending |
+| ASYNC-03 | TBD | Pending |
+| ASYNC-04 | TBD | Pending |
+| ASYNC-05 | TBD | Pending |
+| PGNAT-01 | TBD | Pending |
+| PGNAT-02 | TBD | Pending |
+| PGNAT-03 | TBD | Pending |
+| MODEL-01 | TBD | Pending |
+| MODEL-02 | TBD | Pending |
+| MODEL-03 | TBD | Pending |
+| TEST-01 | TBD | Pending |
+| TEST-02 | TBD | Pending |
+| TEST-03 | TBD | Pending |
+| TEST-04 | TBD | Pending |
+| CI-01 | TBD | Pending |
+| CI-02 | TBD | Pending |
+| CI-03 | TBD | Pending |
+| MON-01 | TBD | Pending |
+| MON-02 | TBD | Pending |
+| MON-03 | TBD | Pending |
 
 **Coverage:**
 - v1.0 requirements: 17 total (4 shipped, 13 remaining)
@@ -139,7 +214,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 - v1.1 requirements: 15 total
 - Mapped to phases: 15
 - Unmapped: 0
+- v2.0 requirements: 24 total
+- Mapped to phases: 0 (awaiting roadmap)
+- Unmapped: 24
 
 ---
 *Requirements defined: 2026-03-14*
-*Last updated: 2026-03-14 after v1.0 phases 3-6 requirements defined*
+*Last updated: 2026-03-14 after v2.0 requirements defined*
