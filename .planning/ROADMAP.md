@@ -184,7 +184,7 @@ Phases execute in numeric order: 3 -> 4 -> 5 -> 6 (v1.0) -> 7 -> 8 -> ... -> 11 
 |-------|-----------|----------------|--------|-----------|
 | 1. MCP Server Setup | v1.0 | — | Complete | 2026-03-13 |
 | 2. Core Paper Tools | v1.0 | 3/3 | Complete | 2026-03-14 |
-| 3. Remaining MCP Tools | v1.0 | 0/3 | Planning complete | - |
+| 3. Remaining MCP Tools | 1/3 | In Progress|  | - |
 | 4. MCP Resources | v1.0 | 0/? | Not started | - |
 | 5. Transport & Entry Point | v1.0 | 0/? | Not started | - |
 | 6. Agent Skills | v1.0 | 0/? | Not started | - |
