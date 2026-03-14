@@ -63,27 +63,27 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| EVNT-01 | — | Pending |
-| EVNT-02 | — | Pending |
-| EVNT-03 | — | Pending |
-| EVNT-04 | — | Pending |
-| DASH-01 | — | Pending |
-| DASH-02 | — | Pending |
-| DASH-03 | — | Pending |
-| DASH-04 | — | Pending |
-| FILE-01 | — | Pending |
-| FILE-02 | — | Pending |
-| CDX-01 | — | Pending |
-| CDX-02 | — | Pending |
-| CDX-03 | — | Pending |
-| VIZ-01 | — | Pending |
-| VIZ-02 | — | Pending |
+| EVNT-01 | Phase 8 | Pending |
+| EVNT-02 | Phase 8 | Pending |
+| EVNT-03 | Phase 8 | Pending |
+| EVNT-04 | Phase 7 | Pending |
+| DASH-01 | Phase 9 | Pending |
+| DASH-02 | Phase 10 | Pending |
+| DASH-03 | Phase 10 | Pending |
+| DASH-04 | Phase 9 | Pending |
+| FILE-01 | Phase 9 | Pending |
+| FILE-02 | Phase 9 | Pending |
+| CDX-01 | Phase 10 | Pending |
+| CDX-02 | Phase 10 | Pending |
+| CDX-03 | Phase 10 | Pending |
+| VIZ-01 | Phase 11 | Pending |
+| VIZ-02 | Phase 11 | Pending |
 
 **Coverage:**
 - v1.1 requirements: 15 total
-- Mapped to phases: 0
-- Unmapped: 15 (pending roadmap creation)
+- Mapped to phases: 15
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-03-14*
-*Last updated: 2026-03-14 after initial definition*
+*Last updated: 2026-03-14 after roadmap creation (phases 7-11)*

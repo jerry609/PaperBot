@@ -1,48 +1,60 @@
 # Project State
 
-## Current Position
-
-Phase: 02-core-paper-tools
-Plan: 03 (next to execute)
-Status: In progress
-Last activity: 2026-03-14 -- Completed 02-02 (paper_judge, paper_summarize, relevance_assess tools)
-
-## Progress
-
-[=====-----] 2/3 plans complete in phase 02
-
 ## Project Reference
 
-See: .planning/PROJECT.md (if exists)
+See: .planning/PROJECT.md (updated 2026-03-14)
 
 **Core value:** Paper-specific capability layer surfaced as standard MCP tools + agent orchestration dashboard
-**Current focus:** v1.1 Agent Orchestration Dashboard
+**Current focus:** v1.1 Agent Orchestration Dashboard -- Phase 7 (EventBus + SSE Foundation)
 
-## Accumulated Context
+## Current Position
 
-- Dev branch synced to origin/dev at 2e5173d (2026-03-14)
-- v1.0 MCP server milestone planned on fix/merge-group-checks branch (not yet executed)
-- Existing agent infrastructure: codex_dispatcher.py, claude_commander.py, AgentEventEnvelope
-- Studio page has Monaco editor + XTerm terminal -- will be integrated into agent dashboard
-- User decisions captured during milestone questioning (2026-03-14)
+Phase: 7 of 11 (EventBus + SSE Foundation)
+Plan: 0 of ? in current phase
+Status: Ready to plan
+Last activity: 2026-03-14 -- Roadmap created for v1.1 milestone (phases 7-11)
 
-## Decisions
-
-- [02-01] Used try/except ImportError for FastMCP import to handle Python 3.9 where mcp package is unavailable
-- [02-01] Exposed _paper_search_impl() as module-level function for direct test invocation without FastMCP dependency
-- [02-01] Created bootstrap test to verify server module imports and tool registration functions exist
-- [02-02] Used module-level _impl async functions for all three tools, matching paper_search pattern from Plan 01
-- [02-02] Degraded detection is tool-specific: judge checks judge_model empty, summarize checks empty output, relevance checks Fallback in reason
-- [02-02] All sync service calls wrapped with anyio.to_thread.run_sync(lambda: ...) pattern
+Progress: [░░░░░░░░░░] 0% (v1.1 milestone)
 
 ## Performance Metrics
 
-| Phase | Plan | Duration | Tasks | Files |
-|-------|------|----------|-------|-------|
-| 02    | 01   | 4min     | 2     | 8     |
-| 02    | 02   | 8min     | 2     | 7     |
+**Velocity:**
+- Total plans completed: 2 (from v1.0 phase 02)
+- Average duration: 6 min
+- Total execution time: 0.2 hours
 
-## Session Info
+**By Phase:**
 
-- **Last session:** 2026-03-14T02:40:10Z
-- **Stopped at:** Completed 02-02-PLAN.md
+| Phase | Plans | Total | Avg/Plan |
+|-------|-------|-------|----------|
+| 02 | 2/3 | 12min | 6min |
+
+**Recent Trend:**
+- Last 2 plans: 4min, 8min
+- Trend: Stable
+
+## Accumulated Context
+
+### Decisions
+
+Decisions logged in PROJECT.md Key Decisions table.
+Recent decisions affecting current work:
+
+- [v1.1 init] EventBus as CompositeEventLog backend -- extends existing event system, not parallel
+- [v1.1 init] Codex bridge is a .claude/agents/ file, not PaperBot server code
+- [v1.1 init] Zero new dependencies -- builds on existing packages
+
+### Pending Todos
+
+None yet.
+
+### Blockers/Concerns
+
+- v1.0 MCP server (phases 1-6) must be functional before v1.1 work begins
+- Codex CLI JSONL output format should be tested with real `codex exec --json` before building parser
+
+## Session Continuity
+
+Last session: 2026-03-14
+Stopped at: v1.1 roadmap created (phases 7-11)
+Resume file: None
