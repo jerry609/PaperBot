@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 _SENSITIVE_KEY_PARTS = frozenset({"api_key", "token", "password", "secret", "authorization"})
 _MAX_AUDIT_TEXT_LENGTH = 1000
 _MAX_AUDIT_COLLECTION_ITEMS = 20
+_MAX_AUDIT_NESTING_DEPTH = 4
 
 
 def _truncate_text(value: str) -> str:
@@ -31,6 +32,13 @@ def _truncate_text(value: str) -> str:
     if len(text) <= _MAX_AUDIT_TEXT_LENGTH:
         return text
     return text[:_MAX_AUDIT_TEXT_LENGTH] + "...[truncated]"
+
+
+def _truncate_json(value: Any) -> str:
+    try:
+        return _truncate_text(json.dumps(value, ensure_ascii=False, default=str))
+    except TypeError:
+        return _truncate_text(str(value))
 
 
 def _is_sensitive_key(key: str) -> bool:
@@ -48,12 +56,6 @@ def _sanitize_value(value: Any, *, key: Optional[str] = None, depth: int = 0) ->
     if isinstance(value, str):
         return _truncate_text(value)
 
-    if depth >= 2:
-        try:
-            return _truncate_text(json.dumps(value, ensure_ascii=False, default=str))
-        except TypeError:
-            return _truncate_text(str(value))
-
     if isinstance(value, dict):
         sanitized: Dict[str, Any] = {}
         for index, (child_key, child_value) in enumerate(value.items()):
@@ -66,6 +68,8 @@ def _sanitize_value(value: Any, *, key: Optional[str] = None, depth: int = 0) ->
                 key=normalized_key,
                 depth=depth + 1,
             )
+        if depth >= _MAX_AUDIT_NESTING_DEPTH:
+            return _truncate_json(sanitized)
         return sanitized
 
     if isinstance(value, (list, tuple, set)):
@@ -75,7 +79,12 @@ def _sanitize_value(value: Any, *, key: Optional[str] = None, depth: int = 0) ->
         ]
         if len(items) > _MAX_AUDIT_COLLECTION_ITEMS:
             sanitized_items.append("...[truncated]")
+        if depth >= _MAX_AUDIT_NESTING_DEPTH:
+            return _truncate_json(sanitized_items)
         return sanitized_items
+
+    if depth >= 2:
+        return _truncate_json(value)
 
     return _truncate_text(str(value))
 

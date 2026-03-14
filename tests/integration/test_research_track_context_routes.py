@@ -112,7 +112,7 @@ def test_track_context_route_returns_consolidated_snapshot(tmp_path, monkeypatch
         with TestClient(app) as client:
             response = client.get(f"/api/research/tracks/{track_id}/context")
     finally:
-        app.dependency_overrides.clear()
+        app.dependency_overrides.pop(auth_deps.get_required_user_id, None)
 
     assert response.status_code == 200
     payload = response.json()
@@ -128,7 +128,9 @@ def test_track_context_route_returns_consolidated_snapshot(tmp_path, monkeypatch
     assert payload["feedback"]["actions"]["save"] == 1
     assert payload["feedback"]["actions"]["like"] == 1
     assert payload["saved_papers"]["total_items"] == 1
-    assert payload["saved_papers"]["recent_items"][0]["paper"]["title"] == "Context-Routed Retrieval"
+    assert (
+        payload["saved_papers"]["recent_items"][0]["paper"]["title"] == "Context-Routed Retrieval"
+    )
     assert "feedback_coverage" in payload["eval_summary"]
 
 
@@ -147,7 +149,7 @@ def test_track_context_route_returns_404_for_missing_or_inaccessible_track(tmp_p
         with TestClient(app) as client:
             wrong_user = client.get(f"/api/research/tracks/{track_id}/context")
     finally:
-        app.dependency_overrides.clear()
+        app.dependency_overrides.pop(auth_deps.get_required_user_id, None)
 
     assert missing.status_code == 404
     assert wrong_user.status_code == 404

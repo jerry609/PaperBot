@@ -21,6 +21,13 @@ class _FakeEmptyTrendAnalyzer:
         return ""
 
 
+class _FailIfCalledTrendAnalyzer:
+    """Fails fast if analyze() is invoked unexpectedly."""
+
+    def analyze(self, *, topic: str, items) -> str:
+        raise AssertionError("analyze() should not be called")
+
+
 class TestAnalyzeTrendsTool:
     def setup_method(self):
         Container._instance = None
@@ -62,6 +69,8 @@ class TestAnalyzeTrendsTool:
         assert isinstance(result, dict)
         assert result["degraded"] is True
         assert "error" in result
+        assert "API_KEY" not in result["error"]
+        assert "unavailable" in result["error"].lower() or "empty" in result["error"].lower()
         assert result["trend_analysis"] == ""
         assert result["topic"] == "llms"
         assert result["paper_count"] == 2
@@ -91,10 +100,10 @@ class TestAnalyzeTrendsTool:
 
     @pytest.mark.asyncio
     async def test_treats_missing_papers_as_empty_list(self):
-        """_analyze_trends_impl tolerates papers=None and reports zero paper_count."""
+        """_analyze_trends_impl skips analyzer work when papers is missing."""
         import paperbot.mcp.tools.analyze_trends as mod
 
-        mod._analyzer = _FakeTrendAnalyzer()
+        mod._analyzer = _FailIfCalledTrendAnalyzer()
         try:
             result = await mod._analyze_trends_impl(
                 topic="llms",
@@ -104,3 +113,5 @@ class TestAnalyzeTrendsTool:
             mod._analyzer = None
 
         assert result["paper_count"] == 0
+        assert result["trend_analysis"] == ""
+        assert result.get("degraded") is not True

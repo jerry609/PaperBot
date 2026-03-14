@@ -37,6 +37,11 @@ class _FakeMemoryStore:
         return self._memories
 
 
+class _FailingMemoryStore:
+    def list_memories(self, **kwargs):
+        raise RuntimeError("db unavailable")
+
+
 class TestTrackMemoryResource:
     @pytest.mark.asyncio
     async def test_returns_memories_for_track(self):
@@ -101,3 +106,18 @@ class TestTrackMemoryResource:
 
         data = json.loads(result)
         assert "error" in data
+
+    @pytest.mark.asyncio
+    async def test_returns_error_object_when_store_lookup_fails(self):
+        """_track_memory_impl returns a stable JSON error object on store failures."""
+        import paperbot.mcp.resources.track_memory as mod
+
+        mod._store = _FailingMemoryStore()
+        try:
+            result = await mod._track_memory_impl(user_id=TEST_USER_ID, track_id="42")
+        finally:
+            mod._store = None
+
+        data = json.loads(result)
+        assert data["error"] == "failed to list memories"
+        assert data["track_id"] == "42"

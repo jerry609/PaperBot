@@ -44,15 +44,21 @@ async def _track_memory_impl(user_id: str, track_id: str) -> str:
         return json.dumps({"error": f"Invalid track_id: {track_id!r}. Must be an integer."})
 
     resolved_user_id = require_user_identity(user_id)
-    store = _get_store()
-    memories = await anyio.to_thread.run_sync(
-        lambda: store.list_memories(
-            user_id=resolved_user_id,
-            scope_type="track",
-            scope_id=str(tid),
-            limit=100,
+    try:
+        store = _get_store()
+        memories = await anyio.to_thread.run_sync(
+            lambda: store.list_memories(
+                user_id=resolved_user_id,
+                scope_type="track",
+                scope_id=str(tid),
+                limit=100,
+            )
         )
-    )
+    except Exception:
+        logger.exception(
+            "track_memory resource failed for user_id=%s track_id=%s", resolved_user_id, tid
+        )
+        return json.dumps({"error": "failed to list memories", "track_id": str(tid)})
 
     return json.dumps(memories)
 

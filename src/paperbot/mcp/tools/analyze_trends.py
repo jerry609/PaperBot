@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import anyio
 
@@ -33,7 +33,7 @@ def _get_analyzer():
 
 async def _analyze_trends_impl(
     topic: str,
-    papers: List[Dict[str, Any]],
+    papers: Optional[List[Dict[str, Any]]],
     _run_id: str = "",
 ) -> dict:
     """Core implementation of analyze_trends, callable from both MCP registration and tests.
@@ -54,6 +54,25 @@ async def _analyze_trends_impl(
     args = {"topic": topic, "paper_count": len(safe_papers)}
 
     try:
+        if not safe_papers:
+            output: Dict[str, Any] = {
+                "trend_analysis": "",
+                "topic": topic,
+                "paper_count": 0,
+            }
+            log_tool_call(
+                tool_name="analyze_trends",
+                arguments=args,
+                result_summary={
+                    "topic": topic,
+                    "paper_count": 0,
+                    "degraded": False,
+                },
+                duration_ms=(time.monotonic() - start) * 1000,
+                run_id=_run_id or None,
+            )
+            return output
+
         analyzer = _get_analyzer()
         result = await anyio.to_thread.run_sync(
             lambda: analyzer.analyze(topic=topic, items=safe_papers)
@@ -68,9 +87,7 @@ async def _analyze_trends_impl(
         # Detect degraded LLM response (empty string when LLM unavailable)
         if not result or not result.strip():
             output["degraded"] = True
-            output["error"] = (
-                "LLM service unavailable. " "Configure OPENAI_API_KEY or ANTHROPIC_API_KEY."
-            )
+            output["error"] = "LLM response unavailable or empty. Check provider configuration."
 
         log_tool_call(
             tool_name="analyze_trends",
@@ -103,7 +120,7 @@ def register(mcp) -> None:
     @mcp.tool()
     async def analyze_trends(
         topic: str,
-        papers: List[Dict[str, Any]],
+        papers: Optional[List[Dict[str, Any]]],
         _run_id: str = "",
     ) -> dict:
         """Analyze trends across a set of papers for a given topic.

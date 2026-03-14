@@ -8,6 +8,7 @@ src/paperbot/infrastructure/event_log/event_bus_event_log.py.
 asyncio_mode = "strict" in pyproject.toml — every async test must carry
 @pytest.mark.asyncio explicitly.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -136,3 +137,67 @@ async def test_composite_includes_bus():
     ring_item = list(bus._ring)[0]
     assert isinstance(ring_item, dict)
     assert ring_item["type"] == "test_event"
+
+
+@pytest.mark.asyncio
+async def test_append_snapshots_mutable_input_for_ring_and_queue():
+    """Mutating the caller's dict after append() must not affect stored/queued events."""
+    bus = EventBusEventLog()
+    q: asyncio.Queue = bus.subscribe()
+
+    event = {"type": "mutable", "payload": {"count": 1}}
+    bus.append(event)
+    event["payload"]["count"] = 99
+
+    queued = q.get_nowait()
+    ring_item = list(bus._ring)[0]
+
+    assert queued["payload"]["count"] == 1
+    assert ring_item["payload"]["count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_subscribers_receive_independent_event_copies():
+    """Mutating one subscriber's item must not leak to other subscribers or the ring buffer."""
+    bus = EventBusEventLog()
+    q1: asyncio.Queue = bus.subscribe()
+    q2: asyncio.Queue = bus.subscribe()
+
+    bus.append({"type": "mutable", "payload": {"count": 1}})
+
+    item1 = q1.get_nowait()
+    item2 = q2.get_nowait()
+    item1["payload"]["count"] = 7
+
+    ring_item = list(bus._ring)[0]
+    assert item2["payload"]["count"] == 1
+    assert ring_item["payload"]["count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_subscribe_registers_before_replay_to_avoid_live_event_gaps(monkeypatch):
+    """A live append during replay should still reach the new subscriber."""
+    bus = EventBusEventLog()
+    bus.append({"type": "seed", "payload": {"seq": "seed"}})
+
+    original_put = EventBusEventLog._put_nowait_drop_oldest
+    injected = {"done": False}
+
+    def _put_with_live_append(q: asyncio.Queue, data: dict) -> None:
+        if not injected["done"] and data.get("payload", {}).get("seq") == "seed":
+            injected["done"] = True
+            bus.append({"type": "live", "payload": {"seq": "live"}})
+        original_put(q, data)
+
+    monkeypatch.setattr(
+        EventBusEventLog,
+        "_put_nowait_drop_oldest",
+        staticmethod(_put_with_live_append),
+    )
+
+    q = bus.subscribe()
+    items = [q.get_nowait() for _ in range(q.qsize())]
+    seqs = [item["payload"]["seq"] for item in items]
+
+    assert "seed" in seqs
+    assert "live" in seqs

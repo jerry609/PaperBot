@@ -166,14 +166,16 @@ class TestPyprojectScripts:
         assert "run_cli" in content
 
     def test_mcp_fastmcp_in_dependencies(self):
-        """pyproject.toml dependencies include mcp[fastmcp]."""
+        """pyproject.toml keeps mcp[fastmcp] gated behind the Python 3.10 marker."""
         content = (REPO_ROOT / "pyproject.toml").read_text()
         assert "mcp[fastmcp]" in content
+        assert "python_version >= '3.10'" in content
 
     def test_requirements_txt_has_mcp_fastmcp(self):
-        """requirements.txt includes mcp[fastmcp]."""
+        """requirements.txt keeps mcp[fastmcp] gated behind the Python 3.10 marker."""
         content = (REPO_ROOT / "requirements.txt").read_text()
         assert "mcp[fastmcp]" in content
+        assert 'python_version >= "3.10"' in content
 
 
 # ---------------------------------------------------------------------------

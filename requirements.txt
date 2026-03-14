@@ -109,4 +109,4 @@ email-validator>=2.0.0
 resend>=0.7.0
 
 # MCP server transport
-mcp[fastmcp]>=1.8.0,<2.0.0
+mcp[fastmcp]>=1.8.0,<2.0.0; python_version >= "3.10"
