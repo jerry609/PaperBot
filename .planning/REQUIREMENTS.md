@@ -181,31 +181,31 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CDX-03 | Phase 10 | Pending |
 | VIZ-01 | Phase 11 | Pending |
 | VIZ-02 | Phase 11 | Pending |
-| PGINFRA-01 | TBD | Pending |
-| PGINFRA-02 | TBD | Pending |
-| PGINFRA-03 | TBD | Pending |
-| PGINFRA-04 | TBD | Pending |
-| ASYNC-01 | TBD | Pending |
-| ASYNC-02 | TBD | Pending |
-| ASYNC-03 | TBD | Pending |
-| ASYNC-04 | TBD | Pending |
-| ASYNC-05 | TBD | Pending |
-| PGNAT-01 | TBD | Pending |
-| PGNAT-02 | TBD | Pending |
-| PGNAT-03 | TBD | Pending |
-| MODEL-01 | TBD | Pending |
-| MODEL-02 | TBD | Pending |
-| MODEL-03 | TBD | Pending |
-| TEST-01 | TBD | Pending |
-| TEST-02 | TBD | Pending |
-| TEST-03 | TBD | Pending |
-| TEST-04 | TBD | Pending |
-| CI-01 | TBD | Pending |
-| CI-02 | TBD | Pending |
-| CI-03 | TBD | Pending |
-| MON-01 | TBD | Pending |
-| MON-02 | TBD | Pending |
-| MON-03 | TBD | Pending |
+| PGINFRA-01 | Phase 12 | Pending |
+| PGINFRA-02 | Phase 12 | Pending |
+| PGINFRA-03 | Phase 17 | Pending |
+| PGINFRA-04 | Phase 17 | Pending |
+| ASYNC-01 | Phase 14 | Pending |
+| ASYNC-02 | Phase 14 | Pending |
+| ASYNC-03 | Phase 14 | Pending |
+| ASYNC-04 | Phase 14 | Pending |
+| ASYNC-05 | Phase 14 | Pending |
+| PGNAT-01 | Phase 15 | Pending |
+| PGNAT-02 | Phase 15 | Pending |
+| PGNAT-03 | Phase 15 | Pending |
+| MODEL-01 | Phase 16 | Pending |
+| MODEL-02 | Phase 16 | Pending |
+| MODEL-03 | Phase 16 | Pending |
+| TEST-01 | Phase 13 | Pending |
+| TEST-02 | Phase 13 | Pending |
+| TEST-03 | Phase 13 | Pending |
+| TEST-04 | Phase 13 | Pending |
+| CI-01 | Phase 17 | Pending |
+| CI-02 | Phase 17 | Pending |
+| CI-03 | Phase 17 | Pending |
+| MON-01 | Phase 17 | Pending |
+| MON-02 | Phase 17 | Pending |
+| MON-03 | Phase 17 | Pending |
 
 **Coverage:**
 - v1.0 requirements: 17 total (4 shipped, 13 remaining)
@@ -214,10 +214,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 - v1.1 requirements: 15 total
 - Mapped to phases: 15
 - Unmapped: 0
-- v2.0 requirements: 24 total
-- Mapped to phases: 0 (awaiting roadmap)
-- Unmapped: 24
+- v2.0 requirements: 25 total (counted: PGINFRA x4, ASYNC x5, PGNAT x3, MODEL x3, TEST x4, CI x3, MON x3)
+- Mapped to phases: 25
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-03-14*
-*Last updated: 2026-03-14 after v2.0 requirements defined*
+*Last updated: 2026-03-14 after v2.0 roadmap created (phases 12-17)*
