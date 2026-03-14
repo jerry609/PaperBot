@@ -71,6 +71,7 @@ class E2EExecutionPolicy:
         sandbox: SharedSandbox,
         paper_slug: str,
         context_pack: Optional[dict] = None,
+        allow_missing_entry_point: bool = False,
     ) -> "E2EExecutionPolicy":
         """Build policy from VM project state and optional context pack."""
         import os
@@ -93,10 +94,12 @@ class E2EExecutionPolicy:
         if not entry_command and not entry_point:
             entry_point = detect_entry_point(sandbox, paper_slug)
 
-        if not entry_command and not entry_point:
-            # Do NOT disable E2E — fall through with entry_point=None.
-            # The orchestrator will ask Commander to generate one.
-            pass
+        if not entry_command and not entry_point and not allow_missing_entry_point:
+            return cls(
+                enabled=False,
+                timeout_seconds=timeout,
+                max_repair_attempts=max_repair,
+            )
 
         return cls(
             enabled=True,

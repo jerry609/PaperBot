@@ -136,6 +136,12 @@ class TestSandboxToolExecutor:
         assert "error" in result.lower()
 
     @pytest.mark.asyncio
+    async def test_windows_absolute_path_blocked(self):
+        te, _ = _make()
+        result = await te.execute("read_file", {"path": "C:/Windows/System32/drivers/etc/hosts"})
+        assert "error" in result.lower()
+
+    @pytest.mark.asyncio
     async def test_task_done(self):
         te, _ = _make()
         result = await te.execute("task_done", {"summary": "all good"})
