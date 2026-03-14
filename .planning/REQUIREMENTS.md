@@ -18,9 +18,9 @@ Requirements for MCP Server milestone. Phases 1-2 shipped; phases 3-6 remain.
 
 - [x] **MCP-01**: Agent can analyze trends across a set of papers via `analyze_trends` MCP tool
 - [x] **MCP-02**: Agent can check a scholar's recent publications and activity via `check_scholar` MCP tool
-- [ ] **MCP-03**: Agent can retrieve research context for a track via `get_research_context` MCP tool
-- [ ] **MCP-04**: Agent can save research findings to memory via `save_to_memory` MCP tool
-- [ ] **MCP-05**: Agent can export papers/notes to Obsidian vault format via `export_to_obsidian` MCP tool
+- [x] **MCP-03**: Agent can retrieve research context for a track via `get_research_context` MCP tool
+- [x] **MCP-04**: Agent can save research findings to memory via `save_to_memory` MCP tool
+- [x] **MCP-05**: Agent can export papers/notes to Obsidian vault format via `export_to_obsidian` MCP tool
 
 ### MCP Resources
 
@@ -105,9 +105,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | MCP-S4 | Phase 2 | Complete |
 | MCP-01 | Phase 3 | Complete |
 | MCP-02 | Phase 3 | Complete |
-| MCP-03 | Phase 3 | Pending |
-| MCP-04 | Phase 3 | Pending |
-| MCP-05 | Phase 3 | Pending |
+| MCP-03 | Phase 3 | Complete |
+| MCP-04 | Phase 3 | Complete |
+| MCP-05 | Phase 3 | Complete |
 | MCP-06 | Phase 4 | Pending |
 | MCP-07 | Phase 4 | Pending |
 | MCP-08 | Phase 4 | Pending |
