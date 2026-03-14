@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: MCP Server
 status: planning
-stopped_at: Completed 03-remaining-mcp-tools/03-03-PLAN.md
-last_updated: "2026-03-14T04:35:18.053Z"
+stopped_at: Completed 04-mcp-resources/04-01-PLAN.md
+last_updated: "2026-03-14T05:03:42.871Z"
 last_activity: 2026-03-14 -- Roadmap created for v1.1 milestone (phases 7-11)
 progress:
   total_phases: 9
   completed_phases: 1
-  total_plans: 5
-  completed_plans: 3
+  total_plans: 7
+  completed_plans: 4
   percent: 50
 ---
 
@@ -51,6 +51,7 @@ Progress: [█████░░░░░] 50%
 | Phase 03-remaining-mcp-tools P01 | 2 | 1 tasks | 4 files |
 | Phase 03-remaining-mcp-tools P02 | 2 | 1 tasks | 6 files |
 | Phase 03-remaining-mcp-tools P03 | 5 | 2 tasks | 2 files |
+| Phase 04-mcp-resources P01 | 3 | 2 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -68,6 +69,9 @@ Recent decisions affecting current work:
 - [Phase 03-remaining-mcp-tools]: save_to_memory defaults invalid MemoryKind to 'note' with logger.warning rather than raising, for safer agent workflows
 - [Phase 03-remaining-mcp-tools]: export_to_obsidian calls _render_paper_note() directly (private method, intentional) for pure in-memory rendering with no filesystem I/O
 - [Phase 03-remaining-mcp-tools]: All 9 MCP tools registered in single FastMCP server via sequential import+register pattern
+- [Phase 04-mcp-resources]: Track resources use anyio.to_thread.run_sync() because SqlAlchemyResearchStore and SqlAlchemyMemoryStore are synchronous
+- [Phase 04-mcp-resources]: track_memory passes scope_type='track' and scope_id=str(tid) to filter memories to specific track (not global scope)
+- [Phase 04-mcp-resources]: scholars.py instantiates fresh SubscriptionService() each call (no singleton caching) for always-fresh YAML config reads
 
 ### Pending Todos
 
@@ -80,6 +84,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-14T04:32:00.548Z
-Stopped at: Completed 03-remaining-mcp-tools/03-03-PLAN.md
+Last session: 2026-03-14T05:03:42.868Z
+Stopped at: Completed 04-mcp-resources/04-01-PLAN.md
 Resume file: None
