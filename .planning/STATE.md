@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: MCP Server
 status: planning
-stopped_at: Completed 04-mcp-resources/04-02-PLAN.md
-last_updated: "2026-03-14"
-last_activity: 2026-03-14 -- v2.0 milestone added (PG migration + async + model refactoring)
+stopped_at: Completed 05-transport-entry-point/05-01-PLAN.md
+last_updated: "2026-03-14T05:51:03.467Z"
+last_activity: 2026-03-14 -- Roadmap created for v1.1 milestone (phases 7-11)
 progress:
   total_phases: 9
-  completed_phases: 2
-  total_plans: 7
-  completed_plans: 5
+  completed_phases: 3
+  total_plans: 8
+  completed_plans: 6
   percent: 50
 ---
 
@@ -58,6 +58,7 @@ Target: PG migration + async data layer + systematic model refactoring
 | Phase 03-remaining-mcp-tools P03 | 5 | 2 tasks | 2 files |
 | Phase 04-mcp-resources P01 | 3 | 2 tasks | 9 files |
 | Phase 04-mcp-resources P02 | 2 | 2 tasks | 2 files |
+| Phase 05-transport-entry-point P01 | 3min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -84,6 +85,7 @@ Recent decisions affecting current work:
 - [v2.0 init] Async data layer: sync Session → AsyncSession (asyncpg), all stores
 - [v2.0 init] Systematic model refactoring: normalize, add constraints, merge/split tables
 - [v2.0 init] Use PG-native features: tsvector (replace FTS5), JSONB (replace JSON text)
+- [Phase 05-transport-entry-point]: [Phase 05-01]: _get_mcp() helper for testable mcp lazy import; default HTTP port 8001 avoids FastAPI conflict; serve.py redirects logging to stderr for stdio purity
 
 ### Pending Todos
 
@@ -100,6 +102,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-14
-Stopped at: v2.0 milestone initialization
+Last session: 2026-03-14T05:51:03.462Z
+Stopped at: Completed 05-transport-entry-point/05-01-PLAN.md
 Resume file: None
