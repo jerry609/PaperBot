@@ -19,9 +19,7 @@ _CANNED_CONTEXT = {
 class _FakeContextEngine:
     """Fake ContextEngine returning a canned context pack dict."""
 
-    async def build_context_pack(
-        self, user_id: str, query: str, track_id=None
-    ):
+    async def build_context_pack(self, user_id: str, query: str, track_id=None):
         return dict(_CANNED_CONTEXT)
 
 
@@ -31,11 +29,27 @@ class _SpyContextEngine:
     def __init__(self):
         self.calls = []
 
-    async def build_context_pack(
-        self, user_id: str, query: str, track_id=None
-    ):
+    async def build_context_pack(self, user_id: str, query: str, track_id=None):
         self.calls.append({"user_id": user_id, "query": query, "track_id": track_id})
         return dict(_CANNED_CONTEXT)
+
+
+class _CaptureContextEngine:
+    """Fake ContextEngine that records constructor kwargs."""
+
+    last_kwargs = None
+
+    def __init__(self, **kwargs):
+        type(self).last_kwargs = kwargs
+
+
+class _CaptureContextEngineConfig:
+    """Fake ContextEngineConfig that records constructor kwargs."""
+
+    last_kwargs = None
+
+    def __init__(self, **kwargs):
+        type(self).last_kwargs = kwargs
 
 
 class TestGetResearchContextTool:
@@ -102,3 +116,44 @@ class TestGetResearchContextTool:
         event = log.events[0]
         assert event["payload"]["tool"] == "get_research_context"
         assert event["workflow"] == "mcp"
+
+    def test_get_engine_wires_search_and_grounding_dependencies(self, monkeypatch):
+        """_get_engine builds a ContextEngine with search, paper store, evidence, and grounding."""
+        import paperbot.mcp.tools.get_research_context as mod
+
+        mod._engine = None
+        mod._paper_store = None
+        mod._paper_search_service = None
+        mod._document_index_store = None
+        mod._query_grounder = None
+        _CaptureContextEngine.last_kwargs = None
+        _CaptureContextEngineConfig.last_kwargs = None
+
+        monkeypatch.setattr(mod, "_get_paper_store", lambda: "paper-store")
+        monkeypatch.setattr(mod, "_get_paper_search_service", lambda: "paper-search")
+        monkeypatch.setattr(mod, "_get_document_index_store", lambda: "document-index")
+        monkeypatch.setattr(mod, "_get_workflow_query_grounder", lambda: "grounder")
+        monkeypatch.setattr(
+            "paperbot.context_engine.engine.ContextEngine",
+            _CaptureContextEngine,
+        )
+        monkeypatch.setattr(
+            "paperbot.context_engine.engine.ContextEngineConfig",
+            _CaptureContextEngineConfig,
+        )
+
+        try:
+            engine = mod._get_engine()
+        finally:
+            mod._engine = None
+            mod._paper_store = None
+            mod._paper_search_service = None
+            mod._document_index_store = None
+            mod._query_grounder = None
+
+        assert isinstance(engine, _CaptureContextEngine)
+        assert _CaptureContextEngineConfig.last_kwargs == {}
+        assert _CaptureContextEngine.last_kwargs["paper_store"] == "paper-store"
+        assert _CaptureContextEngine.last_kwargs["search_service"] == "paper-search"
+        assert _CaptureContextEngine.last_kwargs["evidence_retriever"] == "document-index"
+        assert _CaptureContextEngine.last_kwargs["query_grounder"] == "grounder"

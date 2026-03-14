@@ -16,6 +16,58 @@ logger = logging.getLogger(__name__)
 
 # Module-level lazy singleton for the context engine
 _engine = None
+_paper_store = None
+_paper_search_service = None
+_document_index_store = None
+_query_grounder = None
+
+
+def _get_paper_store():
+    """Construct PaperStore on first call (lazy singleton)."""
+    global _paper_store
+    if _paper_store is None:
+        from paperbot.infrastructure.stores.paper_store import PaperStore
+
+        _paper_store = PaperStore()
+    return _paper_store
+
+
+def _get_paper_search_service():
+    """Construct PaperSearchService on first call (lazy singleton)."""
+    global _paper_search_service
+    if _paper_search_service is None:
+        from paperbot.application.services.paper_search_service import PaperSearchService
+        from paperbot.infrastructure.adapters import build_adapter_registry
+
+        _paper_search_service = PaperSearchService(
+            adapters=build_adapter_registry(),
+            registry=_get_paper_store(),
+        )
+    return _paper_search_service
+
+
+def _get_document_index_store():
+    """Construct DocumentIndexStore on first call (lazy singleton)."""
+    global _document_index_store
+    if _document_index_store is None:
+        from paperbot.infrastructure.stores.document_index_store import DocumentIndexStore
+
+        _document_index_store = DocumentIndexStore()
+    return _document_index_store
+
+
+def _get_workflow_query_grounder():
+    """Construct WorkflowQueryGrounder on first call (lazy singleton)."""
+    global _query_grounder
+    if _query_grounder is None:
+        from paperbot.application.services.workflow_query_grounder import WorkflowQueryGrounder
+        from paperbot.application.services.wiki_concept_service import WikiConceptService
+        from paperbot.infrastructure.stores.wiki_concept_store import WikiConceptStore
+
+        _query_grounder = WorkflowQueryGrounder(
+            concept_service=WikiConceptService(WikiConceptStore())
+        )
+    return _query_grounder
 
 
 def _get_engine():
@@ -24,7 +76,13 @@ def _get_engine():
     if _engine is None:
         from paperbot.context_engine.engine import ContextEngine, ContextEngineConfig
 
-        _engine = ContextEngine(config=ContextEngineConfig(offline=True, paper_limit=0))
+        _engine = ContextEngine(
+            paper_store=_get_paper_store(),
+            search_service=_get_paper_search_service(),
+            evidence_retriever=_get_document_index_store(),
+            query_grounder=_get_workflow_query_grounder(),
+            config=ContextEngineConfig(),
+        )
     return _engine
 
 
