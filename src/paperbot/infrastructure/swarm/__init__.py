@@ -14,7 +14,7 @@ from .e2e_execution import (
     run_e2e_with_repair,
 )
 from .verification import VerificationPolicy, VerificationResult, run_verification, verify_and_repair
-from .worker_tools import CODING_WORKER_TOOLS, ToolExecutor
+from .worker_tools import CODING_WORKER_TOOLS, LocalToolExecutor
 
 __all__ = [
     "CODING_WORKER_TOOLS",
@@ -34,7 +34,7 @@ __all__ = [
     "SandboxVerificationPolicy",
     "SharedSandbox",
     "TaskDAG",
-    "ToolExecutor",
+    "LocalToolExecutor",
     "VerificationPolicy",
     "VerificationResult",
     "WisdomEntry",

@@ -51,6 +51,22 @@ class PersistentSandboxManager:
 
         sandbox_id = self._extract_sandbox_id(created)
         with self._lock:
+            # Double-check: another thread may have created one while we were unlocked.
+            existing = self._executors.get(key)
+            if existing is not None and existing.available():
+                # Discard the one we just created and use the winner.
+                cleanup = getattr(created, "cleanup", None)
+                if callable(cleanup):
+                    cleanup()
+                sandbox_id = self._extract_sandbox_id(existing)
+                self._leases[key] = self._new_lease(
+                    user_key=key,
+                    session_id=session_id,
+                    executor=existing,
+                    sandbox_id=sandbox_id,
+                )
+                return existing, sandbox_id
+
             self._executors[key] = created
             self._leases[key] = self._new_lease(
                 user_key=key,

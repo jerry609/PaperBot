@@ -8,7 +8,7 @@ from typing import Dict, List, Optional, Tuple
 
 try:
     from rapidfuzz import fuzz
-except Exception:  # pragma: no cover - fallback when optional dependency is unavailable.
+except ImportError:  # pragma: no cover - fallback when optional dependency is unavailable.
     class _FuzzFallback:
         @staticmethod
         def ratio(left: str, right: str) -> float:

@@ -4,4 +4,4 @@ template_name = "PaperBot Reproduction Environment"
 
 [resources]
 cpu_count = 2
-memory_mb = 512
+memory_mb = 2048

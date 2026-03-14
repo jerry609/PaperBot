@@ -305,8 +305,6 @@ def accumulate_wisdom(self, task, output, review):
 
 ## 参考来源
 
-- [Manus 系统提示词与工具逆向工程（GitHub Gist）](https://gist.github.com/renschni/4fbc70b31bad8dd57f3370239dccd58f)
-- [Manus 工具和提示词（泄露）](https://gist.github.com/jlia0/db0a9695b3ca7609c9b1a08dcbf872c9)
 - [Context Engineering for AI Agents: Lessons from Building Manus](https://manus.im/blog/Context-Engineering-for-AI-Agents-Lessons-from-Building-Manus)
 - [Introducing Wide Research — Manus Blog](https://manus.im/blog/introducing-wide-research)
 - [How Manus Uses E2B for Virtual Computers](https://e2b.dev/blog/how-manus-uses-e2b-to-provide-agents-with-virtual-computers)

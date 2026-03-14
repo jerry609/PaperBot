@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, Dict, List, Optional, Set, Tuple
 
 from ...repro.base_executor import BaseExecutor
-from .worker_tools import CODING_WORKER_TOOLS, TASK_COMPLETE_SENTINEL, ToolExecutor
+from .worker_tools import CODING_WORKER_TOOLS, TASK_COMPLETE_SENTINEL, LocalToolExecutor
 
 # Lazy import to avoid circular dependency
 _SANDBOX_WORKER_TOOLS = None
@@ -340,7 +340,7 @@ class CodexDispatcher:
             {"role": "system", "content": self._tool_system_prompt(sandbox=sandbox)},
             {"role": "user", "content": prompt},
         ]
-        tool_exec = ToolExecutor(workspace=workspace, sandbox=sandbox, task=task)
+        tool_exec = LocalToolExecutor(workspace=workspace, sandbox=sandbox, task=task)
         tracker = LoopProgressTracker(stagnation_steps=policy.stagnation_steps)
         repeat_signature: Optional[str] = None
         repeat_count = 0

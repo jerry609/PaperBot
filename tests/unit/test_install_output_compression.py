@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from paperbot.infrastructure.swarm.worker_tools import ToolExecutor
+from paperbot.infrastructure.swarm.worker_tools import LocalToolExecutor
 
 
 def test_compress_install_output_keeps_key_lines(tmp_path):
-    tool = ToolExecutor(workspace=tmp_path, sandbox=None)
+    tool = LocalToolExecutor(workspace=tmp_path, sandbox=None)
     raw = "\n".join(
         [
             "Downloading wheel metadata...",
@@ -25,7 +25,7 @@ def test_compress_install_output_keeps_key_lines(tmp_path):
 
 
 def test_compress_install_output_fallback_when_no_signal(tmp_path):
-    tool = ToolExecutor(workspace=tmp_path, sandbox=None)
+    tool = LocalToolExecutor(workspace=tmp_path, sandbox=None)
 
     compressed = tool._compress_install_output("line a\nline b\nline c")
 
