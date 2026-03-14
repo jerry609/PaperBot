@@ -1,0 +1,7 @@
+template_id = "paperbot-repro"
+dockerfile = "e2b.Dockerfile"
+template_name = "PaperBot Reproduction Environment"
+
+[resources]
+cpu_count = 2
+memory_mb = 2048

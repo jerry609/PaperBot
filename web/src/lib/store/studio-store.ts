@@ -37,7 +37,7 @@ export interface Task {
     paperId?: string  // Link task to a paper
 }
 
-export type AgentTaskStatus = 'planning' | 'in_progress' | 'ai_review' | 'human_review' | 'done'
+export type AgentTaskStatus = 'planning' | 'in_progress' | 'repairing' | 'human_review' | 'done' | 'paused' | 'cancelled'
 
 export type BlockType = "think" | "tool" | "diff" | "info" | "result"
 
@@ -56,6 +56,8 @@ export type PipelinePhase =
     | 'idle'
     | 'planning'
     | 'executing'
+    | 'paused'
+    | 'cancelled'
     | 'e2e_running'
     | 'e2e_repairing'
     | 'downloading'
@@ -143,6 +145,8 @@ export interface StudioPaper {
     status: StudioPaperStatus
     outputDir?: string
     lastGenCodeResult?: GenCodeResult
+    contextPackId?: string
+    boardSessionId?: string
 
     // Timestamps
     createdAt: string
@@ -153,9 +157,11 @@ export interface StudioPaper {
 }
 
 const STORAGE_KEY = 'paperbot-studio-papers'
+const RUNTIME_STORAGE_KEY = 'paperbot-studio-runtime'
+const RUNTIME_STORAGE_VERSION = 1
 
 function generateId(): string {
-    return `paper-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
+    return `paper-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`
 }
 
 function loadPapersFromStorage(): StudioPaper[] {
@@ -190,6 +196,109 @@ interface PerPaperCache {
     activeTaskId: string | null
 }
 
+interface PersistedRuntimeState {
+    version: number
+    selectedPaperId: string | null
+    paperCache: Record<string, PerPaperCache>
+    boardSessionByPaper: Record<string, string>
+    agentTasks: AgentTask[]
+    pipelinePhase: PipelinePhase
+    e2eState: E2EState | null
+    sandboxFiles: SandboxFileEntry[]
+    timeEstimate: TimeEstimate | null
+}
+
+function _defaultRuntimeState(): PersistedRuntimeState {
+    return {
+        version: RUNTIME_STORAGE_VERSION,
+        selectedPaperId: null,
+        paperCache: {},
+        boardSessionByPaper: {},
+        agentTasks: [],
+        pipelinePhase: 'idle',
+        e2eState: null,
+        sandboxFiles: [],
+        timeEstimate: null,
+    }
+}
+
+function _normalizePaperCache(cache: unknown): Record<string, PerPaperCache> {
+    if (!cache || typeof cache !== 'object') return {}
+    const normalized: Record<string, PerPaperCache> = {}
+    for (const [paperId, value] of Object.entries(cache as Record<string, unknown>)) {
+        if (!value || typeof value !== 'object') continue
+        const entry = value as Partial<PerPaperCache>
+        normalized[paperId] = {
+            contextPack: (entry.contextPack ?? null) as ReproContextPack | null,
+            contextPackLoading: false,
+            contextPackError: (entry.contextPackError ?? null) as string | null,
+            generationProgress: Array.isArray(entry.generationProgress) ? entry.generationProgress : [],
+            liveObservations: Array.isArray(entry.liveObservations) ? entry.liveObservations : [],
+            activeTaskId: typeof entry.activeTaskId === 'string' ? entry.activeTaskId : null,
+        }
+    }
+    return normalized
+}
+
+function loadRuntimeStateFromStorage(): PersistedRuntimeState {
+    if (typeof window === 'undefined') return _defaultRuntimeState()
+    try {
+        const stored = localStorage.getItem(RUNTIME_STORAGE_KEY)
+        if (!stored) return _defaultRuntimeState()
+
+        const parsed = JSON.parse(stored) as Record<string, unknown>
+        const legacyBoardSessionId =
+            typeof parsed.boardSessionId === 'string' && parsed.boardSessionId.trim()
+                ? parsed.boardSessionId.trim()
+                : null
+
+        const base = _defaultRuntimeState()
+        const boardSessionByPaper: Record<string, string> = {}
+        const rawBoardSessionByPaper = parsed.boardSessionByPaper
+        if (rawBoardSessionByPaper && typeof rawBoardSessionByPaper === 'object') {
+            for (const [paperId, sessionId] of Object.entries(rawBoardSessionByPaper as Record<string, unknown>)) {
+                if (typeof sessionId === 'string' && sessionId.trim()) {
+                    boardSessionByPaper[paperId] = sessionId.trim()
+                }
+            }
+        }
+        const selectedPaperId =
+            typeof parsed.selectedPaperId === 'string' && parsed.selectedPaperId.trim()
+                ? parsed.selectedPaperId.trim()
+                : null
+        // LEGACY MIGRATION: Handle old `boardSessionId` stored at the root of the runtime state.
+        // This can be removed in a future version after users have migrated.
+        if (legacyBoardSessionId && selectedPaperId && !boardSessionByPaper[selectedPaperId]) {
+            boardSessionByPaper[selectedPaperId] = legacyBoardSessionId
+        }
+
+        return {
+            version: typeof parsed.version === 'number' ? parsed.version : base.version,
+            selectedPaperId,
+            paperCache: _normalizePaperCache(parsed.paperCache),
+            boardSessionByPaper,
+            agentTasks: Array.isArray(parsed.agentTasks) ? (parsed.agentTasks as AgentTask[]) : [],
+            pipelinePhase:
+                typeof parsed.pipelinePhase === 'string' ? (parsed.pipelinePhase as PipelinePhase) : base.pipelinePhase,
+            e2eState: (parsed.e2eState ?? null) as E2EState | null,
+            sandboxFiles: Array.isArray(parsed.sandboxFiles) ? (parsed.sandboxFiles as SandboxFileEntry[]) : [],
+            timeEstimate: (parsed.timeEstimate ?? null) as TimeEstimate | null,
+        }
+    } catch (e) {
+        console.error('Failed to load studio runtime from localStorage:', e)
+        return _defaultRuntimeState()
+    }
+}
+
+function saveRuntimeStateToStorage(runtime: PersistedRuntimeState): void {
+    if (typeof window === 'undefined') return
+    try {
+        localStorage.setItem(RUNTIME_STORAGE_KEY, JSON.stringify(runtime))
+    } catch (e) {
+        console.error('Failed to save studio runtime to localStorage:', e)
+    }
+}
+
 interface StudioState {
     // Paper management
     papers: StudioPaper[]
@@ -216,11 +325,13 @@ interface StudioState {
     // Agent Board state
     agentTasks: AgentTask[]
     boardSessionId: string | null
+    boardSessionByPaper: Record<string, string>
     pipelinePhase: PipelinePhase
     e2eState: E2EState | null
     sandboxFiles: SandboxFileEntry[]
     timeEstimate: TimeEstimate | null
     setBoardSessionId: (id: string | null) => void
+    replaceAgentTasksForPaper: (paperId: string, tasks: AgentTask[]) => void
     addAgentTask: (task: Omit<AgentTask, 'createdAt' | 'updatedAt'> & { id?: string }) => string
     updateAgentTask: (taskId: string, updates: Partial<AgentTask>) => void
     moveAgentTask: (taskId: string, status: AgentTask['status']) => void
@@ -283,17 +394,88 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     // Agent Board state
     agentTasks: [],
     boardSessionId: null,
+    boardSessionByPaper: {},
     pipelinePhase: 'idle' as PipelinePhase,
     e2eState: null,
     sandboxFiles: [],
     timeEstimate: null,
 
     setBoardSessionId: (id) => {
-        set({ boardSessionId: id })
+        set((state) => {
+            const selectedPaperId = state.selectedPaperId
+            if (!selectedPaperId) {
+                return { boardSessionId: id }
+            }
+            const nextMap = { ...state.boardSessionByPaper }
+            if (id && id.trim()) {
+                nextMap[selectedPaperId] = id.trim()
+            } else {
+                delete nextMap[selectedPaperId]
+            }
+            const newPapers = state.papers.map((paper) =>
+                paper.id === selectedPaperId
+                    ? {
+                        ...paper,
+                        boardSessionId: id || undefined,
+                        updatedAt: new Date().toISOString(),
+                    }
+                    : paper,
+            )
+            savePapersToStorage(newPapers)
+            return { boardSessionId: id, boardSessionByPaper: nextMap, papers: newPapers }
+        })
     },
 
     clearAgentTasks: () => {
-        set({ agentTasks: [], boardSessionId: null, pipelinePhase: 'idle', e2eState: null, sandboxFiles: [], timeEstimate: null })
+        set((state) => {
+            const selectedPaperId = state.selectedPaperId
+            if (!selectedPaperId) {
+                return {
+                    agentTasks: [],
+                    boardSessionId: null,
+                    boardSessionByPaper: {},
+                    pipelinePhase: 'idle',
+                    e2eState: null,
+                    sandboxFiles: [],
+                    timeEstimate: null,
+                }
+            }
+            const nextMap = { ...state.boardSessionByPaper }
+            delete nextMap[selectedPaperId]
+            const newPapers = state.papers.map((paper) =>
+                paper.id === selectedPaperId
+                    ? {
+                        ...paper,
+                        boardSessionId: undefined,
+                        updatedAt: new Date().toISOString(),
+                    }
+                    : paper,
+            )
+            savePapersToStorage(newPapers)
+            return {
+                agentTasks: state.agentTasks.filter(task => task.paperId !== selectedPaperId),
+                boardSessionId: null,
+                boardSessionByPaper: nextMap,
+                papers: newPapers,
+                pipelinePhase: 'idle',
+                e2eState: null,
+                sandboxFiles: [],
+                timeEstimate: null,
+            }
+        })
+    },
+
+    replaceAgentTasksForPaper: (paperId, tasks) => {
+        set((state) => ({
+            agentTasks: [
+                ...state.agentTasks.filter(task => task.paperId !== paperId),
+                ...tasks.map(task => ({
+                    ...task,
+                    paperId: task.paperId || paperId,
+                    executionLog: task.executionLog || [],
+                })),
+            ],
+        }))
     },
 
     setPipelinePhase: (phase) => set({ pipelinePhase: phase }),
@@ -339,6 +521,11 @@ export const useStudioStore = create<StudioState>((set, get) => ({
                 contextPackError: null,
                 generationProgress: [],
                 liveObservations: [],
+                boardSessionId: null,
+                pipelinePhase: 'idle',
+                e2eState: null,
+                sandboxFiles: [],
+                timeEstimate: null,
             }
         })
         return id
@@ -365,10 +552,18 @@ export const useStudioStore = create<StudioState>((set, get) => ({
             // Remove from cache
             const newCache = { ...state._paperCache }
             delete newCache[paperId]
+            const nextBoardSessionByPaper = { ...state.boardSessionByPaper }
+            delete nextBoardSessionByPaper[paperId]
             return {
                 papers: newPapers,
                 selectedPaperId: newSelectedPaperId,
                 _paperCache: newCache,
+                boardSessionByPaper: nextBoardSessionByPaper,
+                agentTasks: state.agentTasks.filter(task => task.paperId !== paperId),
+                boardSessionId:
+                    newSelectedPaperId && nextBoardSessionByPaper[newSelectedPaperId]
+                        ? nextBoardSessionByPaper[newSelectedPaperId]
+                        : null,
                 // Clear draft if deleted paper was selected
                 ...(state.selectedPaperId === paperId ? {
                     paperDraft: { title: '', abstract: '', methodSection: '' },
@@ -419,12 +614,59 @@ export const useStudioStore = create<StudioState>((set, get) => ({
             contextPackError: cached?.contextPackError ?? null,
             generationProgress: cached?.generationProgress ?? [],
             liveObservations: cached?.liveObservations ?? [],
+            boardSessionId: paperId
+                ? (state.boardSessionByPaper[paperId] ?? paper?.boardSessionId ?? null)
+                : null,
         })
     },
 
     loadPapers: () => {
         const papers = loadPapersFromStorage()
-        set({ papers })
+        const runtime = loadRuntimeStateFromStorage()
+        const mergedBoardSessionByPaper = { ...runtime.boardSessionByPaper }
+        for (const paper of papers) {
+            if (paper.boardSessionId && !mergedBoardSessionByPaper[paper.id]) {
+                mergedBoardSessionByPaper[paper.id] = paper.boardSessionId
+            }
+        }
+        const selectedPaperId =
+            runtime.selectedPaperId && papers.some(p => p.id === runtime.selectedPaperId)
+                ? runtime.selectedPaperId
+                : null
+        const selectedPaper = selectedPaperId ? papers.find(p => p.id === selectedPaperId) || null : null
+        const cached = selectedPaperId ? runtime.paperCache[selectedPaperId] : undefined
+        const boardSessionId =
+            selectedPaperId && mergedBoardSessionByPaper[selectedPaperId]
+                ? mergedBoardSessionByPaper[selectedPaperId]
+                : null
+
+        set({
+            papers,
+            selectedPaperId,
+            _paperCache: runtime.paperCache,
+            agentTasks: runtime.agentTasks,
+            boardSessionByPaper: mergedBoardSessionByPaper,
+            boardSessionId,
+            pipelinePhase: runtime.pipelinePhase,
+            e2eState: runtime.e2eState,
+            sandboxFiles: runtime.sandboxFiles,
+            timeEstimate: runtime.timeEstimate,
+            paperDraft: selectedPaper
+                ? {
+                    title: selectedPaper.title,
+                    abstract: selectedPaper.abstract,
+                    methodSection: selectedPaper.methodSection || '',
+                }
+                : { title: '', abstract: '', methodSection: '' },
+            lastGenCodeResult: selectedPaper?.lastGenCodeResult || null,
+            workspaceSnapshotId: null,
+            activeTaskId: cached?.activeTaskId ?? null,
+            contextPack: cached?.contextPack ?? null,
+            contextPackLoading: false,
+            contextPackError: cached?.contextPackError ?? null,
+            generationProgress: cached?.generationProgress ?? [],
+            liveObservations: cached?.liveObservations ?? [],
+        })
     },
 
     getSelectedPaper: () => {
@@ -470,7 +712,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     },
 
     addAgentTask: (task) => {
-        const id = task.id?.trim() || `agent-task-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
+        const id = task.id?.trim() || `agent-task-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`
         const now = new Date().toISOString()
         set(state => ({
             agentTasks: [
@@ -481,6 +723,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
                     createdAt: now,
                     updatedAt: now,
                     executionLog: task.executionLog || [],
+                    paperId: task.paperId || state.selectedPaperId || undefined,
                 },
             ],
         }))
@@ -518,7 +761,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     addAction: (taskId, action) => {
         const newAction: AgentAction = {
             ...action,
-            id: `action-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+            id: `action-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`,
             timestamp: new Date()
         }
         set(state => ({
@@ -575,7 +818,24 @@ export const useStudioStore = create<StudioState>((set, get) => ({
 
     setWorkspaceSnapshotId: (snapshotId) => set({ workspaceSnapshotId: snapshotId }),
 
-    setContextPack: (pack) => set({ contextPack: pack }),
+    setContextPack: (pack) => {
+        set((state) => {
+            if (!state.selectedPaperId || !pack?.context_pack_id) {
+                return { contextPack: pack }
+            }
+            const newPapers = state.papers.map((paper) =>
+                paper.id === state.selectedPaperId
+                    ? {
+                        ...paper,
+                        contextPackId: pack.context_pack_id,
+                        updatedAt: new Date().toISOString(),
+                    }
+                    : paper,
+            )
+            savePapersToStorage(newPapers)
+            return { contextPack: pack, papers: newPapers }
+        })
+    },
     setContextPackLoading: (loading) => set({ contextPackLoading: loading }),
     setContextPackError: (error) => set({ contextPackError: error }),
     appendGenerationProgress: (event) => set((state) => ({
@@ -593,3 +853,42 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     }),
     clearLiveObservations: () => set({ liveObservations: [] }),
 }))
+
+function _snapshotRuntimeState(state: StudioState): PersistedRuntimeState {
+    const paperCache = _normalizePaperCache(state._paperCache)
+    if (state.selectedPaperId) {
+        paperCache[state.selectedPaperId] = {
+            contextPack: state.contextPack,
+            contextPackLoading: false,
+            contextPackError: state.contextPackError,
+            generationProgress: state.generationProgress,
+            liveObservations: state.liveObservations,
+            activeTaskId: state.activeTaskId,
+        }
+    }
+
+    const boardSessionByPaper = { ...state.boardSessionByPaper }
+    if (state.selectedPaperId && state.boardSessionId) {
+        boardSessionByPaper[state.selectedPaperId] = state.boardSessionId
+    }
+
+    return {
+        version: RUNTIME_STORAGE_VERSION,
+        selectedPaperId: state.selectedPaperId,
+        paperCache,
+        boardSessionByPaper,
+        agentTasks: state.agentTasks,
+        pipelinePhase: state.pipelinePhase,
+        e2eState: state.e2eState,
+        sandboxFiles: state.sandboxFiles,
+        timeEstimate: state.timeEstimate,
+    }
+}
+
+let _runtimeSubscriptionAttached = false
+if (typeof window !== 'undefined' && !_runtimeSubscriptionAttached) {
+    _runtimeSubscriptionAttached = true
+    useStudioStore.subscribe((state) => {
+        saveRuntimeStateToStorage(_snapshotRuntimeState(state))
+    })
+}

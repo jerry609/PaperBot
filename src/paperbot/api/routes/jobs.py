@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 try:
     from arq.connections import create_pool, RedisSettings
     from arq.jobs import Job
-except Exception:  # pragma: no cover
+except ImportError:  # pragma: no cover
     create_pool = None  # type: ignore[assignment]
     RedisSettings = None  # type: ignore[assignment]
     Job = None  # type: ignore[assignment]

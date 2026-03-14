@@ -8,7 +8,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 try:
     from json_repair import repair_json
-except Exception:  # pragma: no cover
+except ImportError:  # pragma: no cover
     def repair_json(s: str) -> str:  # type: ignore[no-redef]
         return s
 

@@ -229,9 +229,45 @@ export function ContextDialogPanel({
 }: Props) {
   const [showFullPack, setShowFullPack] = useState(false)
 
+  // When restoring from cache/refresh, generationProgress and liveObservations
+  // may be empty even though contextPack is available.  Reconstruct synthetic
+  // timeline entries from the pack so the progress section isn't blank.
+  const { effectiveProgress, effectiveObservations } = useMemo(() => {
+    if (generationProgress.length > 0 || liveObservations.length > 0 || !contextPack) {
+      return { effectiveProgress: generationProgress, effectiveObservations: liveObservations }
+    }
+
+    // Group observations by stage, preserving STAGE_ORDER
+    const obsByStage = new Map<string, StageObservationsEvent["observations"]>()
+    for (const obs of contextPack.observations) {
+      const list = obsByStage.get(obs.stage) ?? []
+      list.push({ id: obs.id, type: obs.type, title: obs.title, confidence: obs.confidence })
+      obsByStage.set(obs.stage, list)
+    }
+
+    const syntheticProgress: StageProgressEvent[] = []
+    const syntheticObservations: StageObservationsEvent[] = []
+
+    for (const stage of STAGE_ORDER) {
+      const stageObs = obsByStage.get(stage)
+      if (!stageObs || stageObs.length === 0) continue
+      syntheticProgress.push({ stage, progress: 1, message: "Stage completed" })
+      syntheticObservations.push({ stage, observations: stageObs })
+    }
+
+    // Include any stages not in STAGE_ORDER
+    for (const [stage, stageObs] of obsByStage) {
+      if (STAGE_ORDER.includes(stage)) continue
+      syntheticProgress.push({ stage, progress: 1, message: "Stage completed" })
+      syntheticObservations.push({ stage, observations: stageObs })
+    }
+
+    return { effectiveProgress: syntheticProgress, effectiveObservations: syntheticObservations }
+  }, [generationProgress, liveObservations, contextPack])
+
   const progressTimeline = useMemo(() => {
     const reduced: StageProgressEvent[] = []
-    for (const event of generationProgress) {
+    for (const event of effectiveProgress) {
       const prev = reduced[reduced.length - 1]
       const messageChanged = (event.message || "") !== (prev?.message || "")
       const stageChanged = prev?.stage !== event.stage
@@ -241,11 +277,11 @@ export function ContextDialogPanel({
       }
     }
     return reduced
-  }, [generationProgress])
+  }, [effectiveProgress])
 
   const sortedLiveObservations = useMemo(
-    () => [...liveObservations].sort((a, b) => stageRank(a.stage) - stageRank(b.stage)),
-    [liveObservations],
+    () => [...effectiveObservations].sort((a, b) => stageRank(a.stage) - stageRank(b.stage)),
+    [effectiveObservations],
   )
 
   const timelineItems = useMemo<TimelineItem[]>(() => {

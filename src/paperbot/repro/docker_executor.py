@@ -6,6 +6,7 @@ from typing import List, Optional
 try:
     import docker
     from docker.errors import DockerException, APIError
+
     HAS_DOCKER = True
 except ImportError:
     docker = None
@@ -28,13 +29,21 @@ class DockerExecutor(BaseExecutor):
     - 可禁用网络
     """
 
-    def __init__(self, image: str, cpu_shares: int = 1, mem_limit: str = "1g", network: bool = False):
+    def __init__(
+        self,
+        image: str,
+        cpu_shares: int = 1,
+        mem_limit: str = "1g",
+        network: bool = False,
+        workspace_read_only: bool = True,
+    ):
         self.image = image
         self.cpu_shares = cpu_shares
         self.mem_limit = mem_limit
         self.network_disabled = not network
+        self.workspace_read_only = workspace_read_only
         self.client = None
-        
+
         if HAS_DOCKER and docker is not None:
             try:
                 self.client = docker.from_env()
@@ -59,7 +68,10 @@ class DockerExecutor(BaseExecutor):
         start = time.time()
         try:
             binds = {
-                str(workdir): {"bind": "/workspace", "mode": "ro"},
+                str(workdir): {
+                    "bind": "/workspace",
+                    "mode": "ro" if self.workspace_read_only else "rw",
+                },
             }
             if cache_dir:
                 cache_dir.mkdir(parents=True, exist_ok=True)
@@ -93,6 +105,7 @@ class DockerExecutor(BaseExecutor):
                     "cpu_shares": self.cpu_shares,
                     "mem_limit": self.mem_limit,
                     "network_enabled": not self.network_disabled,
+                    "workspace_read_only": self.workspace_read_only,
                     "timeout_sec": timeout_sec,
                 }
             return result
@@ -108,4 +121,3 @@ class DockerExecutor(BaseExecutor):
                     container.remove(force=True)
                 except Exception:
                     pass
-
