@@ -20,10 +20,11 @@ _service = None
 
 
 async def _scholars_impl() -> str:
-    """Return tracked scholars in a stable JSON envelope.
+    """Return JSON list of tracked scholars.
 
     Returns:
-        JSON string with a stable ``{"scholars": [...], "error": ...}`` shape.
+        JSON string with list of scholar dicts (name, semantic_scholar_id, keywords, ...),
+        or JSON error object with empty scholars list if config file is missing.
     """
     # Use injected service for tests; otherwise instantiate fresh for each call
     # to ensure we always read the latest config file.
@@ -36,9 +37,11 @@ async def _scholars_impl() -> str:
 
     try:
         scholars = await anyio.to_thread.run_sync(service.get_scholar_configs)
-        return json.dumps({"scholars": scholars, "error": None})
+        return json.dumps(scholars)
     except FileNotFoundError:
         return json.dumps({"error": "Scholar config not found", "scholars": []})
+    except ValueError as exc:
+        return json.dumps({"error": str(exc), "scholars": []})
 
 
 def register(mcp) -> None:
@@ -49,6 +52,7 @@ def register(mcp) -> None:
         """Return the list of PaperBot tracked scholars.
 
         Returns scholar configurations including name, semantic_scholar_id, and
-        keyword interests in a stable envelope with optional error information.
+        keyword interests. Useful for understanding which researchers PaperBot
+        is monitoring. Returns error JSON if config file is missing.
         """
         return await _scholars_impl()

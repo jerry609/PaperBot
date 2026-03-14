@@ -86,6 +86,38 @@ def _get_engine():
     return _engine
 
 
+def _normalize_context_pack(result: Dict[str, Any]) -> Dict[str, Any]:
+    """Expose stable MCP aliases while preserving ContextEngine-native keys."""
+    normalized = dict(result)
+    routing = normalized.get("routing") if isinstance(normalized.get("routing"), dict) else {}
+
+    papers = normalized.get("papers")
+    if papers is None:
+        papers = normalized.get("paper_recommendations")
+    if papers is None:
+        papers = []
+
+    memories = normalized.get("memories")
+    if memories is None:
+        memories = normalized.get("relevant_memories")
+    if memories is None:
+        memories = []
+
+    track = normalized.get("track", normalized.get("active_track"))
+    stage = normalized.get("stage", routing.get("stage"))
+    routing_suggestion = normalized.get("routing_suggestion", routing.get("suggestion"))
+
+    normalized.setdefault("paper_recommendations", papers)
+    normalized.setdefault("relevant_memories", memories)
+    normalized.setdefault("active_track", track)
+    normalized["papers"] = papers
+    normalized["memories"] = memories
+    normalized["track"] = track
+    normalized["stage"] = stage
+    normalized["routing_suggestion"] = routing_suggestion
+    return normalized
+
+
 async def _get_research_context_impl(
     query: str,
     user_id: str = "default",
@@ -103,7 +135,8 @@ async def _get_research_context_impl(
         _run_id: Optional run ID for event correlation.
 
     Returns:
-        Dict with keys: papers, memories, track, stage, routing_suggestion, and more.
+        Context pack containing ContextEngine-native keys plus stable MCP aliases
+        for papers, memories, track, stage, and routing_suggestion.
     """
     start = time.monotonic()
     args = {"query": query, "user_id": user_id, "track_id": track_id}
@@ -115,19 +148,20 @@ async def _get_research_context_impl(
             query=query,
             track_id=track_id,
         )
+        normalized = _normalize_context_pack(result)
 
         log_tool_call(
             tool_name="get_research_context",
             arguments=args,
             result_summary={
-                "paper_count": len(result.get("papers") or []),
-                "memory_count": len(result.get("memories") or []),
-                "stage": result.get("stage"),
+                "paper_count": len(normalized.get("papers") or []),
+                "memory_count": len(normalized.get("memories") or []),
+                "stage": normalized.get("stage"),
             },
             duration_ms=(time.monotonic() - start) * 1000,
             run_id=_run_id or None,
         )
-        return result
+        return normalized
 
     except Exception as exc:
         log_tool_call(
@@ -153,7 +187,8 @@ def register(mcp) -> None:
     ) -> dict:
         """Retrieve research context for a query, including relevant papers and memories.
 
-        Returns a context pack dict with papers, memories, track info, research stage,
-        and routing suggestions based on the query and user profile.
+        Returns a context pack dict with ContextEngine-native fields plus MCP
+        compatibility aliases for papers, memories, track info, research stage,
+        and routing suggestions.
         """
         return await _get_research_context_impl(query, user_id, track_id, _run_id)

@@ -44,7 +44,7 @@ async def _track_metadata_impl(track_id: str) -> str:
     store = _get_store()
     track = await anyio.to_thread.run_sync(lambda: store.get_track(user_id="default", track_id=tid))
 
-    if track is None:
+    if track is None or track.get("archived_at") is not None:
         return json.dumps({"error": f"Track {tid} not found."})
 
     return json.dumps(track)

@@ -42,6 +42,10 @@ async def _track_papers_impl(track_id: str) -> str:
         return json.dumps({"error": f"Invalid track_id: {track_id!r}. Must be an integer."})
 
     store = _get_store()
+    track = await anyio.to_thread.run_sync(lambda: store.get_track(user_id="default", track_id=tid))
+    if track is None or track.get("archived_at") is not None:
+        return json.dumps({"error": f"Track {tid} not found."})
+
     feed = await anyio.to_thread.run_sync(
         lambda: store.list_track_feed(user_id="default", track_id=tid, limit=50)
     )

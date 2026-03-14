@@ -62,12 +62,10 @@ async def _paper_judge_impl(
 
     try:
         judge = _get_judge()
-        result = await anyio.to_thread.run_sync(
-            lambda: judge.judge_single(paper=paper, query=rubric)
-        )
+        result = await anyio.to_thread.run_sync(lambda: judge.judge_single(paper=paper, query=rubric))
         output = result.to_dict()
 
-        # Detect degraded LLM response (judge_model is empty when LLM unavailable)
+        # Treat parse/LLM fallbacks as degraded even if provider metadata is configured.
         if not result.judge_model:
             output["degraded"] = True
             output["error"] = (
