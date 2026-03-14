@@ -77,10 +77,10 @@ Plans:
   1. `.claude/skills/` directory contains SKILL.md files for literature-review, paper-reproduction, trend-analysis, scholar-monitoring
   2. Each SKILL.md has valid YAML frontmatter (name, description, tools) and markdown instructions
   3. Skills reference MCP tools by name and provide multi-step workflow guidance
-**Plans**: TBD
+**Plans**: 1 plan
 
 Plans:
-- [ ] 06-01: TBD
+- [ ] 06-01-PLAN.md — Structural tests + four SKILL.md agent skill files (literature-review, paper-reproduction, trend-analysis, scholar-monitoring)
 
 </details>
 
@@ -300,7 +300,7 @@ Phases execute in numeric order: 3 -> 4 -> 5 -> 6 (v1.0) -> 7 -> 8 -> ... -> 11 
 | 3. Remaining MCP Tools | v1.0 | 2/3 | In Progress | - |
 | 4. MCP Resources | v1.0 | 2/2 | Complete | 2026-03-14 |
 | 5. Transport & Entry Point | v1.0 | 1/1 | Complete | 2026-03-14 |
-| 6. Agent Skills | v1.0 | 0/? | Not started | - |
+| 6. Agent Skills | v1.0 | 0/1 | Planning complete | - |
 | 7. EventBus + SSE Foundation | v1.1 | 0/2 | Planning complete | - |
 | 8. Agent Event Vocabulary | v1.1 | 0/? | Not started | - |
 | 9. Three-Panel Dashboard | v1.1 | 0/? | Not started | - |
