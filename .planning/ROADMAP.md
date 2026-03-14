@@ -63,10 +63,10 @@ Plans:
   2. `paperbot mcp serve --http` starts MCP server on Streamable HTTP transport
   3. Claude Code can connect to PaperBot MCP server via stdio in `claude_desktop_config.json`
   4. Remote agent can connect via HTTP and call tools
-**Plans**: TBD
+**Plans**: 1 plan
 
 Plans:
-- [ ] 05-01: TBD
+- [ ] 05-01-PLAN.md — Transport dispatch (serve.py), CLI mcp serve subcommand, packaging (pyproject.toml scripts + mcp dep), unit tests
 
 ### Phase 6: Agent Skills
 **Goal**: Core PaperBot workflows are available as SKILL.md files for agent discovery
@@ -187,7 +187,7 @@ Phases execute in numeric order: 3 -> 4 -> 5 -> 6 (v1.0) -> 7 -> 8 -> ... -> 11 
 | 2. Core Paper Tools | v1.0 | 3/3 | Complete | 2026-03-14 |
 | 3. Remaining MCP Tools | 2/3 | In Progress|  | - |
 | 4. MCP Resources | 2/2 | Complete   | 2026-03-14 | - |
-| 5. Transport & Entry Point | v1.0 | 0/? | Not started | - |
+| 5. Transport & Entry Point | v1.0 | 0/1 | Planning complete | - |
 | 6. Agent Skills | v1.0 | 0/? | Not started | - |
 | 7. EventBus + SSE Foundation | v1.1 | 0/2 | Planning complete | - |
 | 8. Agent Event Vocabulary | v1.1 | 0/? | Not started | - |
