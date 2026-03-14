@@ -97,3 +97,16 @@ class TestPaperSearchTool:
         event = log.events[0]
         assert event["payload"]["tool"] == "paper_search"
         assert event["workflow"] == "mcp"
+
+    @pytest.mark.asyncio
+    async def test_rejects_out_of_range_max_results(self):
+        """paper_search rejects max_results outside the supported range."""
+        from paperbot.application.services.paper_search_service import PaperSearchService
+        import paperbot.mcp.tools.paper_search as ps_mod
+
+        ps_mod._service = PaperSearchService(adapters={"fake": _FakeSearchAdapter()})
+        try:
+            with pytest.raises(ValueError, match="max_results must be between 1 and 100"):
+                await ps_mod._paper_search_impl(query="transformers", max_results=0)
+        finally:
+            ps_mod._service = None

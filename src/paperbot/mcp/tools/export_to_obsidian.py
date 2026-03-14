@@ -36,7 +36,7 @@ def _get_exporter():
 async def _export_to_obsidian_impl(
     title: str,
     abstract: str,
-    authors: List[str] = [],
+    authors: Optional[List[str]] = None,
     year: Optional[int] = None,
     venue: str = "",
     arxiv_id: str = "",
@@ -62,10 +62,11 @@ async def _export_to_obsidian_impl(
         (YAML frontmatter + body). No filesystem writes are performed.
     """
     start = time.monotonic()
+    normalized_authors = list(authors or [])
     args = {
         "title": title,
         "abstract_len": len(abstract),
-        "author_count": len(authors),
+        "author_count": len(normalized_authors),
         "year": year,
         "arxiv_id": arxiv_id or None,
     }
@@ -73,8 +74,8 @@ async def _export_to_obsidian_impl(
     try:
         # Build metadata rows for the template
         metadata_rows: List[str] = []
-        if authors:
-            metadata_rows.append(f"Authors: {', '.join(authors)}")
+        if normalized_authors:
+            metadata_rows.append(f"Authors: {', '.join(normalized_authors)}")
         if year:
             metadata_rows.append(f"Year: {year}")
         if venue:
@@ -91,7 +92,7 @@ async def _export_to_obsidian_impl(
         paper: Dict[str, Any] = {
             "title": title,
             "abstract": abstract,
-            "authors": authors,
+            "authors": normalized_authors,
             "year": year,
             "venue": venue,
             "arxiv_id": arxiv_id,
@@ -119,15 +120,17 @@ async def _export_to_obsidian_impl(
         # Import _yaml_frontmatter to build YAML header
         from paperbot.infrastructure.exporters.obsidian_exporter import _yaml_frontmatter
 
-        frontmatter = _yaml_frontmatter({
-            "title": title,
-            "paperbot_type": "paper",
-            "authors": authors,
-            "year": year,
-            "venue": venue or None,
-            "arxiv_id": arxiv_id or None,
-            "doi": doi or None,
-        })
+        frontmatter = _yaml_frontmatter(
+            {
+                "title": title,
+                "paperbot_type": "paper",
+                "authors": normalized_authors,
+                "year": year,
+                "venue": venue or None,
+                "arxiv_id": arxiv_id or None,
+                "doi": doi or None,
+            }
+        )
 
         markdown = frontmatter + body
 
@@ -161,7 +164,7 @@ def register(mcp) -> None:
     async def export_to_obsidian(
         title: str,
         abstract: str,
-        authors: List[str] = [],
+        authors: Optional[List[str]] = None,
         year: Optional[int] = None,
         venue: str = "",
         arxiv_id: str = "",

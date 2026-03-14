@@ -70,7 +70,8 @@ class TestTrackMetadataResource:
         """_track_metadata_impl('abc') returns JSON error for invalid track_id."""
         import paperbot.mcp.resources.track_metadata as mod
 
-        mod._store = _FakeResearchStore()
+        fake_store = _FakeResearchStore()
+        mod._store = fake_store
         try:
             result = await mod._track_metadata_impl("abc")
         finally:
@@ -78,3 +79,4 @@ class TestTrackMetadataResource:
 
         data = json.loads(result)
         assert "error" in data
+        assert fake_store.calls == []

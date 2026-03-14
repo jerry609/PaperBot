@@ -6,6 +6,7 @@ filtering is applied correctly.
 """
 
 import json
+from typing import Optional
 
 import pytest
 
@@ -17,7 +18,14 @@ class _FakeMemoryStore:
         self._memories = memories if memories is not None else []
         self.last_call_kwargs = {}
 
-    def list_memories(self, user_id: str, scope_type: str = None, scope_id: str = None, limit: int = 100):
+    def list_memories(
+        self,
+        *,
+        user_id: str,
+        scope_type: Optional[str] = None,
+        scope_id: Optional[str] = None,
+        limit: int = 100,
+    ):
         self.last_call_kwargs = {
             "user_id": user_id,
             "scope_type": scope_type,

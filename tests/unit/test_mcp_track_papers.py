@@ -15,7 +15,7 @@ class _FakeResearchStore:
     def __init__(self, items=None):
         self._items = items if items is not None else [{"title": "P1", "arxiv_id": "2401.0001"}]
 
-    def list_track_feed(self, user_id: str, track_id: int, limit: int = 50):
+    def list_track_feed(self, *, user_id: str, track_id: int, limit: int = 50):
         return {"items": self._items, "total": len(self._items)}
 
 

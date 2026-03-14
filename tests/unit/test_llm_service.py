@@ -93,6 +93,7 @@ def test_assess_relevance_fallback_when_non_json_response():
     )
 
     assert isinstance(relevance["score"], int)
+    assert relevance["fallback"] is True
     assert "Fallback" in relevance["reason"]
 
 

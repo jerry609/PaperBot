@@ -141,3 +141,45 @@ class TestLogToolCall:
         event = log.events[0]
         assert event["type"] == "error"
         assert event["payload"]["error"] == "Connection timeout"
+
+    def test_accepts_structured_summary_and_redacts_sensitive_arguments(self):
+        """log_tool_call() accepts structured summaries and redacts sensitive argument keys."""
+        from paperbot.mcp.tools._audit import log_tool_call
+
+        log = self._register_event_log()
+
+        log_tool_call(
+            tool_name="test_tool",
+            arguments={
+                "query": "hello",
+                "api_key": "secret-value",
+                "nested": {"token": "nested-secret"},
+            },
+            result_summary={"count": 3, "status": "ok"},
+            duration_ms=10.0,
+        )
+
+        payload = log.events[0]["payload"]
+        assert payload["arguments"]["query"] == "hello"
+        assert payload["arguments"]["api_key"] == "***redacted***"
+        assert payload["arguments"]["nested"]["token"] == "***redacted***"
+        assert payload["result_summary"] == {"count": 3, "status": "ok"}
+
+    def test_truncates_oversized_audit_fields(self):
+        """log_tool_call() truncates oversized text fields before persistence."""
+        from paperbot.mcp.tools._audit import log_tool_call
+
+        log = self._register_event_log()
+
+        oversized = "x" * 1200
+        log_tool_call(
+            tool_name="test_tool",
+            arguments={"query": oversized},
+            result_summary=oversized,
+            duration_ms=1.0,
+        )
+
+        payload = log.events[0]["payload"]
+        assert payload["arguments"]["query"].endswith("...[truncated]")
+        assert len(payload["arguments"]["query"]) > 1000
+        assert payload["result_summary"].endswith("...[truncated]")

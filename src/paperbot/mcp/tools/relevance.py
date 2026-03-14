@@ -66,19 +66,16 @@ async def _relevance_assess_impl(
 
     try:
         assessor = _get_assessor()
-        result = await anyio.to_thread.run_sync(
-            lambda: assessor.assess(paper=paper, query=query)
-        )
+        result = await anyio.to_thread.run_sync(lambda: assessor.assess(paper=paper, query=query))
 
         output: Dict[str, Any] = dict(result)
 
-        # Detect fallback scoring (reason contains "Fallback")
+        # Prefer structured fallback metadata; keep reason matching as a compatibility fallback.
         reason = str(result.get("reason", ""))
-        if "Fallback" in reason:
+        if bool(result.get("fallback") or result.get("degraded")) or "Fallback" in reason:
             output["degraded"] = True
             output["note"] = (
-                "Score computed via token-overlap fallback. "
-                "LLM-based assessment unavailable."
+                "Score computed via token-overlap fallback. " "LLM-based assessment unavailable."
             )
 
         log_tool_call(

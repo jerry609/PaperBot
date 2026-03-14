@@ -7,8 +7,9 @@ in the DI Container, auditing degrades silently (no tool failure).
 
 from __future__ import annotations
 
+import json
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Union
 
 from paperbot.application.collaboration.message_schema import (
     make_event,
@@ -19,6 +20,68 @@ from paperbot.application.ports.event_log_port import EventLogPort
 from paperbot.core.di import Container
 
 logger = logging.getLogger(__name__)
+
+_SENSITIVE_KEY_PARTS = frozenset({"api_key", "token", "password", "secret", "authorization"})
+_MAX_AUDIT_TEXT_LENGTH = 1000
+_MAX_AUDIT_COLLECTION_ITEMS = 20
+
+
+def _truncate_text(value: str) -> str:
+    text = str(value)
+    if len(text) <= _MAX_AUDIT_TEXT_LENGTH:
+        return text
+    return text[:_MAX_AUDIT_TEXT_LENGTH] + "...[truncated]"
+
+
+def _is_sensitive_key(key: str) -> bool:
+    normalized = str(key or "").strip().lower()
+    return any(part in normalized for part in _SENSITIVE_KEY_PARTS)
+
+
+def _sanitize_value(value: Any, *, key: Optional[str] = None, depth: int = 0) -> Any:
+    if key and _is_sensitive_key(key):
+        return "***redacted***"
+
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+
+    if isinstance(value, str):
+        return _truncate_text(value)
+
+    if depth >= 2:
+        try:
+            return _truncate_text(json.dumps(value, ensure_ascii=False, default=str))
+        except TypeError:
+            return _truncate_text(str(value))
+
+    if isinstance(value, dict):
+        sanitized: Dict[str, Any] = {}
+        for index, (child_key, child_value) in enumerate(value.items()):
+            if index >= _MAX_AUDIT_COLLECTION_ITEMS:
+                sanitized["__truncated__"] = True
+                break
+            normalized_key = str(child_key)
+            sanitized[normalized_key] = _sanitize_value(
+                child_value,
+                key=normalized_key,
+                depth=depth + 1,
+            )
+        return sanitized
+
+    if isinstance(value, (list, tuple, set)):
+        items = list(value)
+        sanitized_items = [
+            _sanitize_value(item, depth=depth + 1) for item in items[:_MAX_AUDIT_COLLECTION_ITEMS]
+        ]
+        if len(items) > _MAX_AUDIT_COLLECTION_ITEMS:
+            sanitized_items.append("...[truncated]")
+        return sanitized_items
+
+    return _truncate_text(str(value))
+
+
+def _sanitize_arguments(arguments: Dict[str, Any]) -> Dict[str, Any]:
+    return {str(key): _sanitize_value(value, key=str(key)) for key, value in arguments.items()}
 
 
 def _get_event_log() -> Optional[EventLogPort]:
@@ -32,7 +95,7 @@ def _get_event_log() -> Optional[EventLogPort]:
 def log_tool_call(
     tool_name: str,
     arguments: Dict[str, Any],
-    result_summary: str,
+    result_summary: Union[str, Dict[str, Any]],
     duration_ms: float,
     run_id: Optional[str] = None,
     error: Optional[str] = None,
@@ -42,7 +105,7 @@ def log_tool_call(
     Args:
         tool_name: Name of the MCP tool being called.
         arguments: Arguments passed to the tool.
-        result_summary: Short summary of the tool result.
+        result_summary: Short summary of the tool result. May be a string or structured dict.
         duration_ms: Duration of the tool call in milliseconds.
         run_id: Optional run_id for correlation. If None, a new one is generated.
         error: Optional error message if the tool call failed.
@@ -63,9 +126,9 @@ def log_tool_call(
         type="error" if error is not None else "tool_result",
         payload={
             "tool": tool_name,
-            "arguments": arguments,
-            "result_summary": result_summary,
-            "error": error,
+            "arguments": _sanitize_arguments(arguments),
+            "result_summary": _sanitize_value(result_summary),
+            "error": _truncate_text(error) if error is not None else None,
         },
         metrics={"duration_ms": duration_ms},
     )

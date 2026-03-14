@@ -88,3 +88,19 @@ class TestAnalyzeTrendsTool:
         event = log.events[0]
         assert event["payload"]["tool"] == "analyze_trends"
         assert event["workflow"] == "mcp"
+
+    @pytest.mark.asyncio
+    async def test_treats_missing_papers_as_empty_list(self):
+        """_analyze_trends_impl tolerates papers=None and reports zero paper_count."""
+        import paperbot.mcp.tools.analyze_trends as mod
+
+        mod._analyzer = _FakeTrendAnalyzer()
+        try:
+            result = await mod._analyze_trends_impl(
+                topic="llms",
+                papers=None,
+            )
+        finally:
+            mod._analyzer = None
+
+        assert result["paper_count"] == 0

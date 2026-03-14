@@ -14,6 +14,9 @@ from paperbot.mcp.tools._audit import log_tool_call
 
 logger = logging.getLogger(__name__)
 
+_MIN_MAX_RESULTS = 1
+_MAX_MAX_RESULTS = 100
+
 # Module-level lazy singleton for the search service
 _service = None
 
@@ -51,11 +54,22 @@ async def _paper_search_impl(
     """
     service = _get_service()
     t0 = time.monotonic()
+    args = {
+        "query": query,
+        "max_results": max_results,
+        "sources": sources,
+    }
 
     try:
+        normalized_max_results = int(max_results)
+        if not (_MIN_MAX_RESULTS <= normalized_max_results <= _MAX_MAX_RESULTS):
+            raise ValueError(
+                f"max_results must be between {_MIN_MAX_RESULTS} and {_MAX_MAX_RESULTS}"
+            )
+
         result = await service.search(
             query,
-            max_results=max_results,
+            max_results=normalized_max_results,
             sources=sources,
             persist=False,
         )
@@ -64,11 +78,7 @@ async def _paper_search_impl(
         elapsed_ms = (time.monotonic() - t0) * 1000.0
         log_tool_call(
             tool_name="paper_search",
-            arguments={
-                "query": query,
-                "max_results": max_results,
-                "sources": sources,
-            },
+            arguments=args,
             result_summary=(
                 f"returned {len(papers)} papers "
                 f"(total_raw={result.total_raw}, "
@@ -84,11 +94,7 @@ async def _paper_search_impl(
         elapsed_ms = (time.monotonic() - t0) * 1000.0
         log_tool_call(
             tool_name="paper_search",
-            arguments={
-                "query": query,
-                "max_results": max_results,
-                "sources": sources,
-            },
+            arguments=args,
             result_summary="",
             duration_ms=elapsed_ms,
             run_id=_run_id or None,
