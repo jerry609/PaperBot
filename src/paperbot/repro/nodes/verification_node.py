@@ -19,6 +19,7 @@ from paperbot.repro.verification_runtime import (
     VerificationRuntimePreparationError,
     prepare_verification_runtime,
 )
+from paperbot.utils.user_identity import optional_user_identity
 from .base_node import BaseNode, NodeResult
 from ..models import ErrorType, PaperContext
 
@@ -465,7 +466,7 @@ class VerificationNode(BaseNode[VerificationResult]):
         else:
             output_dir = Path(input_data)
             paper_context = None
-        user_id = (kwargs.get("user_id", "default") or "default").strip() or "default"
+        user_id = optional_user_identity(kwargs.get("user_id"))
 
         result = VerificationResult()
         debugger = SelfHealingDebugger(output_dir) if self.enable_self_healing else None
@@ -541,7 +542,7 @@ class VerificationNode(BaseNode[VerificationResult]):
             result.smoke_ok = smoke_result["passed"]
 
         # Persist verified structure when all essential checks pass (issue #162)
-        if result.all_passed and self._experience_store:
+        if result.all_passed and self._experience_store and user_id:
             paper_context = (
                 input_data[1] if isinstance(input_data, tuple) and len(input_data) > 1 else None
             )

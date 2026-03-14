@@ -24,6 +24,7 @@ from paperbot.infrastructure.stores.intelligence_store import IntelligenceStore
 from paperbot.infrastructure.stores.models import PaperRepoModel
 from paperbot.infrastructure.stores.research_store import SqlAlchemyResearchStore
 from paperbot.infrastructure.stores.sqlalchemy_db import SessionProvider, get_db_url
+from paperbot.utils.user_identity import require_user_identity
 
 
 ATOM_NS = {"atom": "http://www.w3.org/2005/Atom"}
@@ -100,7 +101,7 @@ class IntelligenceRadarService:
     def list_feed(
         self,
         *,
-        user_id: str = "default",
+        user_id: str,
         limit: int = 8,
         source: Optional[str] = None,
         keyword: Optional[str] = None,
@@ -108,8 +109,13 @@ class IntelligenceRadarService:
         sort_by: str = "score",
         sort_order: str = "desc",
     ) -> List[Dict[str, Any]]:
+        resolved_user_id = require_user_identity(user_id)
         candidate_limit = max(int(limit), 50)
-        rows = self._store.list_events(user_id=user_id, limit=candidate_limit, max_age_days=14)
+        rows = self._store.list_events(
+            user_id=resolved_user_id,
+            limit=candidate_limit,
+            max_age_days=14,
+        )
         source_filter = str(source or "").strip().lower()
         keyword_filter = str(keyword or "").strip().lower()
         repo_filter = str(repo or "").strip().lower()
@@ -137,22 +143,29 @@ class IntelligenceRadarService:
         filtered_rows.sort(key=lambda row: _signal_sort_value(row, sort_by=sort_by), reverse=reverse)
         return filtered_rows[: max(1, int(limit))]
 
-    def needs_refresh(self, *, user_id: str = "default", max_age_minutes: int = 45) -> bool:
-        latest = _parse_datetime(self._store.latest_detected_at(user_id=user_id))
+    def needs_refresh(self, *, user_id: str, max_age_minutes: int = 45) -> bool:
+        resolved_user_id = require_user_identity(user_id)
+        latest = _parse_datetime(self._store.latest_detected_at(user_id=resolved_user_id))
         if latest is None:
             return True
         return latest <= _utcnow() - timedelta(minutes=max(5, int(max_age_minutes)))
 
-    def latest_refresh(self, *, user_id: str = "default") -> Optional[str]:
-        latest = _parse_datetime(self._store.latest_detected_at(user_id=user_id))
+    def latest_refresh(self, *, user_id: str) -> Optional[str]:
+        resolved_user_id = require_user_identity(user_id)
+        latest = _parse_datetime(self._store.latest_detected_at(user_id=resolved_user_id))
         return latest.isoformat() if latest else None
 
-    def build_profile(self, *, user_id: str = "default") -> RadarProfile:
+    def build_profile(self, *, user_id: str) -> RadarProfile:
+        resolved_user_id = require_user_identity(user_id)
         keywords: List[str] = []
         scholar_names: List[str] = []
 
         try:
-            tracks = self._research_store.list_tracks(user_id=user_id, include_archived=False, limit=12)
+            tracks = self._research_store.list_tracks(
+                user_id=resolved_user_id,
+                include_archived=False,
+                limit=12,
+            )
         except Exception:
             tracks = []
 
@@ -204,21 +217,26 @@ class IntelligenceRadarService:
             subreddits=_dedupe_preserve_order(subreddits)[:8],
         )
 
-    def refresh(self, *, user_id: str = "default") -> Dict[str, Any]:
-        profile = self.build_profile(user_id=user_id)
+    def refresh(self, *, user_id: str) -> Dict[str, Any]:
+        resolved_user_id = require_user_identity(user_id)
+        profile = self.build_profile(user_id=resolved_user_id)
         detected_at = _utcnow()
         events: List[Dict[str, Any]] = []
-        events.extend(self._collect_reddit_events(user_id=user_id, profile=profile))
-        events.extend(self._collect_reddit_comment_events(user_id=user_id, profile=profile))
-        events.extend(self._collect_github_events(user_id=user_id, profile=profile))
-        events.extend(self._collect_github_issue_events(user_id=user_id, profile=profile))
-        events.extend(self._collect_hf_events(user_id=user_id, profile=profile))
-        events.extend(self._collect_x_events(user_id=user_id, profile=profile))
+        events.extend(self._collect_reddit_events(user_id=resolved_user_id, profile=profile))
+        events.extend(
+            self._collect_reddit_comment_events(user_id=resolved_user_id, profile=profile)
+        )
+        events.extend(self._collect_github_events(user_id=resolved_user_id, profile=profile))
+        events.extend(
+            self._collect_github_issue_events(user_id=resolved_user_id, profile=profile)
+        )
+        events.extend(self._collect_hf_events(user_id=resolved_user_id, profile=profile))
+        events.extend(self._collect_x_events(user_id=resolved_user_id, profile=profile))
 
         persisted: List[Dict[str, Any]] = []
         for event in events:
             row = self._store.upsert_event(
-                user_id=user_id,
+                user_id=resolved_user_id,
                 external_id=event["external_id"],
                 source=event["source"],
                 source_label=event["source_label"],

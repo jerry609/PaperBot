@@ -248,7 +248,7 @@ def create_parser() -> argparse.ArgumentParser:
         default=None,
         help="按 track 名称导出（大小写不敏感）",
     )
-    obsidian_parser.add_argument("--user-id", default="default", help="用户 ID")
+    obsidian_parser.add_argument("--user-id", default=None, help="用户 ID")
     obsidian_parser.add_argument("--limit", type=int, default=200, help="最多导出多少篇论文")
     obsidian_parser.add_argument(
         "--root-dir",
@@ -615,6 +615,7 @@ def _find_track_by_name(
 def _run_obsidian_export(parsed: argparse.Namespace) -> int:
     from paperbot.infrastructure.exporters import ObsidianFilesystemExporter
     from paperbot.infrastructure.stores.research_store import SqlAlchemyResearchStore
+    from paperbot.utils.user_identity import require_user_identity
 
     settings = create_settings()
     obsidian_config = settings.obsidian
@@ -627,26 +628,27 @@ def _run_obsidian_export(parsed: argparse.Namespace) -> int:
         return 1
     root_dir = parsed.root_dir or obsidian_config.root_dir or "PaperBot"
     paper_template_path = parsed.paper_template or obsidian_config.paper_template_path
+    user_id = require_user_identity(parsed.user_id)
 
     store = SqlAlchemyResearchStore()
     try:
         track = None
         track_id = None
         if parsed.track_id is not None:
-            track = store.get_track(user_id=parsed.user_id, track_id=int(parsed.track_id))
+            track = store.get_track(user_id=user_id, track_id=int(parsed.track_id))
             if track is None:
                 print(f"Error: track not found: {parsed.track_id}", file=sys.stderr)
                 return 1
             track_id = int(track["id"])
         elif parsed.track_name:
-            track = _find_track_by_name(store, user_id=parsed.user_id, track_name=parsed.track_name)
+            track = _find_track_by_name(store, user_id=user_id, track_name=parsed.track_name)
             if track is None:
                 print(f"Error: track not found: {parsed.track_name}", file=sys.stderr)
                 return 1
             track_id = int(track["id"])
 
         saved_items = store.list_saved_papers(
-            user_id=parsed.user_id,
+            user_id=user_id,
             track_id=track_id,
             limit=max(1, int(parsed.limit)),
         )

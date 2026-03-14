@@ -62,7 +62,10 @@ class TestGetResearchContextTool:
 
         mod._engine = _FakeContextEngine()
         try:
-            result = await mod._get_research_context_impl(query="transformers in NLP")
+            result = await mod._get_research_context_impl(
+                query="transformers in NLP",
+                user_id="mcp-user",
+            )
         finally:
             mod._engine = None
 
@@ -111,7 +114,10 @@ class TestGetResearchContextTool:
 
         mod._engine = _FakeContextEngine()
         try:
-            await mod._get_research_context_impl(query="attention mechanisms")
+            await mod._get_research_context_impl(
+                query="attention mechanisms",
+                user_id="mcp-user",
+            )
         finally:
             mod._engine = None
 

@@ -455,8 +455,7 @@ class TestMCPToolSchemas:
         assert params["_run_id"].default == ""
 
     def test_get_research_context_tool_has_correct_params(self):
-        """get_research_context has query (required, str), user_id (optional, default 'default'),
-        track_id (optional), _run_id (optional)."""
+        """get_research_context has query/user_id required and track_id/_run_id optional."""
         from paperbot.mcp.tools.get_research_context import _get_research_context_impl
 
         sig = inspect.signature(_get_research_context_impl)
@@ -467,9 +466,9 @@ class TestMCPToolSchemas:
         assert params["query"].default is inspect.Parameter.empty
         assert self._annotation_name(params["query"]) == "str"
 
-        # user_id is optional with default "default"
+        # user_id is required
         assert "user_id" in params
-        assert params["user_id"].default == "default"
+        assert params["user_id"].default is inspect.Parameter.empty
 
         # track_id is optional
         assert "track_id" in params
@@ -480,8 +479,7 @@ class TestMCPToolSchemas:
         assert params["_run_id"].default == ""
 
     def test_save_to_memory_tool_has_correct_params(self):
-        """save_to_memory has content (required, str), kind (optional, default 'note'),
-        user_id (optional), scope_type (optional), confidence (optional), _run_id (optional)."""
+        """save_to_memory has required content/user_id and optional kind/scope/confidence fields."""
         from paperbot.mcp.tools.save_to_memory import _save_to_memory_impl
 
         sig = inspect.signature(_save_to_memory_impl)
@@ -496,8 +494,10 @@ class TestMCPToolSchemas:
         assert "kind" in params
         assert params["kind"].default == "note"
 
-        # user_id is optional
+        # user_id is required and keyword-only
         assert "user_id" in params
+        assert params["user_id"].default is inspect.Parameter.empty
+        assert params["user_id"].kind is inspect.Parameter.KEYWORD_ONLY
 
         # scope_type is optional
         assert "scope_type" in params
@@ -688,7 +688,8 @@ class TestMCPToolInvocation:
 
         try:
             result = await grc_mod._get_research_context_impl(
-                query="transformer architectures"
+                query="transformer architectures",
+                user_id="mcp-user",
             )
         finally:
             grc_mod._engine = None
@@ -707,7 +708,8 @@ class TestMCPToolInvocation:
 
         try:
             result = await stm_mod._save_to_memory_impl(
-                content="Important finding about attention mechanisms."
+                content="Important finding about attention mechanisms.",
+                user_id="mcp-user",
             )
         finally:
             stm_mod._store = None
@@ -898,7 +900,7 @@ class TestMCPToolEventLogging:
         grc_mod._engine = _FakeContextEngine()
 
         try:
-            await grc_mod._get_research_context_impl(query="llms")
+            await grc_mod._get_research_context_impl(query="llms", user_id="mcp-user")
         finally:
             grc_mod._engine = None
 
@@ -918,7 +920,7 @@ class TestMCPToolEventLogging:
         stm_mod._store = _FakeMemoryStore()
 
         try:
-            await stm_mod._save_to_memory_impl(content="Important finding.")
+            await stm_mod._save_to_memory_impl(content="Important finding.", user_id="mcp-user")
         finally:
             stm_mod._store = None
 
@@ -986,8 +988,11 @@ class TestMCPToolEventLogging:
             await rel_mod._relevance_assess_impl(title="T", abstract="A", query="Q")
             await at_mod._analyze_trends_impl(topic="llms", papers=[{"title": "P"}])
             await cs_mod._check_scholar_impl(scholar_name="Scholar")
-            await grc_mod._get_research_context_impl(query="transformers")
-            await stm_mod._save_to_memory_impl(content="Finding.")
+            await grc_mod._get_research_context_impl(
+                query="transformers",
+                user_id="mcp-user",
+            )
+            await stm_mod._save_to_memory_impl(content="Finding.", user_id="mcp-user")
             await eto_mod._export_to_obsidian_impl(title="T", abstract="A")
         finally:
             ps_mod._service = None
@@ -1103,7 +1108,7 @@ class TestMCPResourceListing:
     def test_each_resource_impl_has_correct_signature(self):
         """Each resource _impl function has the expected parameter signature.
 
-        URI template resources require track_id: str.
+        User-scoped URI template resources require user_id and track_id: str.
         The static scholars resource has no required parameters.
         """
         from paperbot.mcp.resources.track_metadata import _track_metadata_impl
@@ -1111,25 +1116,37 @@ class TestMCPResourceListing:
         from paperbot.mcp.resources.track_memory import _track_memory_impl
         from paperbot.mcp.resources.scholars import _scholars_impl
 
-        # track_metadata_impl: requires track_id: str
+        # track_metadata_impl: requires user_id + track_id: str
         sig = inspect.signature(_track_metadata_impl)
         params = sig.parameters
+        assert "user_id" in params, "_track_metadata_impl missing user_id param"
+        assert params["user_id"].default is inspect.Parameter.empty, (
+            "user_id should be required"
+        )
         assert "track_id" in params, "_track_metadata_impl missing track_id param"
         assert params["track_id"].default is inspect.Parameter.empty, (
             "track_id should be required"
         )
 
-        # track_papers_impl: requires track_id: str
+        # track_papers_impl: requires user_id + track_id: str
         sig = inspect.signature(_track_papers_impl)
         params = sig.parameters
+        assert "user_id" in params, "_track_papers_impl missing user_id param"
+        assert params["user_id"].default is inspect.Parameter.empty, (
+            "user_id should be required"
+        )
         assert "track_id" in params, "_track_papers_impl missing track_id param"
         assert params["track_id"].default is inspect.Parameter.empty, (
             "track_id should be required"
         )
 
-        # track_memory_impl: requires track_id: str
+        # track_memory_impl: requires user_id + track_id: str
         sig = inspect.signature(_track_memory_impl)
         params = sig.parameters
+        assert "user_id" in params, "_track_memory_impl missing user_id param"
+        assert params["user_id"].default is inspect.Parameter.empty, (
+            "user_id should be required"
+        )
         assert "track_id" in params, "_track_memory_impl missing track_id param"
         assert params["track_id"].default is inspect.Parameter.empty, (
             "track_id should be required"

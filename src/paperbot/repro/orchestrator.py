@@ -27,6 +27,7 @@ from .agents import (
     VerificationAgent,
 )
 from .models import PaperContext, ReproductionResult, ReproPhase
+from paperbot.utils.user_identity import optional_user_identity
 
 logger = logging.getLogger(__name__)
 
@@ -161,7 +162,7 @@ class Orchestrator:
         self,
         paper_context: PaperContext,
         *,
-        user_id: str = "default",
+        user_id: Optional[str] = None,
         pack_id: Optional[str] = None,
         run_id: Optional[str] = None,
         trace_id: Optional[str] = None,
@@ -183,10 +184,11 @@ class Orchestrator:
         # use them for end-to-end correlation.
         self._run_id = run_id or new_run_id()
         self._trace_id = trace_id or new_trace_id()
+        resolved_user_id = optional_user_identity(user_id)
 
         self.context = {
             "paper_context": paper_context,
-            "user_id": (user_id or "default").strip() or "default",
+            "user_id": resolved_user_id,
             "pack_id": pack_id,
             "run_id": self._run_id,
             "trace_id": self._trace_id,

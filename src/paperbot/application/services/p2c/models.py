@@ -35,7 +35,7 @@ class GenerateContextRequest:
     """P2C pipeline entry request."""
 
     paper_id: str
-    user_id: str = "default"
+    user_id: Optional[str] = None
     project_id: Optional[str] = None
     track_id: Optional[int] = None
     depth: Depth = "standard"

@@ -10,6 +10,7 @@ from uuid import uuid4
 from paperbot.application.ports.event_log_port import EventLogPort
 from paperbot.application.ports.memory_port import MemoryPort
 from paperbot.memory.schema import MemoryCandidate
+from paperbot.utils.user_identity import optional_user_identity
 
 from .conflict import ObsidianManagedConflict, detect_managed_conflict
 from .parser import ParsedObsidianNote, parse_note_text, user_sections_hash
@@ -341,17 +342,22 @@ class ObsidianBidirectionalSync:
         )
         return created, skipped
 
-    def _write_memories(self, *, user_id: str, memories: List[MemoryCandidate]) -> Tuple[int, int]:
+    def _write_memories(
+        self, *, user_id: Optional[str], memories: List[MemoryCandidate]
+    ) -> Tuple[int, int]:
+        resolved_user_id = optional_user_identity(user_id)
+        if resolved_user_id is None:
+            return 0, 0
         created, skipped, _ = self._memory_store.add_memories(
-            user_id=user_id,
+            user_id=resolved_user_id,
             memories=memories,
             actor_id="obsidian-sync",
         )
         return created, skipped
 
-    def _scope_for_note(self, note: ParsedObsidianNote) -> tuple[str, str, Optional[str]]:
+    def _scope_for_note(self, note: ParsedObsidianNote) -> tuple[Optional[str], str, Optional[str]]:
         frontmatter = note.frontmatter
-        user_id = _coerce_optional_string(frontmatter.get("user_id")) or "default"
+        user_id = optional_user_identity(frontmatter.get("user_id"))
         paperbot_type = str(frontmatter.get("paperbot_type") or "").strip().lower()
         if paperbot_type == "track":
             scope_id = _coerce_optional_string(frontmatter.get("track_id")) or (

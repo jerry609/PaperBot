@@ -11,6 +11,7 @@ import time
 from typing import Any, Dict, Optional
 
 from paperbot.mcp.tools._audit import log_tool_call
+from paperbot.utils.user_identity import require_user_identity
 
 logger = logging.getLogger(__name__)
 
@@ -120,7 +121,7 @@ def _normalize_context_pack(result: Dict[str, Any]) -> Dict[str, Any]:
 
 async def _get_research_context_impl(
     query: str,
-    user_id: str = "default",
+    user_id: str,
     track_id: Optional[int] = None,
     _run_id: str = "",
 ) -> Dict[str, Any]:
@@ -139,12 +140,13 @@ async def _get_research_context_impl(
         for papers, memories, track, stage, and routing_suggestion.
     """
     start = time.monotonic()
-    args = {"query": query, "user_id": user_id, "track_id": track_id}
+    resolved_user_id = require_user_identity(user_id)
+    args = {"query": query, "user_id": resolved_user_id, "track_id": track_id}
 
     try:
         engine = _get_engine()
         result = await engine.build_context_pack(
-            user_id=user_id,
+            user_id=resolved_user_id,
             query=query,
             track_id=track_id,
         )
@@ -181,7 +183,7 @@ def register(mcp) -> None:
     @mcp.tool()
     async def get_research_context(
         query: str,
-        user_id: str = "default",
+        user_id: str,
         track_id: Optional[int] = None,
         _run_id: str = "",
     ) -> dict:

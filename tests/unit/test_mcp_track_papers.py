@@ -8,6 +8,8 @@ import json
 
 import pytest
 
+TEST_USER_ID = "mcp-user"
+
 
 class _FakeResearchStore:
     """ResearchStore stub returning canned feed data."""
@@ -44,7 +46,7 @@ class TestTrackPapersResource:
         fake_store = _FakeResearchStore(items=[{"title": "P1"}])
         mod._store = fake_store
         try:
-            result = await mod._track_papers_impl("42")
+            result = await mod._track_papers_impl(user_id=TEST_USER_ID, track_id="42")
         finally:
             mod._store = None
 
@@ -53,8 +55,8 @@ class TestTrackPapersResource:
         assert len(data["items"]) == 1
         assert data["items"][0]["title"] == "P1"
         assert fake_store.calls == [
-            {"fn": "get_track", "user_id": "default", "track_id": 42},
-            {"fn": "list_track_feed", "user_id": "default", "track_id": 42, "limit": 50},
+            {"fn": "get_track", "user_id": TEST_USER_ID, "track_id": 42},
+            {"fn": "list_track_feed", "user_id": TEST_USER_ID, "track_id": 42, "limit": 50},
         ]
 
     @pytest.mark.asyncio
@@ -64,7 +66,7 @@ class TestTrackPapersResource:
 
         mod._store = _FakeResearchStore(items=[])
         try:
-            result = await mod._track_papers_impl("42")
+            result = await mod._track_papers_impl(user_id=TEST_USER_ID, track_id="42")
         finally:
             mod._store = None
 
@@ -79,7 +81,7 @@ class TestTrackPapersResource:
 
         mod._store = _FakeResearchStore()
         try:
-            result = await mod._track_papers_impl("xyz")
+            result = await mod._track_papers_impl(user_id=TEST_USER_ID, track_id="xyz")
         finally:
             mod._store = None
 
@@ -94,13 +96,13 @@ class TestTrackPapersResource:
         fake_store = _FakeResearchStore(track_exists=False)
         mod._store = fake_store
         try:
-            result = await mod._track_papers_impl("42")
+            result = await mod._track_papers_impl(user_id=TEST_USER_ID, track_id="42")
         finally:
             mod._store = None
 
         data = json.loads(result)
         assert data["error"] == "Track 42 not found."
-        assert fake_store.calls == [{"fn": "get_track", "user_id": "default", "track_id": 42}]
+        assert fake_store.calls == [{"fn": "get_track", "user_id": TEST_USER_ID, "track_id": 42}]
 
     @pytest.mark.asyncio
     async def test_returns_error_when_track_is_archived(self):
@@ -110,7 +112,7 @@ class TestTrackPapersResource:
         fake_store = _FakeResearchStore(archived=True)
         mod._store = fake_store
         try:
-            result = await mod._track_papers_impl("42")
+            result = await mod._track_papers_impl(user_id=TEST_USER_ID, track_id="42")
         finally:
             mod._store = None
 

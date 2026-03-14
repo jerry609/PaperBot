@@ -29,6 +29,7 @@ from paperbot.application.services.p2c.models import (
 )
 from paperbot.application.services.p2c.orchestrator import ExtractionOrchestrator
 from paperbot.infrastructure.stores.repro_context_store import SqlAlchemyReproContextStore
+from paperbot.utils.user_identity import has_user_identity
 from paperbot.utils.logging_config import LogFiles, Logger, set_trace_id
 
 _MAX_OBSERVATION_NARRATIVE = 400  # chars stored per memory item
@@ -292,7 +293,7 @@ async def _write_paper_scope_memories(
     observations: list,
 ) -> None:
     """Persist P2C observations as paper-scoped memory items for future reuse."""
-    if user_id == "default" or not observations:
+    if not has_user_identity(user_id) or not observations:
         return
     try:
         from paperbot.infrastructure.stores.memory_store import SqlAlchemyMemoryStore

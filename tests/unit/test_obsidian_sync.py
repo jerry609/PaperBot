@@ -11,24 +11,24 @@ class _FakeResearchStore:
         self.closed = False
 
     def get_track(self, *, user_id: str, track_id: int):
-        assert user_id == "default"
+        assert user_id == "obsidian-user"
         assert track_id == 7
-        return {"id": 7, "user_id": "default", "name": "ICL Compression"}
+        return {"id": 7, "user_id": "obsidian-user", "name": "ICL Compression"}
 
     def list_saved_papers(self, *, user_id: str, track_id: int, limit: int):
-        assert user_id == "default"
+        assert user_id == "obsidian-user"
         assert track_id == 7
         assert limit == 25
         return [{"paper": {"id": 1, "title": "UniICL"}}]
 
     def list_tasks(self, *, user_id: str, track_id: int, limit: int):
-        assert user_id == "default"
+        assert user_id == "obsidian-user"
         assert track_id == 7
         assert limit == 100
         return [{"title": "Benchmark prompt compression", "status": "doing"}]
 
     def list_milestones(self, *, user_id: str, track_id: int, limit: int):
-        assert user_id == "default"
+        assert user_id == "obsidian-user"
         assert track_id == 7
         assert limit == 100
         return [{"name": "Submit workshop paper", "status": "todo"}]
@@ -83,14 +83,14 @@ def test_export_track_snapshot_uses_obsidian_settings(monkeypatch, tmp_path: Pat
     monkeypatch.setattr(obsidian_sync, "SqlAlchemyResearchStore", _FakeResearchStore)
     monkeypatch.setattr(obsidian_sync, "ObsidianFilesystemExporter", _FakeExporter)
 
-    result = obsidian_sync.export_track_snapshot(user_id="default", track_id=7)
+    result = obsidian_sync.export_track_snapshot(user_id="obsidian-user", track_id=7)
 
     assert result == {"paper_count": 1}
     assert captured["vault_path"] == vault_dir
     assert captured["root_dir"] == "PaperBot Notes"
     assert captured["track"] == {
         "id": 7,
-        "user_id": "default",
+        "user_id": "obsidian-user",
         "name": "ICL Compression",
         "tasks": [{"title": "Benchmark prompt compression", "status": "doing"}],
         "milestones": [{"name": "Submit workshop paper", "status": "todo"}],

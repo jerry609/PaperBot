@@ -87,6 +87,7 @@ class TestSaveToMemoryTool:
             await mod._save_to_memory_impl(
                 content="Hypothesis: scaling laws hold",
                 kind="hypothesis",
+                user_id="mcp-user",
             )
         finally:
             mod._store = None

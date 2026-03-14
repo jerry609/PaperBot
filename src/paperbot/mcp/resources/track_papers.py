@@ -11,6 +11,8 @@ import logging
 
 import anyio
 
+from paperbot.utils.user_identity import require_user_identity
+
 logger = logging.getLogger(__name__)
 
 # Module-level lazy singleton for the research store (can be overridden in tests)
@@ -27,7 +29,7 @@ def _get_store():
     return _store
 
 
-async def _track_papers_impl(track_id: str) -> str:
+async def _track_papers_impl(user_id: str, track_id: str) -> str:
     """Return JSON list of papers in the given track's feed.
 
     Args:
@@ -41,13 +43,16 @@ async def _track_papers_impl(track_id: str) -> str:
     except (ValueError, TypeError):
         return json.dumps({"error": f"Invalid track_id: {track_id!r}. Must be an integer."})
 
+    resolved_user_id = require_user_identity(user_id)
     store = _get_store()
-    track = await anyio.to_thread.run_sync(lambda: store.get_track(user_id="default", track_id=tid))
+    track = await anyio.to_thread.run_sync(
+        lambda: store.get_track(user_id=resolved_user_id, track_id=tid)
+    )
     if track is None or track.get("archived_at") is not None:
         return json.dumps({"error": f"Track {tid} not found."})
 
     feed = await anyio.to_thread.run_sync(
-        lambda: store.list_track_feed(user_id="default", track_id=tid, limit=50)
+        lambda: store.list_track_feed(user_id=resolved_user_id, track_id=tid, limit=50)
     )
 
     return json.dumps(feed)
@@ -56,12 +61,15 @@ async def _track_papers_impl(track_id: str) -> str:
 def register(mcp) -> None:
     """Register the track_papers resource on the given FastMCP instance."""
 
-    @mcp.resource("paperbot://track/{track_id}/papers", mime_type="application/json")
-    async def track_papers(track_id: str) -> str:
+    @mcp.resource(
+        "paperbot://users/{user_id}/tracks/{track_id}/papers",
+        mime_type="application/json",
+    )
+    async def track_papers(user_id: str, track_id: str) -> str:
         """Return papers in a PaperBot research track's feed.
 
         Returns up to 50 most recent papers with metadata including title, authors,
         abstract, arxiv_id, and relevance scores. Use track_metadata first to verify
         the track exists.
         """
-        return await _track_papers_impl(track_id)
+        return await _track_papers_impl(user_id, track_id)

@@ -17,6 +17,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Optional, Set, Tuple
 
+from paperbot.utils.user_identity import require_user_identity
+
 from .symbol_index import SymbolIndex, SymbolInfo
 
 if TYPE_CHECKING:
@@ -365,7 +367,7 @@ class CodeMemory:
         self,
         paper_id: str,
         *,
-        user_id: str = "default",
+        user_id: str,
         pack_id: Optional[str] = None,
         limit: int = 20,
     ) -> None:
@@ -377,7 +379,7 @@ class CodeMemory:
         if not self._experience_store or not paper_id:
             return
         try:
-            effective_user_id = (user_id or "default").strip() or "default"
+            effective_user_id = require_user_identity(user_id)
             rows = self._experience_store.get_by_paper_id(
                 paper_id,
                 user_id=effective_user_id,
@@ -399,7 +401,7 @@ class CodeMemory:
     def record_success_pattern(
         self,
         *,
-        user_id: str = "default",
+        user_id: str,
         paper_id: Optional[str],
         pack_id: Optional[str] = None,
         filepath: str,
@@ -409,8 +411,9 @@ class CodeMemory:
         if not self._experience_store:
             return
         try:
+            resolved_user_id = require_user_identity(user_id)
             self._experience_store.add(
-                user_id=(user_id or "default").strip() or "default",
+                user_id=resolved_user_id,
                 pattern_type="success_pattern",
                 content=f"Successfully generated {filepath}",
                 paper_id=paper_id,
@@ -423,7 +426,7 @@ class CodeMemory:
     def record_verified_structure(
         self,
         *,
-        user_id: str = "default",
+        user_id: str,
         paper_id: Optional[str],
         pack_id: Optional[str] = None,
         description: str,
@@ -433,8 +436,9 @@ class CodeMemory:
         if not self._experience_store:
             return
         try:
+            resolved_user_id = require_user_identity(user_id)
             self._experience_store.add(
-                user_id=(user_id or "default").strip() or "default",
+                user_id=resolved_user_id,
                 pattern_type="verified_structure",
                 content=description,
                 paper_id=paper_id,
@@ -447,7 +451,7 @@ class CodeMemory:
     def record_failure_reason(
         self,
         *,
-        user_id: str = "default",
+        user_id: str,
         paper_id: Optional[str],
         pack_id: Optional[str] = None,
         error_type: str,
@@ -458,8 +462,9 @@ class CodeMemory:
         if not self._experience_store:
             return
         try:
+            resolved_user_id = require_user_identity(user_id)
             self._experience_store.add(
-                user_id=(user_id or "default").strip() or "default",
+                user_id=resolved_user_id,
                 pattern_type="failure_reason",
                 content=f"[{error_type}] fixed: {fix_applied}",
                 paper_id=paper_id,

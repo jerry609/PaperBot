@@ -11,6 +11,7 @@ from paperbot.application.services.candidate_search import (
     search_candidate_papers,
 )
 from paperbot.application.services.paper_search_service import PaperSearchService, SearchResult
+from paperbot.utils.user_identity import has_user_identity, optional_user_identity
 
 if TYPE_CHECKING:
     from paperbot.application.services.workflow_query_grounder import (
@@ -224,7 +225,7 @@ def _merge_item(target: Dict[str, Any], incoming: Dict[str, Any]) -> None:
 async def run_unified_topic_search(
     *,
     queries: Sequence[str],
-    user_id: str = "default",
+    user_id: Optional[str] = None,
     branches: Sequence[str] = ("arxiv", "venue"),
     sources: Sequence[str] = ("papers_cool",),
     top_k_per_query: int = 5,
@@ -235,6 +236,7 @@ async def run_unified_topic_search(
     persist: bool = False,
 ) -> Dict[str, Any]:
     normalized_sources = normalize_topic_sources(sources)
+    resolved_user_id = optional_user_identity(user_id)
 
     query_specs: List[Dict[str, Any]] = []
     seen_queries: set[str] = set()
@@ -243,8 +245,8 @@ async def run_unified_topic_search(
         if not raw_query:
             continue
         grounded = (
-            query_grounder.ground_query(user_id=user_id, query=raw_query)
-            if query_grounder is not None
+            query_grounder.ground_query(user_id=resolved_user_id, query=raw_query)
+            if query_grounder is not None and has_user_identity(resolved_user_id)
             else _default_grounded_query(raw_query)
         )
         canonical_query = str(

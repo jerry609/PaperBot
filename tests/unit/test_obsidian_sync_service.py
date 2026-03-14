@@ -20,6 +20,7 @@ class _FakeMemoryStore:
 
 
 def test_obsidian_sync_scan_captures_user_tags_links_notes_and_conflicts(tmp_path: Path) -> None:
+    user_id = "obsidian-user"
     vault = tmp_path / "vault"
     root = vault / "PaperBot"
     papers_dir = root / "Papers"
@@ -42,7 +43,7 @@ Baseline summary.
             "---\n"
             "paperbot_type: paper\n"
             "paperbot_id: paper-1\n"
-            "user_id: default\n"
+            f"user_id: {user_id}\n"
             "title: UniICL\n"
             "tags:\n"
             "  - icl\n"
@@ -92,7 +93,7 @@ Relates to [[Custom/Prompt Compression]].
             "---\n"
             "paperbot_type: paper\n"
             "paperbot_id: paper-1\n"
-            "user_id: default\n"
+            f"user_id: {user_id}\n"
             "title: UniICL\n"
             "tags:\n"
             "  - icl\n"

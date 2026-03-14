@@ -18,7 +18,7 @@ class EnrichmentContext:
     """Shared context passed through the pipeline."""
 
     query: str = ""
-    user_id: str = "default"
+    user_id: Optional[str] = None
     track_id: Optional[int] = None
     extra: Dict[str, Any] = field(default_factory=dict)
 
