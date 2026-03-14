@@ -11,7 +11,12 @@ logger = logging.getLogger(__name__)
 
 try:
     from mcp.server.fastmcp import FastMCP
-
+except ImportError:
+    # FastMCP not available -- create a minimal stub so tool modules
+    # can still be imported and tested without the mcp package.
+    logger.debug("mcp package not installed; MCP server unavailable")
+    mcp = None  # type: ignore[assignment]
+else:
     mcp = FastMCP("paperbot")
 
     # Register tools
@@ -45,9 +50,3 @@ try:
     track_papers.register(mcp)
     track_memory.register(mcp)
     scholars.register(mcp)
-
-except ImportError:
-    # FastMCP not available -- create a minimal stub so tool modules
-    # can still be imported and tested without the mcp package.
-    logger.debug("mcp package not installed; MCP server unavailable")
-    mcp = None  # type: ignore[assignment]

@@ -29,7 +29,7 @@ class _FakeMissingConfigService:
 class TestScholarsResource:
     @pytest.mark.asyncio
     async def test_returns_scholar_list(self):
-        """_scholars_impl() returns JSON list with name and semantic_scholar_id."""
+        """_scholars_impl() returns a stable JSON envelope with scholar rows."""
         import paperbot.mcp.resources.scholars as mod
 
         mod._service = _FakeSubscriptionService()
@@ -39,10 +39,10 @@ class TestScholarsResource:
             mod._service = None
 
         data = json.loads(result)
-        assert isinstance(data, list)
-        assert len(data) == 2
-        assert data[0]["name"] == "Dawn Song"
-        assert data[0]["semantic_scholar_id"] == "123"
+        assert data["error"] is None
+        assert len(data["scholars"]) == 2
+        assert data["scholars"][0]["name"] == "Dawn Song"
+        assert data["scholars"][0]["semantic_scholar_id"] == "123"
 
     @pytest.mark.asyncio
     async def test_returns_error_json_when_config_not_found(self):

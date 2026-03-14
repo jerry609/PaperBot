@@ -95,3 +95,18 @@ class TestSaveToMemoryTool:
         event = log.events[0]
         assert event["payload"]["tool"] == "save_to_memory"
         assert event["workflow"] == "mcp"
+
+    @pytest.mark.asyncio
+    async def test_rejects_out_of_range_confidence(self):
+        """_save_to_memory_impl rejects confidence outside the documented 0-1 range."""
+        import paperbot.mcp.tools.save_to_memory as mod
+
+        mod._store = _FakeMemoryStore()
+        try:
+            with pytest.raises(ValueError, match="confidence must be between 0.0 and 1.0"):
+                await mod._save_to_memory_impl(
+                    content="Some content",
+                    confidence=1.5,
+                )
+        finally:
+            mod._store = None

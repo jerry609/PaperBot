@@ -141,6 +141,7 @@ class LLMService:
         if parsed is None:
             return {
                 "score": _overlap_relevance_score(query=query, paper=paper),
+                "fallback": True,
                 "reason": "Fallback score from token overlap (LLM output unavailable).",
             }
 

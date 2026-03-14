@@ -50,26 +50,26 @@ async def _analyze_trends_impl(
         Includes degraded=True and error when LLM is unavailable.
     """
     start = time.monotonic()
-    args = {"topic": topic, "paper_count": len(papers)}
+    safe_papers = list(papers or [])
+    args = {"topic": topic, "paper_count": len(safe_papers)}
 
     try:
         analyzer = _get_analyzer()
         result = await anyio.to_thread.run_sync(
-            lambda: analyzer.analyze(topic=topic, items=papers)
+            lambda: analyzer.analyze(topic=topic, items=safe_papers)
         )
 
         output: Dict[str, Any] = {
             "trend_analysis": result,
             "topic": topic,
-            "paper_count": len(papers),
+            "paper_count": len(safe_papers),
         }
 
         # Detect degraded LLM response (empty string when LLM unavailable)
         if not result or not result.strip():
             output["degraded"] = True
             output["error"] = (
-                "LLM service unavailable. "
-                "Configure OPENAI_API_KEY or ANTHROPIC_API_KEY."
+                "LLM service unavailable. " "Configure OPENAI_API_KEY or ANTHROPIC_API_KEY."
             )
 
         log_tool_call(
@@ -77,7 +77,7 @@ async def _analyze_trends_impl(
             arguments=args,
             result_summary={
                 "topic": topic,
-                "paper_count": len(papers),
+                "paper_count": len(safe_papers),
                 "degraded": output.get("degraded", False),
             },
             duration_ms=(time.monotonic() - start) * 1000,

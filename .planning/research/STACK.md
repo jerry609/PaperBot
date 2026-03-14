@@ -57,7 +57,7 @@ The system prompt body instructs Claude Code how to:
 1. Format `codex exec` invocations with appropriate flags
 2. Parse JSONL output events from Codex
 3. Report results back to the main Claude Code session
-4. Log events to PaperBot via MCP `event_log` tool
+4. Log codex-worker runtime events to PaperBot via MCP `event_log` tool
 
 ### Codex CLI (System-level tool, NOT a project dependency)
 
@@ -98,13 +98,17 @@ Note: The existing `CodexDispatcher` in `infrastructure/swarm/codex_dispatcher.p
 ### Data Flow: Agent Dashboard
 
 ```
-Agent activity events arrive via two paths:
+Agent activity events intentionally use two ingestion paths with different actors:
 
-1. MCP tool calls (from Claude Code/Codex):
+1. Runtime / agent execution events (from Claude Code / codex-worker):
+   MCP `event_log` tool --> PaperBot event log backend
+                        --> persistence + stream fan-out for execution views
+
+2. UI / dashboard-authored events (from Studio itself, if needed):
    POST /api/agent-events --> SQLAlchemy persistence
                           --> asyncio.Queue fan-out to SSE subscribers
 
-2. Dashboard consumption:
+3. Dashboard consumption:
    GET /api/agent-events/stream (SSE) --> wrap_generator from streaming.py
    GET /api/agent-events?run_id=X (REST) --> query persisted events
 

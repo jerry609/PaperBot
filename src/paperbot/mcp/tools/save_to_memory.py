@@ -17,19 +17,21 @@ from paperbot.mcp.tools._audit import log_tool_call
 logger = logging.getLogger(__name__)
 
 # Allowed MemoryKind values (must match paperbot.memory.schema.MemoryKind)
-_ALLOWED_KINDS = frozenset([
-    "profile",
-    "preference",
-    "goal",
-    "project",
-    "constraint",
-    "todo",
-    "fact",
-    "note",
-    "decision",
-    "hypothesis",
-    "keyword_set",
-])
+_ALLOWED_KINDS = frozenset(
+    [
+        "profile",
+        "preference",
+        "goal",
+        "project",
+        "constraint",
+        "todo",
+        "fact",
+        "note",
+        "decision",
+        "hypothesis",
+        "keyword_set",
+    ]
+)
 
 # Module-level lazy singleton for the memory store
 _store = None
@@ -77,8 +79,7 @@ async def _save_to_memory_impl(
     effective_kind = kind if kind in _ALLOWED_KINDS else "note"
     if kind not in _ALLOWED_KINDS:
         logger.warning(
-            "save_to_memory: invalid kind=%r; defaulting to 'note'. "
-            "Allowed values: %s",
+            "save_to_memory: invalid kind=%r; defaulting to 'note'. " "Allowed values: %s",
             kind,
             sorted(_ALLOWED_KINDS),
         )
@@ -88,15 +89,20 @@ async def _save_to_memory_impl(
         "kind": effective_kind,
         "user_id": user_id,
         "scope_type": scope_type,
+        "confidence": confidence,
     }
 
     try:
         from paperbot.memory.schema import MemoryCandidate
 
+        normalized_confidence = float(confidence)
+        if not (0.0 <= normalized_confidence <= 1.0):
+            raise ValueError("confidence must be between 0.0 and 1.0")
+
         candidate = MemoryCandidate(
             kind=effective_kind,
             content=content,
-            confidence=confidence,
+            confidence=normalized_confidence,
             scope_type=scope_type or None,
             scope_id=scope_id or None,
         )
