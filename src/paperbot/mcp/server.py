@@ -35,6 +35,17 @@ try:
     save_to_memory.register(mcp)
     export_to_obsidian.register(mcp)
 
+    # Register resources
+    from paperbot.mcp.resources import track_metadata
+    from paperbot.mcp.resources import track_papers
+    from paperbot.mcp.resources import track_memory
+    from paperbot.mcp.resources import scholars
+
+    track_metadata.register(mcp)
+    track_papers.register(mcp)
+    track_memory.register(mcp)
+    scholars.register(mcp)
+
 except ImportError:
     # FastMCP not available -- create a minimal stub so tool modules
     # can still be imported and tested without the mcp package.
