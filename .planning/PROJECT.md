@@ -31,7 +31,7 @@ Paper-specific capability layer: understanding, reproduction, verification, and 
 
 ### Active
 
-<!-- Current scope: v1.1 Agent Orchestration Dashboard -->
+<!-- Current scope: v1.1 Agent Orchestration Dashboard + v2.0 PG Migration -->
 
 - [ ] Codex subagent bridge for Claude Code (custom agent definition)
 - [ ] Agent orchestration dashboard (replaces studio page)
@@ -39,6 +39,10 @@ Paper-specific capability layer: understanding, reproduction, verification, and 
 - [ ] Three-panel IDE layout (tasks | agent activity | files)
 - [ ] Live SSE streaming for real-time agent activity
 - [ ] Paper2Code overflow delegation workflow (Claude Code → Codex)
+- [ ] PostgreSQL migration (replace SQLite)
+- [ ] Async data layer (AsyncSession + asyncpg)
+- [ ] Systematic data model refactoring
+- [ ] PG-native features (tsvector, JSONB)
 
 ### Out of Scope
 
@@ -56,6 +60,7 @@ Paper-specific capability layer: understanding, reproduction, verification, and 
 - @xyflow/react already in web dashboard for DAG visualization
 - MCP server (v1.0 milestone) is prerequisite — provides tool surface for agent integration
 - Dev branch synced to origin/dev at 2e5173d (2026-03-14)
+- Current DB: SQLite with 46 models, sync Session, FTS5 virtual tables, optional sqlite-vec
 
 ## Constraints
 
@@ -65,7 +70,18 @@ Paper-specific capability layer: understanding, reproduction, verification, and 
 - **Studio integration**: Dashboard integrates with existing Monaco/XTerm, not replaces them
 - **Transport**: SSE for live updates (existing infrastructure)
 
-## Current Milestone: v2.0 PostgreSQL Migration & Data Layer Refactoring
+## Current Milestone: v1.1 Agent Orchestration Dashboard
+
+**Goal:** Build a Codex subagent bridge for Claude Code and a real-time agent orchestration dashboard in PaperBot's web UI, enabling the Paper2Code overflow delegation workflow.
+
+**Target features:**
+- Codex subagent bridge (`.claude/agents/codex-worker.md`)
+- Three-panel agent dashboard (replaces studio page)
+- Agent event logging (lifecycle, tools, files, tasks)
+- Live SSE streaming for real-time updates
+- Paper2Code workflow with Codex overflow delegation
+
+## Planned Milestone: v2.0 PostgreSQL Migration & Data Layer Refactoring
 
 **Goal:** Migrate from SQLite to PostgreSQL, refactor all 46 data models systematically, and convert the entire data access layer from synchronous to async (asyncpg + AsyncSession).
 
@@ -88,11 +104,10 @@ Paper-specific capability layer: understanding, reproduction, verification, and 
 | Overflow delegation model | Claude Code does everything, delegates to Codex when workload is high | — Pending |
 | MCP event log as data flow | Agent activity → MCP event log → dashboard reads | — Pending |
 | Live SSE streaming | Real-time updates using existing SSE infrastructure | — Pending |
-
 | PG migration over SQLite | SQLite concurrency limits, lack of PG features (tsvector, JSONB), production readiness | — Pending |
 | Async data layer (asyncpg) | FastAPI is async; sync DB calls block event loop; do it together with PG migration | — Pending |
 | Systematic model refactoring | 46 models accumulated organically; normalize, add constraints, remove redundancy | — Pending |
 | Docker PG for local dev | Standard dev setup, matches production topology | — Pending |
 
 ---
-*Last updated: 2026-03-14 after v2.0 milestone initialization*
+*Last updated: 2026-03-14 after v2.0 milestone added*
