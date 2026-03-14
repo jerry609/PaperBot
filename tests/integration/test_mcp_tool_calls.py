@@ -1,7 +1,7 @@
 """Integration tests verifying MCP tool listing and invocation via MCP protocol.
 
 Tests verify:
-1. All 4 tools are discoverable (register functions + _impl functions)
+1. All 9 tools are discoverable (register functions + _impl functions)
 2. Each tool has correct parameter signatures (types, required vs optional)
 3. Tools are callable through the implementation layer
 4. Tool calls are logged to EventLogPort with correct workflow/stage
@@ -15,7 +15,7 @@ tool registration is skipped, but the implementations remain fully functional.
 
 import inspect
 import json
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import pytest
 
@@ -29,7 +29,7 @@ from paperbot.infrastructure.event_log.memory_event_log import InMemoryEventLog
 
 
 # ---------------------------------------------------------------------------
-# Fakes
+# Fakes for existing 4 tools
 # ---------------------------------------------------------------------------
 
 
@@ -95,39 +95,117 @@ class _FakeRelevanceLLM:
 
 
 # ---------------------------------------------------------------------------
+# Fakes for 5 new tools (Plans 01 and 02)
+# ---------------------------------------------------------------------------
+
+
+class _FakeTrendAnalyzer:
+    """TrendAnalyzer stub returning a canned analysis string."""
+
+    def analyze(self, *, topic: str, items) -> str:
+        return "Trend analysis result"
+
+
+class _FakeS2Client:
+    """Fake SemanticScholarClient returning a test author and papers."""
+
+    async def search_authors(self, query, limit=10, fields=None):
+        return [
+            {
+                "authorId": "123",
+                "name": "Scholar",
+                "hIndex": 10,
+                "paperCount": 50,
+                "citationCount": 1000,
+            }
+        ]
+
+    async def get_author_papers(self, author_id, limit=10, fields=None):
+        return [
+            {
+                "title": "Paper",
+                "year": 2024,
+                "citationCount": 5,
+                "venue": "ICML",
+            }
+        ]
+
+
+class _FakeContextEngine:
+    """Fake ContextEngine returning a minimal context pack."""
+
+    async def build_context_pack(self, user_id, query, track_id=None):
+        return {"papers": [], "memories": [], "track": None, "stage": "explore"}
+
+
+class _FakeMemoryStore:
+    """Fake SqlAlchemyMemoryStore returning (created, skipped, rows) tuple."""
+
+    def add_memories(self, user_id, memories):
+        return (1, 0, [])
+
+
+class _FakeExporter:
+    """Fake ObsidianFilesystemExporter returning a minimal rendered note."""
+
+    def _render_paper_note(self, **kwargs):
+        return "# Title\n\nBody text"
+
+    def _yaml_frontmatter(self, data):
+        return "---\ntitle: Title\n---\n"
+
+
+# ---------------------------------------------------------------------------
 # Tool listing (discovery) tests
 # ---------------------------------------------------------------------------
 
 
-EXPECTED_TOOLS = ["paper_search", "paper_judge", "paper_summarize", "relevance_assess"]
+EXPECTED_TOOLS = [
+    "paper_search",
+    "paper_judge",
+    "paper_summarize",
+    "relevance_assess",
+    "analyze_trends",
+    "check_scholar",
+    "get_research_context",
+    "save_to_memory",
+    "export_to_obsidian",
+]
 
 
 class TestMCPToolListing:
-    """Verify all 4 tools are discoverable and have correct signatures."""
+    """Verify all 9 tools are discoverable and have correct signatures."""
 
     def setup_method(self):
         Container._instance = None
 
-    def test_all_four_tools_listed(self):
-        """All 4 tool modules expose register() and _impl functions."""
+    def test_all_nine_tools_listed(self):
+        """All 9 tool modules expose register() and _impl functions."""
         from paperbot.mcp.tools import paper_search, paper_judge, paper_summarize, relevance
+        from paperbot.mcp.tools import analyze_trends, check_scholar, get_research_context
+        from paperbot.mcp.tools import save_to_memory, export_to_obsidian
 
         modules = {
             "paper_search": paper_search,
             "paper_judge": paper_judge,
             "paper_summarize": paper_summarize,
             "relevance_assess": relevance,
+            "analyze_trends": analyze_trends,
+            "check_scholar": check_scholar,
+            "get_research_context": get_research_context,
+            "save_to_memory": save_to_memory,
+            "export_to_obsidian": export_to_obsidian,
         }
 
-        # Verify exactly 4 tools
-        assert len(modules) == 4, f"Expected 4 tools, found {len(modules)}"
+        # Verify exactly 9 tools
+        assert len(modules) == 9, f"Expected 9 tools, found {len(modules)}"
 
         for tool_name, mod in modules.items():
             # Each module has a register() function
             assert hasattr(mod, "register"), f"{tool_name} missing register()"
             assert callable(mod.register), f"{tool_name}.register is not callable"
 
-            # Each module has a docstring (description)
+            # Each module has an _impl function with a docstring (description)
             impl_name = f"_{tool_name}_impl"
             if tool_name == "relevance_assess":
                 impl_name = "_relevance_assess_impl"
@@ -135,25 +213,33 @@ class TestMCPToolListing:
             assert impl_fn is not None, f"{tool_name} missing {impl_name}"
             assert impl_fn.__doc__, f"{tool_name} impl has no docstring (description)"
 
-    def test_server_registers_all_four_tools(self):
-        """server.py imports and calls register() for all 4 tool modules.
+    def test_server_registers_all_nine_tools(self):
+        """server.py imports and calls register() for all 9 tool modules.
 
         Since mcp package is unavailable on Python 3.9, mcp=None. We verify
         by checking that the server module completed import without error and
-        that all 4 tool register functions are referenced in the module source.
+        that all 9 tool register functions are referenced in the module source.
         """
-        import importlib
         import paperbot.mcp.server as server_mod
 
         # server.py should have mcp attribute (None if package unavailable)
         assert hasattr(server_mod, "mcp")
 
-        # Verify the 4 imports are present in the source
+        # Verify all 9 imports are present in the source
         source = inspect.getsource(server_mod)
         assert "paper_search.register" in source, "paper_search not registered in server.py"
         assert "paper_judge.register" in source, "paper_judge not registered in server.py"
         assert "paper_summarize.register" in source, "paper_summarize not registered in server.py"
         assert "relevance.register" in source, "relevance not registered in server.py"
+        assert "analyze_trends.register" in source, "analyze_trends not registered in server.py"
+        assert "check_scholar.register" in source, "check_scholar not registered in server.py"
+        assert "get_research_context.register" in source, (
+            "get_research_context not registered in server.py"
+        )
+        assert "save_to_memory.register" in source, "save_to_memory not registered in server.py"
+        assert "export_to_obsidian.register" in source, (
+            "export_to_obsidian not registered in server.py"
+        )
 
     def test_each_tool_has_input_schema_via_signature(self):
         """Each tool impl has typed parameters serving as input schema."""
@@ -161,12 +247,22 @@ class TestMCPToolListing:
         from paperbot.mcp.tools.paper_judge import _paper_judge_impl
         from paperbot.mcp.tools.paper_summarize import _paper_summarize_impl
         from paperbot.mcp.tools.relevance import _relevance_assess_impl
+        from paperbot.mcp.tools.analyze_trends import _analyze_trends_impl
+        from paperbot.mcp.tools.check_scholar import _check_scholar_impl
+        from paperbot.mcp.tools.get_research_context import _get_research_context_impl
+        from paperbot.mcp.tools.save_to_memory import _save_to_memory_impl
+        from paperbot.mcp.tools.export_to_obsidian import _export_to_obsidian_impl
 
         for name, fn in [
             ("paper_search", _paper_search_impl),
             ("paper_judge", _paper_judge_impl),
             ("paper_summarize", _paper_summarize_impl),
             ("relevance_assess", _relevance_assess_impl),
+            ("analyze_trends", _analyze_trends_impl),
+            ("check_scholar", _check_scholar_impl),
+            ("get_research_context", _get_research_context_impl),
+            ("save_to_memory", _save_to_memory_impl),
+            ("export_to_obsidian", _export_to_obsidian_impl),
         ]:
             sig = inspect.signature(fn)
             params = sig.parameters
@@ -213,7 +309,7 @@ class TestMCPToolSchemas:
 
     def test_paper_search_tool_has_correct_params(self):
         """paper_search has query (required, str), max_results (optional, int),
-        sources (optional, list), _run_id (optional, str)."""
+        sources (optional, list), _run_id (optional)."""
         from paperbot.mcp.tools.paper_search import _paper_search_impl
 
         sig = inspect.signature(_paper_search_impl)
@@ -309,6 +405,133 @@ class TestMCPToolSchemas:
         # keywords is optional
         assert "keywords" in params
         assert params["keywords"].default == ""
+
+    def test_analyze_trends_tool_has_correct_params(self):
+        """analyze_trends has topic (required, str), papers (required, list),
+        _run_id (optional)."""
+        from paperbot.mcp.tools.analyze_trends import _analyze_trends_impl
+
+        sig = inspect.signature(_analyze_trends_impl)
+        params = sig.parameters
+
+        # topic is required, str
+        assert "topic" in params
+        assert params["topic"].default is inspect.Parameter.empty
+        assert self._annotation_name(params["topic"]) == "str"
+
+        # papers is required, list
+        assert "papers" in params
+        assert params["papers"].default is inspect.Parameter.empty
+
+        # _run_id is optional
+        assert "_run_id" in params
+        assert params["_run_id"].default == ""
+
+    def test_check_scholar_tool_has_correct_params(self):
+        """check_scholar has scholar_name (required, str), max_papers (optional, int, default 10),
+        _run_id (optional)."""
+        from paperbot.mcp.tools.check_scholar import _check_scholar_impl
+
+        sig = inspect.signature(_check_scholar_impl)
+        params = sig.parameters
+
+        # scholar_name is required, str
+        assert "scholar_name" in params
+        assert params["scholar_name"].default is inspect.Parameter.empty
+        assert self._annotation_name(params["scholar_name"]) == "str"
+
+        # max_papers is optional, int, default 10
+        assert "max_papers" in params
+        assert params["max_papers"].default == 10
+        assert self._annotation_name(params["max_papers"]) == "int"
+
+        # _run_id is optional
+        assert "_run_id" in params
+        assert params["_run_id"].default == ""
+
+    def test_get_research_context_tool_has_correct_params(self):
+        """get_research_context has query (required, str), user_id (optional, default 'default'),
+        track_id (optional), _run_id (optional)."""
+        from paperbot.mcp.tools.get_research_context import _get_research_context_impl
+
+        sig = inspect.signature(_get_research_context_impl)
+        params = sig.parameters
+
+        # query is required, str
+        assert "query" in params
+        assert params["query"].default is inspect.Parameter.empty
+        assert self._annotation_name(params["query"]) == "str"
+
+        # user_id is optional with default "default"
+        assert "user_id" in params
+        assert params["user_id"].default == "default"
+
+        # track_id is optional
+        assert "track_id" in params
+        assert params["track_id"].default is None
+
+        # _run_id is optional
+        assert "_run_id" in params
+        assert params["_run_id"].default == ""
+
+    def test_save_to_memory_tool_has_correct_params(self):
+        """save_to_memory has content (required, str), kind (optional, default 'note'),
+        user_id (optional), scope_type (optional), confidence (optional), _run_id (optional)."""
+        from paperbot.mcp.tools.save_to_memory import _save_to_memory_impl
+
+        sig = inspect.signature(_save_to_memory_impl)
+        params = sig.parameters
+
+        # content is required, str
+        assert "content" in params
+        assert params["content"].default is inspect.Parameter.empty
+        assert self._annotation_name(params["content"]) == "str"
+
+        # kind is optional with default "note"
+        assert "kind" in params
+        assert params["kind"].default == "note"
+
+        # user_id is optional
+        assert "user_id" in params
+
+        # scope_type is optional
+        assert "scope_type" in params
+
+        # confidence is optional
+        assert "confidence" in params
+
+        # _run_id is optional
+        assert "_run_id" in params
+        assert params["_run_id"].default == ""
+
+    def test_export_to_obsidian_tool_has_correct_params(self):
+        """export_to_obsidian has title (required, str), abstract (required, str),
+        authors (optional), year (optional), _run_id (optional)."""
+        from paperbot.mcp.tools.export_to_obsidian import _export_to_obsidian_impl
+
+        sig = inspect.signature(_export_to_obsidian_impl)
+        params = sig.parameters
+
+        # title is required, str
+        assert "title" in params
+        assert params["title"].default is inspect.Parameter.empty
+        assert self._annotation_name(params["title"]) == "str"
+
+        # abstract is required, str
+        assert "abstract" in params
+        assert params["abstract"].default is inspect.Parameter.empty
+        assert self._annotation_name(params["abstract"]) == "str"
+
+        # authors is optional
+        assert "authors" in params
+
+        # year is optional
+        assert "year" in params
+        assert params["year"].default is None
+
+        # _run_id is optional
+        assert "_run_id" in params
+        assert params["_run_id"].default == ""
 
 
 # ---------------------------------------------------------------------------
@@ -411,6 +634,104 @@ class TestMCPToolInvocation:
         assert result["score"] == 90
         assert "reason" in result
         assert "degraded" not in result
+
+    @pytest.mark.asyncio
+    async def test_tool_call_analyze_trends_via_impl(self):
+        """Calling analyze_trends through _impl returns trend_analysis result."""
+        import paperbot.mcp.tools.analyze_trends as at_mod
+
+        at_mod._analyzer = _FakeTrendAnalyzer()
+
+        try:
+            result = await at_mod._analyze_trends_impl(
+                topic="llms",
+                papers=[{"title": "Paper A"}, {"title": "Paper B"}],
+            )
+        finally:
+            at_mod._analyzer = None
+
+        assert isinstance(result, dict)
+        assert "trend_analysis" in result
+        assert result["trend_analysis"] == "Trend analysis result"
+        assert result["topic"] == "llms"
+        assert result["paper_count"] == 2
+
+    @pytest.mark.asyncio
+    async def test_tool_call_check_scholar_via_impl(self):
+        """Calling check_scholar through _impl returns scholar and recent_papers."""
+        import paperbot.mcp.tools.check_scholar as cs_mod
+
+        cs_mod._client = _FakeS2Client()
+
+        try:
+            result = await cs_mod._check_scholar_impl(scholar_name="Scholar")
+        finally:
+            cs_mod._client = None
+
+        assert isinstance(result, dict)
+        assert "scholar" in result
+        assert "recent_papers" in result
+        assert result["scholar"]["name"] == "Scholar"
+        assert len(result["recent_papers"]) == 1
+
+    @pytest.mark.asyncio
+    async def test_tool_call_get_research_context_via_impl(self):
+        """Calling get_research_context through _impl returns context pack with papers key."""
+        import paperbot.mcp.tools.get_research_context as grc_mod
+
+        grc_mod._engine = _FakeContextEngine()
+
+        try:
+            result = await grc_mod._get_research_context_impl(
+                query="transformer architectures"
+            )
+        finally:
+            grc_mod._engine = None
+
+        assert isinstance(result, dict)
+        assert "papers" in result
+        assert result["stage"] == "explore"
+
+    @pytest.mark.asyncio
+    async def test_tool_call_save_to_memory_via_impl(self):
+        """Calling save_to_memory through _impl returns dict with saved key."""
+        import paperbot.mcp.tools.save_to_memory as stm_mod
+
+        stm_mod._store = _FakeMemoryStore()
+
+        try:
+            result = await stm_mod._save_to_memory_impl(
+                content="Important finding about attention mechanisms."
+            )
+        finally:
+            stm_mod._store = None
+
+        assert isinstance(result, dict)
+        assert "saved" in result
+        assert result["saved"] is True
+        assert "created" in result
+        assert result["created"] == 1
+
+    @pytest.mark.asyncio
+    async def test_tool_call_export_to_obsidian_via_impl(self):
+        """Calling export_to_obsidian through _impl returns dict with markdown key."""
+        import paperbot.mcp.tools.export_to_obsidian as eto_mod
+
+        eto_mod._exporter = _FakeExporter()
+
+        try:
+            result = await eto_mod._export_to_obsidian_impl(
+                title="Attention Is All You Need",
+                abstract="We propose the Transformer, a model architecture...",
+                authors=["Vaswani", "Shazeer"],
+                year=2017,
+            )
+        finally:
+            eto_mod._exporter = None
+
+        assert isinstance(result, dict)
+        assert "markdown" in result
+        assert len(result["markdown"]) > 0
 
 
 # ---------------------------------------------------------------------------
@@ -519,14 +840,125 @@ class TestMCPToolEventLogging:
         assert event["payload"]["tool"] == "relevance_assess"
 
     @pytest.mark.asyncio
+    async def test_tool_call_analyze_trends_logs_event(self):
+        """analyze_trends logs event with workflow='mcp', stage='tool_call'."""
+        import paperbot.mcp.tools.analyze_trends as at_mod
+
+        log = self._register_event_log()
+
+        at_mod._analyzer = _FakeTrendAnalyzer()
+
+        try:
+            await at_mod._analyze_trends_impl(
+                topic="transformers",
+                papers=[{"title": "Attention Is All You Need"}],
+            )
+        finally:
+            at_mod._analyzer = None
+
+        assert len(log.events) == 1
+        event = log.events[0]
+        assert event["workflow"] == "mcp"
+        assert event["stage"] == "tool_call"
+        assert event["payload"]["tool"] == "analyze_trends"
+
+    @pytest.mark.asyncio
+    async def test_tool_call_check_scholar_logs_event(self):
+        """check_scholar logs event with workflow='mcp', stage='tool_call'."""
+        import paperbot.mcp.tools.check_scholar as cs_mod
+
+        log = self._register_event_log()
+
+        cs_mod._client = _FakeS2Client()
+
+        try:
+            await cs_mod._check_scholar_impl(scholar_name="Scholar")
+        finally:
+            cs_mod._client = None
+
+        assert len(log.events) == 1
+        event = log.events[0]
+        assert event["workflow"] == "mcp"
+        assert event["stage"] == "tool_call"
+        assert event["payload"]["tool"] == "check_scholar"
+
+    @pytest.mark.asyncio
+    async def test_tool_call_get_research_context_logs_event(self):
+        """get_research_context logs event with workflow='mcp', stage='tool_call'."""
+        import paperbot.mcp.tools.get_research_context as grc_mod
+
+        log = self._register_event_log()
+
+        grc_mod._engine = _FakeContextEngine()
+
+        try:
+            await grc_mod._get_research_context_impl(query="llms")
+        finally:
+            grc_mod._engine = None
+
+        assert len(log.events) == 1
+        event = log.events[0]
+        assert event["workflow"] == "mcp"
+        assert event["stage"] == "tool_call"
+        assert event["payload"]["tool"] == "get_research_context"
+
+    @pytest.mark.asyncio
+    async def test_tool_call_save_to_memory_logs_event(self):
+        """save_to_memory logs event with workflow='mcp', stage='tool_call'."""
+        import paperbot.mcp.tools.save_to_memory as stm_mod
+
+        log = self._register_event_log()
+
+        stm_mod._store = _FakeMemoryStore()
+
+        try:
+            await stm_mod._save_to_memory_impl(content="Important finding.")
+        finally:
+            stm_mod._store = None
+
+        assert len(log.events) == 1
+        event = log.events[0]
+        assert event["workflow"] == "mcp"
+        assert event["stage"] == "tool_call"
+        assert event["payload"]["tool"] == "save_to_memory"
+
+    @pytest.mark.asyncio
+    async def test_tool_call_export_to_obsidian_logs_event(self):
+        """export_to_obsidian logs event with workflow='mcp', stage='tool_call'."""
+        import paperbot.mcp.tools.export_to_obsidian as eto_mod
+
+        log = self._register_event_log()
+
+        eto_mod._exporter = _FakeExporter()
+
+        try:
+            await eto_mod._export_to_obsidian_impl(
+                title="Test Paper",
+                abstract="A test abstract.",
+            )
+        finally:
+            eto_mod._exporter = None
+
+        assert len(log.events) == 1
+        event = log.events[0]
+        assert event["workflow"] == "mcp"
+        assert event["stage"] == "tool_call"
+        assert event["payload"]["tool"] == "export_to_obsidian"
+
+    @pytest.mark.asyncio
     async def test_all_tool_events_have_consistent_structure(self):
-        """All 4 tool events share consistent structure: workflow, stage,
+        """All 9 tool events share consistent structure: workflow, stage,
         agent_name, payload with tool name."""
         from paperbot.application.services.paper_search_service import PaperSearchService
         import paperbot.mcp.tools.paper_search as ps_mod
         import paperbot.mcp.tools.paper_judge as pj_mod
         import paperbot.mcp.tools.paper_summarize as psum_mod
         import paperbot.mcp.tools.relevance as rel_mod
+        import paperbot.mcp.tools.analyze_trends as at_mod
+        import paperbot.mcp.tools.check_scholar as cs_mod
+        import paperbot.mcp.tools.get_research_context as grc_mod
+        import paperbot.mcp.tools.save_to_memory as stm_mod
+        import paperbot.mcp.tools.export_to_obsidian as eto_mod
 
         log = self._register_event_log()
 
@@ -535,19 +967,34 @@ class TestMCPToolEventLogging:
         pj_mod._judge = PaperJudge(llm_service=_FakeJudgeLLM())
         psum_mod._summarizer = PaperSummarizer(llm_service=_FakeSummarizerLLM())
         rel_mod._assessor = RelevanceAssessor(llm_service=_FakeRelevanceLLM())
+        at_mod._analyzer = _FakeTrendAnalyzer()
+        cs_mod._client = _FakeS2Client()
+        grc_mod._engine = _FakeContextEngine()
+        stm_mod._store = _FakeMemoryStore()
+        eto_mod._exporter = _FakeExporter()
 
         try:
             await ps_mod._paper_search_impl(query="test")
             await pj_mod._paper_judge_impl(title="T", abstract="A")
             await psum_mod._paper_summarize_impl(title="T", abstract="A")
             await rel_mod._relevance_assess_impl(title="T", abstract="A", query="Q")
+            await at_mod._analyze_trends_impl(topic="llms", papers=[{"title": "P"}])
+            await cs_mod._check_scholar_impl(scholar_name="Scholar")
+            await grc_mod._get_research_context_impl(query="transformers")
+            await stm_mod._save_to_memory_impl(content="Finding.")
+            await eto_mod._export_to_obsidian_impl(title="T", abstract="A")
         finally:
             ps_mod._service = None
             pj_mod._judge = None
             psum_mod._summarizer = None
             rel_mod._assessor = None
+            at_mod._analyzer = None
+            cs_mod._client = None
+            grc_mod._engine = None
+            stm_mod._store = None
+            eto_mod._exporter = None
 
-        assert len(log.events) == 4
+        assert len(log.events) == 9
 
         tool_names_logged = set()
         for event in log.events:
@@ -563,4 +1010,9 @@ class TestMCPToolEventLogging:
             "paper_judge",
             "paper_summarize",
             "relevance_assess",
+            "analyze_trends",
+            "check_scholar",
+            "get_research_context",
+            "save_to_memory",
+            "export_to_obsidian",
         }
