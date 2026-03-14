@@ -31,9 +31,9 @@ Requirements for MCP Server milestone. Phases 1-2 shipped; phases 3-6 remain.
 
 ### Transport & Infrastructure
 
-- [ ] **MCP-10**: MCP server runs via stdio transport for local agent integration
-- [ ] **MCP-11**: MCP server runs via Streamable HTTP transport for remote agent integration
-- [ ] **MCP-12**: User can start MCP server via `paperbot mcp serve` CLI command
+- [x] **MCP-10**: MCP server runs via stdio transport for local agent integration
+- [x] **MCP-11**: MCP server runs via Streamable HTTP transport for remote agent integration
+- [x] **MCP-12**: User can start MCP server via `paperbot mcp serve` CLI command
 
 ### Agent Skills
 
@@ -162,9 +162,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | MCP-07 | Phase 4 | Complete |
 | MCP-08 | Phase 4 | Complete |
 | MCP-09 | Phase 4 | Complete |
-| MCP-10 | Phase 5 | Pending |
-| MCP-11 | Phase 5 | Pending |
-| MCP-12 | Phase 5 | Pending |
+| MCP-10 | Phase 5 | Complete |
+| MCP-11 | Phase 5 | Complete |
+| MCP-12 | Phase 5 | Complete |
 | MCP-13 | Phase 6 | Pending |
 | EVNT-01 | Phase 8 | Pending |
 | EVNT-02 | Phase 8 | Pending |
