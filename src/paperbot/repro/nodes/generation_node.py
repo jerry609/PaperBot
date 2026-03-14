@@ -12,10 +12,12 @@ Enhanced with:
 import logging
 import time
 from typing import Dict, Any, Optional, List, Tuple, Union
+
 from .base_node import BaseNode
 from ..models import PaperContext, ReproductionPlan, ImplementationSpec, Blueprint
 from ..memory import CodeMemory
 from ..rag import CodeKnowledgeBase
+from paperbot.utils.user_identity import optional_user_identity
 
 logger = logging.getLogger(__name__)
 
@@ -165,9 +167,9 @@ Output ONLY the Python code, no markdown or explanations.
         paper_id = getattr(paper_context, "paper_id", None) or getattr(
             paper_context, "arxiv_id", None
         )
-        user_id = (kwargs.get("user_id", "default") or "default").strip() or "default"
+        user_id = optional_user_identity(kwargs.get("user_id"))
         pack_id = kwargs.get("pack_id")
-        if paper_id:
+        if paper_id and user_id:
             self.memory.load_experiences_from_db(paper_id, user_id=user_id, pack_id=pack_id)
 
         files = {}
@@ -199,13 +201,14 @@ Output ONLY the Python code, no markdown or explanations.
             logger.debug(f"Generated {filepath} ({len(code)} chars)")
 
             # Persist success pattern (issue #162)
-            self.memory.record_success_pattern(
-                user_id=user_id,
-                paper_id=paper_id,
-                pack_id=pack_id,
-                filepath=filepath,
-                code_snippet=code[:1000],
-            )
+            if user_id:
+                self.memory.record_success_pattern(
+                    user_id=user_id,
+                    paper_id=paper_id,
+                    pack_id=pack_id,
+                    filepath=filepath,
+                    code_snippet=code[:1000],
+                )
 
         # Add requirements.txt
         files["requirements.txt"] = self._generate_requirements(plan)

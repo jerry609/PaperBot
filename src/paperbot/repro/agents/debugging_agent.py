@@ -14,6 +14,8 @@ from typing import Any, Dict, Optional, List, Tuple
 from pathlib import Path
 from dataclasses import dataclass
 
+from paperbot.utils.user_identity import optional_user_identity
+
 from .base_agent import BaseAgent, AgentResult, AgentStatus
 from ..models import ErrorType, PaperContext
 
@@ -162,16 +164,15 @@ Provide ONLY the corrected full file content. No explanations.
                         else None
                     )
                     try:
-                        user_id = (
-                            context.get("user_id", "default") or "default"
-                        ).strip() or "default"
-                        self._experience_store.add(
-                            user_id=user_id,
-                            pattern_type="failure_reason",
-                            content=f"[{error_type.value}] fixed: {repair_result.fix_applied}",
-                            paper_id=paper_id,
-                            code_snippet=repair_result.original_error[:1000],
-                        )
+                        user_id = optional_user_identity(context.get("user_id"))
+                        if user_id:
+                            self._experience_store.add(
+                                user_id=user_id,
+                                pattern_type="failure_reason",
+                                content=f"[{error_type.value}] fixed: {repair_result.fix_applied}",
+                                paper_id=paper_id,
+                                code_snippet=repair_result.original_error[:1000],
+                            )
                     except Exception:  # noqa: BLE001
                         logger.warning(
                             "Failed to persist code experience for failure reason.",

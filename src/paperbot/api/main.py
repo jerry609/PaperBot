@@ -37,10 +37,12 @@ from .routes import (
     wiki,
     auth,
 )
+from .routes import events as events_route
 from paperbot.api.error_handling import install_api_error_handling
 from paperbot.infrastructure.event_log.logging_event_log import LoggingEventLog
 from paperbot.infrastructure.event_log.composite_event_log import CompositeEventLog
 from paperbot.infrastructure.event_log.sqlalchemy_event_log import SqlAlchemyEventLog
+from paperbot.infrastructure.event_log.event_bus_event_log import EventBusEventLog
 
 # Load repo .env deterministically so API keys match local config.
 # override=True is intentional to avoid picking up a different .env from another cwd.
@@ -96,22 +98,33 @@ app.include_router(push_commands.router, prefix="/api", tags=["Push"])
 app.include_router(agent_board.router, tags=["Agent Board"])
 app.include_router(wiki.router, prefix="/api", tags=["Wiki"])
 app.include_router(auth.router)
+app.include_router(events_route.router, prefix="/api", tags=["Events"])
 
 
 @app.on_event("startup")
 async def _startup_eventlog():
     # Phase-0: create a single event log backend and store on app.state.
     # Per-request run_id/trace_id are generated in handlers.
+    # Phase-7: EventBusEventLog added as third backend for SSE fan-out delivery.
+    bus = EventBusEventLog()
+    backends = [LoggingEventLog(), bus]
     try:
-        app.state.event_log = CompositeEventLog([LoggingEventLog(), SqlAlchemyEventLog()])
+        backends.insert(1, SqlAlchemyEventLog())
     except Exception:
-        # If SQLAlchemy isn't available or DB init fails, fall back to logging only.
-        app.state.event_log = LoggingEventLog()
+        # If SQLAlchemy isn't available or DB init fails, keep SSE available via the bus.
+        pass
+    app.state.event_log = CompositeEventLog(backends)
     obsidian.initialize_obsidian_runtime(app)
 
 
 @app.on_event("shutdown")
-async def _shutdown_obsidian_runtime():
+async def _shutdown_runtime():
+    event_log = getattr(app.state, "event_log", None)
+    if event_log is not None:
+        try:
+            event_log.close()
+        except Exception:
+            pass
     obsidian.shutdown_obsidian_runtime(app)
 
 

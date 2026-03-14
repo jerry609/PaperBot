@@ -82,7 +82,10 @@ class PaperJudge:
             temperature=0.1,
         )
         payload = self._parse_payload(raw)
-        provider_info = self._llm.describe_task_provider("analysis")
+        if payload:
+            provider_info = self._llm.describe_task_provider("analysis")
+        else:
+            provider_info = {"provider_name": "", "model_name": "", "cost_tier": 0}
         return self._to_judgment(payload=payload, provider_info=provider_info)
 
     def judge_with_calibration(

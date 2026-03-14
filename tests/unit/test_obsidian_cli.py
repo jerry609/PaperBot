@@ -9,10 +9,10 @@ from paperbot.presentation.cli import main as cli_main
 
 class _FakeResearchStore:
     def get_track(self, *, user_id: str, track_id: int):
-        if user_id == "default" and track_id == 7:
+        if user_id == "cli-user" and track_id == 7:
             return {
                 "id": 7,
-                "user_id": "default",
+                "user_id": "cli-user",
                 "name": "ICL Compression",
                 "description": "Track compression methods.",
                 "keywords": ["ICL", "Compression"],
@@ -37,7 +37,7 @@ class _FakeResearchStore:
         ]
 
     def list_saved_papers(self, *, user_id: str, track_id: int | None, limit: int):
-        assert user_id == "default"
+        assert user_id == "cli-user"
         assert track_id == 7
         assert limit == 5
         return [
@@ -104,6 +104,8 @@ def test_cli_obsidian_export_parser_flags():
             "/tmp/my-vault",
             "--track-name",
             "ICL Compression",
+            "--user-id",
+            "cli-user",
             "--limit",
             "5",
             "--json",
@@ -135,6 +137,8 @@ def test_cli_obsidian_export_json_output(monkeypatch, capsys):
             "/tmp/my-vault",
             "--track-name",
             "ICL Compression",
+            "--user-id",
+            "cli-user",
             "--limit",
             "5",
             "--json",
@@ -177,6 +181,8 @@ def test_cli_obsidian_export_uses_settings_defaults(monkeypatch, capsys):
             "obsidian",
             "--track-name",
             "ICL Compression",
+            "--user-id",
+            "cli-user",
             "--limit",
             "5",
             "--json",

@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
+from paperbot.api.auth import dependencies as auth_deps
 from paperbot.api.main import app
 from paperbot.infrastructure.stores.research_store import SqlAlchemyResearchStore
 
@@ -17,8 +18,13 @@ def client_with_store(tmp_path, monkeypatch):
     import paperbot.api.routes.research as research_module
 
     monkeypatch.setattr(research_module, "_research_store", store)
+    app.dependency_overrides[auth_deps.get_required_user_id] = lambda: "test"
 
-    return TestClient(app), store
+    try:
+        with TestClient(app) as client:
+            yield client, store
+    finally:
+        app.dependency_overrides.clear()
 
 
 def test_patch_track_success(client_with_store):
@@ -27,9 +33,7 @@ def test_patch_track_success(client_with_store):
 
     track = store.create_track(user_id="test", name="Original", activate=False)
 
-    response = client.patch(
-        f"/api/research/tracks/{track['id']}?user_id=test", json={"name": "Updated"}
-    )
+    response = client.patch(f"/api/research/tracks/{track['id']}", json={"name": "Updated"})
 
     assert response.status_code == 200
     assert response.json()["track"]["name"] == "Updated"
@@ -39,9 +43,7 @@ def test_patch_track_not_found(client_with_store):
     """Test PATCH returns 404 for non-existent track."""
     client, _ = client_with_store
 
-    response = client.patch(
-        "/api/research/tracks/99999?user_id=test", json={"name": "Test"}
-    )
+    response = client.patch("/api/research/tracks/99999", json={"name": "Test"})
 
     assert response.status_code == 404
     assert "not found" in response.json()["detail"].lower()
@@ -54,9 +56,7 @@ def test_patch_track_duplicate_name(client_with_store):
     store.create_track(user_id="test", name="Track A", activate=False)
     track_b = store.create_track(user_id="test", name="Track B", activate=False)
 
-    response = client.patch(
-        f"/api/research/tracks/{track_b['id']}?user_id=test", json={"name": "Track A"}
-    )
+    response = client.patch(f"/api/research/tracks/{track_b['id']}", json={"name": "Track A"})
 
     assert response.status_code == 409
     assert "already exists" in response.json()["detail"].lower()
@@ -68,9 +68,7 @@ def test_patch_track_no_fields(client_with_store):
 
     track = store.create_track(user_id="test", name="Test", activate=False)
 
-    response = client.patch(
-        f"/api/research/tracks/{track['id']}?user_id=test", json={}
-    )
+    response = client.patch(f"/api/research/tracks/{track['id']}", json={})
 
     assert response.status_code == 400
     assert "no fields" in response.json()["detail"].lower()
@@ -89,10 +87,7 @@ def test_patch_track_partial_update(client_with_store):
     )
 
     # Update only name
-    response = client.patch(
-        f"/api/research/tracks/{track['id']}?user_id=test",
-        json={"name": "New Name"},
-    )
+    response = client.patch(f"/api/research/tracks/{track['id']}", json={"name": "New Name"})
 
     assert response.status_code == 200
     result = response.json()["track"]
@@ -109,7 +104,7 @@ def test_patch_track_update_description(client_with_store):
     track = store.create_track(user_id="test", name="Test Track", activate=False)
 
     response = client.patch(
-        f"/api/research/tracks/{track['id']}?user_id=test",
+        f"/api/research/tracks/{track['id']}",
         json={"description": "New description"},
     )
 
@@ -124,7 +119,7 @@ def test_patch_track_update_keywords(client_with_store):
     track = store.create_track(user_id="test", name="Test Track", activate=False)
 
     response = client.patch(
-        f"/api/research/tracks/{track['id']}?user_id=test",
+        f"/api/research/tracks/{track['id']}",
         json={"keywords": ["ml", "nlp", "transformers"]},
     )
 
@@ -139,7 +134,7 @@ def test_patch_track_update_multiple_fields(client_with_store):
     track = store.create_track(user_id="test", name="Original", activate=False)
 
     response = client.patch(
-        f"/api/research/tracks/{track['id']}?user_id=test",
+        f"/api/research/tracks/{track['id']}",
         json={
             "name": "Updated Name",
             "description": "Updated Description",
@@ -159,26 +154,19 @@ def test_patch_track_wrong_user(client_with_store):
     client, store = client_with_store
 
     track = store.create_track(user_id="user1", name="Test Track", activate=False)
-
-    response = client.patch(
-        f"/api/research/tracks/{track['id']}?user_id=user2",
-        json={"name": "New Name"},
-    )
+    app.dependency_overrides[auth_deps.get_required_user_id] = lambda: "user2"
+    response = client.patch(f"/api/research/tracks/{track['id']}", json={"name": "New Name"})
 
     assert response.status_code == 404
 
 
-def test_patch_track_default_user(client_with_store):
-    """Test PATCH uses default user_id when not specified."""
+def test_patch_track_requires_authenticated_user_context(client_with_store):
+    """Test PATCH uses the authenticated user rather than a query-string fallback."""
     client, store = client_with_store
 
-    track = store.create_track(user_id="default", name="Test Track", activate=False)
+    track = store.create_track(user_id="test", name="Test Track", activate=False)
 
-    # Call without user_id parameter (should default to "default")
-    response = client.patch(
-        f"/api/research/tracks/{track['id']}",
-        json={"name": "Updated Name"},
-    )
+    response = client.patch(f"/api/research/tracks/{track['id']}", json={"name": "Updated Name"})
 
     assert response.status_code == 200
     assert response.json()["track"]["name"] == "Updated Name"
@@ -204,7 +192,6 @@ def test_create_track_schedules_obsidian_export(client_with_store, monkeypatch):
     response = client.post(
         "/api/research/tracks",
         json={
-            "user_id": "test",
             "name": "Obsidian Sync Track",
             "keywords": ["obsidian", "knowledge-base"],
             "activate": False,
@@ -234,10 +221,7 @@ def test_patch_track_schedules_obsidian_export(client_with_store, monkeypatch):
         ),
     )
 
-    response = client.patch(
-        f"/api/research/tracks/{track['id']}?user_id=test",
-        json={"keywords": ["obsidian", "moc"]},
-    )
+    response = client.patch(f"/api/research/tracks/{track['id']}", json={"keywords": ["obsidian", "moc"]})
 
     assert response.status_code == 200
     assert captured == [{"user_id": "test", "track_id": int(track["id"]), "for_tracks": True}]
@@ -276,16 +260,19 @@ def test_create_track_schedules_obsidian_export_using_persisted_track_owner(monk
         ),
     )
 
-    with TestClient(app) as client:
-        response = client.post(
-            "/api/research/tracks",
-            json={
-                "user_id": "spoofed-request-user",
-                "name": "Obsidian Sync Track",
-                "keywords": ["obsidian"],
-                "activate": False,
-            },
-        )
+    app.dependency_overrides[auth_deps.get_required_user_id] = lambda: "authenticated-user"
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/research/tracks",
+                json={
+                    "name": "Obsidian Sync Track",
+                    "keywords": ["obsidian"],
+                    "activate": False,
+                },
+            )
+    finally:
+        app.dependency_overrides.clear()
 
     assert response.status_code == 200
     assert captured == [

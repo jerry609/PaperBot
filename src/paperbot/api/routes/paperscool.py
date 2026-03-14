@@ -48,6 +48,7 @@ from paperbot.infrastructure.stores.pipeline_session_store import PipelineSessio
 from paperbot.infrastructure.stores.research_store import SqlAlchemyResearchStore
 from paperbot.infrastructure.stores.wiki_concept_store import WikiConceptStore
 from paperbot.infrastructure.stores.workflow_metric_store import WorkflowMetricStore
+from paperbot.utils.user_identity import optional_user_identity
 from paperbot.utils.text_processing import extract_github_url
 
 router = APIRouter()
@@ -232,7 +233,7 @@ def _schedule_document_indexing_for_report(
 
 async def _run_topic_search(
     *,
-    user_id: str,
+    user_id: Optional[str],
     queries: List[str],
     sources: List[str],
     branches: List[str],
@@ -242,7 +243,7 @@ async def _run_topic_search(
 ) -> Dict[str, Any]:
     return await run_unified_topic_search(
         queries=queries,
-        user_id=user_id,
+        user_id=optional_user_identity(user_id),
         sources=sources,
         branches=branches,
         top_k_per_query=top_k_per_query,
@@ -255,7 +256,7 @@ async def _run_topic_search(
 
 
 class PapersCoolSearchRequest(BaseModel):
-    user_id: str = "default"
+    user_id: Optional[str] = None
     queries: List[str] = Field(default_factory=list)
     sources: List[str] = Field(default_factory=lambda: ["papers_cool"])
     branches: List[str] = Field(default_factory=lambda: ["arxiv", "venue"])
@@ -291,7 +292,7 @@ class PapersCoolCurateResponse(BaseModel):
 
 
 class DailyPaperRequest(BaseModel):
-    user_id: str = "default"
+    user_id: Optional[str] = None
     queries: List[str] = Field(default_factory=list)
     sources: List[str] = Field(default_factory=lambda: ["papers_cool"])
     branches: List[str] = Field(default_factory=lambda: ["arxiv", "venue"])

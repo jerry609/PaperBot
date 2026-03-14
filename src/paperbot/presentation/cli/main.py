@@ -211,6 +211,25 @@ def create_parser() -> argparse.ArgumentParser:
         help="从最近 checkpoint 恢复执行",
     )
 
+    # mcp commands
+    mcp_parser = subparsers.add_parser("mcp", help="MCP server commands")
+    mcp_subparsers = mcp_parser.add_subparsers(dest="mcp_command", help="Available commands")
+
+    serve_parser = mcp_subparsers.add_parser("serve", help="Start MCP server")
+    serve_transport = serve_parser.add_mutually_exclusive_group(required=True)
+    serve_transport.add_argument(
+        "--stdio",
+        action="store_true",
+        help="stdio transport (for Claude Desktop / Claude Code)",
+    )
+    serve_transport.add_argument(
+        "--http",
+        action="store_true",
+        help="Streamable HTTP transport (for remote agents)",
+    )
+    serve_parser.add_argument("--host", default="127.0.0.1", help="HTTP host (default: 127.0.0.1)")
+    serve_parser.add_argument("--port", type=int, default=8001, help="HTTP port (default: 8001)")
+
     export_parser = subparsers.add_parser("export", help="导出 PaperBot 数据")
     export_subparsers = export_parser.add_subparsers(dest="export_target", help="导出目标")
 
@@ -229,7 +248,7 @@ def create_parser() -> argparse.ArgumentParser:
         default=None,
         help="按 track 名称导出（大小写不敏感）",
     )
-    obsidian_parser.add_argument("--user-id", default="default", help="用户 ID")
+    obsidian_parser.add_argument("--user-id", default=None, help="用户 ID")
     obsidian_parser.add_argument("--limit", type=int, default=200, help="最多导出多少篇论文")
     obsidian_parser.add_argument(
         "--root-dir",
@@ -308,6 +327,15 @@ def run_cli(args: Optional[list] = None) -> int:
                 return _run_obsidian_export(parsed)
             print("Error: export target is required", file=sys.stderr)
             return 1
+
+        elif parsed.command == "mcp":
+            if not getattr(parsed, "mcp_command", None):
+                print("Usage: paperbot mcp <command>\n\nCommands:\n  serve  Start MCP server")
+                return 0
+            if parsed.mcp_command == "serve":
+                return _run_mcp_serve(parsed)
+            print("Usage: paperbot mcp <command>\n\nCommands:\n  serve  Start MCP server")
+            return 0
 
         return 0
 
@@ -587,6 +615,7 @@ def _find_track_by_name(
 def _run_obsidian_export(parsed: argparse.Namespace) -> int:
     from paperbot.infrastructure.exporters import ObsidianFilesystemExporter
     from paperbot.infrastructure.stores.research_store import SqlAlchemyResearchStore
+    from paperbot.utils.user_identity import require_user_identity
 
     settings = create_settings()
     obsidian_config = settings.obsidian
@@ -599,26 +628,27 @@ def _run_obsidian_export(parsed: argparse.Namespace) -> int:
         return 1
     root_dir = parsed.root_dir or obsidian_config.root_dir or "PaperBot"
     paper_template_path = parsed.paper_template or obsidian_config.paper_template_path
+    user_id = require_user_identity(parsed.user_id)
 
     store = SqlAlchemyResearchStore()
     try:
         track = None
         track_id = None
         if parsed.track_id is not None:
-            track = store.get_track(user_id=parsed.user_id, track_id=int(parsed.track_id))
+            track = store.get_track(user_id=user_id, track_id=int(parsed.track_id))
             if track is None:
                 print(f"Error: track not found: {parsed.track_id}", file=sys.stderr)
                 return 1
             track_id = int(track["id"])
         elif parsed.track_name:
-            track = _find_track_by_name(store, user_id=parsed.user_id, track_name=parsed.track_name)
+            track = _find_track_by_name(store, user_id=user_id, track_name=parsed.track_name)
             if track is None:
                 print(f"Error: track not found: {parsed.track_name}", file=sys.stderr)
                 return 1
             track_id = int(track["id"])
 
         saved_items = store.list_saved_papers(
-            user_id=parsed.user_id,
+            user_id=user_id,
             track_id=track_id,
             limit=max(1, int(parsed.limit)),
         )
@@ -660,6 +690,17 @@ def _run_obsidian_export(parsed: argparse.Namespace) -> int:
     finally:
         if hasattr(store, "close"):
             store.close()
+
+
+def _run_mcp_serve(parsed: argparse.Namespace) -> int:
+    """Dispatch to the appropriate MCP transport based on CLI flags."""
+    from paperbot.mcp.serve import run_http, run_stdio
+
+    if parsed.stdio:
+        run_stdio()  # blocks until client disconnects
+    else:
+        run_http(host=parsed.host, port=parsed.port)  # blocks until Ctrl+C
+    return 0
 
 
 if __name__ == "__main__":

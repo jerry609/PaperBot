@@ -1,7 +1,7 @@
 import { auth } from "@/auth"
 import { NextResponse } from "next/server"
 
-// Only allow unauthenticated access to explicit auth pages.
+// Proxy only allows unauthenticated access to explicit auth pages.
 // All other paths (including "/") require a valid session.
 const PUBLIC_PATHS = ["/login", "/register", "/forgot-password", "/reset-password"]
 

@@ -20,6 +20,7 @@ from paperbot.infrastructure.stores.models import (
     UserAnchorScoreModel,
 )
 from paperbot.infrastructure.stores.sqlalchemy_db import SessionProvider, get_db_url
+from paperbot.utils.user_identity import optional_user_identity
 
 
 @dataclass
@@ -138,11 +139,13 @@ class AnchorService:
         self,
         *,
         track_id: int,
-        user_id: str = "default",
+        user_id: Optional[str] = None,
         limit: int = 20,
         window_years: int = 5,
         personalized: bool = True,
     ) -> list[dict]:
+        resolved_user_id = optional_user_identity(user_id)
+        personalized_mode = bool(personalized and resolved_user_id is not None)
         now_year = datetime.utcnow().year
         year_from = max(now_year - max(int(window_years), 1) + 1, 1970)
 
@@ -165,11 +168,15 @@ class AnchorService:
             max_paper_count = max(x.paper_count for x in aggregates) or 1
             max_citation_sum = max(x.citation_sum for x in aggregates) or 1
             network_map = self._build_network_map(session, year_from=year_from, now_year=now_year)
-            action_map = self.list_user_anchor_actions(
-                user_id=user_id,
-                track_id=int(track_id),
-                author_ids=[int(item.author.id) for item in aggregates],
-                session=session,
+            action_map = (
+                self.list_user_anchor_actions(
+                    user_id=resolved_user_id,
+                    track_id=int(track_id),
+                    author_ids=[int(item.author.id) for item in aggregates],
+                    session=session,
+                )
+                if resolved_user_id is not None
+                else {}
             )
 
             payload: list[dict] = []
@@ -205,12 +212,12 @@ class AnchorService:
 
                 paper_ids = [int(p.id) for p in author_papers if p.id is not None]
                 feedback_rows = []
-                if paper_ids:
+                if paper_ids and resolved_user_id is not None:
                     feedback_rows = (
                         session.execute(
                             select(PaperFeedbackModel)
                             .where(PaperFeedbackModel.track_id == int(track_id))
-                            .where(PaperFeedbackModel.user_id == user_id)
+                            .where(PaperFeedbackModel.user_id == resolved_user_id)
                             .where(
                                 or_(
                                     PaperFeedbackModel.canonical_paper_id.in_(paper_ids),
@@ -257,7 +264,7 @@ class AnchorService:
                     citation_map=citation_map,
                     max_citation_sum=max_citation_sum,
                 )
-                personalization_score = feedback_signal if personalized else 0.0
+                personalization_score = feedback_signal if personalized_mode else 0.0
 
                 anchor_score = (
                     0.45 * intrinsic_score
@@ -321,10 +328,10 @@ class AnchorService:
                     }
                 )
 
-                if personalized:
+                if personalized_mode and resolved_user_id is not None:
                     self._upsert_user_anchor_score(
                         session,
-                        user_id=user_id,
+                        user_id=resolved_user_id,
                         track_id=int(track_id),
                         author_id=int(item.author.id),
                         score=float(round(anchor_score, 6)),

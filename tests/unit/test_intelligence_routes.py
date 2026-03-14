@@ -10,16 +10,16 @@ class _FakeIntelligenceService:
     def __init__(self):
         self.list_feed_calls = []
 
-    def needs_refresh(self, *, user_id: str = "default", max_age_minutes: int = 45) -> bool:
+    def needs_refresh(self, *, user_id: str, max_age_minutes: int = 45) -> bool:
         return False
 
-    def refresh(self, *, user_id: str = "default"):
+    def refresh(self, *, user_id: str):
         return {"refreshed_at": "2026-03-10T11:00:00+00:00"}
 
     def list_feed(
         self,
         *,
-        user_id: str = "default",
+        user_id: str,
         limit: int = 8,
         source=None,
         keyword=None,
@@ -66,10 +66,10 @@ class _FakeIntelligenceService:
             }
         ][:limit]
 
-    def latest_refresh(self, *, user_id: str = "default"):
+    def latest_refresh(self, *, user_id: str):
         return "2026-03-10T11:00:00+00:00"
 
-    def build_profile(self, *, user_id: str = "default") -> RadarProfile:
+    def build_profile(self, *, user_id: str) -> RadarProfile:
         return RadarProfile(
             keywords=["rag", "agents"],
             scholar_names=["Alice Zhang"],
@@ -103,7 +103,7 @@ def test_intelligence_feed_route_returns_external_signal_payload(monkeypatch):
     monkeypatch.setattr(intelligence_route, "_research_store", _FakeResearchStore())
 
     app = api_main.app
-    app.dependency_overrides[auth_deps.get_required_user_id] = _override_user_id("default")
+    app.dependency_overrides[auth_deps.get_required_user_id] = _override_user_id("radar-user")
     try:
         with TestClient(app) as client:
             resp = client.get(
@@ -126,7 +126,7 @@ def test_intelligence_feed_route_returns_external_signal_payload(monkeypatch):
 
     assert service.list_feed_calls == [
         {
-            "user_id": "default",
+            "user_id": "radar-user",
             "limit": 50,
             "source": "reddit",
             "keyword": "rag",

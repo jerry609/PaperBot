@@ -5,11 +5,19 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from paperbot.api import main as api_main
+from paperbot.api.auth import dependencies as auth_deps
 from paperbot.api.routes import research as research_route
 from paperbot.infrastructure.stores.memory_store import SqlAlchemyMemoryStore
 from paperbot.infrastructure.stores.paper_store import SqlAlchemyPaperStore
 from paperbot.infrastructure.stores.research_store import SqlAlchemyResearchStore
 from paperbot.memory.schema import MemoryCandidate
+
+
+def _override_user_id(user_id: str):
+    def _dep_override():
+        return user_id
+
+    return _dep_override
 
 
 def _prepare_context_route_db(tmp_path: Path):
@@ -98,11 +106,13 @@ def test_track_context_route_returns_consolidated_snapshot(tmp_path, monkeypatch
     monkeypatch.setattr(research_route, "_research_store", research_store)
     monkeypatch.setattr(research_route, "_memory_store", memory_store)
 
-    with TestClient(api_main.app) as client:
-        response = client.get(
-            f"/api/research/tracks/{track_id}/context",
-            params={"user_id": "u-context"},
-        )
+    app = api_main.app
+    app.dependency_overrides[auth_deps.get_required_user_id] = _override_user_id("u-context")
+    try:
+        with TestClient(app) as client:
+            response = client.get(f"/api/research/tracks/{track_id}/context")
+    finally:
+        app.dependency_overrides.pop(auth_deps.get_required_user_id, None)
 
     assert response.status_code == 200
     payload = response.json()
@@ -118,7 +128,9 @@ def test_track_context_route_returns_consolidated_snapshot(tmp_path, monkeypatch
     assert payload["feedback"]["actions"]["save"] == 1
     assert payload["feedback"]["actions"]["like"] == 1
     assert payload["saved_papers"]["total_items"] == 1
-    assert payload["saved_papers"]["recent_items"][0]["paper"]["title"] == "Context-Routed Retrieval"
+    assert (
+        payload["saved_papers"]["recent_items"][0]["paper"]["title"] == "Context-Routed Retrieval"
+    )
     assert "feedback_coverage" in payload["eval_summary"]
 
 
@@ -127,15 +139,17 @@ def test_track_context_route_returns_404_for_missing_or_inaccessible_track(tmp_p
     monkeypatch.setattr(research_route, "_research_store", research_store)
     monkeypatch.setattr(research_route, "_memory_store", memory_store)
 
-    with TestClient(api_main.app) as client:
-        missing = client.get(
-            "/api/research/tracks/999999/context",
-            params={"user_id": "u-context"},
-        )
-        wrong_user = client.get(
-            f"/api/research/tracks/{track_id}/context",
-            params={"user_id": "other-user"},
-        )
+    app = api_main.app
+    try:
+        app.dependency_overrides[auth_deps.get_required_user_id] = _override_user_id("u-context")
+        with TestClient(app) as client:
+            missing = client.get("/api/research/tracks/999999/context")
+
+        app.dependency_overrides[auth_deps.get_required_user_id] = _override_user_id("other-user")
+        with TestClient(app) as client:
+            wrong_user = client.get(f"/api/research/tracks/{track_id}/context")
+    finally:
+        app.dependency_overrides.pop(auth_deps.get_required_user_id, None)
 
     assert missing.status_code == 404
     assert wrong_user.status_code == 404

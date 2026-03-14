@@ -6,6 +6,7 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from paperbot.application.services.p2c.models import NormalizedInput
+from paperbot.utils.user_identity import has_user_identity
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +45,7 @@ class ContextEngineBridge:
         self,
         normalized_input: NormalizedInput,
         *,
-        user_id: str,
+        user_id: Optional[str],
         track_id: Optional[int] = None,
         paper_id: Optional[str] = None,
     ) -> NormalizedInput:
@@ -57,7 +58,7 @@ class ContextEngineBridge:
 
         Returns the same NormalizedInput object (mutated in place).
         """
-        if user_id == "default":
+        if not has_user_identity(user_id):
             return normalized_input
 
         engine = self._get_engine()

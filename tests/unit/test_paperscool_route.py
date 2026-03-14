@@ -79,7 +79,7 @@ class _FakeWorkflow:
 
 async def _fake_run_topic_search(
     *,
-    user_id="default",
+    user_id=None,
     queries,
     sources,
     branches,
@@ -100,7 +100,7 @@ async def _fake_run_topic_search(
 
 async def _fake_run_topic_search_multi(
     *,
-    user_id="default",
+    user_id=None,
     queries,
     sources,
     branches,

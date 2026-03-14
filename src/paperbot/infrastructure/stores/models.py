@@ -1295,7 +1295,7 @@ class ReproContextPackModel(Base):
     __tablename__ = "repro_context_pack"
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)  # "ctxp_{uuid}"
-    user_id: Mapped[str] = mapped_column(String(64), nullable=False, default="default", index=True)
+    user_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     project_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
     paper_id: Mapped[str] = mapped_column(String(256), nullable=False, index=True)
     paper_title: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -1427,7 +1427,7 @@ class ReproCodeExperienceModel(Base):
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    user_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True, default="default")
+    user_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     pack_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
     paper_id: Mapped[Optional[str]] = mapped_column(String(256), nullable=True, index=True)
     # pattern_type: success_pattern | failure_reason | verified_structure
@@ -1447,7 +1447,7 @@ class IntelligenceEventModel(Base):
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    user_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True, default="default")
+    user_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     external_id: Mapped[str] = mapped_column(String(255), nullable=False)
 
     source: Mapped[str] = mapped_column(String(32), default="unknown", index=True)

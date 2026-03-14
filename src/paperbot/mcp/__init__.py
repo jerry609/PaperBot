@@ -1,0 +1,1 @@
+"""PaperBot MCP server package."""

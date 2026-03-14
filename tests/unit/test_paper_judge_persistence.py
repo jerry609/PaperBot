@@ -83,9 +83,9 @@ def test_feedback_links_to_paper_registry_row(tmp_path: Path):
         }
     )
 
-    track = research_store.create_track(user_id="default", name="t1", activate=True)
+    track = research_store.create_track(user_id="judge-user", name="t1", activate=True)
     feedback = research_store.add_paper_feedback(
-        user_id="default",
+        user_id="judge-user",
         track_id=int(track["id"]),
         paper_id="https://arxiv.org/abs/2501.12345",
         action="save",

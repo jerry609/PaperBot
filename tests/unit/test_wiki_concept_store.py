@@ -8,6 +8,7 @@ from paperbot.infrastructure.stores.wiki_concept_store import WikiConceptStore
 
 
 def test_wiki_concept_store_loads_papers_and_tracks(tmp_path: Path):
+    user_id = "wiki-user"
     db_url = f"sqlite:///{tmp_path / 'wiki-grounding.db'}"
     paper_store = PaperStore(db_url=db_url)
     research_store = SqlAlchemyResearchStore(db_url=db_url)
@@ -33,7 +34,7 @@ def test_wiki_concept_store_loads_papers_and_tracks(tmp_path: Path):
         }
     )
     track = research_store.create_track(
-        user_id="default",
+        user_id=user_id,
         name="LLM Agents",
         description="Track the architecture and alignment stack for agents.",
         keywords=["transformer", "agents"],
@@ -41,14 +42,14 @@ def test_wiki_concept_store_loads_papers_and_tracks(tmp_path: Path):
         activate=True,
     )
     research_store.add_paper_feedback(
-        user_id="default",
+        user_id=user_id,
         track_id=int(track["id"]),
         paper_id=str(saved_paper["id"]),
         action="save",
     )
 
     store = WikiConceptStore(db_url=db_url)
-    snapshot = store.load_grounding_snapshot(user_id="default")
+    snapshot = store.load_grounding_snapshot(user_id=user_id)
 
     assert len(snapshot["papers"]) == 1
     assert snapshot["papers"][0]["title"] == "Attention Is All You Need"

@@ -59,7 +59,7 @@ async def test_run_unified_topic_search_adds_grounded_variants(monkeypatch):
     grounder = WorkflowQueryGrounder(WikiConceptService(_FakeWikiConceptStore()))
 
     result = await uts.run_unified_topic_search(
-        user_id="default",
+        user_id="ground-user",
         queries=["rag latency"],
         search_service=object(),
         query_grounder=grounder,
