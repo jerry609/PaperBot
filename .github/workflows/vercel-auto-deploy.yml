@@ -34,6 +34,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       preview_url: ${{ steps.deploy.outputs.preview_url }}
+      preview_alias_url: ${{ steps.alias.outputs.preview_alias_url }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -83,18 +84,49 @@ jobs:
           echo "preview_url=${preview_url}" >> "${GITHUB_OUTPUT}"
           echo "Preview URL: ${preview_url}"
 
+      - name: Assign stable PR alias
+        id: alias
+        if: github.event_name == 'pull_request' && vars.VERCEL_PREVIEW_ALIAS_DOMAIN != ''
+        shell: bash
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PREVIEW_ALIAS_DOMAIN: ${{ vars.VERCEL_PREVIEW_ALIAS_DOMAIN }}
+          PREVIEW_URL: ${{ steps.deploy.outputs.preview_url }}
+        run: |
+          set -euo pipefail
+          repo_slug="$(printf '%s' "${GITHUB_REPOSITORY#*/}" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+|-+$//g')"
+          preview_alias_host="${repo_slug}-pr-${PR_NUMBER}.${PREVIEW_ALIAS_DOMAIN#.}"
+          vercel alias set "${PREVIEW_URL}" "${preview_alias_host}" --token="${{ secrets.VERCEL_TOKEN }}"
+          echo "preview_alias_url=https://${preview_alias_host}" >> "${GITHUB_OUTPUT}"
+          echo "Stable preview alias: https://${preview_alias_host}"
+
+      - name: Note missing stable PR alias configuration
+        if: github.event_name == 'pull_request' && vars.VERCEL_PREVIEW_ALIAS_DOMAIN == ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "### Stable preview alias not configured"
+            echo
+            echo 'Set the repository variable `VERCEL_PREVIEW_ALIAS_DOMAIN` to a wildcard-enabled preview domain suffix such as `preview.example.com` to get stable per-PR aliases.'
+          } >> "${GITHUB_STEP_SUMMARY}"
+
       - name: Comment preview URL on PR
         if: github.event_name == 'pull_request'
         uses: actions/github-script@v7
         env:
           PREVIEW_URL: ${{ steps.deploy.outputs.preview_url }}
+          PREVIEW_ALIAS_URL: ${{ steps.alias.outputs.preview_alias_url }}
         with:
           script: |
             const marker = "<!-- vercel-preview-comment -->";
+            const previewAliasUrl = process.env.PREVIEW_ALIAS_URL;
             const body = [
               marker,
               "## Vercel Preview",
               `- Preview: ${process.env.PREVIEW_URL}`,
+              ...(previewAliasUrl ? [`- Stable alias: ${previewAliasUrl}`] : []),
               "- Automation bypass is expected via `VERCEL_AUTOMATION_BYPASS_SECRET` for CI and Playwright.",
             ].join("\n");
 
