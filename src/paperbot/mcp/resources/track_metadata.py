@@ -42,7 +42,7 @@ async def _track_metadata_impl(track_id: str) -> str:
         return json.dumps({"error": f"Invalid track_id: {track_id!r}. Must be an integer."})
 
     store = _get_store()
-    track = await anyio.to_thread.run_sync(lambda: store.get_track_by_id(tid))
+    track = await anyio.to_thread.run_sync(lambda: store.get_track(user_id="default", track_id=tid))
 
     if track is None:
         return json.dumps({"error": f"Track {tid} not found."})

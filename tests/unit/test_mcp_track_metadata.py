@@ -12,8 +12,12 @@ import pytest
 class _FakeResearchStore:
     """ResearchStore stub returning canned track data."""
 
-    def get_track_by_id(self, track_id: int):
-        if track_id == 42:
+    def __init__(self):
+        self.calls = []
+
+    def get_track(self, *, user_id: str, track_id: int):
+        self.calls.append({"user_id": user_id, "track_id": track_id})
+        if user_id == "default" and track_id == 42:
             return {
                 "id": 42,
                 "name": "ML",
@@ -31,13 +35,15 @@ class TestTrackMetadataResource:
         """_track_metadata_impl('42') returns JSON with track fields."""
         import paperbot.mcp.resources.track_metadata as mod
 
-        mod._store = _FakeResearchStore()
+        fake_store = _FakeResearchStore()
+        mod._store = fake_store
         try:
             result = await mod._track_metadata_impl("42")
         finally:
             mod._store = None
 
         data = json.loads(result)
+        assert fake_store.calls == [{"user_id": "default", "track_id": 42}]
         assert data["id"] == 42
         assert data["name"] == "ML"
         assert "description" in data
