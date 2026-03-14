@@ -1816,7 +1816,7 @@ async def _run_all_stream_sandbox_inner(
         shared.refresh_timeout()
     context_pack_raw = getattr(session, "context_pack", None)
     e2e_policy = E2EExecutionPolicy.from_context(
-        shared, slug, context_pack=context_pack_raw
+        shared, slug, context_pack=context_pack_raw, allow_missing_entry_point=True
     )
 
     if e2e_policy.enabled and not e2e_policy.entry_point and not e2e_policy.entry_command:

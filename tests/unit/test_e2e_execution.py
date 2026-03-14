@@ -190,6 +190,14 @@ class TestE2EPolicy:
         policy = E2EExecutionPolicy.from_context(shared, "slug")
         assert policy.enabled is False
 
+    def test_allows_missing_entry_point_when_requested(self):
+        shared, _ = _make_shared(["README.md"])
+        policy = E2EExecutionPolicy.from_context(
+            shared, "slug", allow_missing_entry_point=True
+        )
+        assert policy.enabled is True
+        assert policy.entry_point is None
+
     def test_context_pack_entry_command(self):
         shared, _ = _make_shared([])
         policy = E2EExecutionPolicy.from_context(

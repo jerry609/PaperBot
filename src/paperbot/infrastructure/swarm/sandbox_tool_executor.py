@@ -11,7 +11,7 @@ import asyncio
 import os
 import re
 import shlex
-from pathlib import Path
+from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from .shared_sandbox import SharedSandbox
@@ -319,15 +319,18 @@ class SandboxToolExecutor:
         rel = (rel or "").strip()
         if not rel:
             return None
-        path = Path(rel)
-        if path.is_absolute():
+        normalized = rel.replace("\\", "/")
+        if normalized.startswith("/") or normalized.startswith("//"):
             return None
+        if re.match(r"^[A-Za-z]:/", normalized):
+            return None
+        path = PurePosixPath(normalized)
         if ".." in path.parts:
             return None
         parts = [p for p in path.parts if p not in ("", ".")]
         if not parts:
             return None
-        return str(Path(*parts))
+        return str(PurePosixPath(*parts))
 
     # ----- Utilities -----
 
