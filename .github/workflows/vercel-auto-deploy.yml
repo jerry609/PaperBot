@@ -1,4 +1,4 @@
-name: Vercel Preview
+name: Vercel Preview Validation
 
 on:
   pull_request:
@@ -9,10 +9,6 @@ on:
       - synchronize
       - reopened
       - ready_for_review
-  push:
-    branches:
-      - dev
-  workflow_dispatch:
 
 permissions:
   contents: read
@@ -23,71 +19,91 @@ concurrency:
   group: vercel-preview-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
-env:
-  VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-  VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
-
 jobs:
-  deploy_preview:
-    name: Deploy preview
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
+  discover_preview:
+    name: Resolve preview URL
+    if: github.event.pull_request.head.repo.fork == false
     runs-on: ubuntu-latest
     outputs:
-      preview_url: ${{ steps.deploy.outputs.preview_url }}
+      preview_url: ${{ steps.resolve.outputs.preview_url }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Wait for Vercel Git preview deployment
+        id: resolve
+        uses: actions/github-script@v7
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const sha = context.payload.pull_request.head.sha;
+            const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-      - name: Check required Vercel secrets
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -n "${{ secrets.VERCEL_TOKEN }}"
-          test -n "${{ secrets.VERCEL_ORG_ID }}"
-          test -n "${{ secrets.VERCEL_PROJECT_ID }}"
+            for (let attempt = 1; attempt <= 60; attempt += 1) {
+              const deployments = await github.paginate(github.rest.repos.listDeployments, {
+                owner,
+                repo,
+                sha,
+                per_page: 100,
+              });
+              const previewDeployments = deployments
+                .filter(
+                  (deployment) =>
+                    deployment.creator?.login === "vercel[bot]" &&
+                    String(deployment.environment || "").toLowerCase() === "preview"
+                )
+                .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-          cache-dependency-path: web/package-lock.json
+              if (previewDeployments.length > 0) {
+                const deployment = previewDeployments[0];
+                const statuses = await github.paginate(github.rest.repos.listDeploymentStatuses, {
+                  owner,
+                  repo,
+                  deployment_id: deployment.id,
+                  per_page: 100,
+                });
+                const latestStatus = statuses[0];
 
-      - name: Install web dependencies
-        working-directory: web
-        run: npm ci
+                if (latestStatus) {
+                  const previewUrl = latestStatus.environment_url || latestStatus.log_url || "";
+                  core.info(
+                    `Attempt ${attempt}: deployment ${deployment.id} state=${latestStatus.state} url=${previewUrl || "n/a"}`
+                  );
 
-      - name: Install Vercel CLI
-        run: npm install --global vercel@latest
+                  if (latestStatus.state === "success") {
+                    if (!previewUrl) {
+                      core.setFailed(
+                        `Vercel deployment ${deployment.id} succeeded but did not expose an environment_url.`
+                      );
+                      return;
+                    }
 
-      - name: Pull Vercel project settings
-        run: vercel pull --yes --environment=preview --token="${{ secrets.VERCEL_TOKEN }}"
+                    core.setOutput("preview_url", previewUrl);
+                    return;
+                  }
 
-      - name: Build preview artifacts
-        run: vercel build --token="${{ secrets.VERCEL_TOKEN }}"
+                  if (["failure", "error", "inactive"].includes(latestStatus.state)) {
+                    core.setFailed(
+                      `Vercel preview deployment ${deployment.id} finished with state=${latestStatus.state}. URL: ${previewUrl || "n/a"}`
+                    );
+                    return;
+                  }
+                } else {
+                  core.info(`Attempt ${attempt}: deployment ${deployment.id} exists but has no statuses yet.`);
+                }
+              } else {
+                core.info(`Attempt ${attempt}: no Vercel preview deployment found yet for ${sha}.`);
+              }
 
-      - name: Deploy preview
-        id: deploy
-        shell: bash
-        run: |
-          set -euo pipefail
-          deploy_log="$(mktemp)"
-          vercel deploy --prebuilt --token="${{ secrets.VERCEL_TOKEN }}" 2>&1 | tee "${deploy_log}"
-          preview_url="$(grep -Eo 'https://[^ ]+\.vercel\.app[^ ]*' "${deploy_log}" | tail -n 1)"
-          if [ -z "${preview_url}" ]; then
-            echo "Unable to determine preview URL from Vercel deploy output" >&2
-            exit 1
-          fi
-          echo "preview_url=${preview_url}" >> "${GITHUB_OUTPUT}"
-          echo "Preview URL: ${preview_url}"
+              await delay(10000);
+            }
+
+            core.setFailed(
+              "Timed out waiting for a Vercel Git preview deployment. Check that Vercel Git deployments are enabled for this project."
+            );
 
       - name: Comment preview URL on PR
-        if: github.event_name == 'pull_request'
         uses: actions/github-script@v7
         env:
-          PREVIEW_URL: ${{ steps.deploy.outputs.preview_url }}
+          PREVIEW_URL: ${{ steps.resolve.outputs.preview_url }}
         with:
           script: |
             const marker = "<!-- vercel-preview-comment -->";
@@ -95,6 +111,7 @@ jobs:
               marker,
               "## Vercel Preview",
               `- Preview: ${process.env.PREVIEW_URL}`,
+              "- Resolved from Vercel Git Deployments and reused for CI smoke checks.",
               "- Automation bypass is expected via `VERCEL_AUTOMATION_BYPASS_SECRET` for CI and Playwright.",
             ].join("\n");
 
@@ -128,8 +145,8 @@ jobs:
 
   preview_smoke:
     name: Preview smoke
-    needs: deploy_preview
-    if: needs.deploy_preview.outputs.preview_url != ''
+    needs: discover_preview
+    if: needs.discover_preview.outputs.preview_url != ''
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -138,7 +155,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ github.event.pull_request.head.sha }}
 
       - name: Detect preview smoke bypass secret
         id: bypass_secret
@@ -175,7 +192,7 @@ jobs:
         if: steps.bypass_secret.outputs.enabled == 'true'
         shell: bash
         env:
-          PREVIEW_URL: ${{ needs.deploy_preview.outputs.preview_url }}
+          PREVIEW_URL: ${{ needs.discover_preview.outputs.preview_url }}
           VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
         run: |
           set -euo pipefail
@@ -197,24 +214,24 @@ jobs:
       - name: Run Playwright smoke against preview
         if: steps.bypass_secret.outputs.enabled == 'true'
         env:
-          E2E_BASE_URL: ${{ needs.deploy_preview.outputs.preview_url }}
+          E2E_BASE_URL: ${{ needs.discover_preview.outputs.preview_url }}
           VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
         run: npm run test:e2e -- e2e/smoke.spec.ts
 
   fork_notice:
     name: Fork PR notice
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork
+    if: github.event.pull_request.head.repo.fork
     runs-on: ubuntu-latest
     steps:
       - name: Record skip reason for fork PR
         shell: bash
         run: |
           set -euo pipefail
-          echo "Fork PR detected; preview deployment is skipped because GitHub Actions does not expose the Vercel secrets required for protected preview deploys." 
+          echo "Fork PR detected; protected preview smoke is skipped because GitHub Actions does not expose the secrets required to bypass Vercel preview protection."
           {
             echo "### Fork PR preview skipped"
             echo
-            echo "This pull request comes from a fork, so GitHub Actions cannot access the Vercel secrets required for preview deployment and protected preview smoke tests."
+            echo "This pull request comes from a fork, so GitHub Actions cannot access the secrets required for protected preview smoke tests."
             echo
-            echo "The workflow is intentionally passing here to avoid a false-red CI result."
+            echo "Vercel Git deployments still run outside GitHub Actions when the project configuration allows them."
           } >> "${GITHUB_STEP_SUMMARY}"
