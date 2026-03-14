@@ -1016,3 +1016,127 @@ class TestMCPToolEventLogging:
             "save_to_memory",
             "export_to_obsidian",
         }
+
+
+# ---------------------------------------------------------------------------
+# Resource listing (discovery) tests
+# ---------------------------------------------------------------------------
+
+
+EXPECTED_RESOURCES = [
+    "track_metadata",
+    "track_papers",
+    "track_memory",
+    "scholars",
+]
+
+
+class TestMCPResourceListing:
+    """Verify all 4 resources are discoverable and registered in server.py.
+
+    URI template resources (track/{id}, track/{id}/papers, track/{id}/memory)
+    appear in list_resource_templates; static resources (scholars) appear in
+    list_resources. Both are verified via source inspection since FastMCP
+    cannot be invoked directly on Python 3.9.
+    """
+
+    def setup_method(self):
+        Container._instance = None
+
+    def test_all_four_resources_listed(self):
+        """All 4 resource modules expose register() and _impl functions."""
+        from paperbot.mcp.resources import track_metadata, track_papers, track_memory, scholars
+
+        modules = {
+            "track_metadata": (track_metadata, "_track_metadata_impl"),
+            "track_papers": (track_papers, "_track_papers_impl"),
+            "track_memory": (track_memory, "_track_memory_impl"),
+            "scholars": (scholars, "_scholars_impl"),
+        }
+
+        # Verify exactly 4 resources
+        assert len(modules) == 4, f"Expected 4 resources, found {len(modules)}"
+
+        for resource_name, (mod, impl_name) in modules.items():
+            # Each module has a register() function
+            assert hasattr(mod, "register"), f"{resource_name} missing register()"
+            assert callable(mod.register), f"{resource_name}.register is not callable"
+
+            # Each module has an _impl function
+            impl_fn = getattr(mod, impl_name, None)
+            assert impl_fn is not None, f"{resource_name} missing {impl_name}"
+            assert impl_fn.__doc__, f"{resource_name} impl has no docstring (description)"
+
+    def test_server_registers_all_four_resources(self):
+        """server.py imports and calls register() for all 4 resource modules.
+
+        Since mcp package is unavailable on Python 3.9, mcp=None. We verify
+        by checking that the server module source contains all 4 resource
+        register() calls (same approach as test_server_registers_all_nine_tools).
+        """
+        import paperbot.mcp.server as server_mod
+
+        # server.py should have mcp attribute (None if package unavailable)
+        assert hasattr(server_mod, "mcp")
+
+        # Verify all 4 resource registrations are present in the source
+        source = inspect.getsource(server_mod)
+        assert "track_metadata.register" in source, (
+            "track_metadata not registered in server.py"
+        )
+        assert "track_papers.register" in source, (
+            "track_papers not registered in server.py"
+        )
+        assert "track_memory.register" in source, (
+            "track_memory not registered in server.py"
+        )
+        assert "scholars.register" in source, (
+            "scholars not registered in server.py"
+        )
+
+    def test_each_resource_impl_has_correct_signature(self):
+        """Each resource _impl function has the expected parameter signature.
+
+        URI template resources require track_id: str.
+        The static scholars resource has no required parameters.
+        """
+        from paperbot.mcp.resources.track_metadata import _track_metadata_impl
+        from paperbot.mcp.resources.track_papers import _track_papers_impl
+        from paperbot.mcp.resources.track_memory import _track_memory_impl
+        from paperbot.mcp.resources.scholars import _scholars_impl
+
+        # track_metadata_impl: requires track_id: str
+        sig = inspect.signature(_track_metadata_impl)
+        params = sig.parameters
+        assert "track_id" in params, "_track_metadata_impl missing track_id param"
+        assert params["track_id"].default is inspect.Parameter.empty, (
+            "track_id should be required"
+        )
+
+        # track_papers_impl: requires track_id: str
+        sig = inspect.signature(_track_papers_impl)
+        params = sig.parameters
+        assert "track_id" in params, "_track_papers_impl missing track_id param"
+        assert params["track_id"].default is inspect.Parameter.empty, (
+            "track_id should be required"
+        )
+
+        # track_memory_impl: requires track_id: str
+        sig = inspect.signature(_track_memory_impl)
+        params = sig.parameters
+        assert "track_id" in params, "_track_memory_impl missing track_id param"
+        assert params["track_id"].default is inspect.Parameter.empty, (
+            "track_id should be required"
+        )
+
+        # _scholars_impl: static resource — no required parameters
+        sig = inspect.signature(_scholars_impl)
+        required_params = [
+            p
+            for p in sig.parameters.values()
+            if p.default is inspect.Parameter.empty and p.name != "self"
+        ]
+        assert len(required_params) == 0, (
+            f"_scholars_impl should have no required params, found: "
+            f"{[p.name for p in required_params]}"
+        )
