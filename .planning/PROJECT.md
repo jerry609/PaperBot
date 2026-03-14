@@ -65,16 +65,17 @@ Paper-specific capability layer: understanding, reproduction, verification, and 
 - **Studio integration**: Dashboard integrates with existing Monaco/XTerm, not replaces them
 - **Transport**: SSE for live updates (existing infrastructure)
 
-## Current Milestone: v1.1 Agent Orchestration Dashboard
+## Current Milestone: v2.0 PostgreSQL Migration & Data Layer Refactoring
 
-**Goal:** Build a Codex subagent bridge for Claude Code and a real-time agent orchestration dashboard in PaperBot's web UI, enabling the Paper2Code overflow delegation workflow.
+**Goal:** Migrate from SQLite to PostgreSQL, refactor all 46 data models systematically, and convert the entire data access layer from synchronous to async (asyncpg + AsyncSession).
 
 **Target features:**
-- Codex subagent bridge (`.claude/agents/codex-worker.md`)
-- Three-panel agent dashboard (replaces studio page)
-- Agent event logging (lifecycle, tools, files, tasks)
-- Live SSE streaming for real-time updates
-- Paper2Code workflow with Codex overflow delegation
+- Full PostgreSQL migration with Docker-based local development
+- Async data layer (AsyncSession + asyncpg) across all stores
+- Systematic model refactoring: normalization, constraints, redundancy removal
+- PG-native features: tsvector full-text search (replacing FTS5), JSONB columns, proper indexing
+- Alembic migration path from SQLite to PostgreSQL
+- Data migration tooling for existing SQLite databases
 
 ## Key Decisions
 
@@ -88,5 +89,10 @@ Paper-specific capability layer: understanding, reproduction, verification, and 
 | MCP event log as data flow | Agent activity → MCP event log → dashboard reads | — Pending |
 | Live SSE streaming | Real-time updates using existing SSE infrastructure | — Pending |
 
+| PG migration over SQLite | SQLite concurrency limits, lack of PG features (tsvector, JSONB), production readiness | — Pending |
+| Async data layer (asyncpg) | FastAPI is async; sync DB calls block event loop; do it together with PG migration | — Pending |
+| Systematic model refactoring | 46 models accumulated organically; normalize, add constraints, remove redundancy | — Pending |
+| Docker PG for local dev | Standard dev setup, matches production topology | — Pending |
+
 ---
-*Last updated: 2026-03-14 after v1.1 milestone initialization*
+*Last updated: 2026-03-14 after v2.0 milestone initialization*
