@@ -31,11 +31,12 @@
   5. Agent can call `export_to_obsidian` and receive Obsidian-formatted markdown
   6. All 9 tools appear in MCP tools/list
   7. All tools log calls via audit helper
-**Plans**: TBD
+**Plans**: 3 plans
 
 Plans:
-- [ ] 03-01: TBD
-- [ ] 03-02: TBD
+- [ ] 03-01-PLAN.md — analyze_trends + check_scholar tools with TDD
+- [ ] 03-02-PLAN.md — get_research_context + save_to_memory + export_to_obsidian tools with TDD
+- [ ] 03-03-PLAN.md — Server registration + integration tests for all 9 tools
 
 ### Phase 4: MCP Resources
 **Goal**: Agents can read PaperBot data via MCP resource URIs without tool calls
@@ -183,7 +184,7 @@ Phases execute in numeric order: 3 -> 4 -> 5 -> 6 (v1.0) -> 7 -> 8 -> ... -> 11 
 |-------|-----------|----------------|--------|-----------|
 | 1. MCP Server Setup | v1.0 | — | Complete | 2026-03-13 |
 | 2. Core Paper Tools | v1.0 | 3/3 | Complete | 2026-03-14 |
-| 3. Remaining MCP Tools | v1.0 | 0/? | Not started | - |
+| 3. Remaining MCP Tools | v1.0 | 0/3 | Planning complete | - |
 | 4. MCP Resources | v1.0 | 0/? | Not started | - |
 | 5. Transport & Entry Point | v1.0 | 0/? | Not started | - |
 | 6. Agent Skills | v1.0 | 0/? | Not started | - |
