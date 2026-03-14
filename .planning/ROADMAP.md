@@ -92,7 +92,7 @@ Plans:
 - Integer phases (7, 8, 9...): Planned milestone work
 - Decimal phases (7.1, 7.2): Urgent insertions (marked with INSERTED)
 
-- [ ] **Phase 7: EventBus + SSE Foundation** - In-process event bus with SSE subscription endpoint for real-time push
+- [x] **Phase 7: EventBus + SSE Foundation** - In-process event bus with SSE subscription endpoint for real-time push (completed 2026-03-14)
 - [ ] **Phase 8: Agent Event Vocabulary** - Extend AgentEventEnvelope types and build activity feed, lifecycle indicators, and tool call timeline
 - [ ] **Phase 9: Three-Panel Dashboard** - Frontend store, SSE hook, and three-panel IDE layout with file visualization
 - [ ] **Phase 10: Agent Board + Codex Bridge** - Kanban board generalization, Codex worker agent definition, and overflow delegation
@@ -301,7 +301,7 @@ Phases execute in numeric order: 3 -> 4 -> 5 -> 6 (v1.0) -> 7 -> 8 -> ... -> 11 
 | 4. MCP Resources | v1.0 | 2/2 | Complete | 2026-03-14 |
 | 5. Transport & Entry Point | v1.0 | 1/1 | Complete | 2026-03-14 |
 | 6. Agent Skills | 1/1 | Complete   | 2026-03-14 | - |
-| 7. EventBus + SSE Foundation | 1/2 | In Progress|  | - |
+| 7. EventBus + SSE Foundation | 2/2 | Complete   | 2026-03-14 | - |
 | 8. Agent Event Vocabulary | v1.1 | 0/? | Not started | - |
 | 9. Three-Panel Dashboard | v1.1 | 0/? | Not started | - |
 | 10. Agent Board + Codex Bridge | v1.1 | 0/? | Not started | - |

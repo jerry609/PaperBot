@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: MCP Server
 status: planning
-stopped_at: Completed 07-01-PLAN.md
-last_updated: "2026-03-14T06:41:42.262Z"
+stopped_at: Completed 07-02-PLAN.md
+last_updated: "2026-03-14T06:48:05.573Z"
 last_activity: 2026-03-14 -- v2.0 roadmap created (phases 12-17)
 progress:
   total_phases: 15
-  completed_phases: 4
+  completed_phases: 5
   total_plans: 9
-  completed_plans: 8
+  completed_plans: 9
   percent: 26
 ---
 
@@ -64,6 +64,7 @@ Progress: [████░░░░░░░░░░░░░] 26%
 - Trend: Stable
 | Phase 06-agent-skills P01 | 3 | 2 tasks | 5 files |
 | Phase 07-eventbus-sse-foundation P01 | 3 | 2 tasks | 3 files |
+| Phase 07 P02 | 4 | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -86,6 +87,9 @@ Recent decisions affecting current work:
 - [Phase 07-01]: EventBusEventLog uses drop-oldest backpressure (get_nowait+put_nowait) so append() never blocks the producer
 - [Phase 07-01]: AgentEventEnvelope serialized once via .to_dict() in append(); fan-out distributes the dict (no re-serialization)
 - [Phase 07-01]: stream() returns iter(()) — EventBusEventLog is a live delivery channel, not a historical store
+- [Phase 07-02]: Late import of EventBusEventLog inside _get_bus() prevents circular import (events.py loaded at app creation before bus is wired)
+- [Phase 07-02]: No wrap_generator() in events.py: events carry own AgentEventEnvelope fields; second envelope layer would confuse consumers
+- [Phase 07-02]: asyncio.wait_for(q.get(), timeout=15.0) drives both delivery and idle heartbeat at single await point
 
 ### Pending Todos
 
@@ -100,6 +104,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-14T06:41:42.258Z
-Stopped at: Completed 07-01-PLAN.md
+Last session: 2026-03-14T06:48:05.569Z
+Stopped at: Completed 07-02-PLAN.md
 Resume file: None
