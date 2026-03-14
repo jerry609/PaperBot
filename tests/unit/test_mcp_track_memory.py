@@ -10,6 +10,8 @@ from typing import Optional
 
 import pytest
 
+TEST_USER_ID = "mcp-user"
+
 
 class _FakeMemoryStore:
     """MemoryStore stub that captures args and returns canned memories."""
@@ -44,7 +46,7 @@ class TestTrackMemoryResource:
         fake_store = _FakeMemoryStore(memories=[{"id": 1, "content": "note", "kind": "note"}])
         mod._store = fake_store
         try:
-            result = await mod._track_memory_impl("42")
+            result = await mod._track_memory_impl(user_id=TEST_USER_ID, track_id="42")
         finally:
             mod._store = None
 
@@ -61,7 +63,7 @@ class TestTrackMemoryResource:
         fake_store = _FakeMemoryStore(memories=[])
         mod._store = fake_store
         try:
-            result = await mod._track_memory_impl("42")
+            result = await mod._track_memory_impl(user_id=TEST_USER_ID, track_id="42")
         finally:
             mod._store = None
 
@@ -77,12 +79,13 @@ class TestTrackMemoryResource:
         fake_store = _FakeMemoryStore(memories=[])
         mod._store = fake_store
         try:
-            await mod._track_memory_impl("42")
+            await mod._track_memory_impl(user_id=TEST_USER_ID, track_id="42")
         finally:
             mod._store = None
 
         assert fake_store.last_call_kwargs["scope_type"] == "track"
         assert fake_store.last_call_kwargs["scope_id"] == "42"
+        assert fake_store.last_call_kwargs["user_id"] == TEST_USER_ID
 
     @pytest.mark.asyncio
     async def test_returns_error_for_invalid_track_id(self):
@@ -92,7 +95,7 @@ class TestTrackMemoryResource:
         fake_store = _FakeMemoryStore()
         mod._store = fake_store
         try:
-            result = await mod._track_memory_impl("bad")
+            result = await mod._track_memory_impl(user_id=TEST_USER_ID, track_id="bad")
         finally:
             mod._store = None
 

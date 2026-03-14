@@ -45,7 +45,7 @@ class _FakeWikiConceptStore:
 def test_wiki_concept_service_enriches_catalog_with_live_grounding():
     service = WikiConceptService(_FakeWikiConceptStore())
 
-    items = service.list_concepts(user_id="default", query="transformer")
+    items = service.list_concepts(user_id="wiki-user", query="transformer")
 
     assert items
     top = items[0]
@@ -57,7 +57,7 @@ def test_wiki_concept_service_enriches_catalog_with_live_grounding():
 def test_wiki_concept_service_filters_by_category():
     service = WikiConceptService(_FakeWikiConceptStore())
 
-    items = service.list_concepts(user_id="default", category="Metric")
+    items = service.list_concepts(user_id="wiki-user", category="Metric")
 
     assert items
     assert all(item.category == "Metric" for item in items)
@@ -67,7 +67,7 @@ def test_wiki_concept_service_filters_by_category():
 def test_wiki_concept_service_resolves_grounded_concepts_for_query():
     service = WikiConceptService(_FakeWikiConceptStore())
 
-    items = service.resolve_concepts(user_id="default", query="rag latency")
+    items = service.resolve_concepts(user_id="wiki-user", query="rag latency")
 
     assert items
     top = items[0]

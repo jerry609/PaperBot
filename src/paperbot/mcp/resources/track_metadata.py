@@ -11,6 +11,8 @@ import logging
 
 import anyio
 
+from paperbot.utils.user_identity import require_user_identity
+
 logger = logging.getLogger(__name__)
 
 # Module-level lazy singleton for the research store (can be overridden in tests)
@@ -27,7 +29,7 @@ def _get_store():
     return _store
 
 
-async def _track_metadata_impl(track_id: str) -> str:
+async def _track_metadata_impl(user_id: str, track_id: str) -> str:
     """Return JSON metadata for the given track.
 
     Args:
@@ -41,8 +43,11 @@ async def _track_metadata_impl(track_id: str) -> str:
     except (ValueError, TypeError):
         return json.dumps({"error": f"Invalid track_id: {track_id!r}. Must be an integer."})
 
+    resolved_user_id = require_user_identity(user_id)
     store = _get_store()
-    track = await anyio.to_thread.run_sync(lambda: store.get_track(user_id="default", track_id=tid))
+    track = await anyio.to_thread.run_sync(
+        lambda: store.get_track(user_id=resolved_user_id, track_id=tid)
+    )
 
     if track is None or track.get("archived_at") is not None:
         return json.dumps({"error": f"Track {tid} not found."})
@@ -53,11 +58,11 @@ async def _track_metadata_impl(track_id: str) -> str:
 def register(mcp) -> None:
     """Register the track_metadata resource on the given FastMCP instance."""
 
-    @mcp.resource("paperbot://track/{track_id}", mime_type="application/json")
-    async def track_metadata(track_id: str) -> str:
+    @mcp.resource("paperbot://users/{user_id}/tracks/{track_id}", mime_type="application/json")
+    async def track_metadata(user_id: str, track_id: str) -> str:
         """Return metadata for a PaperBot research track.
 
         Provides track name, description, keywords, venues, methods, and status.
         Use this to understand what a track monitors before fetching its papers.
         """
-        return await _track_metadata_impl(track_id)
+        return await _track_metadata_impl(user_id, track_id)

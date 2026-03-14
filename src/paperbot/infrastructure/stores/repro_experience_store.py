@@ -9,6 +9,7 @@ from sqlalchemy.exc import IntegrityError
 
 from paperbot.infrastructure.stores.models import Base, ReproCodeExperienceModel
 from paperbot.infrastructure.stores.sqlalchemy_db import SessionProvider, get_db_url
+from paperbot.utils.user_identity import require_user_identity
 
 _VALID_TYPES = {"success_pattern", "failure_reason", "verified_structure"}
 
@@ -25,7 +26,7 @@ class ReproExperienceStore:
     def add(
         self,
         *,
-        user_id: str = "default",
+        user_id: str,
         pattern_type: str,
         content: str,
         paper_id: Optional[str] = None,
@@ -38,9 +39,10 @@ class ReproExperienceStore:
         normalized_content = (content or "").strip()
         if not normalized_content:
             raise ValueError("content must not be empty")
+        resolved_user_id = require_user_identity(user_id)
         now = datetime.now(timezone.utc)
         row = ReproCodeExperienceModel(
-            user_id=(user_id or "default").strip() or "default",
+            user_id=resolved_user_id,
             pack_id=pack_id,
             paper_id=paper_id,
             pattern_type=pattern_type,
@@ -85,15 +87,16 @@ class ReproExperienceStore:
         self,
         paper_id: str,
         *,
-        user_id: str = "default",
+        user_id: str,
         pattern_type: Optional[str] = None,
         limit: int = 50,
     ) -> List[Dict[str, Any]]:
         """Retrieve experiences for a specific paper, newest first."""
+        resolved_user_id = require_user_identity(user_id)
         with self._provider.session() as session:
             stmt = (
                 select(ReproCodeExperienceModel)
-                .where(ReproCodeExperienceModel.user_id == ((user_id or "default").strip() or "default"))
+                .where(ReproCodeExperienceModel.user_id == resolved_user_id)
                 .where(ReproCodeExperienceModel.paper_id == paper_id)
             )
             if pattern_type:
@@ -106,15 +109,16 @@ class ReproExperienceStore:
         self,
         pack_id: str,
         *,
-        user_id: str = "default",
+        user_id: str,
         pattern_type: Optional[str] = None,
         limit: int = 50,
     ) -> List[Dict[str, Any]]:
         """Retrieve experiences for a specific P2C pack, newest first."""
+        resolved_user_id = require_user_identity(user_id)
         with self._provider.session() as session:
             stmt = (
                 select(ReproCodeExperienceModel)
-                .where(ReproCodeExperienceModel.user_id == ((user_id or "default").strip() or "default"))
+                .where(ReproCodeExperienceModel.user_id == resolved_user_id)
                 .where(ReproCodeExperienceModel.pack_id == pack_id)
             )
             if pattern_type:

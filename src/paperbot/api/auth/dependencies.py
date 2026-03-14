@@ -62,16 +62,16 @@ def get_current_user(
 
 def get_user_id(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer),
-) -> str:
+) -> Optional[str]:
     """Return the authenticated user id as a string.
 
-    When AUTH_OPTIONAL=true, missing/invalid tokens fall back to "default" so
-    legacy callers keep functioning while we migrate to multi-user auth.
+    When AUTH_OPTIONAL=true, missing/invalid tokens return None so callers can
+    distinguish anonymous flows from real user-scoped operations.
     """
 
     user = _resolve_user(credentials)
     if user is None:
-        return "default"
+        return None
     return str(user.id)
 
 

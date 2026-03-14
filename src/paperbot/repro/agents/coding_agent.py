@@ -96,7 +96,7 @@ class CodingAgent(BaseAgent):
 
             gen_result = await self.generation_node.run(
                 gen_input,
-                user_id=context.get("user_id", "default"),
+                user_id=context.get("user_id"),
                 pack_id=context.get("pack_id"),
             )
 

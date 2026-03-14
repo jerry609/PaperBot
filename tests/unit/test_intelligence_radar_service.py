@@ -84,10 +84,10 @@ def test_signal_sort_value_supports_delta_keyword_and_time_modes():
 
 def test_needs_refresh_accepts_naive_latest_detected_at():
     class _NaiveStore:
-        def latest_detected_at(self, *, user_id: str = "default") -> datetime:
+        def latest_detected_at(self, *, user_id: str = "radar-user") -> datetime:
             return datetime.utcnow()
 
     service = object.__new__(IntelligenceRadarService)
     service._store = _NaiveStore()
 
-    assert service.needs_refresh(user_id="default", max_age_minutes=45) is False
+    assert service.needs_refresh(user_id="radar-user", max_age_minutes=45) is False

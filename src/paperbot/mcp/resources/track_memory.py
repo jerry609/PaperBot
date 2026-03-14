@@ -11,6 +11,8 @@ import logging
 
 import anyio
 
+from paperbot.utils.user_identity import require_user_identity
+
 logger = logging.getLogger(__name__)
 
 # Module-level lazy singleton for the memory store (can be overridden in tests)
@@ -27,7 +29,7 @@ def _get_store():
     return _store
 
 
-async def _track_memory_impl(track_id: str) -> str:
+async def _track_memory_impl(user_id: str, track_id: str) -> str:
     """Return JSON list of memories scoped to the given track.
 
     Args:
@@ -41,10 +43,11 @@ async def _track_memory_impl(track_id: str) -> str:
     except (ValueError, TypeError):
         return json.dumps({"error": f"Invalid track_id: {track_id!r}. Must be an integer."})
 
+    resolved_user_id = require_user_identity(user_id)
     store = _get_store()
     memories = await anyio.to_thread.run_sync(
         lambda: store.list_memories(
-            user_id="default",
+            user_id=resolved_user_id,
             scope_type="track",
             scope_id=str(tid),
             limit=100,
@@ -57,12 +60,15 @@ async def _track_memory_impl(track_id: str) -> str:
 def register(mcp) -> None:
     """Register the track_memory resource on the given FastMCP instance."""
 
-    @mcp.resource("paperbot://track/{track_id}/memory", mime_type="application/json")
-    async def track_memory(track_id: str) -> str:
+    @mcp.resource(
+        "paperbot://users/{user_id}/tracks/{track_id}/memory",
+        mime_type="application/json",
+    )
+    async def track_memory(user_id: str, track_id: str) -> str:
         """Return memories scoped to a PaperBot research track.
 
         Returns approved, non-expired memory entries (notes, hypotheses, decisions, etc.)
         that were recorded in the context of this track. Useful for retrieving persistent
         agent observations and research findings.
         """
-        return await _track_memory_impl(track_id)
+        return await _track_memory_impl(user_id, track_id)

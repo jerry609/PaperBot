@@ -38,7 +38,7 @@ class _FakeWikiConceptStore:
 def test_workflow_query_grounder_expands_short_concept_ids():
     grounder = WorkflowQueryGrounder(WikiConceptService(_FakeWikiConceptStore()))
 
-    grounded = grounder.ground_query(user_id="default", query="rag latency")
+    grounded = grounder.ground_query(user_id="wiki-user", query="rag latency")
 
     assert grounded.original_query == "rag latency"
     assert grounded.canonical_query == "retrieval augmented generation latency"
@@ -52,7 +52,7 @@ def test_workflow_query_grounder_expands_short_concept_ids():
 def test_workflow_query_grounder_keeps_broader_aliases_without_overwriting_query():
     grounder = WorkflowQueryGrounder(WikiConceptService(_FakeWikiConceptStore()))
 
-    grounded = grounder.ground_query(user_id="default", query="alignment roadmap")
+    grounded = grounder.ground_query(user_id="wiki-user", query="alignment roadmap")
 
     assert grounded.canonical_query == "alignment roadmap"
     assert grounded.search_queries == ["alignment roadmap"]

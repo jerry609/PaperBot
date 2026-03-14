@@ -8,6 +8,7 @@ from paperbot.infrastructure.stores.models import IntelligenceEventModel
 
 
 def test_intelligence_store_serializes_datetime_payload(tmp_path: Path):
+    user_id = "radar-user"
     store = IntelligenceStore(
         db_url=f"sqlite:///{tmp_path / 'intelligence-store.db'}",
         auto_create_schema=True,
@@ -15,7 +16,7 @@ def test_intelligence_store_serializes_datetime_payload(tmp_path: Path):
     observed_at = datetime(2026, 3, 11, 12, 30, tzinfo=timezone.utc)
 
     row = store.upsert_event(
-        user_id="default",
+        user_id=user_id,
         external_id="signal-1",
         source="github",
         source_label="GitHub",
@@ -37,6 +38,7 @@ def test_intelligence_store_serializes_datetime_payload(tmp_path: Path):
 
 
 def test_intelligence_store_latest_detected_at_restores_utc_timezone(tmp_path: Path):
+    user_id = "radar-user"
     store = IntelligenceStore(
         db_url=f"sqlite:///{tmp_path / 'intelligence-store-latest.db'}",
         auto_create_schema=True,
@@ -44,7 +46,7 @@ def test_intelligence_store_latest_detected_at_restores_utc_timezone(tmp_path: P
     observed_at = datetime(2026, 3, 11, 12, 30, tzinfo=timezone.utc)
 
     store.upsert_event(
-        user_id="default",
+        user_id=user_id,
         external_id="signal-latest",
         source="reddit",
         source_label="Reddit",
@@ -54,13 +56,14 @@ def test_intelligence_store_latest_detected_at_restores_utc_timezone(tmp_path: P
         detected_at=observed_at,
     )
 
-    latest = store.latest_detected_at(user_id="default")
+    latest = store.latest_detected_at(user_id=user_id)
 
     assert latest == observed_at
     assert latest.tzinfo == timezone.utc
 
 
 def test_intelligence_store_upsert_event_retries_after_integrity_error(tmp_path: Path, monkeypatch):
+    user_id = "radar-user"
     store = IntelligenceStore(
         db_url=f"sqlite:///{tmp_path / 'intelligence-store-race.db'}",
         auto_create_schema=True,
@@ -80,7 +83,7 @@ def test_intelligence_store_upsert_event_retries_after_integrity_error(tmp_path:
                 with original_session_factory() as competing:
                     competing.add(
                         IntelligenceEventModel(
-                            user_id="default",
+                            user_id=user_id,
                             external_id="signal-race",
                             created_at=observed_at,
                             detected_at=observed_at,
@@ -102,7 +105,7 @@ def test_intelligence_store_upsert_event_retries_after_integrity_error(tmp_path:
     monkeypatch.setattr(store._provider, "session", session_factory)
 
     row = store.upsert_event(
-        user_id="default",
+        user_id=user_id,
         external_id="signal-race",
         source="github",
         source_label="GitHub",

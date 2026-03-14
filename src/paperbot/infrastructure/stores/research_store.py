@@ -29,6 +29,7 @@ from paperbot.infrastructure.stores.models import (
     ResearchTrackModel,
 )
 from paperbot.infrastructure.stores.sqlalchemy_db import SessionProvider, get_db_url
+from paperbot.utils.user_identity import require_user_identity
 from paperbot.utils.logging_config import LogFiles, Logger
 
 
@@ -1564,9 +1565,8 @@ class SqlAlchemyResearchStore(FeedbackPort):
             )
             return [self._repo_to_dict(row) for row in rows]
 
-    def get_paper_detail(
-        self, *, paper_id: str, user_id: str = "default"
-    ) -> Optional[Dict[str, Any]]:
+    def get_paper_detail(self, *, paper_id: str, user_id: str) -> Optional[Dict[str, Any]]:
+        resolved_user_id = require_user_identity(user_id)
         with self._provider.session() as session:
             paper_ref_id = self._resolve_paper_ref_id(
                 session=session,
@@ -1584,7 +1584,7 @@ class SqlAlchemyResearchStore(FeedbackPort):
 
             reading_status = session.execute(
                 select(PaperReadingStatusModel).where(
-                    PaperReadingStatusModel.user_id == user_id,
+                    PaperReadingStatusModel.user_id == resolved_user_id,
                     PaperReadingStatusModel.paper_id == int(paper_ref_id),
                 )
             ).scalar_one_or_none()
@@ -1603,7 +1603,7 @@ class SqlAlchemyResearchStore(FeedbackPort):
                 session.execute(
                     select(PaperFeedbackModel)
                     .where(
-                        PaperFeedbackModel.user_id == user_id,
+                        PaperFeedbackModel.user_id == resolved_user_id,
                         PaperFeedbackModel.paper_ref_id == int(paper_ref_id),
                     )
                     .order_by(desc(PaperFeedbackModel.ts), desc(PaperFeedbackModel.id))

@@ -28,7 +28,7 @@ def _seed_track(db_url: str) -> int:
     Base.metadata.create_all(provider.engine)
     with provider.session() as session:
         track = ResearchTrackModel(
-            user_id="default",
+            user_id="anchor-user",
             name="LLM Systems",
             description="",
             keywords_json=json.dumps(["attention", "transformer"]),
@@ -45,6 +45,7 @@ def _seed_track(db_url: str) -> int:
 
 
 def test_anchor_service_discovers_and_scores_authors(tmp_path: Path):
+    user_id = "anchor-user"
     db_url = f"sqlite:///{tmp_path / 'anchor-service.db'}"
     paper_store = PaperStore(db_url=db_url)
     author_store = AuthorStore(db_url=db_url)
@@ -113,7 +114,7 @@ def test_anchor_service_discovers_and_scores_authors(tmp_path: Path):
     with provider.session() as session:
         session.add(
             PaperFeedbackModel(
-                user_id="default",
+                user_id=user_id,
                 track_id=track_id,
                 paper_id=str(p2["id"]),
                 paper_ref_id=int(p2["id"]),
@@ -127,7 +128,7 @@ def test_anchor_service_discovers_and_scores_authors(tmp_path: Path):
         session.commit()
 
     service = AnchorService(db_url=db_url)
-    anchors = service.discover(track_id=track_id, user_id="default", limit=5, window_years=15)
+    anchors = service.discover(track_id=track_id, user_id=user_id, limit=5, window_years=15)
 
     assert len(anchors) >= 2
     assert anchors[0]["name"] == "Alice Smith"
@@ -141,7 +142,7 @@ def test_anchor_service_discovers_and_scores_authors(tmp_path: Path):
 
     global_mode = service.discover(
         track_id=track_id,
-        user_id="default",
+        user_id=None,
         limit=5,
         window_years=15,
         personalized=False,
@@ -158,7 +159,7 @@ def test_anchor_service_raises_for_unknown_track(tmp_path: Path):
     db_url = f"sqlite:///{tmp_path / 'anchor-track-missing.db'}"
     service = AnchorService(db_url=db_url)
     with pytest.raises(ValueError, match="track not found"):
-        service.discover(track_id=999, user_id="default")
+        service.discover(track_id=999, user_id="anchor-user")
 
 
 def test_collapse_effective_feedback_actions_ignores_toggled_off_state() -> None:
@@ -254,7 +255,7 @@ def test_cleared_feedback_does_not_contribute_to_anchor_personalization() -> Non
     now = datetime.now(timezone.utc)
     rows = [
         PaperFeedbackModel(
-            user_id="default",
+            user_id="anchor-user",
             track_id=1,
             paper_id="paper-1",
             paper_ref_id=1,
@@ -265,7 +266,7 @@ def test_cleared_feedback_does_not_contribute_to_anchor_personalization() -> Non
             metadata_json="{}",
         ),
         PaperFeedbackModel(
-            user_id="default",
+            user_id="anchor-user",
             track_id=1,
             paper_id="paper-1",
             paper_ref_id=1,

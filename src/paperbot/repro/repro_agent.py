@@ -46,6 +46,7 @@ from .e2b_executor import E2BExecutor
 from .orchestrator import Orchestrator, OrchestratorConfig
 from paperbot.application.services.llm_service import LLMService
 from paperbot.infrastructure.stores.repro_experience_store import ReproExperienceStore
+from paperbot.utils.user_identity import optional_user_identity
 
 logger = logging.getLogger(__name__)
 
@@ -255,7 +256,7 @@ class ReproAgent:
         paper_context: PaperContext,
         output_dir: Optional[Path] = None,
         *,
-        user_id: str = "default",
+        user_id: Optional[str] = None,
         pack_id: Optional[str] = None,
         event_log: "Optional[EventLogPort]" = None,
         run_id: Optional[str] = None,
@@ -286,13 +287,14 @@ class ReproAgent:
         if output_dir is None:
             output_dir = Path(tempfile.mkdtemp(prefix="repro_"))
         output_dir.mkdir(parents=True, exist_ok=True)
+        resolved_user_id = optional_user_identity(user_id)
 
         # Use orchestrator mode if enabled
         if self.use_orchestrator:
             return await self._reproduce_with_orchestrator(
                 paper_context,
                 output_dir,
-                user_id=user_id,
+                user_id=resolved_user_id,
                 pack_id=pack_id,
                 event_log=event_log,
                 run_id=run_id,
@@ -303,7 +305,7 @@ class ReproAgent:
         return await self._reproduce_legacy(
             paper_context,
             output_dir,
-            user_id=user_id,
+            user_id=resolved_user_id,
             pack_id=pack_id,
         )
 
@@ -312,7 +314,7 @@ class ReproAgent:
         paper_context: PaperContext,
         output_dir: Path,
         *,
-        user_id: str = "default",
+        user_id: Optional[str] = None,
         pack_id: Optional[str] = None,
         event_log: "Optional[EventLogPort]" = None,
         run_id: Optional[str] = None,
@@ -350,7 +352,7 @@ class ReproAgent:
         paper_context: PaperContext,
         output_dir: Path,
         *,
-        user_id: str = "default",
+        user_id: Optional[str] = None,
         pack_id: Optional[str] = None,
     ) -> ReproductionResult:
         """
@@ -490,7 +492,7 @@ class ReproAgent:
         paper_context: PaperContext,
         result: ReproductionResult,
         *,
-        user_id: str = "default",
+        user_id: Optional[str] = None,
     ) -> None:
         """Run verification with self-healing debugger."""
         # Pass paper context for better repair context

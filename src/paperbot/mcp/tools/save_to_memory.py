@@ -14,6 +14,7 @@ from typing import Any, Dict
 import anyio
 
 from paperbot.mcp.tools._audit import log_tool_call
+from paperbot.utils.user_identity import require_user_identity
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +50,8 @@ def _get_store():
 async def _save_to_memory_impl(
     content: str,
     kind: str = "note",
-    user_id: str = "default",
+    *,
+    user_id: str,
     scope_type: str = "global",
     scope_id: str = "",
     confidence: float = 0.8,
@@ -73,11 +75,12 @@ async def _save_to_memory_impl(
         Dict with keys: saved (bool), created (int), skipped (int).
     """
     start = time.monotonic()
+    resolved_user_id = require_user_identity(user_id)
 
     args = {
         "content_len": len(content),
         "kind": kind,
-        "user_id": user_id,
+        "user_id": resolved_user_id,
         "scope_type": scope_type,
         "confidence": confidence,
     }
@@ -112,7 +115,7 @@ async def _save_to_memory_impl(
 
         store = _get_store()
         created_count, skipped_count, _rows = await anyio.to_thread.run_sync(
-            lambda: store.add_memories(user_id=user_id, memories=[candidate])
+            lambda: store.add_memories(user_id=resolved_user_id, memories=[candidate])
         )
 
         output = {
@@ -149,7 +152,8 @@ def register(mcp) -> None:
     async def save_to_memory(
         content: str,
         kind: str = "note",
-        user_id: str = "default",
+        *,
+        user_id: str,
         scope_type: str = "global",
         scope_id: str = "",
         confidence: float = 0.8,

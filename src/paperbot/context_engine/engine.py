@@ -808,8 +808,9 @@ class ContextEngine:
         grounded_query: Optional["GroundedQuery"] = None
         resolved_query = query
         routing_query = query
-        if self.query_grounder is not None:
-            grounded_query = self.query_grounder.ground_query(user_id=user_id, query=query)
+        query_grounder = getattr(self, "query_grounder", None)
+        if query_grounder is not None:
+            grounded_query = query_grounder.ground_query(user_id=user_id, query=query)
             if grounded_query.canonical_query:
                 resolved_query = grounded_query.canonical_query
             routing_query = (
@@ -1200,7 +1201,8 @@ class ContextEngine:
             }
 
         evidence_hits: List[Dict[str, Any]] = []
-        if self.evidence_retriever is not None and self.config.evidence_limit > 0:
+        evidence_retriever = getattr(self, "evidence_retriever", None)
+        if evidence_retriever is not None and self.config.evidence_limit > 0:
             indexed_paper_ids: List[int] = []
             for paper in papers:
                 candidate_ids = (
@@ -1219,7 +1221,7 @@ class ContextEngine:
 
             if indexed_paper_ids:
                 try:
-                    raw_hits = self.evidence_retriever.retrieve_evidence(
+                    raw_hits = evidence_retriever.retrieve_evidence(
                         query=merged_query,
                         paper_ids=indexed_paper_ids,
                         limit=int(self.config.evidence_limit),
