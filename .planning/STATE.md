@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: MCP Server
 status: planning
-stopped_at: Phase 12 context gathered
-last_updated: "2026-03-14T06:36:05.994Z"
+stopped_at: Completed 07-01-PLAN.md
+last_updated: "2026-03-14T06:41:42.262Z"
 last_activity: 2026-03-14 -- v2.0 roadmap created (phases 12-17)
 progress:
   total_phases: 15
   completed_phases: 4
   total_plans: 9
-  completed_plans: 7
+  completed_plans: 8
   percent: 26
 ---
 
@@ -63,6 +63,7 @@ Progress: [████░░░░░░░░░░░░░] 26%
 - Last 3 plans: 3min, 2min, 3min
 - Trend: Stable
 | Phase 06-agent-skills P01 | 3 | 2 tasks | 5 files |
+| Phase 07-eventbus-sse-foundation P01 | 3 | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -82,6 +83,9 @@ Recent decisions affecting current work:
 - [Phase 05-transport-entry-point]: default HTTP port 8001 avoids FastAPI conflict; serve.py redirects logging to stderr for stdio purity
 - [Phase 06-agent-skills]: Skill tool names copied verbatim from @mcp.tool() source to prevent name mismatch bugs
 - [Phase 06-agent-skills]: Degraded Mode section included in all four skills — LLM tools return degraded=True when API key missing
+- [Phase 07-01]: EventBusEventLog uses drop-oldest backpressure (get_nowait+put_nowait) so append() never blocks the producer
+- [Phase 07-01]: AgentEventEnvelope serialized once via .to_dict() in append(); fan-out distributes the dict (no re-serialization)
+- [Phase 07-01]: stream() returns iter(()) — EventBusEventLog is a live delivery channel, not a historical store
 
 ### Pending Todos
 
@@ -96,6 +100,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-14T06:36:05.988Z
-Stopped at: Phase 12 context gathered
-Resume file: .planning/phases/12-pg-infrastructure-schema/12-CONTEXT.md
+Last session: 2026-03-14T06:41:42.258Z
+Stopped at: Completed 07-01-PLAN.md
+Resume file: None
