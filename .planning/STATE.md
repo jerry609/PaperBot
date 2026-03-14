@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: MCP Server
 status: planning
-stopped_at: Completed 03-remaining-mcp-tools/03-02-PLAN.md
-last_updated: "2026-03-14T04:27:05.422Z"
+stopped_at: Completed 03-remaining-mcp-tools/03-03-PLAN.md
+last_updated: "2026-03-14T04:32:00.551Z"
 last_activity: 2026-03-14 -- Roadmap created for v1.1 milestone (phases 7-11)
 progress:
   total_phases: 9
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 5
-  completed_plans: 2
+  completed_plans: 3
   percent: 50
 ---
 
@@ -50,6 +50,7 @@ Progress: [█████░░░░░] 50%
 - Trend: Stable
 | Phase 03-remaining-mcp-tools P01 | 2 | 1 tasks | 4 files |
 | Phase 03-remaining-mcp-tools P02 | 2 | 1 tasks | 6 files |
+| Phase 03-remaining-mcp-tools P03 | 5 | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -66,6 +67,7 @@ Recent decisions affecting current work:
 - [Phase 03-remaining-mcp-tools]: get_research_context uses ContextEngineConfig(offline=True) default to avoid network side-effects in MCP tool calls
 - [Phase 03-remaining-mcp-tools]: save_to_memory defaults invalid MemoryKind to 'note' with logger.warning rather than raising, for safer agent workflows
 - [Phase 03-remaining-mcp-tools]: export_to_obsidian calls _render_paper_note() directly (private method, intentional) for pure in-memory rendering with no filesystem I/O
+- [Phase 03-remaining-mcp-tools]: All 9 MCP tools registered in single FastMCP server via sequential import+register pattern
 
 ### Pending Todos
 
@@ -78,6 +80,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-14T04:27:05.419Z
-Stopped at: Completed 03-remaining-mcp-tools/03-02-PLAN.md
+Last session: 2026-03-14T04:32:00.548Z
+Stopped at: Completed 03-remaining-mcp-tools/03-03-PLAN.md
 Resume file: None
