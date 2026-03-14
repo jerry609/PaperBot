@@ -24,10 +24,10 @@ Requirements for MCP Server milestone. Phases 1-2 shipped; phases 3-6 remain.
 
 ### MCP Resources
 
-- [ ] **MCP-06**: Agent can read track metadata via `paperbot://track/{id}` resource
-- [ ] **MCP-07**: Agent can read track paper list via `paperbot://track/{id}/papers` resource
-- [ ] **MCP-08**: Agent can read track memory via `paperbot://track/{id}/memory` resource
-- [ ] **MCP-09**: Agent can read scholar subscriptions via `paperbot://scholars` resource
+- [x] **MCP-06**: Agent can read track metadata via `paperbot://track/{id}` resource
+- [x] **MCP-07**: Agent can read track paper list via `paperbot://track/{id}/papers` resource
+- [x] **MCP-08**: Agent can read track memory via `paperbot://track/{id}/memory` resource
+- [x] **MCP-09**: Agent can read scholar subscriptions via `paperbot://scholars` resource
 
 ### Transport & Infrastructure
 
@@ -108,10 +108,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 | MCP-03 | Phase 3 | Complete |
 | MCP-04 | Phase 3 | Complete |
 | MCP-05 | Phase 3 | Complete |
-| MCP-06 | Phase 4 | Pending |
-| MCP-07 | Phase 4 | Pending |
-| MCP-08 | Phase 4 | Pending |
-| MCP-09 | Phase 4 | Pending |
+| MCP-06 | Phase 4 | Complete |
+| MCP-07 | Phase 4 | Complete |
+| MCP-08 | Phase 4 | Complete |
+| MCP-09 | Phase 4 | Complete |
 | MCP-10 | Phase 5 | Pending |
 | MCP-11 | Phase 5 | Pending |
 | MCP-12 | Phase 5 | Pending |
