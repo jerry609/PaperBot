@@ -11,6 +11,7 @@ type ProxyErrorContext = {
 type ProxyOptions = {
   accept?: string
   auth?: boolean
+  cache?: RequestCache
   contentType?: string
   onError?: (context: ProxyErrorContext) => Response
   timeoutMs?: number
@@ -80,6 +81,7 @@ async function fetchUpstream(
       method,
       headers: await resolveHeaders(req, body, options),
       body,
+      cache: options.cache,
       signal: controller?.signal,
     })
   } finally {

@@ -1,17 +1,11 @@
-import { NextResponse } from "next/server"
+import { apiBaseUrl, proxyJson } from "@/app/api/_utils/backend-proxy"
 
-import { apiBaseUrl } from "@/app/api/research/_base"
-
-export async function GET(_req: Request, ctx: { params: Promise<{ sessionId: string }> }) {
+export async function GET(req: Request, ctx: { params: Promise<{ sessionId: string }> }) {
   const { sessionId } = await ctx.params
-  const upstream = await fetch(
+  return proxyJson(
+    req,
     `${apiBaseUrl()}/api/research/paperscool/sessions/${encodeURIComponent(sessionId)}`,
+    "GET",
     { cache: "no-store" },
   )
-
-  const body = await upstream.text()
-  return new NextResponse(body, {
-    status: upstream.status,
-    headers: { "Content-Type": upstream.headers.get("content-type") || "application/json" },
-  })
 }

@@ -140,4 +140,36 @@ describe("backend proxy helpers", () => {
     expect(res.status).toBe(502)
     await expect(res.json()).resolves.toEqual({ detail: "Service unavailable" })
   })
+
+  it("forwards cache directives to the upstream request", async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    )
+    global.fetch = fetchMock as typeof fetch
+
+    const req = new Request("https://localhost/api/research/paperscool/sessions/demo", {
+      method: "GET",
+    })
+    const res = await proxyJson(
+      req,
+      "https://backend/api/research/paperscool/sessions/demo",
+      "GET",
+      { cache: "no-store" },
+    )
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://backend/api/research/paperscool/sessions/demo",
+      {
+        method: "GET",
+        headers: { Accept: "application/json" },
+        body: undefined,
+        cache: "no-store",
+        signal: expect.any(AbortSignal),
+      },
+    )
+    expect(res.status).toBe(200)
+  })
 })
