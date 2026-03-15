@@ -7,7 +7,7 @@
  * - Cancel/Retry actions
  */
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Box, Text, useInput, useApp } from 'ink';
 import Spinner from 'ink-spinner';
 import { client } from '../../utils/api.js';

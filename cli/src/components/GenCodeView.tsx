@@ -11,7 +11,6 @@ import { client } from '../utils/api.js';
 interface GenCodeViewProps {
   title?: string;
   abstract?: string;
-  outputDir?: string;
 }
 
 interface GenCodeProgress {
@@ -44,7 +43,6 @@ type InputStep = 'title' | 'abstract' | 'generating';
 export const GenCodeView: React.FC<GenCodeViewProps> = ({
   title: initialTitle,
   abstract: initialAbstract,
-  outputDir = './output',
 }) => {
   const { exit } = useApp();
   const [step, setStep] = useState<InputStep>(

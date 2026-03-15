@@ -3,24 +3,25 @@
  * Supports both REST and Server-Sent Events (SSE) for streaming
  */
 
-export interface ApiConfig {
+interface ApiConfig {
   baseUrl: string;
   timeout: number;
+  token?: string;
 }
 
-export interface ScholarTrackRequest {
+interface ScholarTrackRequest {
   scholarId?: string;
   scholarName?: string;
   force?: boolean;
 }
 
-export interface PaperAnalyzeRequest {
+interface PaperAnalyzeRequest {
   title: string;
   abstract?: string;
   doi?: string;
 }
 
-export interface GenCodeRequest {
+interface GenCodeRequest {
   title: string;
   abstract: string;
   methodSection?: string;
@@ -28,12 +29,12 @@ export interface GenCodeRequest {
   useRag?: boolean;
 }
 
-export interface ReviewRequest {
+interface ReviewRequest {
   title: string;
   abstract: string;
 }
 
-export interface StreamEvent {
+interface StreamEvent {
   type: 'progress' | 'result' | 'error' | 'done';
   data: unknown;
   message?: string;
@@ -42,9 +43,10 @@ export interface StreamEvent {
 const DEFAULT_CONFIG: ApiConfig = {
   baseUrl: process.env['PAPERBOT_API_URL'] || 'http://localhost:8000',
   timeout: 300000, // 5 minutes
+  token: process.env['PAPERBOT_API_TOKEN'],
 };
 
-export class PaperBotClient {
+class PaperBotClient {
   private config: ApiConfig;
 
   constructor(config: Partial<ApiConfig> = {}) {
@@ -139,10 +141,9 @@ export class PaperBotClient {
     try {
       const response = await fetch(url, {
         ...init,
-        headers: {
-          ...init.headers,
-          'Accept': 'text/event-stream',
-        },
+        headers: this.buildHeaders(init, {
+          Accept: 'text/event-stream',
+        }),
         signal: AbortSignal.timeout(this.config.timeout),
       });
 
@@ -203,17 +204,13 @@ export class PaperBotClient {
     }
   }
 
-  /**
-   * Non-streaming request
-   */
-  async request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  async fetchJson<T = unknown>(path: string, init: RequestInit = {}): Promise<T> {
     const url = `${this.config.baseUrl}${path}`;
     const response = await fetch(url, {
       ...init,
-      headers: {
+      headers: this.buildHeaders(init, {
         'Content-Type': 'application/json',
-        ...init.headers,
-      },
+      }),
       signal: AbortSignal.timeout(this.config.timeout),
     });
 
@@ -224,11 +221,22 @@ export class PaperBotClient {
     return response.json() as Promise<T>;
   }
 
-  /**
-   * Fetch JSON (alias for request with better error handling)
-   */
-  async fetchJson<T = unknown>(path: string, init: RequestInit = {}): Promise<T> {
-    return this.request<T>(path, init) as Promise<T>;
+  private buildHeaders(
+    init: RequestInit,
+    defaults: Record<string, string> = {}
+  ): Record<string, string> {
+    const headers = new Headers(init.headers);
+    for (const [key, value] of Object.entries(defaults)) {
+      if (!headers.has(key)) {
+        headers.set(key, value);
+      }
+    }
+
+    if (this.config.token && !headers.has('authorization')) {
+      headers.set('authorization', `Bearer ${this.config.token}`);
+    }
+
+    return Object.fromEntries(headers.entries());
   }
 }
 

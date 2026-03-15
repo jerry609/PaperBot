@@ -21,7 +21,3 @@ export async function showBanner(): Promise<void> {
     console.log('  ╚═══════════════════════════════════╝\n');
   }
 }
-
-export function showVersion(): void {
-  console.log('PaperBot CLI v0.1.0');
-}

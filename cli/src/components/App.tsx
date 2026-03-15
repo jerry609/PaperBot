@@ -17,8 +17,6 @@ export interface AppFlags {
   title?: string;
   doi?: string;
   abstract?: string;
-  output?: string;
-  stream?: boolean;
   runId?: string;
 }
 
@@ -56,7 +54,6 @@ export const App: React.FC<AppProps> = ({ command, flags }) => {
           <GenCodeView
             title={flags.title}
             abstract={flags.abstract}
-            outputDir={flags.output}
           />
         );
       case 'review':
