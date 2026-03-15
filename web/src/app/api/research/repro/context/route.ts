@@ -1,5 +1,5 @@
 import { apiBaseUrl, proxyJson } from "../../_base"
-import { withBackendAuth } from "../../../_utils/auth-headers"
+import { proxyStream } from "@/app/api/_utils/backend-proxy"
 
 export const runtime = "nodejs"
 
@@ -9,23 +9,9 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  const body = await req.text()
-  const upstream = await fetch(`${apiBaseUrl()}/api/research/repro/context/generate`, {
-    method: "POST",
-    headers: await withBackendAuth(req, {
-      "Content-Type": req.headers.get("content-type") || "application/json",
-      Accept: "text/event-stream",
-    }),
-    body,
-  })
-
-  const headers = new Headers()
-  headers.set("Content-Type", upstream.headers.get("content-type") || "text/event-stream")
-  headers.set("Cache-Control", "no-cache")
-  headers.set("Connection", "keep-alive")
-
-  return new Response(upstream.body, {
-    status: upstream.status,
-    headers,
+  return proxyStream(req, `${apiBaseUrl()}/api/research/repro/context/generate`, "POST", {
+    accept: "text/event-stream",
+    auth: true,
+    responseContentType: "text/event-stream",
   })
 }
