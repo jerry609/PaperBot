@@ -145,6 +145,12 @@ class EventType:
     # --- File change events ---
     FILE_CHANGE: str = "file_change"
 
+    # --- Codex delegation events (Phase 10 / CDX-03) ---
+    CODEX_DISPATCHED: str = "codex_dispatched"
+    CODEX_ACCEPTED: str = "codex_accepted"
+    CODEX_COMPLETED: str = "codex_completed"
+    CODEX_FAILED: str = "codex_failed"
+
     # --- Existing types (documented for discoverability; callers should migrate gradually) ---
     JOB_START: str = "job_start"
     JOB_RESULT: str = "job_result"

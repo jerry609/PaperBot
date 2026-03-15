@@ -11,6 +11,7 @@ Provides:
 
 import asyncio
 import logging
+import os
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -35,6 +36,25 @@ from paperbot.application.collaboration.message_schema import new_run_id, new_tr
 
 if TYPE_CHECKING:
     from paperbot.application.ports.event_log_port import EventLogPort
+
+
+def _should_overflow_to_codex() -> bool:
+    """Return True if the Paper2Code CODING stage should overflow to Codex.
+
+    Checks the PAPERBOT_CODEX_OVERFLOW_THRESHOLD environment variable:
+    - Unset or empty -> False
+    - "1", "true", "yes", "on" (case-insensitive) -> True
+    - Any other value -> False
+
+    Wraps in try/except so any unexpected error returns False safely.
+    """
+    try:
+        value = os.getenv("PAPERBOT_CODEX_OVERFLOW_THRESHOLD", "").strip()
+        if not value:
+            return False
+        return value.lower() in {"1", "true", "yes", "on"}
+    except Exception:
+        return False
 
 
 class PipelineStage(Enum):
