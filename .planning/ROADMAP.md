@@ -155,12 +155,11 @@ Plans:
   3. User can view inline diffs showing exactly what an agent changed in each file
   4. User can see a per-task file list with created/modified indicators for every file an agent touched
   5. Dashboard state is managed by a Zustand store fed by the SSE event stream (no polling)
-**Plans**: TBD
+**Plans**: 2 plans
 
 Plans:
-- [ ] 09-01: TBD
-- [ ] 09-02: TBD
-- [ ] 09-03: TBD
+- [ ] 09-01-PLAN.md — File tracking data layer: EventType.FILE_CHANGE, FileTouchedEntry type, parseFileTouched parser, store extension, SSE hook wiring with TDD
+- [ ] 09-02-PLAN.md — Three-panel UI: TasksPanel, FileListPanel, InlineDiffPanel components, /agent-dashboard page with SplitPanels, sidebar nav link
 
 ### Phase 10: Agent Board + Codex Bridge
 **Goal**: Users can manage agent tasks on a Kanban board and Claude Code can delegate work to Codex
@@ -303,7 +302,7 @@ Phases execute in numeric order: 3 -> 4 -> 5 -> 6 (v1.0) -> 7 -> 8 -> ... -> 11 
 | 6. Agent Skills | v1.0 | 1/1 | Complete | 2026-03-14 |
 | 7. EventBus + SSE Foundation | v1.1 | 2/2 | Complete | 2026-03-14 |
 | 8. Agent Event Vocabulary | 1/2 | In Progress|  | - |
-| 9. Three-Panel Dashboard | v1.1 | 0/? | Not started | - |
+| 9. Three-Panel Dashboard | v1.1 | 0/2 | Not started | - |
 | 10. Agent Board + Codex Bridge | v1.1 | 0/? | Not started | - |
 | 11. DAG Visualization | v1.1 | 0/? | Not started | - |
 | 12. PG Infrastructure & Schema | v2.0 | 0/? | Not started | - |
