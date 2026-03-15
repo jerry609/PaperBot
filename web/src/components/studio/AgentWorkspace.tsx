@@ -11,6 +11,7 @@ import {
   GitBranch,
   MessageSquare,
   Sparkles,
+  TerminalSquare,
   Wrench,
 } from "lucide-react"
 
@@ -37,7 +38,7 @@ import { ChatHistoryPanel } from "./ChatHistoryPanel"
 import { ReproductionLog } from "./ReproductionLog"
 
 type LeftRailView = "threads" | "tasks" | "workspace"
-type CenterView = "log" | "context" | "board"
+type CenterView = "log" | "context" | "board" | "commands"
 type InspectorView = "live" | "tools" | "files" | "agents" | "graph"
 
 interface AgentWorkspaceProps {
@@ -128,7 +129,7 @@ function clampPanelWidths(
 }
 
 function normalizeCenterView(value: string | null | undefined, fallback: CenterView = "log"): CenterView {
-  if (value === "context" || value === "board" || value === "log") return value
+  if (value === "context" || value === "board" || value === "log" || value === "commands") return value
   return fallback
 }
 
@@ -525,6 +526,18 @@ function CenterSurface({
             </button>
             <button
               type="button"
+              onClick={() => onViewChange("commands")}
+              className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
+                activeView === "commands"
+                  ? "border-slate-300 bg-[#f6f7f3] text-slate-900 shadow-sm"
+                  : "border-transparent bg-transparent text-slate-500 hover:text-slate-700"
+              }`}
+            >
+              <TerminalSquare className="h-3.5 w-3.5" />
+              Commands
+            </button>
+            <button
+              type="button"
               onClick={() => onViewChange("board")}
               className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
                 activeView === "board"
@@ -552,6 +565,8 @@ function CenterSurface({
           <p className="text-xs text-slate-500">
             {activeView === "board"
               ? "Delegation graph and latest monitor session snapshot."
+              : activeView === "commands"
+                ? "Run non-chat Claude Code and OpenCode management commands without polluting the print-mode console."
               : activeView === "context"
                 ? "Paper context pack and monitor preparation actions."
                 : runtimeLoading
@@ -944,9 +959,9 @@ export function AgentWorkspace({
 
           <TabsContent value="console" className="m-0 flex-1 min-h-0">
             <ReproductionLog
-              viewMode={centerView === "board" ? "log" : centerView}
+              viewMode={centerView}
               onViewModeChange={setCenterView}
-              hideNavigation
+              hideNavigation={false}
               onOpenBoardWorkspace={() => setCenterView("board")}
               runtimeInfo={runtimeInfo}
               runtimeLoading={runtimeLoading}

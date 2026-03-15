@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Textarea } from "@/components/ui/textarea"
@@ -15,6 +16,7 @@ import { DiffModal } from "./DiffViewer"
 import { WorkspaceSetupDialog } from "./WorkspaceSetupDialog"
 import { ContextDialogPanel } from "./ContextDialogPanel"
 import { AgentBoard } from "./AgentBoard"
+import { CliCommandRunner } from "./CliCommandRunner"
 import { useContextPackGeneration } from "@/hooks/useContextPackGeneration"
 import type { StudioRuntimeInfo } from "@/lib/studio-runtime"
 import { cn } from "@/lib/utils"
@@ -44,7 +46,8 @@ import type { ContextPackSession } from "@/lib/types/p2c"
 
 type StepStatus = "idle" | "running" | "success" | "error"
 type Mode = "Code" | "Plan" | "Ask"
-export type ReproductionViewMode = "log" | "context" | "board"
+type EffortOption = "default" | "low" | "medium" | "high" | "max"
+export type ReproductionViewMode = "log" | "context" | "board" | "commands"
 
 interface ReproductionLogProps {
     viewMode: ReproductionViewMode
@@ -131,10 +134,60 @@ function effectivePermissionMode(
     return "default"
 }
 
+type StudioCommandPreviewOptions = {
+    mode: Mode
+    model: string
+    continueLast: boolean
+    resumeSession: string
+    cliSessionId: string
+    agent: string
+    mcpConfig: string[]
+    tools: string[]
+    allowedTools: string[]
+    addDirs: string[]
+    settings: string
+    effort: Exclude<EffortOption, "default"> | null
+}
+
+function splitCommaSeparatedValues(value: string): string[] {
+    return value
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean)
+}
+
+function splitLineValues(value: string): string[] {
+    return value
+        .split(/\r?\n/)
+        .map((item) => item.trim())
+        .filter(Boolean)
+}
+
+function resolveRequestedModel(modelOption: string, customModel: string): string {
+    return modelOption === "custom" ? customModel.trim() : modelOption.trim()
+}
+
+function formatPreviewToken(token: string): string {
+    if (!token) return '""'
+    if (/\s|,|\{|\}|\[|\]|"/.test(token)) {
+        return JSON.stringify(token)
+    }
+    return token
+}
+
+function appendPreviewOption(parts: string[], flag: string, values: string[]) {
+    if (values.length === 0) return
+    parts.push(flag, ...values)
+}
+
+function appendJoinedPreviewOption(parts: string[], flag: string, values: string[]) {
+    if (values.length === 0) return
+    parts.push(flag, values.join(","))
+}
+
 function buildStudioCommandPreview(
     runtimeInfo: StudioRuntimeInfo,
-    mode: Mode,
-    model: string,
+    options: StudioCommandPreviewOptions,
 ): string {
     if (runtimeInfo.source === "anthropic_api") {
         return "Fallback path: direct Anthropic API call, not Claude Code CLI"
@@ -143,16 +196,45 @@ function buildStudioCommandPreview(
         return "Resolving Claude Code CLI surface..."
     }
 
-    const normalizedModel = model.trim() || "sonnet"
-    const permissionMode = effectivePermissionMode(mode, runtimeInfo.codeModeEnabled)
+    const normalizedModel = options.model.trim() || "sonnet"
+    const permissionMode = effectivePermissionMode(options.mode, runtimeInfo.codeModeEnabled)
     const parts = ["claude", "--model", normalizedModel]
+
+    if (options.continueLast) {
+        parts.push("--continue")
+    }
+
+    if (options.resumeSession.trim()) {
+        parts.push("--resume", options.resumeSession.trim())
+    }
+
+    if (options.cliSessionId.trim()) {
+        parts.push("--session-id", options.cliSessionId.trim())
+    }
+
+    if (options.agent.trim()) {
+        parts.push("--agent", options.agent.trim())
+    }
+
+    appendPreviewOption(parts, "--add-dir", options.addDirs)
+    appendPreviewOption(parts, "--mcp-config", options.mcpConfig)
+    appendJoinedPreviewOption(parts, "--tools", options.tools)
+    appendJoinedPreviewOption(parts, "--allowed-tools", options.allowedTools)
+
+    if (options.settings.trim()) {
+        parts.push("--settings", options.settings.trim())
+    }
+
+    if (options.effort) {
+        parts.push("--effort", options.effort)
+    }
 
     if (permissionMode !== "default") {
         parts.push("--permission-mode", permissionMode)
     }
 
-    parts.push("-p", "--output-format", "stream-json", "--verbose")
-    return parts.join(" ")
+    parts.push("-p", "<prompt>", "--output-format", "stream-json", "--verbose")
+    return parts.map(formatPreviewToken).join(" ")
 }
 
 function formatTime(date: Date): string {
@@ -297,13 +379,25 @@ export function ReproductionLog({
 
     const [status, setStatus] = useState<StepStatus>("idle")
     const [mode, setMode] = useState<Mode>("Code")
-    const [model, setModel] = useState("sonnet")
+    const [modelOption, setModelOption] = useState("sonnet")
+    const [customModel, setCustomModel] = useState("")
     const [lastError, setLastError] = useState<string | null>(null)
     const [diffAction, setDiffAction] = useState<AgentAction | null>(null)
     const [saving, setSaving] = useState(false)
     const [messageInput, setMessageInput] = useState("")
     const [showWorkspaceSetup, setShowWorkspaceSetup] = useState(false)
     const [pendingAction, setPendingAction] = useState<"chat" | "delegate_codex" | null>(null)
+    const [showAdvancedOptions, setShowAdvancedOptions] = useState(false)
+    const [continueLast, setContinueLast] = useState(false)
+    const [resumeSession, setResumeSession] = useState("")
+    const [cliSessionId, setCliSessionId] = useState("")
+    const [agentOverride, setAgentOverride] = useState("")
+    const [mcpConfigText, setMcpConfigText] = useState("")
+    const [toolsText, setToolsText] = useState("")
+    const [allowedToolsText, setAllowedToolsText] = useState("")
+    const [addDirsText, setAddDirsText] = useState("")
+    const [settingsText, setSettingsText] = useState("")
+    const [effort, setEffort] = useState<EffortOption>("default")
     // Switch to context dialog when generation starts.
     useEffect(() => {
         if (contextPackLoading && viewMode !== "context") {
@@ -313,6 +407,18 @@ export function ReproductionLog({
 
     // Do not auto-switch away from "context"; keep it open until the user changes tabs.
 
+    const knownModelAliases = useMemo(() => {
+        const aliases = runtimeInfo.knownModelAliases.filter((item) => item.trim().length > 0)
+        return aliases.length > 0 ? aliases : ["sonnet", "opus"]
+    }, [runtimeInfo.knownModelAliases])
+
+    useEffect(() => {
+        if (modelOption === "custom") return
+        if (!knownModelAliases.includes(modelOption)) {
+            setModelOption(knownModelAliases[0] ?? "sonnet")
+        }
+    }, [knownModelAliases, modelOption])
+
     const activeTask = tasks.find(t => t.id === activeTaskId)
     const projectDir = selectedPaper?.outputDir || lastGenCodeResult?.outputDir || null
     const isBusy = status === "running"
@@ -321,9 +427,74 @@ export function ReproductionLog({
         : runtimeInfo.source === "anthropic_api"
             ? "Anthropic API fallback"
             : "Claude Code"
+    const requestedModel = useMemo(
+        () => resolveRequestedModel(modelOption, customModel),
+        [customModel, modelOption],
+    )
+    const parsedMcpConfig = useMemo(() => splitLineValues(mcpConfigText), [mcpConfigText])
+    const parsedTools = useMemo(() => splitCommaSeparatedValues(toolsText), [toolsText])
+    const parsedAllowedTools = useMemo(() => splitCommaSeparatedValues(allowedToolsText), [allowedToolsText])
+    const parsedAddDirs = useMemo(() => splitLineValues(addDirsText), [addDirsText])
+    const selectedEffort = effort === "default" ? null : effort
+    const missingCustomModel = modelOption === "custom" && requestedModel.length === 0
+    const advancedOptionsCount = useMemo(
+        () =>
+            [
+                continueLast,
+                Boolean(resumeSession.trim()),
+                Boolean(cliSessionId.trim()),
+                Boolean(agentOverride.trim()),
+                parsedMcpConfig.length > 0,
+                parsedTools.length > 0,
+                parsedAllowedTools.length > 0,
+                parsedAddDirs.length > 0,
+                Boolean(settingsText.trim()),
+                Boolean(selectedEffort),
+            ].filter(Boolean).length,
+        [
+            agentOverride,
+            cliSessionId,
+            continueLast,
+            parsedAddDirs.length,
+            parsedAllowedTools.length,
+            parsedMcpConfig.length,
+            parsedTools.length,
+            resumeSession,
+            selectedEffort,
+            settingsText,
+        ],
+    )
     const commandPreview = useMemo(
-        () => buildStudioCommandPreview(runtimeInfo, mode, model),
-        [runtimeInfo, mode, model],
+        () =>
+            buildStudioCommandPreview(runtimeInfo, {
+                mode,
+                model: requestedModel,
+                continueLast,
+                resumeSession,
+                cliSessionId,
+                agent: agentOverride,
+                mcpConfig: parsedMcpConfig,
+                tools: parsedTools,
+                allowedTools: parsedAllowedTools,
+                addDirs: parsedAddDirs,
+                settings: settingsText,
+                effort: selectedEffort,
+            }),
+        [
+            agentOverride,
+            cliSessionId,
+            continueLast,
+            mode,
+            parsedAddDirs,
+            parsedAllowedTools,
+            parsedMcpConfig,
+            parsedTools,
+            requestedModel,
+            resumeSession,
+            runtimeInfo,
+            selectedEffort,
+            settingsText,
+        ],
     )
     const messagePlaceholder = runtimeLoading
         ? "Message Studio runtime..."
@@ -369,6 +540,10 @@ export function ReproductionLog({
         // Chat with specified directory - called after workspace setup
         const message = messageInput.trim()
         if (!message) return
+        if (!requestedModel) {
+            setLastError("Select a Claude Code model alias or enter a full custom model name.")
+            return
+        }
         setMessageInput("")
         await handleSendMessageWithDir(message, targetDir)
     }
@@ -382,6 +557,10 @@ export function ReproductionLog({
 
     const handleSendMessage = async () => {
         if (!messageInput.trim() || isBusy) return
+        if (!requestedModel) {
+            setLastError("Select a Claude Code model alias or enter a full custom model name.")
+            return
+        }
 
         // For Code mode, require a project directory
         if (mode === "Code" && !projectDir) {
@@ -448,7 +627,7 @@ export function ReproductionLog({
                 body: JSON.stringify({
                     message,
                     mode,
-                    model,
+                    model: requestedModel,
                     paper: selectedPaper ? {
                         title: selectedPaper.title,
                         abstract: selectedPaper.abstract,
@@ -456,6 +635,16 @@ export function ReproductionLog({
                     } : undefined,
                     project_dir: targetDir,
                     context_pack_id: contextPack?.context_pack_id,
+                    continue_last: continueLast,
+                    resume_session: resumeSession.trim() || undefined,
+                    cli_session_id: cliSessionId.trim() || undefined,
+                    agent: agentOverride.trim() || undefined,
+                    mcp_config: parsedMcpConfig,
+                    tools: parsedTools,
+                    allowed_tools: parsedAllowedTools,
+                    add_dirs: parsedAddDirs,
+                    settings: settingsText.trim() || undefined,
+                    effort: selectedEffort ?? undefined,
                 }),
             })
 
@@ -697,6 +886,7 @@ export function ReproductionLog({
                     {([
                         { key: "context" as const, label: "Context", icon: Activity },
                         { key: "log" as const, label: "Chat", icon: MessageSquare },
+                        { key: "commands" as const, label: "Commands", icon: Terminal },
                         { key: "board" as const, label: "Monitor", icon: LayoutDashboard },
                     ]).map(({ key, label, icon: TabIcon }) => (
                         <button
@@ -762,6 +952,8 @@ export function ReproductionLog({
                         onSessionCreated={handleSessionCreated}
                         onDeployToBoard={openAgentBoardWorkspace}
                     />
+                ) : viewMode === "commands" ? (
+                    <CliCommandRunner runtimeInfo={runtimeInfo} projectDir={projectDir} />
                 ) : viewMode === "board" ? (
                     <AgentBoard paperId={selectedPaperId} monitorMode />
                 ) : activeFileData ? (
@@ -889,19 +1081,18 @@ export function ReproductionLog({
                                 }
                             }}
                         />
-                        <div className="flex items-center justify-between border-t border-slate-200 bg-[#f3f4f0] px-3 py-2">
-                            <div className="flex items-center gap-2">
-                                {/* Paper attachment indicator */}
+                        <div className="border-t border-slate-200 bg-[#f3f4f0] px-3 py-3">
+                            <div className="flex flex-wrap items-center gap-2">
                                 {selectedPaper && (
                                     <div className="flex items-center gap-1.5 rounded-md border border-slate-200 bg-[#f7f7f4] px-2 py-1 text-xs text-slate-600">
                                         <FileText className="h-3.5 w-3.5" />
                                         <span className="max-w-[150px] truncate">{selectedPaper.title}</span>
                                     </div>
                                 )}
-                                {/* Mode selector */}
+
                                 <Select value={mode} onValueChange={(v) => setMode(v as Mode)}>
-                                    <SelectTrigger className="h-7 w-[96px] border-slate-200 bg-[#f7f7f4] text-xs text-slate-700">
-                                        <Code className="h-3.5 w-3.5 mr-1" />
+                                    <SelectTrigger className="h-8 w-[108px] border-slate-200 bg-[#f7f7f4] text-xs text-slate-700">
+                                        <Code className="mr-1 h-3.5 w-3.5" />
                                         <SelectValue />
                                     </SelectTrigger>
                                     <SelectContent>
@@ -910,36 +1101,192 @@ export function ReproductionLog({
                                         <SelectItem value="Ask">Ask</SelectItem>
                                     </SelectContent>
                                 </Select>
-                            </div>
-                            <div className="flex items-center gap-2">
-                                {/* Model selector */}
-                                <Input
-                                    value={model}
-                                    onChange={(event) => setModel(event.target.value)}
-                                    placeholder="sonnet / opus / claude-sonnet-4-6"
-                                    className="h-8 w-[220px] border-slate-200 bg-[#f7f7f4] text-xs text-slate-700"
-                                    title="Claude Code model alias or full model name"
-                                />
+
+                                <Select value={modelOption} onValueChange={setModelOption}>
+                                    <SelectTrigger className="h-8 w-[158px] border-slate-200 bg-[#f7f7f4] text-xs text-slate-700">
+                                        <Bot className="mr-1 h-3.5 w-3.5" />
+                                        <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {knownModelAliases.map((alias) => (
+                                            <SelectItem key={alias} value={alias}>
+                                                {alias}
+                                            </SelectItem>
+                                        ))}
+                                        <SelectItem value="custom">Custom model…</SelectItem>
+                                    </SelectContent>
+                                </Select>
+
+                                {modelOption === "custom" ? (
+                                    <Input
+                                        value={customModel}
+                                        onChange={(event) => setCustomModel(event.target.value)}
+                                        placeholder="claude-sonnet-4-6"
+                                        className="h-8 w-[220px] border-slate-200 bg-[#f7f7f4] text-xs text-slate-700"
+                                        title="Full Claude Code model name"
+                                    />
+                                ) : null}
+
                                 <Button
-                                    variant="outline"
+                                    variant="ghost"
                                     size="sm"
-                                    className="h-8 gap-1.5 border-slate-200 bg-[#f7f7f4] text-xs text-slate-700 hover:bg-white"
-                                    onClick={handleDelegateToCodex}
-                                    disabled={!messageInput.trim() || isBusy}
-                                    title="Create a real Codex subagent task from this prompt"
+                                    className="h-8 gap-1 px-2 text-xs text-slate-600 hover:bg-[#e7e9e3] hover:text-slate-900"
+                                    onClick={() => setShowAdvancedOptions((current) => !current)}
                                 >
-                                    <Bot className="h-3.5 w-3.5" />
-                                    Codex
+                                    {showAdvancedOptions ? (
+                                        <ChevronDown className="h-3.5 w-3.5" />
+                                    ) : (
+                                        <ChevronRight className="h-3.5 w-3.5" />
+                                    )}
+                                    Advanced
+                                    {advancedOptionsCount > 0 ? ` (${advancedOptionsCount})` : ""}
                                 </Button>
-                                {/* Send button */}
-                                <Button
-                                    size="icon"
-                                    className="h-8 w-8 rounded-md bg-slate-700 text-white hover:bg-slate-600"
-                                    onClick={handleSendMessage}
-                                    disabled={!messageInput.trim() || isBusy}
-                                >
-                                    <Send className="h-4 w-4" />
-                                </Button>
+                            </div>
+
+                            {showAdvancedOptions ? (
+                                <div className="mt-3 rounded-lg border border-slate-200 bg-[#f7f7f4] p-3">
+                                    <div className="grid gap-3 xl:grid-cols-2">
+                                        <label className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700">
+                                            <Checkbox
+                                                checked={continueLast}
+                                                onCheckedChange={(value) => setContinueLast(Boolean(value))}
+                                                className="border-slate-300 data-[state=checked]:border-slate-700 data-[state=checked]:bg-slate-700"
+                                            />
+                                            Continue most recent CLI session
+                                        </label>
+
+                                        <label className="space-y-1">
+                                            <span className="text-[11px] font-medium text-slate-600">Resume session</span>
+                                            <Input
+                                                value={resumeSession}
+                                                onChange={(event) => setResumeSession(event.target.value)}
+                                                placeholder="Existing Claude session ID"
+                                                className="h-8 border-slate-200 bg-white text-xs text-slate-700"
+                                            />
+                                        </label>
+
+                                        <label className="space-y-1">
+                                            <span className="text-[11px] font-medium text-slate-600">Session ID</span>
+                                            <Input
+                                                value={cliSessionId}
+                                                onChange={(event) => setCliSessionId(event.target.value)}
+                                                placeholder="Pin a UUID for this print-mode run"
+                                                className="h-8 border-slate-200 bg-white text-xs text-slate-700"
+                                            />
+                                        </label>
+
+                                        <label className="space-y-1">
+                                            <span className="text-[11px] font-medium text-slate-600">Agent override</span>
+                                            <Input
+                                                value={agentOverride}
+                                                onChange={(event) => setAgentOverride(event.target.value)}
+                                                placeholder="reviewer / planner / custom agent"
+                                                className="h-8 border-slate-200 bg-white text-xs text-slate-700"
+                                            />
+                                        </label>
+
+                                        <label className="space-y-1">
+                                            <span className="text-[11px] font-medium text-slate-600">Effort</span>
+                                            <Select value={effort} onValueChange={(value) => setEffort(value as EffortOption)}>
+                                                <SelectTrigger className="h-8 border-slate-200 bg-white text-xs text-slate-700">
+                                                    <SelectValue />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="default">Default</SelectItem>
+                                                    <SelectItem value="low">Low</SelectItem>
+                                                    <SelectItem value="medium">Medium</SelectItem>
+                                                    <SelectItem value="high">High</SelectItem>
+                                                    <SelectItem value="max">Max</SelectItem>
+                                                </SelectContent>
+                                            </Select>
+                                        </label>
+
+                                        <label className="space-y-1">
+                                            <span className="text-[11px] font-medium text-slate-600">Tools</span>
+                                            <Input
+                                                value={toolsText}
+                                                onChange={(event) => setToolsText(event.target.value)}
+                                                placeholder="Comma-separated, e.g. Bash,Edit,Read"
+                                                className="h-8 border-slate-200 bg-white text-xs text-slate-700"
+                                            />
+                                        </label>
+
+                                        <label className="space-y-1">
+                                            <span className="text-[11px] font-medium text-slate-600">Allowed tools</span>
+                                            <Input
+                                                value={allowedToolsText}
+                                                onChange={(event) => setAllowedToolsText(event.target.value)}
+                                                placeholder='Comma-separated, e.g. "Bash(git:*),Read"'
+                                                className="h-8 border-slate-200 bg-white text-xs text-slate-700"
+                                            />
+                                        </label>
+
+                                        <label className="space-y-1">
+                                            <span className="text-[11px] font-medium text-slate-600">Add directories</span>
+                                            <Textarea
+                                                value={addDirsText}
+                                                onChange={(event) => setAddDirsText(event.target.value)}
+                                                placeholder={"One directory per line\n../shared-worktree"}
+                                                className="min-h-[72px] border-slate-200 bg-white text-xs text-slate-700"
+                                            />
+                                        </label>
+
+                                        <label className="space-y-1">
+                                            <span className="text-[11px] font-medium text-slate-600">MCP config</span>
+                                            <Textarea
+                                                value={mcpConfigText}
+                                                onChange={(event) => setMcpConfigText(event.target.value)}
+                                                placeholder={"One file path or JSON object per line\n./mcp.json"}
+                                                className="min-h-[72px] border-slate-200 bg-white text-xs text-slate-700"
+                                            />
+                                        </label>
+
+                                        <label className="space-y-1 xl:col-span-2">
+                                            <span className="text-[11px] font-medium text-slate-600">Settings</span>
+                                            <Textarea
+                                                value={settingsText}
+                                                onChange={(event) => setSettingsText(event.target.value)}
+                                                placeholder='Path or JSON blob for --settings, e.g. {"theme":"slate"}'
+                                                className="min-h-[84px] border-slate-200 bg-white text-xs text-slate-700"
+                                            />
+                                        </label>
+                                    </div>
+                                </div>
+                            ) : null}
+
+                            <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                                <div className="min-w-0 text-[11px] text-slate-500">
+                                    {missingCustomModel
+                                        ? "Enter a full Claude Code model name to use the custom model option."
+                                        : `Claude Code aliases from local help: ${knownModelAliases.join(", ")}`}
+                                </div>
+
+                                <div className="flex items-center gap-2">
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        className="h-8 gap-1.5 border-slate-200 bg-[#f7f7f4] text-xs text-slate-700 hover:bg-white"
+                                        onClick={handleDelegateToCodex}
+                                        disabled={!messageInput.trim() || isBusy}
+                                        title="Create a real Codex subagent task from this prompt"
+                                    >
+                                        <Bot className="h-3.5 w-3.5" />
+                                        Codex
+                                    </Button>
+                                    <Button
+                                        size="icon"
+                                        className="h-8 w-8 rounded-md bg-slate-700 text-white hover:bg-slate-600"
+                                        onClick={handleSendMessage}
+                                        disabled={!messageInput.trim() || isBusy || missingCustomModel}
+                                        title={
+                                            missingCustomModel
+                                                ? "Enter a full Claude model name first"
+                                                : "Send to Claude Code"
+                                        }
+                                    >
+                                        <Send className="h-4 w-4" />
+                                    </Button>
+                                </div>
                             </div>
                         </div>
                     </div>

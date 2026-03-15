@@ -211,3 +211,47 @@ def test_build_cli_telemetry_events_opencode_delegation_uses_opencode_assignee()
     assert dispatched[2].type == EventType.CODEX_DISPATCHED
     assert dispatched[2].payload["assignee"].startswith("opencode-")
     assert dispatched[3].agent_name.startswith("opencode-")
+
+
+def test_build_cli_telemetry_events_opencode_delegation_completion_emits_terminal_events():
+    state = _make_state()
+
+    _build_cli_telemetry_events(
+        {
+            "type": "assistant",
+            "message": {
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": "toolu_opencode_finish",
+                        "name": "spawn_agent",
+                        "input": {
+                            "runtime": "opencode",
+                            "description": "Finish the OpenCode handoff",
+                        },
+                    }
+                ]
+            },
+        },
+        state,
+        now_monotonic=50.0,
+    )
+
+    completed = _build_cli_telemetry_events(
+        {
+            "type": "tool_result",
+            "tool_name": "spawn_agent",
+            "tool_use_id": "toolu_opencode_finish",
+            "content": "delegation completed",
+        },
+        state,
+        now_monotonic=51.0,
+    )
+
+    assert [event.type for event in completed] == [
+        EventType.TOOL_RESULT,
+        EventType.CODEX_COMPLETED,
+        EventType.AGENT_COMPLETED,
+    ]
+    assert completed[1].payload["assignee"].startswith("opencode-")
+    assert completed[2].agent_name.startswith("opencode-")

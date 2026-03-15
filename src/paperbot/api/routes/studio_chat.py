@@ -12,6 +12,7 @@ import asyncio
 import json
 import logging
 import os
+import shlex
 import shutil
 import subprocess
 import tempfile
@@ -31,6 +32,8 @@ from ..streaming import StreamEvent, sse_response
 router = APIRouter()
 
 Mode = Literal["Code", "Plan", "Ask"]
+Effort = Literal["low", "medium", "high", "max"]
+StudioRuntimeName = Literal["claude", "opencode"]
 DEFAULT_STUDIO_MODEL = "sonnet"
 _LEGACY_MODEL_ALIASES = {
     "claude-sonnet-4-5": "sonnet",
@@ -41,6 +44,11 @@ _API_FALLBACK_MODEL_ALIASES = {
     "sonnet": "claude-sonnet-4-5-20250514",
     "opus": "claude-opus-4-5-20250514",
     "haiku": "claude-haiku-4-5-20250514",
+}
+_KNOWN_CLAUDE_MODEL_ALIASES = ["sonnet", "opus"]
+_ALLOWED_MANAGEMENT_COMMANDS: Dict[str, set[str]] = {
+    "claude": {"agents", "mcp", "auth"},
+    "opencode": {"agent", "mcp", "providers", "models"},
 }
 
 
@@ -64,17 +72,63 @@ class StudioChatRequest(BaseModel):
     history: List[ChatMessage] = []
     session_id: Optional[str] = None
     context_pack_id: Optional[str] = None
+    continue_last: bool = False
+    resume_session: Optional[str] = None
+    cli_session_id: Optional[str] = None
+    agent: Optional[str] = None
+    mcp_config: List[str] = []
+    tools: List[str] = []
+    allowed_tools: List[str] = []
+    add_dirs: List[str] = []
+    settings: Optional[str] = None
+    effort: Optional[Effort] = None
+
+
+class StudioCommandRequest(BaseModel):
+    runtime: StudioRuntimeName = "claude"
+    command: str
+    args: str = ""
+    project_dir: Optional[str] = None
+    timeout_ms: int = 15000
 
 
 def find_claude_cli() -> Optional[str]:
     """Find Claude CLI executable path."""
+    nvm_candidates = sorted(
+        (Path.home() / ".nvm" / "versions" / "node").glob("v*/bin/claude"),
+        reverse=True,
+    )
+
     # Check common locations
     candidates = [
         shutil.which("claude"),
+        *[str(path) for path in nvm_candidates],
         os.path.expanduser("~/.npm-global/bin/claude"),
         os.path.expanduser("~/.local/bin/claude"),
         "/opt/homebrew/bin/claude",
         "/usr/local/bin/claude",
+    ]
+
+    for path in candidates:
+        if path and os.path.isfile(path):
+            return path
+
+    return None
+
+
+def find_opencode_cli() -> Optional[str]:
+    nvm_candidates = sorted(
+        (Path.home() / ".nvm" / "versions" / "node").glob("v*/bin/opencode"),
+        reverse=True,
+    )
+
+    candidates = [
+        shutil.which("opencode"),
+        *[str(path) for path in nvm_candidates],
+        os.path.expanduser("~/.npm-global/bin/opencode"),
+        os.path.expanduser("~/.local/bin/opencode"),
+        "/opt/homebrew/bin/opencode",
+        "/usr/local/bin/opencode",
     ]
 
     for path in candidates:
@@ -123,6 +177,101 @@ def get_model_id(model: Optional[str], for_cli: bool = False) -> str:
     if for_cli:
         return normalized
     return _API_FALLBACK_MODEL_ALIASES.get(normalized, normalized)
+
+
+def _clean_optional_text(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    cleaned = value.strip()
+    return cleaned or None
+
+
+def _normalize_text_items(values: List[str]) -> List[str]:
+    normalized: List[str] = []
+    for value in values:
+        cleaned = _clean_optional_text(value)
+        if cleaned:
+            normalized.append(cleaned)
+    return normalized
+
+
+def _append_multi_value_flag(cmd: List[str], flag: str, values: List[str]) -> None:
+    normalized = _normalize_text_items(values)
+    if normalized:
+        cmd.extend([flag, *normalized])
+
+
+def _append_joined_flag(cmd: List[str], flag: str, values: List[str]) -> None:
+    normalized = _normalize_text_items(values)
+    if normalized:
+        cmd.extend([flag, ",".join(normalized)])
+
+
+def build_claude_cli_command_args(
+    request: StudioChatRequest,
+    *,
+    effective_mode: Mode,
+    prompt: str,
+) -> List[str]:
+    model_id = get_model_id(request.model, for_cli=True)
+    cmd: List[str] = ["--model", model_id]
+
+    if request.continue_last:
+        cmd.append("--continue")
+
+    resume_session = _clean_optional_text(request.resume_session)
+    if resume_session:
+        cmd.extend(["--resume", resume_session])
+
+    cli_session_id = _clean_optional_text(request.cli_session_id)
+    if cli_session_id:
+        cmd.extend(["--session-id", cli_session_id])
+
+    agent = _clean_optional_text(request.agent)
+    if agent:
+        cmd.extend(["--agent", agent])
+
+    _append_multi_value_flag(cmd, "--add-dir", request.add_dirs)
+    _append_multi_value_flag(cmd, "--mcp-config", request.mcp_config)
+    _append_joined_flag(cmd, "--tools", request.tools)
+    _append_joined_flag(cmd, "--allowed-tools", request.allowed_tools)
+
+    settings = _clean_optional_text(request.settings)
+    if settings:
+        cmd.extend(["--settings", settings])
+
+    if request.effort:
+        cmd.extend(["--effort", request.effort])
+
+    cmd.extend(get_mode_flags(effective_mode))
+    cmd.extend(["-p", prompt, "--output-format", "stream-json", "--verbose"])
+    return cmd
+
+
+def build_management_command(
+    request: StudioCommandRequest,
+) -> List[str]:
+    runtime = request.runtime
+    command = request.command.strip()
+    if command not in _ALLOWED_MANAGEMENT_COMMANDS[runtime]:
+        allowed = ", ".join(sorted(_ALLOWED_MANAGEMENT_COMMANDS[runtime]))
+        raise ValueError(f"Unsupported {runtime} command '{command}'. Allowed: {allowed}")
+
+    binary = find_claude_cli() if runtime == "claude" else find_opencode_cli()
+    if not binary:
+        raise ValueError(f"{runtime} CLI not found")
+
+    cmd = [binary, command]
+    extra_args = shlex.split(request.args) if request.args.strip() else []
+    if not extra_args:
+        if runtime == "claude" and command == "mcp":
+            extra_args = ["list"]
+        elif runtime == "claude" and command == "auth":
+            extra_args = ["status"]
+        elif runtime == "opencode" and command in {"agent", "mcp", "providers"}:
+            extra_args = ["list"]
+    cmd.extend(extra_args)
+    return cmd
 
 
 def build_prompt_with_context(message: str, paper: Optional[PaperContext], mode: Mode) -> str:
@@ -982,17 +1131,9 @@ async def stream_claude_cli(
         )
         return
 
-    # Build command — use stream-json for structured real-time output
-    cmd = [claude_path]
-
-    model_id = get_model_id(request.model, for_cli=True)
-    cmd.extend(["--model", model_id])
-
     effective_mode = resolve_execution_mode(request.mode)
-    cmd.extend(get_mode_flags(request.mode))
-
     prompt = build_prompt_with_context(request.message, request.paper, effective_mode)
-    cmd.extend(["-p", prompt, "--output-format", "stream-json", "--verbose"])
+    cmd = [claude_path, *build_claude_cli_command_args(request, effective_mode=effective_mode, prompt=prompt)]
 
     _append_eventlog(
         event_log,
@@ -1430,10 +1571,84 @@ async def studio_chat(http_request: Request, request: StudioChatRequest):
     )
 
 
+@router.post("/studio/command")
+async def studio_command(request: StudioCommandRequest):
+    """Run a non-chat Claude Code / OpenCode management command and return its output."""
+    try:
+        cmd = build_management_command(request)
+        try:
+            cwd = str(_resolve_cli_project_dir(request.project_dir))
+        except ValueError as exc:
+            return {
+                "ok": False,
+                "command": cmd,
+                "returncode": 1,
+                "stdout": "",
+                "stderr": str(exc),
+                "cwd": request.project_dir,
+            }
+
+        timeout_seconds = max(1.0, min(request.timeout_ms / 1000.0, 60.0))
+
+        def _run():
+            return subprocess.run(
+                cmd,
+                cwd=cwd,
+                env={**os.environ, "FORCE_COLOR": "0"},
+                capture_output=True,
+                text=True,
+                timeout=timeout_seconds,
+            )
+
+        result = await asyncio.to_thread(_run)
+        return {
+            "ok": result.returncode == 0,
+            "command": cmd,
+            "returncode": result.returncode,
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+            "cwd": cwd,
+        }
+    except subprocess.TimeoutExpired:
+        return {
+            "ok": False,
+            "command": [],
+            "returncode": 124,
+            "stdout": "",
+            "stderr": "Command timed out",
+            "cwd": request.project_dir,
+        }
+    except ValueError as exc:
+        return {
+            "ok": False,
+            "command": [],
+            "returncode": 1,
+            "stdout": "",
+            "stderr": str(exc),
+            "cwd": request.project_dir,
+        }
+
+
 @router.get("/studio/status")
 async def studio_status():
     """Check if Claude CLI is available."""
     claude_path = find_claude_cli()
+    opencode_path = find_opencode_cli()
+    opencode_version = None
+    opencode_available = False
+
+    if opencode_path:
+        try:
+            result = subprocess.run(
+                [opencode_path, "--version"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            opencode_version = result.stdout.strip() if result.returncode == 0 else None
+            opencode_available = result.returncode == 0
+        except Exception:
+            opencode_version = None
 
     if claude_path:
         # Try to get version
@@ -1453,6 +1668,10 @@ async def studio_status():
             "claude_path": claude_path,
             "claude_version": version,
             "code_mode_enabled": is_code_mode_enabled(),
+            "known_model_aliases": _KNOWN_CLAUDE_MODEL_ALIASES,
+            "opencode_cli": opencode_available,
+            "opencode_path": opencode_path,
+            "opencode_version": opencode_version,
         }
 
     return {
@@ -1461,6 +1680,10 @@ async def studio_status():
         "claude_version": None,
         "fallback": "anthropic_api",
         "code_mode_enabled": is_code_mode_enabled(),
+        "known_model_aliases": _KNOWN_CLAUDE_MODEL_ALIASES,
+        "opencode_cli": opencode_available,
+        "opencode_path": opencode_path,
+        "opencode_version": opencode_version,
     }
 
 

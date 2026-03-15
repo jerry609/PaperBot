@@ -3,6 +3,10 @@ export interface StudioRuntimeStatusResponse {
   claude_path?: string | null
   claude_version?: string | null
   code_mode_enabled?: boolean
+  known_model_aliases?: string[] | null
+  opencode_cli?: boolean
+  opencode_path?: string | null
+  opencode_version?: string | null
   fallback?: string | null
   error?: string | null
 }
@@ -25,6 +29,10 @@ export interface StudioRuntimeInfo {
   version: string | null
   claudePath: string | null
   codeModeEnabled: boolean | null
+  knownModelAliases: string[]
+  opencodeAvailable: boolean
+  opencodePath: string | null
+  opencodeVersion: string | null
   cwd: string | null
   actualCwd: string | null
   workspaceLabel: string
@@ -56,6 +64,12 @@ export function buildStudioRuntimeInfo(
   const version = cleanString(status?.claude_version)
   const claudePath = cleanString(status?.claude_path)
   const codeModeEnabled = typeof status?.code_mode_enabled === "boolean" ? status.code_mode_enabled : null
+  const knownModelAliases = Array.isArray(status?.known_model_aliases)
+    ? status!.known_model_aliases.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+    : []
+  const opencodeAvailable = status?.opencode_cli === true
+  const opencodePath = cleanString(status?.opencode_path)
+  const opencodeVersion = cleanString(status?.opencode_version)
   const error = cleanString(status?.error) ?? cleanString(cwdPayload?.error)
   const workspaceLabel = formatRuntimePath(cwd ?? actualCwd)
 
@@ -68,6 +82,10 @@ export function buildStudioRuntimeInfo(
       version,
       claudePath,
       codeModeEnabled,
+      knownModelAliases,
+      opencodeAvailable,
+      opencodePath,
+      opencodeVersion,
       cwd,
       actualCwd,
       workspaceLabel,
@@ -84,6 +102,10 @@ export function buildStudioRuntimeInfo(
       version,
       claudePath,
       codeModeEnabled,
+      knownModelAliases,
+      opencodeAvailable,
+      opencodePath,
+      opencodeVersion,
       cwd,
       actualCwd,
       workspaceLabel,
@@ -99,6 +121,10 @@ export function buildStudioRuntimeInfo(
     version: null,
     claudePath: null,
     codeModeEnabled: null,
+    knownModelAliases: [],
+    opencodeAvailable: false,
+    opencodePath: null,
+    opencodeVersion: null,
     cwd: null,
     actualCwd: null,
     workspaceLabel,

@@ -214,7 +214,10 @@ function StudioContent() {
 
     const requestedSurface = searchParams.get("surface")
     const defaultCenterView =
-        requestedSurface === "board" || requestedSurface === "context" || requestedSurface === "log"
+        requestedSurface === "board" ||
+        requestedSurface === "context" ||
+        requestedSurface === "log" ||
+        requestedSurface === "commands"
             ? requestedSurface
             : "log"
 
