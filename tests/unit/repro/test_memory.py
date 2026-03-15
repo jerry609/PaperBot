@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from repro.memory.code_memory import CodeMemory, FileInfo
-from repro.memory.symbol_index import SymbolIndex, SymbolInfo
+from paperbot.repro.memory.code_memory import CodeMemory, FileInfo
+from paperbot.repro.memory.symbol_index import SymbolIndex, SymbolInfo
 
 
 def test_symbol_info_to_summary_variants():

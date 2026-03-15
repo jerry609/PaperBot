@@ -7,8 +7,8 @@ from tempfile import TemporaryDirectory
 
 import pytest
 
-from repro.agents.base_agent import AgentResult, AgentStatus, BaseAgent
-from repro.agents.verification_agent import VerificationAgent, VerificationReport
+from paperbot.repro.agents.base_agent import AgentResult, AgentStatus, BaseAgent
+from paperbot.repro.agents.verification_agent import VerificationAgent, VerificationReport
 
 
 class ConcreteAgent(BaseAgent):

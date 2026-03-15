@@ -1,7 +1,7 @@
 # tests/conftest.py
 """
 Pytest configuration and fixtures.
-Adds src/paperbot to sys.path so imports work correctly.
+Adds the project `src` directory to `sys.path` so `paperbot` imports resolve in tests.
 """
 
 import sys
@@ -13,16 +13,11 @@ src_root = project_root / "src"
 if str(src_root) not in sys.path:
     sys.path.insert(0, str(src_root))
 
-# Keep legacy behavior: add src/paperbot so `import repro` style tests keep working
-legacy_src_path = src_root / "paperbot"
-if str(legacy_src_path) not in sys.path:
-    sys.path.insert(0, str(legacy_src_path))
-
 # Also add project root
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
-# Exclude legacy test files that use old import paths (agents.xxx, repro.xxx, etc.)
+# Exclude stale root-level tests pending dedicated cleanup PRs.
 collect_ignore = [
     str(Path(__file__).parent / "test_code_analysis_fallback.py"),
     str(Path(__file__).parent / "test_conference_agent_stats.py"),
