@@ -736,7 +736,7 @@ export function AgentWorkspace({
   }
 
   return (
-    <div className="flex h-screen min-h-0 flex-col bg-background">
+    <div className="flex h-screen min-h-0 flex-col bg-[#f1f2ed]">
       <div className="border-b border-slate-200 bg-white">
         <div className="flex min-h-14 items-center gap-3 px-4 py-3">
           <Button

@@ -92,7 +92,7 @@ function ActionItem({ action, onViewDiff, isLast }: ActionItemProps) {
     return (
         <div className="relative flex gap-2.5">
             {!isLast && (
-                <div className="absolute left-2.5 top-6 bottom-0 w-px bg-border" />
+                <div className="absolute left-2.5 top-6 bottom-0 w-px bg-slate-200" />
             )}
 
             <div className={cn(
@@ -114,10 +114,10 @@ function ActionItem({ action, onViewDiff, isLast }: ActionItemProps) {
                                     >
                                         {action.metadata.filename}
                                     </button>
-                                    <span className="text-[10px] px-1 py-0.5 rounded bg-muted">
-                                        <span className="text-green-600 dark:text-green-400">+{action.metadata.linesAdded || 0}</span>
-                                        <span className="text-muted-foreground mx-0.5">/</span>
-                                        <span className="text-red-600 dark:text-red-400">-{action.metadata.linesDeleted || 0}</span>
+                                    <span className="rounded bg-[#e5e8e1] px-1 py-0.5 text-[10px]">
+                                        <span className="text-emerald-700">+{action.metadata.linesAdded || 0}</span>
+                                        <span className="mx-0.5 text-slate-400">/</span>
+                                        <span className="text-rose-700">-{action.metadata.linesDeleted || 0}</span>
                                     </span>
                                 </div>
                             </div>
@@ -130,7 +130,7 @@ function ActionItem({ action, onViewDiff, isLast }: ActionItemProps) {
                                     {hasExpandableContent && (
                                         <button
                                             onClick={() => setExpanded(!expanded)}
-                                            className="text-muted-foreground hover:text-foreground transition-colors"
+                                            className="text-slate-500 transition-colors hover:text-slate-700"
                                         >
                                             {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
                                         </button>
@@ -154,11 +154,11 @@ function ActionItem({ action, onViewDiff, isLast }: ActionItemProps) {
                         ) : action.type === 'complete' ? (
                             <span className={cn("text-xs font-medium", colors.text)}>Completed</span>
                         ) : (
-                            <p className="text-xs text-foreground/90 whitespace-pre-wrap leading-relaxed">{action.content}</p>
+                            <p className="whitespace-pre-wrap text-xs leading-relaxed text-slate-700">{action.content}</p>
                         )}
                     </div>
 
-                    <div className="flex items-center gap-1 text-[9px] text-muted-foreground shrink-0">
+                    <div className="flex shrink-0 items-center gap-1 text-[9px] text-slate-400">
                         <Clock className="h-2 w-2" />
                         {formatTime(action.timestamp)}
                     </div>
