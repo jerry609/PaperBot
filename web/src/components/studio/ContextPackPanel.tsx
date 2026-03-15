@@ -104,7 +104,7 @@ export function ContextPackPanel({ pack, onSessionCreated, onDeployToBoard, clas
       const session = await sessionRes.json()
       setBoardSessionId(session.session_id)
 
-      // 2. Start planning (SSE) -- Claude decomposes into tasks
+      // 2. Start planning (SSE) -- CC decomposes the context pack into task cards
       //    Must go directly to backend; Next.js rewrite proxy buffers SSE.
       const planRes = await fetch(backendUrl(`/api/agent-board/sessions/${session.session_id}/plan`), {
         method: "POST",
@@ -249,7 +249,7 @@ export function ContextPackPanel({ pack, onSessionCreated, onDeployToBoard, clas
       <div className="flex justify-end gap-2">
         <Button variant="outline" onClick={handleDeployToBoard} disabled={deploying || creating}>
           <LayoutDashboard className="h-4 w-4 mr-1.5" />
-          {deploying ? "Deploying..." : "Deploy to Agent Board"}
+          {deploying ? "Opening..." : "Open Agent Board"}
         </Button>
         <Button onClick={handleCreateSession} disabled={creating || deploying}>
           {creating ? "Creating..." : "Create Repro Session"}
@@ -375,44 +375,59 @@ function ObservationCard({
 }
 
 function useObservationDetail(packId: string, observationId: string | null) {
-  const [detail, setDetail] = useState<ExtractionObservation | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [state, setState] = useState<{
+    detail: ExtractionObservation | null
+    loading: boolean
+    error: string | null
+  }>({
+    detail: null,
+    loading: false,
+    error: null,
+  })
 
   useEffect(() => {
-    if (!observationId) {
-      setDetail(null)
-      setLoading(false)
-      setError(null)
-      return
-    }
-
     let cancelled = false
-    setLoading(true)
-    setError(null)
 
-    fetch(`/api/research/repro/context/${packId}/observation/${observationId}`)
-      .then(async (res) => {
+    const loadObservationDetail = async () => {
+      if (!observationId) {
+        if (!cancelled) {
+          setState({ detail: null, loading: false, error: null })
+        }
+        return
+      }
+
+      if (!cancelled) {
+        setState({ detail: null, loading: true, error: null })
+      }
+
+      try {
+        const res = await fetch(`/api/research/repro/context/${packId}/observation/${observationId}`)
         if (!res.ok) {
           const text = await res.text()
           throw new Error(text || `Failed to load observation (${res.status})`)
         }
-        return res.json() as Promise<ExtractionObservation>
-      })
-      .then((data) => {
-        if (!cancelled) setDetail(data)
-      })
-      .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load observation")
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
+
+        const detail = (await res.json()) as ExtractionObservation
+        if (!cancelled) {
+          setState({ detail, loading: false, error: null })
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setState({
+            detail: null,
+            loading: false,
+            error: err instanceof Error ? err.message : "Failed to load observation",
+          })
+        }
+      }
+    }
+
+    void loadObservationDetail()
 
     return () => {
       cancelled = true
     }
   }, [packId, observationId])
 
-  return { detail, loading, error }
+  return state
 }

@@ -42,11 +42,13 @@ import type { ContextPackSession } from "@/lib/types/p2c"
 
 type StepStatus = "idle" | "running" | "success" | "error"
 type Mode = "Code" | "Plan" | "Ask"
-export type ReproductionViewMode = "log" | "context" | "agent_board"
+export type ReproductionViewMode = "log" | "context" | "board"
 
 interface ReproductionLogProps {
     viewMode: ReproductionViewMode
     onViewModeChange: (mode: ReproductionViewMode) => void
+    hideNavigation?: boolean
+    onOpenBoardWorkspace?: () => void
 }
 
 const actionIcons: Record<string, React.ElementType> = {
@@ -167,7 +169,12 @@ function ActionItem({ action, onViewDiff, isLast }: ActionItemProps) {
     )
 }
 
-export function ReproductionLog({ viewMode, onViewModeChange }: ReproductionLogProps) {
+export function ReproductionLog({
+    viewMode,
+    onViewModeChange,
+    hideNavigation = false,
+    onOpenBoardWorkspace,
+}: ReproductionLogProps) {
     const router = useRouter()
     const { theme } = useTheme()
     const {
@@ -284,7 +291,7 @@ export function ReproductionLog({ viewMode, onViewModeChange }: ReproductionLogP
         onViewModeChange("log")
 
         const taskId = addTask(`Chat — ${message.slice(0, 30)}${message.length > 30 ? "…" : ""}`)
-        addAction(taskId, { type: "thinking", content: `[${mode}] Sending to Claude...` })
+        addAction(taskId, { type: "thinking", content: `[${mode}] Sending to CC...` })
 
         try {
             const res = await fetch("/api/studio/chat", {
@@ -403,47 +410,53 @@ export function ReproductionLog({ viewMode, onViewModeChange }: ReproductionLogP
         }
     }
 
-    const openAgentBoardFocusPage = () => {
-        if (selectedPaperId) {
-            router.push(`/studio/agent-board/${selectedPaperId}`)
+    const openAgentBoardWorkspace = () => {
+        if (onOpenBoardWorkspace) {
+            onOpenBoardWorkspace()
             return
         }
-        onViewModeChange("agent_board")
+        if (selectedPaperId) {
+            router.push(`/studio?paperId=${encodeURIComponent(selectedPaperId)}&surface=board`)
+            return
+        }
+        router.push("/studio?surface=board")
     }
 
     return (
         <div className="h-full w-full flex-1 flex flex-col min-w-0 min-h-0 bg-background">
             {/* Tab Navigation */}
-            <div className="flex items-center shrink-0 border-b">
-                {([
-                    { key: "context" as const, label: "Context", icon: Activity },
-                    { key: "log" as const, label: "Chat", icon: MessageSquare },
-                    { key: "agent_board" as const, label: "Agent Board", icon: LayoutDashboard },
-                ]).map(({ key, label, icon: TabIcon }) => (
-                    <button
-                        key={key}
-                        onClick={() => {
-                            if (key === "agent_board") {
-                                openAgentBoardFocusPage()
-                                return
-                            }
-                            onViewModeChange(key)
-                        }}
-                        className={cn(
-                            "flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium transition-colors relative",
-                            viewMode === key
-                                ? "text-foreground"
-                                : "text-muted-foreground hover:text-foreground/80"
-                        )}
-                    >
-                        <TabIcon className="h-3.5 w-3.5" />
-                        {label}
-                        {viewMode === key && (
-                            <span className="absolute bottom-0 left-2 right-2 h-0.5 bg-primary rounded-full" />
-                        )}
-                    </button>
-                ))}
-            </div>
+            {!hideNavigation && (
+                <div className="flex items-center shrink-0 border-b">
+                    {([
+                        { key: "context" as const, label: "Context", icon: Activity },
+                        { key: "log" as const, label: "Chat", icon: MessageSquare },
+                        { key: "board" as const, label: "Agent Board", icon: LayoutDashboard },
+                    ]).map(({ key, label, icon: TabIcon }) => (
+                        <button
+                            key={key}
+                            onClick={() => {
+                                if (key === "board") {
+                                    openAgentBoardWorkspace()
+                                    return
+                                }
+                                onViewModeChange(key)
+                            }}
+                            className={cn(
+                                "flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium transition-colors relative",
+                                viewMode === key
+                                    ? "text-foreground"
+                                    : "text-muted-foreground hover:text-foreground/80"
+                            )}
+                        >
+                            <TabIcon className="h-3.5 w-3.5" />
+                            {label}
+                            {viewMode === key && (
+                                <span className="absolute bottom-0 left-2 right-2 h-0.5 bg-primary rounded-full" />
+                            )}
+                        </button>
+                    ))}
+                </div>
+            )}
 
             {/* Error banner */}
             {(lastError || contextPackError) && (
@@ -480,9 +493,9 @@ export function ReproductionLog({ viewMode, onViewModeChange }: ReproductionLogP
                             })
                         }
                         onSessionCreated={handleSessionCreated}
-                        onDeployToBoard={openAgentBoardFocusPage}
+                        onDeployToBoard={openAgentBoardWorkspace}
                     />
-                ) : viewMode === "agent_board" ? (
+                ) : viewMode === "board" ? (
                     <AgentBoard paperId={selectedPaperId} />
                 ) : activeFileData ? (
                     /* File Viewer */
@@ -544,7 +557,7 @@ export function ReproductionLog({ viewMode, onViewModeChange }: ReproductionLogP
                                         <p className="font-medium">Ready to chat</p>
                                         <p className="text-xs max-w-[280px]">
                                             {selectedPaper
-                                                ? "Send a message to start working with Claude on this paper"
+                                                ? "Send a message to start working with CC on this paper"
                                                 : "Select or create a paper to get started"}
                                         </p>
                                     </div>
@@ -573,7 +586,7 @@ export function ReproductionLog({ viewMode, onViewModeChange }: ReproductionLogP
                         <Textarea
                             value={messageInput}
                             onChange={(e) => setMessageInput(e.target.value)}
-                            placeholder="Message Claude..."
+                            placeholder="Message CC..."
                             className="border-0 bg-transparent resize-none min-h-[60px] focus-visible:ring-0 px-4 py-3"
                             onKeyDown={(e) => {
                                 if (e.key === 'Enter' && !e.shiftKey) {

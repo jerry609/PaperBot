@@ -17,7 +17,7 @@ export function InlineDiffPanel({ entry, onBack }: InlineDiffPanelProps) {
   return (
     <div className="flex flex-col h-full min-h-0">
       {/* Header bar */}
-      <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-700 shrink-0">
+      <div className="flex shrink-0 items-center gap-2 border-b border-zinc-200 px-3 py-2">
         <Button
           variant="ghost"
           size="icon"
@@ -26,15 +26,15 @@ export function InlineDiffPanel({ entry, onBack }: InlineDiffPanelProps) {
         >
           <ArrowLeft className="h-4 w-4" />
         </Button>
-        <span className="font-mono text-xs text-gray-300 truncate" title={entry.path}>
+        <span className="truncate font-mono text-xs text-zinc-600" title={entry.path}>
           {entry.path}
         </span>
       </div>
 
       {/* Diff content */}
-      <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         {!hasContent ? (
-          <div className="flex items-center justify-center h-full text-xs text-gray-500 px-4 text-center">
+          <div className="flex h-full items-center justify-center px-4 text-center text-xs text-zinc-500">
             Diff not available for this change
           </div>
         ) : (

@@ -3,6 +3,7 @@
 import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import type { AgentTask, AgentTaskStatus } from "@/lib/store/studio-store"
+import { getAgentPresentation } from "@/lib/agent-runtime"
 
 type ColumnDef = {
   id: string
@@ -24,16 +25,18 @@ type AgentLabelResult = {
 }
 
 export function agentLabel(assignee: string): AgentLabelResult {
-  if (!assignee || assignee === "claude") {
-    return { label: "Claude Code", variant: "default" }
+  const presentation = getAgentPresentation(assignee)
+
+  if (presentation.kind === "commander") {
+    return { label: "CC", variant: "default" }
   }
-  if (assignee.startsWith("codex-retry")) {
-    return { label: "Codex (retry)", variant: "secondary" }
+  if (presentation.kind === "retry") {
+    return { label: presentation.shortLabel, variant: "secondary" }
   }
-  if (assignee.startsWith("codex")) {
-    return { label: "Codex", variant: "secondary" }
+  if (presentation.kind === "subagent") {
+    return { label: presentation.shortLabel, variant: "secondary" }
   }
-  return { label: assignee, variant: "outline" }
+  return { label: presentation.shortLabel, variant: "outline" }
 }
 
 const CODEX_REASON_LABELS: Record<string, string> = {

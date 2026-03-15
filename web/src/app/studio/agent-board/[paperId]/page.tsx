@@ -27,7 +27,11 @@ export default function AgentBoardFocusPage() {
         paperId={paperId}
         focusMode
         onBack={() => {
-          router.push("/studio")
+          router.push(
+            paperId
+              ? `/studio?paperId=${encodeURIComponent(paperId)}&surface=board`
+              : "/studio?surface=board",
+          )
         }}
       />
     </div>

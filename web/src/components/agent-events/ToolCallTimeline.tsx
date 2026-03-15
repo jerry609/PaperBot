@@ -33,34 +33,34 @@ function ToolCallRow({ entry }: { entry: ToolCallEntry }) {
   const isError = entry.status === "error"
 
   return (
-    <li className="flex items-start gap-3 py-2 border-b border-gray-800 last:border-0">
+    <li className="flex items-start gap-3 border-b border-zinc-200 py-2 last:border-0">
       <div
-        className={`w-2 h-2 rounded-full mt-1.5 shrink-0 ${isError ? "bg-red-500" : "bg-green-500"}`}
+        className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${isError ? "bg-rose-500" : "bg-emerald-500"}`}
       />
       <div className="flex-1 min-w-0">
         <div className="flex items-center justify-between gap-2">
-          <span className="text-sm font-semibold text-gray-100 truncate">{entry.tool}</span>
+          <span className="truncate text-sm font-semibold text-zinc-900">{entry.tool}</span>
           <div className="flex items-center gap-2 shrink-0">
             {isError && (
-              <span className="text-xs px-1.5 py-0.5 rounded bg-red-950/60 text-red-400 border border-red-800/50">
+              <span className="rounded border border-rose-200 bg-rose-50 px-1.5 py-0.5 text-xs text-rose-700">
                 error
               </span>
             )}
-            <span className="text-xs text-gray-400 font-mono">{formatDuration(entry.duration_ms)}</span>
-            <span className="text-xs text-gray-600 font-mono">{formatTimestamp(entry.ts)}</span>
+            <span className="font-mono text-xs text-zinc-500">{formatDuration(entry.duration_ms)}</span>
+            <span className="font-mono text-xs text-zinc-400">{formatTimestamp(entry.ts)}</span>
           </div>
         </div>
-        <div className="text-xs text-gray-500 mt-0.5">
-          <span className="text-gray-600">args: </span>
+        <div className="mt-0.5 text-xs text-zinc-500">
+          <span className="text-zinc-400">args: </span>
           <span>{formatArgs(entry.arguments)}</span>
         </div>
         {entry.result_summary && !isError && (
-          <div className="text-xs text-gray-400 mt-0.5 truncate">
+          <div className="mt-0.5 truncate text-xs text-zinc-600">
             {truncate(entry.result_summary)}
           </div>
         )}
         {isError && entry.error && (
-          <div className="text-xs text-red-400 mt-0.5 truncate">{entry.error}</div>
+          <div className="mt-0.5 truncate text-xs text-rose-700">{entry.error}</div>
         )}
       </div>
     </li>
@@ -71,17 +71,17 @@ export function ToolCallTimeline() {
   const toolCalls = useAgentEventStore((s) => s.toolCalls)
 
   return (
-    <div className="flex flex-col h-full">
-      <div className="flex items-center justify-between px-3 py-2 border-b border-gray-700">
-        <h3 className="text-sm font-semibold text-gray-200">Tool Calls</h3>
-        <span className="text-xs text-gray-500">{toolCalls.length} calls</span>
+    <div className="flex h-full flex-col bg-[#f5f5f3]">
+      <div className="flex items-center justify-between border-b border-zinc-200 px-3 py-2">
+        <h3 className="text-sm font-semibold text-zinc-900">Tool Calls</h3>
+        <span className="text-xs text-zinc-500">{toolCalls.length} calls</span>
       </div>
       {toolCalls.length === 0 ? (
-        <div className="flex items-center justify-center h-20 text-gray-500 text-sm">
+        <div className="flex h-20 items-center justify-center text-sm text-zinc-500">
           No tool calls yet
         </div>
       ) : (
-        <div className="overflow-y-auto flex-1">
+        <div className="flex-1 overflow-y-auto">
           <ul className="px-3 py-1">
             {toolCalls.map((entry) => (
               <ToolCallRow key={entry.id} entry={entry} />

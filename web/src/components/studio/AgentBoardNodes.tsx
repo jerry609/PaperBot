@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Bot, Clock, Cpu, ExternalLink, FileCode, Loader2, Zap, CheckCircle2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { AgentTask, AgentTaskLog, E2EState } from "@/lib/store/studio-store"
+import { getAgentPresentation, isCommanderAssignee } from "@/lib/agent-runtime"
 
 // ---------------------------------------------------------------------------
 // Shared card wrapper (Flowith-style)
@@ -87,7 +88,7 @@ export function CommanderNode({ data }: NodeProps<Node<CommanderNodeData>>) {
         <div className="flex items-center gap-2 mb-2">
           <Bot className={cn("text-indigo-500", isFocusCard ? "h-5 w-5" : "h-4 w-4")} />
           <span className={cn("font-semibold text-zinc-800", isFocusCard ? "text-base" : "text-sm")}>
-            Claude Commander
+            CC Commander
           </span>
           <span className={cn("ml-auto h-2.5 w-2.5 rounded-full shrink-0", dotColor)} />
         </div>
@@ -175,6 +176,7 @@ function computeCardStats(logs?: AgentTaskLog[]) {
 
 export function TaskNode({ data }: NodeProps<Node<TaskNodeData>>) {
   const task = data.task
+  const assigneePresentation = getAgentPresentation(task.assignee)
   const completedSubtasks = task.subtasks.filter((s) => s.done).length
   const totalSubtasks = task.subtasks.length
   const cardStats = computeCardStats(task.executionLog)
@@ -282,12 +284,12 @@ export function TaskNode({ data }: NodeProps<Node<TaskNodeData>>) {
           {/* Assignee + time */}
           <div className="flex items-center justify-between text-[10px] text-zinc-400 pt-1">
             <div className="flex items-center gap-1">
-              {task.assignee === "claude" ? (
+              {isCommanderAssignee(task.assignee) ? (
                 <Bot className="h-3 w-3" />
               ) : (
                 <Cpu className="h-3 w-3" />
               )}
-              <span>{task.assignee}</span>
+              <span title={task.assignee}>{assigneePresentation.shortLabel}</span>
             </div>
             <div className="flex items-center gap-1">
               <Clock className="h-2.5 w-2.5" />

@@ -10,9 +10,7 @@ import {
 } from "@/components/ui/dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Textarea } from "@/components/ui/textarea"
 import {
-  AlertCircle,
   ArrowDown,
   ArrowUp,
   Bot,
@@ -20,16 +18,13 @@ import {
   ChevronRight,
   Clock,
   Cpu,
-  FileCode,
   FolderOpen,
   Loader2,
   Pin,
   PinOff,
-  RotateCcw,
-  ThumbsUp,
-  XCircle,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { getAgentPresentation, isCommanderAssignee } from "@/lib/agent-runtime"
 import type { AgentTask, AgentTaskLog, BlockType } from "@/lib/store/studio-store"
 import { InfoBlock, ThinkBlock, ToolBlock, DiffBlock, ResultBlock } from "./blocks"
 
@@ -111,134 +106,6 @@ function computeWorkspaceStats(logs: AgentTaskLog[]) {
     }
   }
   return { filesChanged, linesAdded, fileNames: Array.from(seenFiles) }
-}
-
-// ---------------------------------------------------------------------------
-// Human Review Section
-// ---------------------------------------------------------------------------
-
-function HumanReviewSection({ task }: { task: AgentTask }) {
-  const [notes, setNotes] = useState("")
-  const [submitting, setSubmitting] = useState(false)
-  const [lastResult, setLastResult] = useState<{ ok: boolean; msg: string } | null>(null)
-
-  const submit = useCallback(
-    async (decision: "approve" | "request_changes") => {
-      setSubmitting(true)
-      setLastResult(null)
-      try {
-        const res = await fetch(`/api/agent-board/tasks/${task.id}/human-review`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ decision, notes: notes.trim() || null }),
-        })
-        if (!res.ok) {
-          const body = await res.text()
-          setLastResult({ ok: false, msg: body || `Error ${res.status}` })
-        } else {
-          setLastResult({
-            ok: true,
-            msg: decision === "approve" ? "Task approved" : "Changes requested — task moved back to planning",
-          })
-          setNotes("")
-        }
-      } catch (err) {
-        setLastResult({ ok: false, msg: String(err) })
-      } finally {
-        setSubmitting(false)
-      }
-    },
-    [task.id, notes],
-  )
-
-  const pastReviews = task.humanReviews ?? []
-
-  return (
-    <section>
-      <h3 className="text-xs font-medium text-zinc-500 uppercase tracking-wider mb-2">
-        Human Review
-      </h3>
-      <div className="rounded-lg border border-zinc-200 bg-white p-4 space-y-3">
-        {/* Past reviews */}
-        {pastReviews.length > 0 && (
-          <div className="space-y-2 pb-2 border-b border-zinc-100">
-            {pastReviews.map((r) => (
-              <div key={r.id} className="flex items-start gap-2 text-xs">
-                {r.decision === "approve" ? (
-                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 mt-0.5 shrink-0" />
-                ) : (
-                  <RotateCcw className="h-3.5 w-3.5 text-amber-500 mt-0.5 shrink-0" />
-                )}
-                <div>
-                  <span className="font-medium text-zinc-700">
-                    {r.decision === "approve" ? "Approved" : "Requested Changes"}
-                  </span>
-                  {r.notes && (
-                    <p className="text-zinc-500 mt-0.5">{r.notes}</p>
-                  )}
-                  <p className="text-zinc-300 text-[10px] mt-0.5">
-                    {new Date(r.timestamp).toLocaleString()}
-                  </p>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Comments input */}
-        <Textarea
-          placeholder="Add comments (optional)..."
-          className="min-h-[60px] text-sm resize-none"
-          value={notes}
-          onChange={(e) => setNotes(e.target.value)}
-          disabled={submitting}
-        />
-
-        {/* Action buttons */}
-        <div className="flex items-center gap-2">
-          <Button
-            size="sm"
-            className="h-8 text-xs gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white"
-            onClick={() => submit("approve")}
-            disabled={submitting}
-          >
-            <ThumbsUp className="h-3.5 w-3.5" />
-            Approve
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-8 text-xs gap-1.5 border-amber-300 text-amber-700 hover:bg-amber-50"
-            onClick={() => submit("request_changes")}
-            disabled={submitting}
-          >
-            <RotateCcw className="h-3.5 w-3.5" />
-            Request Changes
-          </Button>
-          {submitting && <Loader2 className="h-3.5 w-3.5 animate-spin text-zinc-400" />}
-        </div>
-
-        {/* Result feedback */}
-        {lastResult && (
-          <div
-            className={cn(
-              "text-xs flex items-center gap-1.5 px-2 py-1.5 rounded-md",
-              lastResult.ok
-                ? "bg-emerald-50 text-emerald-700"
-                : "bg-red-50 text-red-700",
-            )}
-          >
-            {lastResult.ok ? (
-              <CheckCircle2 className="h-3 w-3 shrink-0" />
-            ) : (
-              <AlertCircle className="h-3 w-3 shrink-0" />
-            )}
-            {lastResult.msg}
-          </div>
-        )}
-      </div>
-    </section>
-  )
 }
 
 // ---------------------------------------------------------------------------
@@ -603,6 +470,8 @@ export function TaskDetailPanel({
 
   if (!task) return null
 
+  const assigneePresentation = getAgentPresentation(task.assignee)
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="w-[97vw] max-w-[97vw] sm:max-w-5xl h-[88vh] p-0 overflow-hidden !gap-0">
@@ -616,12 +485,12 @@ export function TaskDetailPanel({
                 </DialogTitle>
                 <DialogDescription className="text-xs flex items-center gap-2">
                   <span className="flex items-center gap-1">
-                    {task.assignee === "claude" ? (
+                    {isCommanderAssignee(task.assignee) ? (
                       <Bot className="h-3 w-3" />
                     ) : (
                       <Cpu className="h-3 w-3" />
                     )}
-                    {task.assignee}
+                    <span title={task.assignee}>{assigneePresentation.label}</span>
                   </span>
                   <span className="text-zinc-300">·</span>
                   <span>{task.progress}%</span>

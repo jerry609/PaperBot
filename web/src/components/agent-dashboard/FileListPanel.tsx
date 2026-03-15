@@ -25,15 +25,15 @@ export function FileListPanel() {
 
   return (
     <div className="flex flex-col h-full min-h-0">
-      <div className="px-3 py-2 border-b border-gray-700 shrink-0">
-        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
+      <div className="shrink-0 border-b border-zinc-200 px-3 py-2">
+        <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500">
           Files {selectedRunId ? `(run ${selectedRunId.slice(0, 8)})` : "(all runs)"}
         </p>
       </div>
 
       <ScrollArea className="flex-1 min-h-0">
         {entries.length === 0 ? (
-          <div className="flex items-center justify-center py-12 text-xs text-gray-500">
+          <div className="flex items-center justify-center py-12 text-xs text-zinc-500">
             No file changes yet
           </div>
         ) : (
@@ -43,22 +43,22 @@ export function FileListPanel() {
                 <button
                   className={cn(
                     "w-full flex items-center gap-2 px-2 py-2 rounded-md text-xs transition-colors",
-                    "hover:bg-accent hover:text-accent-foreground text-gray-300",
+                    "text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900",
                   )}
                   onClick={() => setSelectedFile(entry)}
                 >
                   {entry.status === "created" ? (
-                    <FilePlus2 size={14} className="text-green-400 shrink-0" />
+                    <FilePlus2 size={14} className="shrink-0 text-emerald-700" />
                   ) : (
-                    <FileEdit size={14} className="text-amber-400 shrink-0" />
+                    <FileEdit size={14} className="shrink-0 text-amber-700" />
                   )}
                   <span className="font-mono flex-1 truncate text-left" title={entry.path}>
                     {entry.path}
                   </span>
                   {entry.linesAdded !== undefined && (
-                    <span className="text-green-400 shrink-0">+{entry.linesAdded}</span>
+                    <span className="shrink-0 text-emerald-700">+{entry.linesAdded}</span>
                   )}
-                  <ChevronRight size={12} className="text-gray-600 shrink-0" />
+                  <ChevronRight size={12} className="shrink-0 text-zinc-400" />
                 </button>
               </li>
             ))}

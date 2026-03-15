@@ -1,6 +1,7 @@
 "use client"
 
 import type { ActivityFeedItem, AgentStatus, AgentStatusEntry, AgentEventEnvelopeRaw, CodexDelegationEntry, ScoreEdgeEntry, ToolCallEntry, FileTouchedEntry } from "./types"
+import { getAgentPresentation } from "@/lib/agent-runtime"
 
 const LIFECYCLE_TYPES = new Set([
   "agent_started",
@@ -42,21 +43,24 @@ function deriveHumanSummary(raw: AgentEventEnvelopeRaw): string {
   if (t === "codex_dispatched") {
     const assignee = String(payload.assignee ?? raw.agent_name ?? "Codex")
     const title = String(payload.task_title ?? "")
-    return `Task dispatched to ${assignee}: ${title}`
+    return `Task dispatched to ${getAgentPresentation(assignee).shortLabel}: ${title}`
   }
   if (t === "codex_accepted") {
+    const assignee = String(payload.assignee ?? raw.agent_name ?? "Codex")
     const title = String(payload.task_title ?? "")
-    return `Codex accepted task: ${title}`
+    return `${getAgentPresentation(assignee).shortLabel} accepted task: ${title}`
   }
   if (t === "codex_completed") {
+    const assignee = String(payload.assignee ?? raw.agent_name ?? "Codex")
     const title = String(payload.task_title ?? "")
     const files = Array.isArray(payload.files_generated) ? payload.files_generated.length : 0
-    return `Codex completed: ${title} (${files} files)`
+    return `${getAgentPresentation(assignee).shortLabel} completed: ${title} (${files} files)`
   }
   if (t === "codex_failed") {
+    const assignee = String(payload.assignee ?? raw.agent_name ?? "Codex")
     const title = String(payload.task_title ?? "")
     const reason = String(payload.reason_code ?? "unknown")
-    return `Codex failed: ${title} (${reason})`
+    return `${getAgentPresentation(assignee).shortLabel} failed: ${title} (${reason})`
   }
   if (t === "job_start") return `Job started: ${raw.stage}`
   if (t === "job_result") return `Job finished: ${raw.stage}`

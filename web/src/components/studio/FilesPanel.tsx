@@ -415,7 +415,7 @@ export function FilesPanel() {
                                 className="font-mono text-sm"
                             />
                             <p className="text-xs text-muted-foreground">
-                                This directory will be used to save generated code and can be accessed by Claude CLI.
+                                This directory will be used to save generated code and can be accessed by CC and connected code agents.
                             </p>
                             {dirError && (
                                 <p className="text-xs text-destructive">{dirError}</p>

@@ -345,10 +345,19 @@ function TimeEstimateSection() {
 // Sidebar wrapper
 // ---------------------------------------------------------------------------
 
-export function AgentBoardSidebar({ backgroundColor = "#f3f3f2" }: { backgroundColor?: string }) {
+export function AgentBoardSidebar({
+  backgroundColor = "#f3f3f2",
+  className,
+}: {
+  backgroundColor?: string
+  className?: string
+}) {
   return (
     <div
-      className="w-[260px] shrink-0 border-r border-zinc-200 overflow-y-auto"
+      className={cn(
+        "overflow-y-auto border-zinc-200",
+        className ?? "w-[260px] shrink-0 border-r",
+      )}
       style={{ background: backgroundColor }}
     >
       <SandboxFilesSection />

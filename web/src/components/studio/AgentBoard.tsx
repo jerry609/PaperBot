@@ -56,6 +56,7 @@ interface Props {
   paperId: string | null
   focusMode?: boolean
   onBack?: () => void
+  showSidebar?: boolean
 }
 
 // LOG_LEVEL_STYLE, toLogTimestamp, extractPossibleFiles removed — now in TaskDetailPanel
@@ -447,7 +448,7 @@ function buildFlowEdges(
 // Main component
 // ---------------------------------------------------------------------------
 
-export function AgentBoard({ paperId, focusMode = false, onBack }: Props) {
+export function AgentBoard({ paperId, focusMode = false, onBack, showSidebar = true }: Props) {
   const {
     agentTasks,
     boardSessionId,
@@ -802,7 +803,7 @@ export function AgentBoard({ paperId, focusMode = false, onBack }: Props) {
               taskId,
               "task_codex_done",
               "codex_running",
-              `Codex output received.`,
+              "Subagent output received.",
               "success",
             )
           }
@@ -1236,7 +1237,9 @@ export function AgentBoard({ paperId, focusMode = false, onBack }: Props) {
 
       {/* Body: sidebar + canvas */}
       <div className="flex-1 flex min-h-0" style={{ background: AGENT_BOARD_SURFACE }}>
-        <AgentBoardSidebar backgroundColor={AGENT_BOARD_SIDEBAR_SURFACE} />
+        {showSidebar ? (
+          <AgentBoardSidebar backgroundColor={AGENT_BOARD_SIDEBAR_SURFACE} />
+        ) : null}
         <div className="flex-1 min-w-0 h-full" style={{ background: AGENT_BOARD_SURFACE }}>
           <EdgeAnimationStyles />
           <ReactFlow

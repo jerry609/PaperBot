@@ -1,30 +1,14 @@
 "use client"
 
-import { useEffect, Suspense, useRef, useState } from "react"
+import { useEffect, Suspense, useRef } from "react"
 import { useSearchParams, useRouter } from "next/navigation"
-import { ArrowLeft, PanelsTopLeft, Loader2, ExternalLink } from "lucide-react"
 import { PaperGallery } from "@/components/studio/PaperGallery"
-import { ReproductionLog, type ReproductionViewMode } from "@/components/studio/ReproductionLog"
-import { FilesPanel } from "@/components/studio/FilesPanel"
-import { ChatHistoryPanel } from "@/components/studio/ChatHistoryPanel"
+import { AgentWorkspace } from "@/components/studio/AgentWorkspace"
 import { MCPProvider } from "@/lib/mcp"
-import { useStudioStore, type StudioPaperStatus } from "@/lib/store/studio-store"
+import { useStudioStore } from "@/lib/store/studio-store"
 import { useContextPackGeneration } from "@/hooks/useContextPackGeneration"
 import { normalizePack } from "@/lib/context-pack-utils"
 import { backendUrl } from "@/lib/backend-url"
-import { Button } from "@/components/ui/button"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable"
-import { cn } from "@/lib/utils"
-
-const statusConfig: Record<StudioPaperStatus, { label: string; className: string }> = {
-    draft: { label: "Draft", className: "bg-zinc-500/90 text-white" },
-    generating: { label: "Code", className: "bg-blue-500 text-white" },
-    ready: { label: "Ready", className: "bg-emerald-500 text-white" },
-    running: { label: "Run", className: "bg-violet-500 text-white" },
-    completed: { label: "Done", className: "bg-emerald-500 text-white" },
-    error: { label: "Error", className: "bg-red-500 text-white" },
-}
 
 function StudioContent() {
     const {
@@ -34,8 +18,6 @@ function StudioContent() {
         papers,
         selectedPaperId,
         contextPack,
-        contextPackLoading,
-        lastGenCodeResult,
         setContextPack,
         setContextPackLoading,
         setContextPackError,
@@ -48,7 +30,6 @@ function StudioContent() {
     const hasProcessedParams = useRef(false)
     const latestContextLookupRef = useRef<Set<string>>(new Set())
     const contextFetchInFlightRef = useRef(false)
-    const [viewMode, setViewMode] = useState<ReproductionViewMode>("log")
 
     // Load papers from localStorage on mount
     useEffect(() => {
@@ -231,103 +212,17 @@ function StudioContent() {
         return <PaperGallery />
     }
 
-    // Workspace view — paper selected
-    const selectedPaper = papers.find(p => p.id === selectedPaperId)
-    const paperTitle = selectedPaper?.title || "Untitled"
-    const paperStatus = selectedPaper?.status || "draft"
-    const config = statusConfig[paperStatus]
-    const isLoading = paperStatus === "generating" || paperStatus === "running"
-    const projectDir = selectedPaper?.outputDir || lastGenCodeResult?.outputDir || null
+    const requestedSurface = searchParams.get("surface")
+    const defaultCenterView =
+        requestedSurface === "board" || requestedSurface === "context" || requestedSurface === "log"
+            ? requestedSurface
+            : "log"
 
     return (
-        <div className="flex h-screen min-h-0 flex-col">
-            {/* Top Bar */}
-            <div className="border-b bg-background h-11 px-3 flex items-center gap-2 shrink-0">
-                <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7 shrink-0"
-                    onClick={() => selectPaper(null)}
-                    title="Back to gallery"
-                >
-                    <ArrowLeft className="h-4 w-4" />
-                </Button>
-                <PanelsTopLeft className="h-4 w-4 text-primary shrink-0" />
-                <span className="text-sm font-medium truncate">{paperTitle}</span>
-                <span
-                    className={cn(
-                        "inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium shrink-0",
-                        config.className,
-                    )}
-                >
-                    {isLoading && <Loader2 className="mr-1 h-2.5 w-2.5 animate-spin" />}
-                    {config.label}
-                </span>
-                <div className="flex-1" />
-                <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 text-xs gap-1.5 shrink-0"
-                    onClick={() => {
-                        if (projectDir) {
-                            window.open(`vscode://file${projectDir}`, "_blank")
-                        }
-                    }}
-                    disabled={!projectDir}
-                    title={projectDir ? `Open ${projectDir} in VS Code` : "Set up a workspace first"}
-                >
-                    <ExternalLink className="h-3.5 w-3.5" />
-                    Open in VS Code
-                </Button>
-            </div>
-
-            {/* Desktop: full-width for context/agent board, split for chat workflow */}
-            <div className="hidden md:flex flex-1 min-h-0 min-w-0">
-                {viewMode === "agent_board" || viewMode === "context" ? (
-                    <div className="flex-1 min-w-0">
-                        <ReproductionLog
-                            viewMode={viewMode}
-                            onViewModeChange={setViewMode}
-                        />
-                    </div>
-                ) : (
-                    <ResizablePanelGroup orientation="horizontal" className="flex-1">
-                        <ResizablePanel defaultSize={20} minSize={14}>
-                            <ChatHistoryPanel />
-                        </ResizablePanel>
-
-                        <ResizableHandle withHandle />
-
-                        <ResizablePanel defaultSize={80} minSize={40}>
-                            <ReproductionLog
-                                viewMode={viewMode}
-                                onViewModeChange={setViewMode}
-                            />
-                        </ResizablePanel>
-                    </ResizablePanelGroup>
-                )}
-            </div>
-
-            {/* Mobile: 2-tab workspace */}
-            <div className="flex md:hidden flex-1 min-h-0">
-                <Tabs defaultValue="log" className="h-full w-full flex flex-col">
-                    <TabsList className="w-full justify-start rounded-none border-b bg-transparent p-0 h-10 shrink-0">
-                        <TabsTrigger value="log" className="rounded-none text-xs h-10 px-4">
-                            Reproduction
-                        </TabsTrigger>
-                        <TabsTrigger value="files" className="rounded-none text-xs h-10 px-4">
-                            Files
-                        </TabsTrigger>
-                    </TabsList>
-                    <TabsContent value="log" className="flex-1 min-h-0 m-0">
-                        <ReproductionLog viewMode={viewMode} onViewModeChange={setViewMode} />
-                    </TabsContent>
-                    <TabsContent value="files" className="flex-1 min-h-0 m-0">
-                        <FilesPanel />
-                    </TabsContent>
-                </Tabs>
-            </div>
-        </div>
+        <AgentWorkspace
+            defaultCenterView={defaultCenterView}
+            onBackToStudio={() => selectPaper(null)}
+        />
     )
 }
 
