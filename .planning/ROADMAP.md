@@ -202,10 +202,11 @@ Plans:
   1. User can view an interactive task dependency DAG where node colors update in real-time to reflect task status
   2. User can see ScoreShareBus data flow edges in the DAG showing which agents shared evaluation context with which other agents
   3. DAG renders using existing @xyflow/react (no new visualization dependencies)
-**Plans**: TBD
+**Plans**: 2 plans
 
 Plans:
-- [ ] 11-01: TBD
+- [ ] 11-01-PLAN.md — Data layer: ScoreEdgeEntry type, parseScoreEdge parser, store slice, AgentTask.depends_on, DAG builder functions (buildDagNodes/buildDagEdges) with TDD
+- [ ] 11-02-PLAN.md — Components: AgentDagPanel with TaskDagNode/ScoreFlowEdge custom types, page integration as third view mode, human verification
 
 ### Phase 18: Adapter Foundation
 **Goal**: The dashboard can connect to and control Claude Code via a stable, agent-agnostic adapter interface — with persistent sessions, typed events, and config-driven agent selection
@@ -414,7 +415,7 @@ Phases execute in milestone order: 1-6 (v1.0) -> 7-11 (v1.1) -> 18-23 (v1.2) -> 
 | 8. Agent Event Vocabulary | 1/2 | In Progress|  | - |
 | 9. Three-Panel Dashboard | 2/2 | Complete   | 2026-03-15 | - |
 | 10. Agent Board + Codex Bridge | 3/3 | Complete   | 2026-03-15 | - |
-| 11. DAG Visualization | v1.1 | 0/? | Not started | - |
+| 11. DAG Visualization | v1.1 | 0/2 | Not started | - |
 | 18. Adapter Foundation | v1.2 | 0/? | Not started | - |
 | 19. Activity Stream + Session Management | v1.2 | 0/? | Not started | - |
 | 20. Chat + Control Surface | v1.2 | 0/? | Not started | - |
