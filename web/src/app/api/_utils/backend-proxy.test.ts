@@ -10,7 +10,7 @@ vi.mock("./auth-headers", () => ({
   withBackendAuth: withBackendAuthMock,
 }))
 
-import { apiBaseUrl, proxyJson, proxyStream, proxyText } from "./backend-proxy"
+import { apiBaseUrl, proxyBinary, proxyJson, proxyStream, proxyText } from "./backend-proxy"
 
 describe("apiBaseUrl", () => {
   it("uses the shared backend base URL helper", () => {
@@ -248,5 +248,54 @@ describe("backend proxy helpers", () => {
 
     expect(res.headers.get("content-type")).toContain("application/json")
     await expect(res.json()).resolves.toEqual({ done: true })
+  })
+
+  it("preserves binary download headers and auth for protected exports", async () => {
+    withBackendAuthMock.mockResolvedValue({
+      Accept: "*/*",
+      authorization: "Bearer export-token",
+    })
+
+    const fetchMock = vi.fn(async () =>
+      new Response("bibtex-body", {
+        status: 200,
+        headers: {
+          "content-type": "application/x-bibtex",
+          "content-disposition": "attachment; filename=papers.bib",
+        },
+      }),
+    )
+    global.fetch = fetchMock as typeof fetch
+
+    const req = new Request("https://localhost/api/papers/export?format=bibtex", {
+      method: "GET",
+    })
+    const res = await proxyBinary(
+      req,
+      "https://backend/api/research/papers/export?format=bibtex",
+      "GET",
+      {
+        accept: "*/*",
+        auth: true,
+      },
+    )
+
+    expect(withBackendAuthMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://backend/api/research/papers/export?format=bibtex",
+      {
+        method: "GET",
+        headers: {
+          Accept: "*/*",
+          authorization: "Bearer export-token",
+        },
+        body: undefined,
+        signal: expect.any(AbortSignal),
+      },
+    )
+    expect(res.status).toBe(200)
+    expect(await res.text()).toBe("bibtex-body")
+    expect(res.headers.get("content-type")).toContain("application/x-bibtex")
+    expect(res.headers.get("content-disposition")).toContain("papers.bib")
   })
 })

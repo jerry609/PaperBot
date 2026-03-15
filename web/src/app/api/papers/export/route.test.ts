@@ -1,46 +1,29 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-const { withBackendAuthMock } = vi.hoisted(() => ({
-  withBackendAuthMock: vi.fn(),
+const { apiBaseUrlMock, proxyBinaryMock } = vi.hoisted(() => ({
+  apiBaseUrlMock: vi.fn(() => "http://backend.example.com"),
+  proxyBinaryMock: vi.fn(),
 }))
 
-vi.mock("@/app/api/_utils/auth-headers", () => ({
-  withBackendAuth: withBackendAuthMock,
-}))
-
-vi.mock("@/app/api/research/_base", () => ({
-  apiBaseUrl: () => "http://backend.example.com",
+vi.mock("@/app/api/_utils/backend-proxy", () => ({
+  apiBaseUrl: apiBaseUrlMock,
+  proxyBinary: proxyBinaryMock,
 }))
 
 import { GET } from "./route"
 
 describe("papers export proxy", () => {
-  const originalFetch = global.fetch
-
   beforeEach(() => {
     vi.resetAllMocks()
+    apiBaseUrlMock.mockReturnValue("http://backend.example.com")
   })
 
   afterEach(() => {
-    global.fetch = originalFetch
+    vi.clearAllMocks()
   })
 
-  it("forwards backend auth headers to the protected export endpoint", async () => {
-    withBackendAuthMock.mockResolvedValue({
-      Accept: "*/*",
-      authorization: "Bearer export-token",
-    })
-
-    const fetchMock = vi.fn(async () =>
-      new Response("bibtex-body", {
-        status: 200,
-        headers: {
-          "content-type": "application/x-bibtex",
-          "content-disposition": "attachment; filename=papers.bib",
-        },
-      }),
-    )
-    global.fetch = fetchMock as typeof fetch
+  it("proxies protected exports through the shared binary helper", async () => {
+    proxyBinaryMock.mockResolvedValueOnce(new Response("bibtex-body"))
 
     const res = await GET(
       new Request("http://localhost/api/papers/export?format=bibtex", {
@@ -48,20 +31,34 @@ describe("papers export proxy", () => {
       }),
     )
 
-    expect(withBackendAuthMock).toHaveBeenCalledTimes(1)
-    expect(fetchMock).toHaveBeenCalledWith(
+    expect(proxyBinaryMock).toHaveBeenCalledWith(
+      expect.any(Request),
       "http://backend.example.com/api/research/papers/export?format=bibtex",
+      "GET",
       {
-        method: "GET",
-        headers: {
-          Accept: "*/*",
-          authorization: "Bearer export-token",
-        },
+        accept: "*/*",
+        auth: true,
+        onError: expect.any(Function),
       },
     )
-    expect(res.status).toBe(200)
+    expect(res).toBeInstanceOf(Response)
     expect(await res.text()).toBe("bibtex-body")
-    expect(res.headers.get("Content-Type")).toBe("application/x-bibtex")
-    expect(res.headers.get("Content-Disposition")).toBe("attachment; filename=papers.bib")
+
+    const calls = vi.mocked(proxyBinaryMock).mock.calls as unknown[][]
+    const options = calls[0]?.[3] as
+      | { onError?: (context: { error: unknown; isTimeout: boolean; upstreamUrl: string }) => Response }
+      | undefined
+    const fallback = options?.onError?.({
+      error: new Error("offline"),
+      isTimeout: false,
+      upstreamUrl: "http://backend.example.com/api/research/papers/export?format=bibtex",
+    })
+
+    expect(fallback).toBeInstanceOf(Response)
+    expect(fallback?.status).toBe(502)
+    await expect(fallback?.json()).resolves.toEqual({
+      detail: "Upstream API unreachable",
+      error: "offline",
+    })
   })
 })
