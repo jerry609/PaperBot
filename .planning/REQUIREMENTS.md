@@ -55,7 +55,7 @@ Requirements for Agent Orchestration Dashboard milestone. Each maps to roadmap p
 - [x] **DASH-01**: User can view agent orchestration in a three-panel IDE layout (tasks | activity | files)
 - [ ] **DASH-02**: User can manage agent tasks via Kanban board showing Claude Code and Codex agent identity
 - [ ] **DASH-03**: User can see Codex-specific error states (timeout, sandbox crash) surfaced prominently
-- [ ] **DASH-04**: User can resize panels in the three-panel layout to customize workspace
+- [x] **DASH-04**: User can resize panels in the three-panel layout to customize workspace
 
 ### File Visualization
 
@@ -222,7 +222,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | DASH-01 | Phase 9 | Complete |
 | DASH-02 | Phase 10 | Pending |
 | DASH-03 | Phase 10 | Pending |
-| DASH-04 | Phase 9 | Pending |
+| DASH-04 | Phase 9 | Complete |
 | FILE-01 | Phase 9 | Complete |
 | FILE-02 | Phase 9 | Complete |
 | CDX-01 | Phase 10 | Pending |
