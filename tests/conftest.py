@@ -26,7 +26,6 @@ if str(project_root) not in sys.path:
 collect_ignore = [
     str(Path(__file__).parent / "test_code_analysis_fallback.py"),
     str(Path(__file__).parent / "test_conference_agent_stats.py"),
-    str(Path(__file__).parent / "test_influence_recency.py"),
     str(Path(__file__).parent / "test_literature_grounding.py"),
     str(Path(__file__).parent / "test_render_report_latest.py"),
 ]
