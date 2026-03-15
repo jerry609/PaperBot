@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from repro import Blueprint, PaperContext, PlanningNode, ReproductionPlan
+from paperbot.repro import Blueprint, PaperContext, PlanningNode, ReproductionPlan
 
 
 @pytest.fixture

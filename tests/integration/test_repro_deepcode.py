@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from repro import (
+from paperbot.repro import (
     AgentResult,
     Blueprint,
     CodeKnowledgeBase,

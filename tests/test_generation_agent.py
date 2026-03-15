@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from repro import Blueprint, GenerationNode, ImplementationSpec, ReproductionPlan
+from paperbot.repro import Blueprint, GenerationNode, ImplementationSpec, ReproductionPlan
 
 
 def test_generation_node_fallback_templates_cover_known_and_generic_files():

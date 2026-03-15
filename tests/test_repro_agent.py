@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from repro import (
+from paperbot.repro import (
     EnvironmentSpec,
     ExecutionResult,
     ImplementationSpec,

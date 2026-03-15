@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from repro import (
+from paperbot.repro import (
     ImplementationSpec,
     PaperContext,
     ReproductionPlan,

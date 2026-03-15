@@ -1,7 +1,7 @@
 # tests/conftest.py
 """
 Pytest configuration and fixtures.
-Adds src/paperbot to sys.path so imports work correctly.
+Adds the project `src` directory to `sys.path` so `paperbot` imports resolve in tests.
 """
 
 import sys
