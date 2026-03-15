@@ -94,7 +94,7 @@ Plans:
 
 - [x] **Phase 7: EventBus + SSE Foundation** - In-process event bus with SSE subscription endpoint for real-time push (completed 2026-03-14)
 - [ ] **Phase 8: Agent Event Vocabulary** - Extend AgentEventEnvelope types and build activity feed, lifecycle indicators, and tool call timeline
-- [ ] **Phase 9: Three-Panel Dashboard** - Frontend store, SSE hook, and three-panel IDE layout with file visualization
+- [x] **Phase 9: Three-Panel Dashboard** - Frontend store, SSE hook, and three-panel IDE layout with file visualization (completed 2026-03-15)
 - [ ] **Phase 10: Agent Board + Codex Bridge** - Kanban board generalization, Codex worker agent definition, and overflow delegation
 - [ ] **Phase 11: DAG Visualization** - Task dependency DAG and cross-agent context sharing visualization
 
@@ -302,7 +302,7 @@ Phases execute in numeric order: 3 -> 4 -> 5 -> 6 (v1.0) -> 7 -> 8 -> ... -> 11 
 | 6. Agent Skills | v1.0 | 1/1 | Complete | 2026-03-14 |
 | 7. EventBus + SSE Foundation | v1.1 | 2/2 | Complete | 2026-03-14 |
 | 8. Agent Event Vocabulary | 1/2 | In Progress|  | - |
-| 9. Three-Panel Dashboard | 1/2 | In Progress|  | - |
+| 9. Three-Panel Dashboard | 2/2 | Complete   | 2026-03-15 | - |
 | 10. Agent Board + Codex Bridge | v1.1 | 0/? | Not started | - |
 | 11. DAG Visualization | v1.1 | 0/? | Not started | - |
 | 12. PG Infrastructure & Schema | v2.0 | 0/? | Not started | - |

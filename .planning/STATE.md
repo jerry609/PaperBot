@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Agent Orchestration Dashboard
 status: executing
-stopped_at: Completed 09-01-PLAN.md
-last_updated: "2026-03-15T03:19:09.618Z"
-last_activity: 2026-03-15 — Completed 08-02-PLAN.md (frontend event consumer layer)
+stopped_at: Completed 09-02-PLAN.md (checkpoint:human-verify pending)
+last_updated: "2026-03-15T03:28:00.000Z"
+last_activity: 2026-03-15 — Completed 09-02-PLAN.md tasks 1-2 (three-panel agent dashboard UI)
 progress:
   total_phases: 15
   completed_phases: 6
   total_plans: 13
-  completed_plans: 12
+  completed_plans: 13
 ---
 
 # Project State
@@ -24,10 +24,10 @@ See: .planning/PROJECT.md (updated 2026-03-15)
 
 ## Current Position
 
-Phase: 8 of 17 (Agent Event Vocabulary)
+Phase: 9 of 17 (Three-Panel Dashboard)
 Plan: 2 completed
-Status: Active — executing phase plans
-Last activity: 2026-03-15 — Completed 08-02-PLAN.md (frontend event consumer layer)
+Status: Active — awaiting human verification checkpoint (Task 3)
+Last activity: 2026-03-15 — Completed 09-02-PLAN.md tasks 1-2 (three-panel agent dashboard UI)
 
 ## Milestones
 
@@ -66,6 +66,7 @@ Last activity: 2026-03-15 — Completed 08-02-PLAN.md (frontend event consumer l
 | Phase 08-agent-event-vocabulary P01 | 2min | 2 tasks | 4 files |
 | Phase 08-agent-event-vocabulary P02 | 6min | 2 tasks | 10 files |
 | Phase 09 P01 | 3 | 2 tasks | 8 files |
+| Phase 09 P02 | 8min | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -98,6 +99,9 @@ Recent decisions affecting current work:
 - [Phase 08-agent-event-vocabulary P02]: tool_call type added to TOOL_TYPES in parsers.ts alongside tool_result and tool_error (handles pre-result events)
 - [Phase 09]: [Phase 09-01] parseFileTouched handles two event shapes: explicit file_change type and tool_result with payload.tool=='write_file' (fallback path)
 - [Phase 09]: [Phase 09-01] Store 20-run eviction uses Object.keys(updated)[0] deletion; path dedup within run_id is first-wins
+- [Phase 09]: [Phase 09-02] TasksPanel derives run_ids from feed[].raw.run_id (ActivityFeedItem.raw has run_id; top-level item does not)
+- [Phase 09]: [Phase 09-02] FileListPanel toggles in-place between file list and InlineDiffPanel via Zustand selectedFile (no URL/router change)
+- [Phase 09]: [Phase 09-02] AgentStatusPanel compact=false default preserves backward compatibility with /agent-events page
 
 ### Pending Todos
 
@@ -112,6 +116,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-15T03:19:09.614Z
-Stopped at: Completed 09-01-PLAN.md
+Last session: 2026-03-15T03:28:00.000Z
+Stopped at: Completed 09-02-PLAN.md (checkpoint:human-verify for visual verification pending)
 Resume file: None
