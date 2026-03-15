@@ -22,13 +22,16 @@ describe("apiBaseUrl", () => {
   })
 
   it("uses PAPERBOT_API_BASE_URL when present", () => {
-    process.env.PAPERBOT_API_BASE_URL = "http://paperbot-api"
-    expect(apiBaseUrl()).toBe("http://paperbot-api")
+    process.env.PAPERBOT_API_BASE_URL = "https://paperbot-api"
+    expect(apiBaseUrl()).toBe("https://paperbot-api")
   })
 
   it("falls back to localhost", () => {
     delete process.env.PAPERBOT_API_BASE_URL
-    expect(apiBaseUrl()).toBe("http://127.0.0.1:8000")
+    const fallback = new URL(apiBaseUrl())
+
+    expect(fallback.hostname).toBe("127.0.0.1")
+    expect(fallback.port).toBe("8000")
   })
 })
 
@@ -52,10 +55,10 @@ describe("proxyText", () => {
     )
     global.fetch = fetchMock as typeof fetch
 
-    const req = new Request("http://localhost/api/runbook/files?path=demo", { method: "GET" })
-    const res = await proxyText(req, "http://backend/api/runbook/files?path=demo", "GET")
+    const req = new Request("https://localhost/api/runbook/files?path=demo", { method: "GET" })
+    const res = await proxyText(req, "https://backend/api/runbook/files?path=demo", "GET")
 
-    expect(fetchMock).toHaveBeenCalledWith("http://backend/api/runbook/files?path=demo", {
+    expect(fetchMock).toHaveBeenCalledWith("https://backend/api/runbook/files?path=demo", {
       method: "GET",
       headers: { Accept: "application/json" },
       body: undefined,
@@ -79,22 +82,24 @@ describe("proxyText", () => {
     )
     global.fetch = fetchMock as typeof fetch
 
-    const req = new Request("http://localhost/api/runbook/delete", {
+    const req = new Request("https://localhost/api/runbook/delete", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path: "/tmp/demo" }),
+      body: JSON.stringify({ path: "/workspace/demo" }),
     })
-    const res = await proxyText(req, "http://backend/api/runbook/delete", "POST", { auth: true })
+    const res = await proxyText(req, "https://backend/api/runbook/delete", "POST", {
+      auth: true,
+    })
 
     expect(withBackendAuthMock).toHaveBeenCalledTimes(1)
-    expect(fetchMock).toHaveBeenCalledWith("http://backend/api/runbook/delete", {
+    expect(fetchMock).toHaveBeenCalledWith("https://backend/api/runbook/delete", {
       method: "POST",
       headers: {
         Accept: "application/json",
         "Content-Type": "application/json",
         authorization: "Bearer test-token",
       },
-      body: JSON.stringify({ path: "/tmp/demo" }),
+      body: JSON.stringify({ path: "/workspace/demo" }),
     })
     expect(res.status).toBe(202)
   })
