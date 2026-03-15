@@ -27,9 +27,7 @@ const cli = meow(`
     --title, -t     Paper title
     --doi, -d       Paper DOI
     --abstract, -a  Paper abstract
-    --output, -o    Output directory
     --run-id        Run ID for sandbox logs
-    --stream        Enable streaming output
     --no-banner     Disable startup banner
 
   Examples
@@ -58,17 +56,8 @@ const cli = meow(`
       type: 'string',
       shortFlag: 'a',
     },
-    output: {
-      type: 'string',
-      shortFlag: 'o',
-      default: './output',
-    },
     runId: {
       type: 'string',
-    },
-    stream: {
-      type: 'boolean',
-      default: true,
     },
     banner: {
       type: 'boolean',

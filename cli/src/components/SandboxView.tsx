@@ -2,7 +2,7 @@
  * SandboxView Component - Main sandbox management interface
  *
  * Features:
- * - Tab navigation (Queue, History, Submit)
+ * - Tab navigation (Queue, History)
  * - System status display
  * - Keyboard shortcuts
  */
@@ -12,10 +12,9 @@ import { Box, Text, useApp, useInput } from 'ink';
 import { client } from '../utils/api.js';
 import { QueuePanel } from './sandbox/QueuePanel.js';
 import { HistoryPanel } from './sandbox/HistoryPanel.js';
-import { SubmitPanel } from './sandbox/SubmitPanel.js';
 import { LogView } from './sandbox/LogView.js';
 
-type TabType = 'queue' | 'history' | 'submit';
+type TabType = 'queue' | 'history';
 type ViewMode = 'tabs' | 'logs';
 
 interface SystemStatusData {
@@ -72,7 +71,7 @@ export const SandboxView: React.FC<SandboxViewProps> = ({
     if (viewMode === 'tabs') {
       if (key.tab || input === '\t') {
         // Cycle through tabs
-        const tabs: TabType[] = ['queue', 'history', 'submit'];
+        const tabs: TabType[] = ['queue', 'history'];
         const currentIndex = tabs.indexOf(activeTab);
         const nextIndex = (currentIndex + 1) % tabs.length;
         setActiveTab(tabs[nextIndex]);
@@ -81,7 +80,6 @@ export const SandboxView: React.FC<SandboxViewProps> = ({
       // Number shortcuts for tabs
       if (input === '1') setActiveTab('queue');
       if (input === '2') setActiveTab('history');
-      if (input === '3') setActiveTab('submit');
     }
 
     // Back from logs view
@@ -115,7 +113,7 @@ export const SandboxView: React.FC<SandboxViewProps> = ({
             <Text color="yellow">Tab</Text> - Cycle through tabs
           </Text>
           <Text>
-            <Text color="yellow">1/2/3</Text> - Jump to Queue/History/Submit
+            <Text color="yellow">1/2</Text> - Jump to Queue/History
           </Text>
           <Text>
             <Text color="yellow">j/k</Text> - Navigate up/down in lists
@@ -163,7 +161,6 @@ export const SandboxView: React.FC<SandboxViewProps> = ({
             tabs={[
               { key: 'queue', label: '1. Queue' },
               { key: 'history', label: '2. History' },
-              { key: 'submit', label: '3. Submit' },
             ]}
             activeTab={activeTab}
             onSelect={setActiveTab}
@@ -176,7 +173,6 @@ export const SandboxView: React.FC<SandboxViewProps> = ({
         <Box flexDirection="column">
           {activeTab === 'queue' && <QueuePanel onViewLogs={handleViewLogs} />}
           {activeTab === 'history' && <HistoryPanel onViewLogs={handleViewLogs} />}
-          {activeTab === 'submit' && <SubmitPanel onJobSubmitted={handleViewLogs} />}
         </Box>
       )}
 
@@ -188,7 +184,7 @@ export const SandboxView: React.FC<SandboxViewProps> = ({
       <Box marginTop={1} borderStyle="single" borderColor="gray" paddingX={1}>
         <Text color="gray">
           {viewMode === 'tabs'
-            ? 'Tab: switch | 1-3: jump | ?: help | Ctrl+C: exit'
+            ? 'Tab: switch | 1-2: jump | ?: help | Ctrl+C: exit'
             : 'q/Esc: back | c: cancel | r: retry | ?: help'}
         </Text>
       </Box>

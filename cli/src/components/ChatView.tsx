@@ -6,7 +6,7 @@ import React, { useState, useCallback } from 'react';
 import { Box, Text, useInput, useApp } from 'ink';
 import TextInput from 'ink-text-input';
 import Spinner from 'ink-spinner';
-import { client, StreamEvent } from '../utils/api.js';
+import { client } from '../utils/api.js';
 
 interface Message {
   role: 'user' | 'assistant' | 'system';
