@@ -1,6 +1,6 @@
 export const runtime = "nodejs"
 
-import { apiBaseUrl, proxyJson } from "../../_base"
+import { apiBaseUrl, proxyJson } from "@/app/api/_utils/auth-json-proxy"
 
 interface Context {
   params: Promise<{ collectionId: string }>

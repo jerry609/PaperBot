@@ -9,7 +9,7 @@ const { proxyStreamMock } = vi.hoisted(() => ({
   proxyStreamMock: vi.fn(),
 }))
 
-vi.mock("../../_base", () => ({
+vi.mock("@/app/api/_utils/auth-json-proxy", () => ({
   apiBaseUrl: researchApiBaseUrlMock,
   proxyJson: proxyJsonMock,
 }))

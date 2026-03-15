@@ -1,4 +1,4 @@
-import { apiBaseUrl, proxyJson } from "../../../../../_base"
+import { apiBaseUrl, proxyJson } from "@/app/api/_utils/auth-json-proxy"
 import type { NextRequest } from "next/server"
 
 export const runtime = "nodejs"
