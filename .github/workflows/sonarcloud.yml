@@ -15,16 +15,15 @@ concurrency:
   group: sonarcloud-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
-permissions:
-  contents: read
-  pull-requests: read
-
 jobs:
   scan:
     name: SonarCloud Scan
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    permissions:
+      contents: read
+      pull-requests: read
     env:
       PYTHONPATH: src
       PAPERBOT_DB_URL: sqlite:///data/paperbot-ci.db
