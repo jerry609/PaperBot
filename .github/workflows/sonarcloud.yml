@@ -28,6 +28,9 @@ jobs:
     env:
       PYTHONPATH: src
       PAPERBOT_DB_URL: sqlite:///data/paperbot-ci.db
+      SONAR_ORGANIZATION: ${{ vars.SONAR_ORGANIZATION || 'jerry609' }}
+      SONAR_PROJECT_KEY: ${{ vars.SONAR_PROJECT_KEY || 'jerry609_PaperBot' }}
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
     steps:
       - name: Checkout repository
@@ -35,24 +38,31 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Validate SonarCloud settings
+      - name: Check SonarCloud settings
+        id: sonar_config
         shell: bash
-        env:
-          SONAR_ORGANIZATION: ${{ vars.SONAR_ORGANIZATION }}
-          SONAR_PROJECT_KEY: ${{ vars.SONAR_PROJECT_KEY }}
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: |
           set -euo pipefail
-          test -n "${SONAR_ORGANIZATION}" || { echo "Missing repository variable SONAR_ORGANIZATION"; exit 1; }
-          test -n "${SONAR_PROJECT_KEY}" || { echo "Missing repository variable SONAR_PROJECT_KEY"; exit 1; }
-          test -n "${SONAR_TOKEN}" || { echo "Missing repository secret SONAR_TOKEN"; exit 1; }
+          if [ -z "${SONAR_TOKEN}" ]; then
+            echo "scan_enabled=false" >> "${GITHUB_OUTPUT}"
+            {
+              echo "### SonarCloud scan skipped"
+              echo
+              echo "Repository secret SONAR_TOKEN is not configured."
+              echo "The workflow remains available and will start scanning once the secret is added."
+            } >> "${GITHUB_STEP_SUMMARY}"
+            exit 0
+          fi
+          echo "scan_enabled=true" >> "${GITHUB_OUTPUT}"
 
       - name: Set up Python
+        if: steps.sonar_config.outputs.scan_enabled == 'true'
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
       - name: Cache pip
+        if: steps.sonar_config.outputs.scan_enabled == 'true'
         uses: actions/cache@v4
         with:
           path: ~/.cache/pip
@@ -61,14 +71,17 @@ jobs:
             ${{ runner.os }}-sonar-pip-
 
       - name: Install backend dependencies
+        if: steps.sonar_config.outputs.scan_enabled == 'true'
         run: |
           python -m pip install -U pip
           python -m pip install -r requirements-ci.txt
 
       - name: Run backend tests with coverage
+        if: steps.sonar_config.outputs.scan_enabled == 'true'
         run: bash scripts/ci/run_backend_offline_gates.sh --cov=src --cov-report=xml:coverage.xml
 
       - name: Set up Node.js
+        if: steps.sonar_config.outputs.scan_enabled == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -76,14 +89,17 @@ jobs:
           cache-dependency-path: web/package-lock.json
 
       - name: Install web dependencies
+        if: steps.sonar_config.outputs.scan_enabled == 'true'
         working-directory: web
         run: npm ci
 
       - name: Run web tests with coverage
+        if: steps.sonar_config.outputs.scan_enabled == 'true'
         working-directory: web
         run: npm run test:coverage
 
       - name: Cache SonarCloud packages
+        if: steps.sonar_config.outputs.scan_enabled == 'true'
         uses: actions/cache@v4
         with:
           path: ~/.sonar/cache
@@ -92,13 +108,12 @@ jobs:
             ${{ runner.os }}-sonar-cache
 
       - name: SonarCloud scan
+        if: steps.sonar_config.outputs.scan_enabled == 'true'
         uses: SonarSource/sonarqube-scan-action@a31c9398be7ace6bbfaf30c0bd5d415f843d45e9 # v7.0.0
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         with:
           args: >
-            -Dsonar.organization=${{ vars.SONAR_ORGANIZATION }}
-            -Dsonar.projectKey=${{ vars.SONAR_PROJECT_KEY }}
+            -Dsonar.organization=${{ env.SONAR_ORGANIZATION }}
+            -Dsonar.projectKey=${{ env.SONAR_PROJECT_KEY }}
             -Dsonar.qualitygate.wait=true
             -Dsonar.qualitygate.timeout=300
 
