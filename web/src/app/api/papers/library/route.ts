@@ -1,4 +1,4 @@
-import { apiBaseUrl, proxyJson } from "../../research/_base"
+import { apiBaseUrl, proxyJson } from "@/app/api/_utils/auth-json-proxy"
 
 export async function GET(req: Request) {
   const url = new URL(req.url)

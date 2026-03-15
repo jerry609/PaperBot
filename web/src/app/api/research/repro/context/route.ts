@@ -1,4 +1,4 @@
-import { apiBaseUrl, proxyJson } from "../../_base"
+import { apiBaseUrl, proxyJson } from "@/app/api/_utils/auth-json-proxy"
 import { proxyStream } from "@/app/api/_utils/backend-proxy"
 
 export const runtime = "nodejs"

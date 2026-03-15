@@ -5,14 +5,14 @@ const { sharedApiBaseUrlMock, sharedProxyJsonMock } = vi.hoisted(() => ({
   sharedProxyJsonMock: vi.fn(),
 }))
 
-vi.mock("../_utils/backend-proxy", () => ({
+vi.mock("./backend-proxy", () => ({
   apiBaseUrl: sharedApiBaseUrlMock,
   proxyJson: sharedProxyJsonMock,
 }))
 
-import { apiBaseUrl, proxyJson } from "./_base"
+import { apiBaseUrl, proxyJson } from "./auth-json-proxy"
 
-describe("research base proxy", () => {
+describe("auth json proxy", () => {
   it("delegates backend base URL resolution to the shared helper", () => {
     expect(apiBaseUrl()).toBe("https://backend.test")
     expect(sharedApiBaseUrlMock).toHaveBeenCalledTimes(1)

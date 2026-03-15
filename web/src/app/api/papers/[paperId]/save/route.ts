@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { apiBaseUrl, proxyJson } from "../../../research/_base"
+import { apiBaseUrl, proxyJson } from "@/app/api/_utils/auth-json-proxy"
 
 // Validate paperId to prevent path traversal attacks
 function validatePaperId(paperId: string): number | null {

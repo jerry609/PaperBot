@@ -1,6 +1,6 @@
 export const runtime = "nodejs"
 
-import { apiBaseUrl, proxyJson } from "../../_base"
+import { apiBaseUrl, proxyJson } from "@/app/api/_utils/auth-json-proxy"
 
 export async function PATCH(req: Request, context: { params: Promise<{ scholarRef: string }> }) {
   const params = await context.params
