@@ -2,15 +2,12 @@
 """
 PaperBot 工具函数模块
 
-包含:
+暴露当前仍在主代码路径中使用的通用工具：
 - logger: 日志配置
 - downloader: 论文下载器
 - retry_helper: 重试机制
 - json_parser: JSON 解析
 - text_processing: 文本处理
-- search: 搜索工具
-- analyzer: 分析工具
-- conference_*: 会议相关工具
 """
 
 from paperbot.utils.logger import setup_logger, LogContext, log_with_context
