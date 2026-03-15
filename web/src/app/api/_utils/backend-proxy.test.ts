@@ -225,10 +225,7 @@ describe("backend proxy helpers", () => {
     })
 
     const fetchMock = vi.fn(async () =>
-      new Response(JSON.stringify({ done: true }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      }),
+      new Response(new TextEncoder().encode(JSON.stringify({ done: true })), { status: 200 }),
     )
     global.fetch = fetchMock as typeof fetch
 

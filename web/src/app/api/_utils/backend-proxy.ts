@@ -101,7 +101,7 @@ export async function proxyStream(
     ) {
       const text = await upstream.text()
       return buildTextResponse(text, upstream, {
-        responseContentType: requestOptions.responseContentType ?? "application/json",
+        responseContentType: "application/json",
         responseHeaders: undefined,
       })
     }
