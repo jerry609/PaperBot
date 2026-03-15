@@ -155,24 +155,6 @@ function formatWorkspaceLabel(outputDir: string | null | undefined): string {
   return segments[segments.length - 1]
 }
 
-function WorkbenchMetric({
-  label,
-  value,
-  hint,
-}: {
-  label: string
-  value: string
-  hint: string
-}) {
-  return (
-    <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
-      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">{label}</p>
-      <p className="mt-2 text-sm font-semibold text-slate-900">{value}</p>
-      <p className="mt-1 text-[11px] text-slate-500">{hint}</p>
-    </div>
-  )
-}
-
 function taskStatusLabel(status: AgentTask["status"]): string {
   if (status === "in_progress") return "Running"
   if (status === "repairing") return "Repairing"
@@ -273,18 +255,82 @@ function TaskRail({
 function LeftRail({
   selectedPaperTitle,
   selectedSessionId,
+  selectedPaperStatus,
+  projectDir,
+  contextLabel,
+  contextHint,
+  activeAgents,
+  subagentEvents,
+  onOpenInVSCode,
   tasks,
   activeView,
   onViewChange,
 }: {
   selectedPaperTitle: string
   selectedSessionId: string | null
+  selectedPaperStatus: StudioPaperStatus
+  projectDir: string | null
+  contextLabel: string
+  contextHint: string
+  activeAgents: number
+  subagentEvents: number
+  onOpenInVSCode: () => void
   tasks: AgentTask[]
   activeView: LeftRailView
   onViewChange: (value: LeftRailView) => void
 }) {
   return (
     <div className="flex h-full min-h-0 flex-col bg-slate-50">
+      <div className="border-b border-slate-200 bg-[#f4f5f1] px-3 py-3">
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+              Paper Summary
+            </p>
+            <h2 className="mt-1 truncate text-sm font-semibold text-slate-900">{selectedPaperTitle}</h2>
+            {selectedSessionId ? (
+              <p className="mt-1 font-mono text-[11px] text-slate-500">{selectedSessionId}</p>
+            ) : (
+              <p className="mt-1 text-[11px] text-slate-500">No active session</p>
+            )}
+          </div>
+          <span
+            className={`shrink-0 rounded-full border px-2 py-1 text-[10px] font-medium ${paperStatusClassName(selectedPaperStatus)}`}
+          >
+            {paperStatusLabel(selectedPaperStatus)}
+          </span>
+        </div>
+
+        <dl className="mt-3 space-y-2 text-[11px]">
+          <div className="flex items-start justify-between gap-3 border-t border-slate-200 pt-2">
+            <dt className="shrink-0 font-semibold uppercase tracking-[0.14em] text-slate-500">Workspace</dt>
+            <dd className="min-w-0 text-right text-slate-700">{formatWorkspaceLabel(projectDir)}</dd>
+          </div>
+          <div className="flex items-start justify-between gap-3">
+            <dt className="shrink-0 font-semibold uppercase tracking-[0.14em] text-slate-500">Context</dt>
+            <dd className="min-w-0 text-right text-slate-700">{contextLabel}</dd>
+          </div>
+          <div className="flex items-start justify-between gap-3">
+            <dt className="shrink-0 font-semibold uppercase tracking-[0.14em] text-slate-500">Subagents</dt>
+            <dd className="min-w-0 text-right text-slate-700">{activeAgents} active / {subagentEvents} total</dd>
+          </div>
+        </dl>
+
+        <p className="mt-2 line-clamp-2 text-[11px] text-slate-500">{contextHint}</p>
+
+        <Button
+          variant="outline"
+          size="sm"
+          className="mt-3 h-8 w-full justify-center gap-1.5 border-slate-200 text-slate-700"
+          onClick={onOpenInVSCode}
+          disabled={!projectDir}
+          title={projectDir ? `Open ${projectDir} in VS Code` : "Set up a workspace first"}
+        >
+          <ExternalLink className="h-3.5 w-3.5" />
+          Open Workspace
+        </Button>
+      </div>
+
       <Tabs
         value={activeView}
         onValueChange={(value) => onViewChange(value as LeftRailView)}
@@ -765,28 +811,6 @@ export function AgentWorkspace({
           </div>
         </div>
 
-        <div className="grid gap-3 border-t border-slate-200 bg-slate-50 px-4 py-3 md:grid-cols-2 xl:grid-cols-4">
-          <WorkbenchMetric
-            label="Paper"
-            value={selectedPaperTitle}
-            hint={`${paperStatusLabel(selectedPaperStatus)} workflow`}
-          />
-          <WorkbenchMetric
-            label="Workspace"
-            value={formatWorkspaceLabel(projectDir)}
-            hint={projectDir ? "Connected project directory" : "Required for CC code runs"}
-          />
-          <WorkbenchMetric
-            label="Context"
-            value={contextLabel}
-            hint={selectedPaper?.contextPackId || contextPack?.context_pack_id || "No context pack yet"}
-          />
-          <WorkbenchMetric
-            label="Subagents"
-            value={`${activeAgents} active / ${codexDelegations.length} total`}
-            hint="CC delegation runtime"
-          />
-        </div>
       </div>
 
       <div ref={desktopLayoutRef} className="hidden flex-1 min-h-0 overflow-hidden bg-slate-100 lg:flex">
@@ -798,6 +822,17 @@ export function AgentWorkspace({
             <LeftRail
               selectedPaperTitle={selectedPaperTitle}
               selectedSessionId={selectedSessionId}
+              selectedPaperStatus={selectedPaperStatus}
+              projectDir={projectDir}
+              contextLabel={contextLabel}
+              contextHint={selectedPaper?.contextPackId || contextPack?.context_pack_id || "No context pack yet"}
+              activeAgents={activeAgents}
+              subagentEvents={codexDelegations.length}
+              onOpenInVSCode={() => {
+                if (projectDir) {
+                  window.open(`vscode://file${projectDir}`, "_blank")
+                }
+              }}
               tasks={boardTasks}
               activeView={leftRailView}
               onViewChange={setLeftRailView}
@@ -845,6 +880,17 @@ export function AgentWorkspace({
             <LeftRail
               selectedPaperTitle={selectedPaperTitle}
               selectedSessionId={selectedSessionId}
+              selectedPaperStatus={selectedPaperStatus}
+              projectDir={projectDir}
+              contextLabel={contextLabel}
+              contextHint={selectedPaper?.contextPackId || contextPack?.context_pack_id || "No context pack yet"}
+              activeAgents={activeAgents}
+              subagentEvents={codexDelegations.length}
+              onOpenInVSCode={() => {
+                if (projectDir) {
+                  window.open(`vscode://file${projectDir}`, "_blank")
+                }
+              }}
               tasks={boardTasks}
               activeView="threads"
               onViewChange={() => {}}
