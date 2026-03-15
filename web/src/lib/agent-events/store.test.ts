@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest"
 import { useAgentEventStore } from "./store"
-import type { ActivityFeedItem, AgentStatusEntry, ToolCallEntry } from "./types"
+import type { ActivityFeedItem, AgentStatusEntry, FileTouchedEntry, ToolCallEntry } from "./types"
 
 function makeItem(i: number): ActivityFeedItem {
   return {
@@ -26,6 +26,16 @@ function makeToolCall(i: number): ToolCallEntry {
     duration_ms: 100,
     ts: `2026-03-15T00:00:${String(i).padStart(2, "0")}Z`,
     status: "ok",
+  }
+}
+
+function makeFileTouched(runId: string, path: string, i: number = 0): FileTouchedEntry {
+  return {
+    run_id: runId,
+    path,
+    status: "modified",
+    ts: `2026-03-15T00:00:${String(i).padStart(2, "0")}Z`,
+    linesAdded: 5,
   }
 }
 
@@ -152,6 +162,54 @@ describe("useAgentEventStore", () => {
       useAgentEventStore.getState().updateAgentStatus(agentB)
       expect(useAgentEventStore.getState().agentStatuses["AgentA"].status).toBe("working")
       expect(useAgentEventStore.getState().agentStatuses["AgentB"].status).toBe("errored")
+    })
+  })
+
+  describe("addFileTouched", () => {
+    it("adds entry under correct run_id key", () => {
+      const entry = makeFileTouched("run-1", "src/main.py", 0)
+      useAgentEventStore.getState().addFileTouched(entry)
+      const state = useAgentEventStore.getState()
+      expect(state.filesTouched["run-1"]).toBeDefined()
+      expect(state.filesTouched["run-1"][0].path).toBe("src/main.py")
+    })
+
+    it("deduplicates same path within same run_id (second add is ignored)", () => {
+      const entry1 = makeFileTouched("run-1", "src/main.py", 0)
+      const entry2 = makeFileTouched("run-1", "src/main.py", 1)
+      useAgentEventStore.getState().addFileTouched(entry1)
+      useAgentEventStore.getState().addFileTouched(entry2)
+      expect(useAgentEventStore.getState().filesTouched["run-1"]).toHaveLength(1)
+    })
+
+    it("evicts oldest run_id when exceeding 20 runs", () => {
+      // Add 21 distinct run IDs
+      for (let i = 0; i < 21; i++) {
+        const entry = makeFileTouched(`run-evict-${i}`, "src/x.py", i)
+        useAgentEventStore.getState().addFileTouched(entry)
+      }
+      const keys = Object.keys(useAgentEventStore.getState().filesTouched)
+      expect(keys.length).toBe(20)
+      // run-evict-0 was the first added, should be evicted
+      expect(keys).not.toContain("run-evict-0")
+    })
+
+    it("setSelectedRunId updates selectedRunId", () => {
+      useAgentEventStore.getState().setSelectedRunId("run-abc")
+      expect(useAgentEventStore.getState().selectedRunId).toBe("run-abc")
+    })
+
+    it("setSelectedFile updates selectedFile", () => {
+      const file = makeFileTouched("run-1", "src/utils.py", 0)
+      useAgentEventStore.getState().setSelectedFile(file)
+      expect(useAgentEventStore.getState().selectedFile?.path).toBe("src/utils.py")
+    })
+
+    it("initial state has filesTouched={}, selectedRunId=null, selectedFile=null", () => {
+      const state = useAgentEventStore.getState()
+      expect(state.filesTouched).toEqual({})
+      expect(state.selectedRunId).toBeNull()
+      expect(state.selectedFile).toBeNull()
     })
   })
 })

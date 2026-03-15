@@ -79,3 +79,17 @@ export type ToolCallEntry = {
   ts: string
   status: "ok" | "error"
 }
+
+export type FileChangeStatus = "created" | "modified"
+
+export type FileTouchedEntry = {
+  run_id: string
+  path: string
+  status: FileChangeStatus
+  ts: string
+  linesAdded?: number
+  linesDeleted?: number
+  diff?: string
+  oldContent?: string
+  newContent?: string
+}

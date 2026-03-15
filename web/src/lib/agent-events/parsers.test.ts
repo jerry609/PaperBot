@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { parseActivityItem, parseAgentStatus, parseToolCall } from "./parsers"
+import { parseActivityItem, parseAgentStatus, parseToolCall, parseFileTouched } from "./parsers"
 import type { AgentEventEnvelopeRaw } from "./types"
 
 const BASE_ENVELOPE: AgentEventEnvelopeRaw = {
@@ -142,5 +142,85 @@ describe("parseToolCall", () => {
   it("generates id from run_id + tool + ts", () => {
     const result = parseToolCall(TOOL_ENVELOPE)
     expect(result?.id).toBe("run-1-paper_search-2026-03-15T01:00:00Z")
+  })
+})
+
+describe("parseFileTouched", () => {
+  const FILE_CHANGE_ENVELOPE: AgentEventEnvelopeRaw = {
+    type: "file_change",
+    run_id: "run-fc-1",
+    trace_id: "trace-fc-1",
+    agent_name: "CodingAgent",
+    workflow: "repro",
+    stage: "generation",
+    ts: "2026-03-15T02:00:00Z",
+    payload: {
+      path: "src/main.py",
+      status: "modified",
+      lines_added: 10,
+      lines_deleted: 2,
+    },
+  }
+
+  it("returns FileTouchedEntry for file_change event with path/status/lines_added", () => {
+    const result = parseFileTouched(FILE_CHANGE_ENVELOPE)
+    expect(result).not.toBeNull()
+    expect(result?.run_id).toBe("run-fc-1")
+    expect(result?.path).toBe("src/main.py")
+    expect(result?.status).toBe("modified")
+    expect(result?.ts).toBe("2026-03-15T02:00:00Z")
+    expect(result?.linesAdded).toBe(10)
+    expect(result?.linesDeleted).toBe(2)
+  })
+
+  it("returns FileTouchedEntry for tool_result with payload.tool=='write_file' (fallback path)", () => {
+    const raw: AgentEventEnvelopeRaw = {
+      type: "tool_result",
+      run_id: "run-fc-2",
+      ts: "2026-03-15T02:01:00Z",
+      payload: {
+        tool: "write_file",
+        arguments: { path: "src/utils.py", content: "# code" },
+        result_summary: "written",
+        error: null,
+      },
+    }
+    const result = parseFileTouched(raw)
+    expect(result).not.toBeNull()
+    expect(result?.path).toBe("src/utils.py")
+    expect(result?.run_id).toBe("run-fc-2")
+  })
+
+  it("returns null for lifecycle events (agent_started)", () => {
+    const raw = { ...BASE_ENVELOPE, type: "agent_started" }
+    expect(parseFileTouched(raw)).toBeNull()
+  })
+
+  it("returns null for tool_result with payload.tool!='write_file'", () => {
+    const raw: AgentEventEnvelopeRaw = {
+      type: "tool_result",
+      run_id: "run-fc-3",
+      ts: "2026-03-15T02:02:00Z",
+      payload: {
+        tool: "paper_search",
+        arguments: {},
+        result_summary: "found",
+        error: null,
+      },
+    }
+    expect(parseFileTouched(raw)).toBeNull()
+  })
+
+  it("returns null when run_id is missing", () => {
+    const { run_id: _rid, ...raw } = FILE_CHANGE_ENVELOPE
+    expect(parseFileTouched(raw as AgentEventEnvelopeRaw)).toBeNull()
+  })
+
+  it("returns null when path is empty or missing", () => {
+    const raw: AgentEventEnvelopeRaw = {
+      ...FILE_CHANGE_ENVELOPE,
+      payload: { ...FILE_CHANGE_ENVELOPE.payload, path: "" },
+    }
+    expect(parseFileTouched(raw)).toBeNull()
   })
 })

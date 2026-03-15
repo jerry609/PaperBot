@@ -1,6 +1,6 @@
 "use client"
 
-import type { ActivityFeedItem, AgentStatus, AgentStatusEntry, AgentEventEnvelopeRaw, ToolCallEntry } from "./types"
+import type { ActivityFeedItem, AgentStatus, AgentStatusEntry, AgentEventEnvelopeRaw, ToolCallEntry, FileTouchedEntry } from "./types"
 
 const LIFECYCLE_TYPES = new Set([
   "agent_started",
@@ -81,5 +81,42 @@ export function parseToolCall(raw: AgentEventEnvelopeRaw): ToolCallEntry | null 
       raw.type === "tool_error" || (typeof payload.error === "string" && payload.error)
         ? "error"
         : "ok",
+  }
+}
+
+const FILE_CHANGE_TYPES = new Set(["file_change"])
+
+export function parseFileTouched(raw: AgentEventEnvelopeRaw): FileTouchedEntry | null {
+  const t = String(raw.type ?? "")
+  const payload = (raw.payload ?? {}) as Record<string, unknown>
+
+  const isExplicitFileChange = FILE_CHANGE_TYPES.has(t)
+  const isWriteFileTool =
+    t === "tool_result" &&
+    typeof payload.tool === "string" &&
+    payload.tool === "write_file"
+
+  if (!isExplicitFileChange && !isWriteFileTool) return null
+  if (!raw.run_id || !raw.ts) return null
+
+  const path = String(
+    (isExplicitFileChange
+      ? payload.path
+      : payload.arguments
+        ? (payload.arguments as Record<string, unknown>).path
+        : undefined) ?? ""
+  )
+  if (!path) return null
+
+  return {
+    run_id: String(raw.run_id),
+    path,
+    status: (payload.status as "created" | "modified") ?? "modified",
+    ts: String(raw.ts),
+    linesAdded: typeof payload.lines_added === "number" ? payload.lines_added : undefined,
+    linesDeleted: typeof payload.lines_deleted === "number" ? payload.lines_deleted : undefined,
+    diff: typeof payload.diff === "string" ? payload.diff : undefined,
+    oldContent: typeof payload.old_content === "string" ? payload.old_content : undefined,
+    newContent: typeof payload.new_content === "string" ? payload.new_content : undefined,
   }
 }
