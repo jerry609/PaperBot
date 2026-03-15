@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Agent Orchestration Dashboard
 status: verifying
-stopped_at: Completed 10-02-PLAN.md
-last_updated: "2026-03-15T04:12:57.059Z"
+stopped_at: Completed 10-03-PLAN.md
+last_updated: "2026-03-15T04:36:37.177Z"
 last_activity: 2026-03-15 — Completed 09-02-PLAN.md tasks 1-2 (three-panel agent dashboard UI)
 progress:
   total_phases: 21
-  completed_phases: 7
+  completed_phases: 8
   total_plans: 16
-  completed_plans: 15
+  completed_plans: 16
 ---
 
 # Project State
@@ -70,6 +70,7 @@ Last activity: 2026-03-15 — Completed 09-02-PLAN.md tasks 1-2 (three-panel age
 | Phase 09-three-panel-dashboard P02 | 8min | 3 tasks | 6 files |
 | Phase 10-agent-board-codex-bridge P01 | 5min | 1 tasks | 6 files |
 | Phase 10-agent-board-codex-bridge P02 | 8 | 2 tasks | 10 files |
+| Phase 10-agent-board-codex-bridge P10-03 | 3 | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -111,6 +112,8 @@ Recent decisions affecting current work:
 - [Phase 10-agent-board-codex-bridge]: getAllByText instead of getByText for Radix UI components — ScrollArea renders content in multiple DOM nodes causing duplicate text matches
 - [Phase 10-agent-board-codex-bridge]: vitest environmentMatchGlobs: jsdom for src/components/**/*.test.tsx, node for all other tests (faster pure-logic tests)
 - [Phase 10-agent-board-codex-bridge]: extractCodexFailureReason iterates executionLog from end (most recent), checks event==='task_failed' + codex_diagnostics.reason_code, falls back to lastError
+- [Phase 10-agent-board-codex-bridge]: KanbanBoard at page level (not inside SplitPanels) to avoid horizontal scroll conflict
+- [Phase 10-agent-board-codex-bridge]: codex-worker.md tools: only Bash and Read — always available in Claude Code without extra config
 
 ### Pending Todos
 
@@ -131,6 +134,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-15T04:12:57.053Z
-Stopped at: Completed 10-02-PLAN.md
+Last session: 2026-03-15T04:36:37.172Z
+Stopped at: Completed 10-03-PLAN.md
 Resume file: None
