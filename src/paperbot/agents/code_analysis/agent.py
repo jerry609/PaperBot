@@ -43,6 +43,8 @@ class CodeAnalysisAgent(BaseAgent):
         # 如果是单仓库模式，尝试返回扁平化结果适配 Coordinator
         if "repo_url" in kwargs and result['analysis_results']:
             repo_result = result['analysis_results'][0]
+            if repo_result.get("placeholder"):
+                return repo_result
             return self._flatten_result(repo_result)
             
         return result
@@ -64,7 +66,8 @@ class CodeAnalysisAgent(BaseAgent):
             "stars": meta.get("stars"),
             "forks": meta.get("forks"),
             "language": structure.get('primary_language', 'Unknown'),
-            "updated_at": meta.get("last_commit_at"),
+            "updated_at": meta.get("updated_at") or meta.get("last_commit_at"),
+            "last_commit_date": meta.get("last_commit_date") or meta.get("last_commit_at"),
             "has_readme": structure.get('documentation', {}).get('has_readme', False),
             "reproducibility_score": quality.get('overall_score', 0) * 100,
             "quality_notes": str(quality.get('recommendations', [])),
@@ -125,6 +128,7 @@ class CodeAnalysisAgent(BaseAgent):
             "forks": None,
             "language": None,
             "updated_at": None,
+            "last_commit_date": None,
             "has_readme": False,
             "reproducibility_score": None,
             "quality_notes": f"Repository unavailable: {reason}",
@@ -226,6 +230,7 @@ class CodeAnalysisAgent(BaseAgent):
             last_commit = next(repo.iter_commits(max_count=1), None)
             if last_commit:
                 meta["last_commit_at"] = last_commit.committed_datetime.isoformat()
+                meta["last_commit_date"] = meta["last_commit_at"]
         except Exception as e:
             self.log_error(e, {"repo_meta": "commit_time"})
 
@@ -245,8 +250,8 @@ class CodeAnalysisAgent(BaseAgent):
                         data = resp.json()
                         meta["stars"] = data.get("stargazers_count")
                         meta["forks"] = data.get("forks_count")
+                        meta["updated_at"] = data.get("updated_at")
         except Exception as e:
             self.log_error(e, {"repo_meta": "github_api"})
 
         return meta
-

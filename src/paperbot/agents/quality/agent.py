@@ -5,7 +5,6 @@
 
 from typing import Dict, List, Any, Optional
 from enum import Enum
-from pathlib import Path
 from ..base import BaseAgent
 
 
@@ -37,45 +36,50 @@ class QualityAgent(BaseAgent):
 
     async def process(self, *args, **kwargs) -> Dict[str, Any]:
         """处理代码质量评估"""
-        # 适配 Coordinator 调用：process(context)
-        analysis_results = None
-        if args and isinstance(args[0], dict):
-            context = args[0]
-            # 如果上下文中有 code_analysis 结果，使用它
-            if "code_analysis" in context and isinstance(context["code_analysis"], dict):
-                # 如果是扁平化结果，没法做深入分析，只能返回空或模拟值
-                if "analysis_results" not in context["code_analysis"]:
-                     return self._process_flat_result(context)
-                analysis_results = context["code_analysis"]
-            elif "analysis_results" in context:
-                analysis_results = context
-        elif kwargs and "analysis_results" in kwargs:
-            analysis_results = kwargs["analysis_results"]
-            
-        if not analysis_results:
-             # 无法进行深入分析，返回基础结构
-             return {
-                 'quality_scores': {},
-                 'summary': "无法进行深入质量评估（缺少代码分析详情）",
-                 'overall_assessment': "暂无代码详情，无法评估。",
-                 'strengths': [],
-                 'weaknesses': []
-             }
+        analysis_input = self._extract_analysis_input(*args, **kwargs)
+        if not analysis_input:
+            return {
+                'quality_score': 0.0,
+                'quality_scores': {},
+                'summary': "无法进行深入质量评估（缺少代码分析详情）",
+                'overall_assessment': "暂无代码详情，无法评估。",
+                'strengths': [],
+                'weaknesses': [],
+            }
+
+        if self._is_flat_result(analysis_input):
+            return self._process_flat_result(analysis_input)
 
         try:
             quality_scores = {}
-            for repo_result in analysis_results.get('analysis_results', []):
-                quality_scores[repo_result['repo_url']] = await self._evaluate_quality(
-                    repo_result['analysis']
-                )
+            repo_entries = self._normalize_repo_entries(analysis_input)
+            for repo_result in repo_entries:
+                repo_url = repo_result.get('repo_url') or repo_result.get('repo_name') or 'unknown'
+                if repo_result.get('placeholder'):
+                    quality_scores[repo_url] = self._placeholder_quality(repo_result)
+                    continue
+
+                analysis = repo_result.get('analysis', repo_result)
+                quality_scores[repo_url] = await self._evaluate_quality(analysis)
+
+            overall_values = [
+                score['overall_score']
+                for score in quality_scores.values()
+                if isinstance(score, dict)
+            ]
+            overall_score = (
+                sum(overall_values) / len(overall_values)
+                if overall_values
+                else 0.0
+            )
 
             return {
+                'quality_score': overall_score,
                 'quality_scores': quality_scores,
                 'summary': await self._generate_quality_summary(quality_scores),
-                # 添加 Coordinator 需要的字段
                 'overall_assessment': await self._generate_quality_summary(quality_scores),
-                'strengths': [],  # TODO: 从 scores 中提取
-                'weaknesses': []
+                'strengths': self._collect_strengths(quality_scores),
+                'weaknesses': self._collect_weaknesses(quality_scores),
             }
         except Exception as e:
             self.log_error(e)
@@ -83,12 +87,32 @@ class QualityAgent(BaseAgent):
 
     def _process_flat_result(self, context: Dict[str, Any]) -> Dict[str, Any]:
         """处理扁平化的上下文（通常只有元数据）"""
+        raw_score = context.get('reproducibility_score')
+        quality_score = float(raw_score or 0.0)
+        if quality_score > 1.0:
+            quality_score /= 100.0
+
+        strengths = []
+        if context.get('has_readme'):
+            strengths.append("仓库包含 README")
+        if raw_score is not None:
+            strengths.append(f"代码复现度信号: {float(raw_score):.0f}/100")
+
+        weaknesses = []
+        if context.get('placeholder'):
+            weaknesses.append(f"仓库分析不可用: {context.get('reason', 'unknown')}")
+        else:
+            weaknesses.append("当前仅有仓库元数据，缺少静态分析细节")
+
         return {
+            'quality_score': quality_score,
             'quality_scores': {},
             'summary': "基于元数据的基础评估",
-            'overall_assessment': "代码已公开，但未进行深度静态分析。",
-            'strengths': ["代码开源"],
-            'weaknesses': ["缺少深度质量指标"]
+            'overall_assessment': (
+                "代码仓库已发现，但当前链路只拿到了元数据，尚未建立完整静态分析画像。"
+            ),
+            'strengths': strengths or ["代码开源"],
+            'weaknesses': weaknesses,
         }
 
     async def _generate_quality_summary(self, quality_scores: Dict[str, Any]) -> str:
@@ -129,21 +153,15 @@ class QualityAgent(BaseAgent):
     async def _analyze_complexity(self, analysis: Dict[str, Any]) -> float:
         """分析代码复杂度"""
         try:
-            complexity_metrics = analysis['structure_analysis'].get('complexity', {})
+            quality_metrics = analysis.get('quality_analysis', {})
+            if 'complexity_score' in quality_metrics:
+                return min(1.0, max(0.0, float(quality_metrics.get('complexity_score', 0.0))))
 
-            # 计算加权分数
-            weights = {
-                'cyclomatic_complexity': 0.4,
-                'cognitive_complexity': 0.3,
-                'nesting_depth': 0.3
-            }
-
-            score = sum(
-                weights[metric] * value
-                for metric, value in complexity_metrics.items()
-            )
-
-            return min(1.0, max(0.0, 1.0 - score / 10.0))
+            complexity_metrics = analysis.get('structure_analysis', {}).get('complexity', {})
+            total_complexity = float(complexity_metrics.get('overall_complexity', 0.0) or 0.0)
+            file_count = max(1, len(complexity_metrics.get('file_complexity', {})))
+            average_complexity = total_complexity / file_count
+            return min(1.0, max(0.0, 1.0 - (average_complexity / 20.0)))
         except Exception as e:
             self.log_error(e)
             return 0.0
@@ -151,20 +169,15 @@ class QualityAgent(BaseAgent):
     async def _analyze_maintainability(self, analysis: Dict[str, Any]) -> float:
         """分析可维护性"""
         try:
-            maintainability_metrics = analysis['quality_analysis'].get('maintainability', {})
+            quality_metrics = analysis.get('quality_analysis', {})
+            if 'maintainability_score' in quality_metrics:
+                return min(1.0, max(0.0, float(quality_metrics.get('maintainability_score', 0.0))))
 
-            factors = {
-                'code_duplication': 0.3,
-                'comment_ratio': 0.2,
-                'function_length': 0.2,
-                'naming_convention': 0.3
-            }
-
-            score = sum(
-                factors[metric] * value
-                for metric, value in maintainability_metrics.items()
-            )
-
+            overall = float(quality_metrics.get('overall_score', 0.0) or 0.0)
+            documentation = float(quality_metrics.get('documentation_score', 0.0) or 0.0)
+            complexity = float(quality_metrics.get('complexity_score', 0.0) or 0.0)
+            has_readme = 1.0 if quality_metrics.get('has_readme') else 0.0
+            score = (overall * 0.5) + (documentation * 0.2) + (complexity * 0.2) + (has_readme * 0.1)
             return min(1.0, max(0.0, score))
         except Exception as e:
             self.log_error(e)
@@ -173,20 +186,19 @@ class QualityAgent(BaseAgent):
     async def _analyze_security(self, analysis: Dict[str, Any]) -> float:
         """分析安全性"""
         try:
-            security_metrics = analysis['security_analysis']
+            security_metrics = analysis.get('security_analysis', {})
+            vulnerabilities = security_metrics.get('vulnerabilities', []) or []
+            dependency_security = security_metrics.get('dependency_security', {}) or {}
+            dependency_vulns = float(dependency_security.get('total_vulnerabilities', 0.0) or 0.0)
 
-            # 评估各个安全指标
-            weights = {
-                'vulnerability_count': 0.4,
-                'security_best_practices': 0.3,
-                'dependency_security': 0.3
-            }
-
-            score = sum(
-                weights[metric] * (1.0 - value / 10.0)
-                for metric, value in security_metrics.items()
-            )
-
+            vulnerability_score = max(0.0, 1.0 - ((len(vulnerabilities) + dependency_vulns) / 5.0))
+            measures = security_metrics.get('security_measures', {}) or {}
+            coverage = [
+                1.0 if self._security_measure_present(value) else 0.0
+                for value in measures.values()
+            ]
+            measures_score = sum(coverage) / len(coverage) if coverage else 0.0
+            score = (vulnerability_score * 0.7) + (measures_score * 0.3)
             return min(1.0, max(0.0, score))
         except Exception as e:
             self.log_error(e)
@@ -195,19 +207,16 @@ class QualityAgent(BaseAgent):
     async def _analyze_documentation(self, analysis: Dict[str, Any]) -> float:
         """分析文档质量"""
         try:
-            doc_metrics = analysis['structure_analysis'].get('documentation', {})
-
-            weights = {
-                'docstring_coverage': 0.4,
-                'readme_quality': 0.3,
-                'api_documentation': 0.3
-            }
-
-            score = sum(
-                weights[metric] * value
-                for metric, value in doc_metrics.items()
+            doc_metrics = analysis.get('structure_analysis', {}).get('documentation', {})
+            docstring_coverage = float(doc_metrics.get('docstring_coverage', 0.0) or 0.0)
+            readme_quality = float(doc_metrics.get('readme_quality', 0.0) or 0.0)
+            api_docs = doc_metrics.get('api_documentation', {}) or {}
+            api_coverage = float(api_docs.get('coverage', 0.0) or 0.0)
+            score = (
+                (docstring_coverage * 0.5)
+                + (readme_quality * 0.3)
+                + (api_coverage * 0.2)
             )
-
             return min(1.0, max(0.0, score))
         except Exception as e:
             self.log_error(e)
@@ -216,23 +225,42 @@ class QualityAgent(BaseAgent):
     async def _analyze_test_coverage(self, analysis: Dict[str, Any]) -> float:
         """分析测试覆盖率"""
         try:
-            test_metrics = analysis['quality_analysis'].get('testing', {})
+            quality_metrics = analysis.get('quality_analysis', {})
+            if 'test_coverage_score' in quality_metrics:
+                return min(1.0, max(0.0, float(quality_metrics.get('test_coverage_score', 0.0))))
 
-            weights = {
-                'line_coverage': 0.4,
-                'branch_coverage': 0.3,
-                'test_quality': 0.3
-            }
+            files = analysis.get('structure_analysis', {}).get('files', {})
+            file_paths = files.get('file_paths', [])
+            if not file_paths:
+                return 0.0
 
-            score = sum(
-                weights[metric] * value
-                for metric, value in test_metrics.items()
+            test_count = sum(1 for path in file_paths if self._is_test_file(path))
+            code_count = sum(
+                1 for path in file_paths if self._is_source_file(path) and not self._is_test_file(path)
             )
+            if not code_count:
+                return 0.0
 
-            return min(1.0, max(0.0, score))
+            ratio = test_count / code_count
+            return min(1.0, max(0.0, ratio * 2.0))
         except Exception as e:
             self.log_error(e)
             return 0.0
+
+    def _is_test_file(self, path: str) -> bool:
+        return (
+            path.startswith('tests/')
+            or '/tests/' in path
+            or path.endswith('_test.py')
+            or path.endswith('.spec.ts')
+            or path.endswith('.test.ts')
+            or path.endswith('.test.tsx')
+            or path.endswith('.spec.js')
+            or path.endswith('.test.js')
+        )
+
+    def _is_source_file(self, path: str) -> bool:
+        return path.endswith(('.py', '.ts', '.tsx', '.js', '.jsx'))
 
     def _calculate_overall_score(self, scores: Dict[str, float]) -> float:
         """计算总体质量分数"""
@@ -257,6 +285,86 @@ class QualityAgent(BaseAgent):
                 )
 
         return recommendations
+
+    def _extract_analysis_input(self, *args, **kwargs) -> Optional[Dict[str, Any]]:
+        if args and isinstance(args[0], dict):
+            context = args[0]
+            for key in ('code_analysis_result', 'code_analysis', 'analysis_results'):
+                value = context.get(key)
+                if isinstance(value, dict):
+                    return value
+            if any(key in context for key in ('structure_analysis', 'repo_url', 'placeholder')):
+                return context
+
+        for key in ('code_analysis_result', 'analysis_results'):
+            value = kwargs.get(key)
+            if isinstance(value, dict):
+                return value
+
+        return None
+
+    def _is_flat_result(self, analysis_input: Dict[str, Any]) -> bool:
+        if 'analysis_results' in analysis_input or 'structure_analysis' in analysis_input:
+            return False
+        return any(
+            key in analysis_input
+            for key in ('repo_url', 'repo_name', 'reproducibility_score', 'placeholder')
+        )
+
+    def _normalize_repo_entries(self, analysis_input: Dict[str, Any]) -> List[Dict[str, Any]]:
+        if 'analysis_results' in analysis_input:
+            entries = analysis_input.get('analysis_results') or []
+            return [entry for entry in entries if isinstance(entry, dict)]
+
+        if 'structure_analysis' in analysis_input:
+            return [{'repo_url': analysis_input.get('repo_url', 'unknown'), 'analysis': analysis_input}]
+
+        return []
+
+    def _placeholder_quality(self, repo_result: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            'scores': {
+                QualityMetric.CODE_COMPLEXITY.value: 0.0,
+                QualityMetric.MAINTAINABILITY.value: 0.0,
+                QualityMetric.SECURITY.value: 0.0,
+                QualityMetric.DOCUMENTATION.value: 0.0,
+                QualityMetric.TEST_COVERAGE.value: 0.0,
+            },
+            'overall_score': 0.0,
+            'recommendations': [f"Repository unavailable: {repo_result.get('reason', 'unknown')}"],
+            'status': "需要改进",
+        }
+
+    def _collect_strengths(self, quality_scores: Dict[str, Any]) -> List[str]:
+        strengths: List[str] = []
+        for score in quality_scores.values():
+            if not isinstance(score, dict):
+                continue
+            metric_scores = score.get('scores', {})
+            if metric_scores.get(QualityMetric.DOCUMENTATION.value, 0.0) >= 0.7:
+                strengths.append("文档完整度较好")
+            if metric_scores.get(QualityMetric.SECURITY.value, 0.0) >= 0.7:
+                strengths.append("安全基线较稳定")
+            if metric_scores.get(QualityMetric.TEST_COVERAGE.value, 0.0) >= 0.6:
+                strengths.append("测试信号较强")
+
+        return list(dict.fromkeys(strengths))
+
+    def _collect_weaknesses(self, quality_scores: Dict[str, Any]) -> List[str]:
+        weaknesses: List[str] = []
+        for score in quality_scores.values():
+            if not isinstance(score, dict):
+                continue
+            weaknesses.extend(score.get('recommendations', []))
+        return list(dict.fromkeys(weaknesses))
+
+    def _security_measure_present(self, value: Any) -> bool:
+        if isinstance(value, dict):
+            if value.get('present'):
+                return True
+            matches = value.get('matches')
+            return isinstance(matches, list) and bool(matches)
+        return bool(value)
 
     def _determine_status(self, overall_score: float) -> str:
         """确定代码质量状态"""
@@ -298,4 +406,3 @@ class QualityAgent(BaseAgent):
         }
 
         return recommendations.get(metric, "一般性改进建议")
-
