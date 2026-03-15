@@ -41,9 +41,12 @@ function statusConfig(status: AgentStatus) {
   }
 }
 
-function AgentStatusBadge({ entry }: { entry: AgentStatusEntry }) {
+function AgentStatusBadge({ entry, compact }: { entry: AgentStatusEntry; compact?: boolean }) {
   const cfg = statusConfig(entry.status)
   const Icon = cfg.icon
+  const displayName = compact
+    ? entry.agent_name.slice(0, 12) + (entry.agent_name.length > 12 ? "…" : "")
+    : entry.agent_name
 
   return (
     <div
@@ -54,42 +57,44 @@ function AgentStatusBadge({ entry }: { entry: AgentStatusEntry }) {
         className={`${cfg.colorClass} shrink-0 ${cfg.spin ? "animate-spin" : ""}`}
       />
       <div className="min-w-0">
-        <div className="text-xs font-medium text-gray-200 truncate">{entry.agent_name}</div>
+        <div className="text-xs font-medium text-gray-200 truncate">{displayName}</div>
         <div className={`text-xs ${cfg.colorClass}`}>{cfg.label}</div>
       </div>
     </div>
   )
 }
 
-export function AgentStatusPanel() {
+export function AgentStatusPanel({ compact = false }: { compact?: boolean }) {
   const agentStatuses = useAgentEventStore((s) => s.agentStatuses)
   const connected = useAgentEventStore((s) => s.connected)
   const entries = Object.values(agentStatuses)
 
   return (
     <div className="flex flex-col gap-2 p-3">
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-gray-200">Agent Status</h3>
-        <div className="flex items-center gap-1.5">
-          {connected ? (
-            <>
-              <Wifi size={12} className="text-green-400" />
-              <span className="text-xs text-green-400">Connected</span>
-            </>
-          ) : (
-            <>
-              <WifiOff size={12} className="text-amber-400" />
-              <span className="text-xs text-amber-400">Connecting...</span>
-            </>
-          )}
+      {!compact && (
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-gray-200">Agent Status</h3>
+          <div className="flex items-center gap-1.5">
+            {connected ? (
+              <>
+                <Wifi size={12} className="text-green-400" />
+                <span className="text-xs text-green-400">Connected</span>
+              </>
+            ) : (
+              <>
+                <WifiOff size={12} className="text-amber-400" />
+                <span className="text-xs text-amber-400">Connecting...</span>
+              </>
+            )}
+          </div>
         </div>
-      </div>
+      )}
       {entries.length === 0 ? (
         <div className="text-xs text-gray-500">No agents active</div>
       ) : (
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
+        <div className={compact ? "grid grid-cols-1 gap-2" : "grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4"}>
           {entries.map((entry) => (
-            <AgentStatusBadge key={entry.agent_name} entry={entry} />
+            <AgentStatusBadge key={entry.agent_name} entry={entry} compact={compact} />
           ))}
         </div>
       )}
