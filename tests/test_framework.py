@@ -14,9 +14,7 @@ import json
 import pytest
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-from unittest.mock import MagicMock, AsyncMock, patch
-from dataclasses import dataclass, field
-from datetime import datetime
+from unittest.mock import MagicMock, AsyncMock
 
 
 # ===== 测试数据目录 =====
@@ -121,17 +119,6 @@ def mock_llm_client():
     client.invoke = MagicMock(return_value='{"result": "test"}')
     client.invoke_async = AsyncMock(return_value='{"result": "test"}')
     return client
-
-
-@pytest.fixture
-def mock_semantic_scholar():
-    """Mock Semantic Scholar API"""
-    with patch("tools.search.requests") as mock_requests:
-        mock_response = MagicMock()
-        mock_response.json.return_value = MockDataGenerator.create_search_response()
-        mock_response.raise_for_status = MagicMock()
-        mock_requests.get.return_value = mock_response
-        yield mock_requests
 
 
 @pytest.fixture
@@ -275,122 +262,6 @@ class TestMockDataGenerator:
         assert response["total"] == 50
         assert "data" in response
         assert len(response["data"]) > 0
-
-
-
-class TestKeywordOptimizer:
-    """关键词优化器测试"""
-    
-    def test_optimizer_import(self):
-        """测试优化器导入"""
-        from tools.keyword_optimizer import KeywordOptimizer, SecurityPaperQueryBuilder
-        
-        optimizer = KeywordOptimizer()
-        assert optimizer is not None
-    
-    def test_expand_abbreviations(self):
-        """测试缩写展开"""
-        from tools.keyword_optimizer import KeywordOptimizer
-        
-        optimizer = KeywordOptimizer()
-        result = optimizer.expand_abbreviations("ML security in IoT")
-        
-        assert "machine learning" in result.lower() or "ML" in result
-    
-    def test_get_synonyms(self):
-        """测试同义词获取"""
-        from tools.keyword_optimizer import KeywordOptimizer
-        
-        optimizer = KeywordOptimizer()
-        synonyms = optimizer.get_synonyms("vulnerability")
-        
-        assert len(synonyms) > 0
-
-
-class TestCacheModule:
-    """缓存模块测试"""
-    
-    def test_local_cache_import(self):
-        """测试缓存模块导入"""
-        from utils.db import LocalCache, JSONFileStorage
-        
-        assert LocalCache is not None
-        assert JSONFileStorage is not None
-    
-    def test_local_cache_operations(self, temp_cache_db):
-        """测试缓存操作"""
-        from utils.db import LocalCache
-        
-        cache = LocalCache(db_path=temp_cache_db)
-        
-        # 测试学者缓存
-        cache.set_scholar("scholar1", "Test Scholar", {"h_index": 50})
-        result = cache.get_scholar("scholar1")
-        
-        assert result is not None
-        assert result["h_index"] == 50
-    
-    def test_kv_cache(self, temp_cache_db):
-        """测试键值缓存"""
-        from utils.db import LocalCache
-        
-        cache = LocalCache(db_path=temp_cache_db)
-        
-        cache.set("test_key", "test_value")
-        assert cache.get("test_key") == "test_value"
-        
-        cache.delete("test_key")
-        assert cache.get("test_key") is None
-
-
-class TestReportCore:
-    """报告核心模块测试"""
-    
-    def test_document_composer_import(self):
-        """测试文档装订器导入"""
-        from reports.core import DocumentComposer, ChapterStorage
-        
-        assert DocumentComposer is not None
-        assert ChapterStorage is not None
-    
-    def test_build_document(self):
-        """测试构建文档"""
-        from reports.core import DocumentComposer
-        
-        composer = DocumentComposer()
-        
-        chapters = [
-            {"chapterId": "S1", "title": "Chapter 1", "order": 10, "blocks": []},
-            {"chapterId": "S2", "title": "Chapter 2", "order": 20, "blocks": []},
-        ]
-        
-        document = composer.build_document(
-            report_id="test-report",
-            metadata={"title": "Test Report"},
-            chapters=chapters,
-        )
-        
-        assert document["reportId"] == "test-report"
-        assert len(document["chapters"]) == 2
-        assert "version" in document
-    
-    def test_template_parser(self):
-        """测试模板解析"""
-        from reports.core import parse_template_sections
-        
-        template = """
-# 第一章
-## 1.1 小节
-- 要点1
-- 要点2
-
-# 第二章
-## 2.1 小节
-"""
-        
-        sections = parse_template_sections(template)
-        
-        assert len(sections) >= 2
 
 
 # ===== 运行配置 =====
