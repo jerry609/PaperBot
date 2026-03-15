@@ -2,11 +2,12 @@
 
 import { create } from "zustand"
 import type { AgentTask } from "@/lib/store/studio-store"
-import type { ActivityFeedItem, AgentStatusEntry, CodexDelegationEntry, FileTouchedEntry, ToolCallEntry } from "./types"
+import type { ActivityFeedItem, AgentStatusEntry, CodexDelegationEntry, FileTouchedEntry, ScoreEdgeEntry, ToolCallEntry } from "./types"
 
 const FEED_MAX = 200
 const TOOL_TIMELINE_MAX = 100
 const CODEX_DELEGATIONS_MAX = 100
+const SCORE_EDGES_MAX = 200
 
 interface AgentEventState {
   // SSE connection status
@@ -38,6 +39,10 @@ interface AgentEventState {
   // Codex delegation events — newest first, capped at CODEX_DELEGATIONS_MAX
   codexDelegations: CodexDelegationEntry[]
   addCodexDelegation: (entry: CodexDelegationEntry) => void
+
+  // ScoreShareBus edges — upserted by id, capped at SCORE_EDGES_MAX
+  scoreEdges: ScoreEdgeEntry[]
+  addScoreEdge: (entry: ScoreEdgeEntry) => void
 
   // Kanban task board — upserted by task id
   kanbanTasks: AgentTask[]
@@ -95,6 +100,18 @@ export const useAgentEventStore = create<AgentEventState>((set) => ({
     set((s) => ({
       codexDelegations: [entry, ...s.codexDelegations].slice(0, CODEX_DELEGATIONS_MAX),
     })),
+
+  scoreEdges: [],
+  addScoreEdge: (entry) =>
+    set((s) => {
+      const idx = s.scoreEdges.findIndex((e) => e.id === entry.id)
+      if (idx !== -1) {
+        const next = [...s.scoreEdges]
+        next[idx] = entry
+        return { scoreEdges: next }
+      }
+      return { scoreEdges: [entry, ...s.scoreEdges].slice(0, SCORE_EDGES_MAX) }
+    }),
 
   kanbanTasks: [],
   upsertKanbanTask: (task) =>

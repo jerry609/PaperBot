@@ -114,6 +114,7 @@ export interface AgentTask {
     executionLog?: AgentTaskLog[]
     humanReviews?: Array<{ id: string; decision: string; notes: string; timestamp: string }>
     paperId?: string
+    depends_on?: string[]
 }
 
 export type GenCodeResult = {

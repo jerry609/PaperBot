@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { parseActivityItem, parseAgentStatus, parseToolCall, parseFileTouched, parseCodexDelegation } from "./parsers"
+import { parseActivityItem, parseAgentStatus, parseToolCall, parseFileTouched, parseCodexDelegation, parseScoreEdge } from "./parsers"
 import type { AgentEventEnvelopeRaw } from "./types"
 
 const BASE_ENVELOPE: AgentEventEnvelopeRaw = {
@@ -300,6 +300,113 @@ describe("parseCodexDelegation", () => {
   it("generates deterministic id from type + task_id + ts", () => {
     const result = parseCodexDelegation(CODEX_DISPATCHED)
     expect(result?.id).toBe("codex_dispatched-task-abc-2026-03-15T03:00:00Z")
+  })
+})
+
+describe("parseScoreEdge", () => {
+  const SCORE_UPDATE_ENVELOPE: AgentEventEnvelopeRaw = {
+    type: "score_update",
+    run_id: "run-score-1",
+    trace_id: "trace-score-1",
+    agent_name: "JudgeAgent",
+    workflow: "scholar_pipeline",
+    stage: "research",
+    ts: "2026-03-15T05:00:00Z",
+    payload: {
+      score: { stage: "research", score: 0.85 },
+    },
+  }
+
+  it("returns null for agent_started event", () => {
+    const raw = { ...SCORE_UPDATE_ENVELOPE, type: "agent_started" }
+    expect(parseScoreEdge(raw)).toBeNull()
+  })
+
+  it("returns null for tool_result event", () => {
+    const raw = { ...SCORE_UPDATE_ENVELOPE, type: "tool_result" }
+    expect(parseScoreEdge(raw)).toBeNull()
+  })
+
+  it("returns ScoreEdgeEntry with correct id for score_update event", () => {
+    const result = parseScoreEdge(SCORE_UPDATE_ENVELOPE)
+    expect(result).not.toBeNull()
+    // id = `${from_agent}-${to_agent}-${stage}`
+    // from_agent = raw.stage = "research", to_agent = raw.workflow = "scholar_pipeline", stage = score.stage = "research"
+    expect(result?.id).toBe("research-scholar_pipeline-research")
+  })
+
+  it("uses raw.stage as from_agent context", () => {
+    const result = parseScoreEdge(SCORE_UPDATE_ENVELOPE)
+    expect(result?.from_agent).toBe("research")
+  })
+
+  it("uses raw.workflow as to_agent context", () => {
+    const result = parseScoreEdge(SCORE_UPDATE_ENVELOPE)
+    expect(result?.to_agent).toBe("scholar_pipeline")
+  })
+
+  it("extracts score number from payload.score.score", () => {
+    const result = parseScoreEdge(SCORE_UPDATE_ENVELOPE)
+    expect(result?.score).toBe(0.85)
+  })
+
+  it("extracts stage from payload.score.stage", () => {
+    const result = parseScoreEdge(SCORE_UPDATE_ENVELOPE)
+    expect(result?.stage).toBe("research")
+  })
+
+  it("returns ts from raw.ts", () => {
+    const result = parseScoreEdge(SCORE_UPDATE_ENVELOPE)
+    expect(result?.ts).toBe("2026-03-15T05:00:00Z")
+  })
+
+  it("falls back to 'ScoreShareBus' as from_agent when stage and agent_name both missing", () => {
+    const raw: AgentEventEnvelopeRaw = {
+      type: "score_update",
+      run_id: "run-2",
+      ts: "2026-03-15T05:01:00Z",
+      workflow: "my_workflow",
+      payload: { score: { stage: "quality", score: 0.7 } },
+    }
+    const result = parseScoreEdge(raw)
+    expect(result?.from_agent).toBe("ScoreShareBus")
+  })
+
+  it("falls back to 'pipeline' as to_agent when workflow is missing", () => {
+    const raw: AgentEventEnvelopeRaw = {
+      type: "score_update",
+      run_id: "run-3",
+      ts: "2026-03-15T05:02:00Z",
+      stage: "code",
+      payload: { score: { stage: "code", score: 0.5 } },
+    }
+    const result = parseScoreEdge(raw)
+    expect(result?.to_agent).toBe("pipeline")
+  })
+
+  it("defaults score to 0 when payload.score.score is not a number", () => {
+    const raw: AgentEventEnvelopeRaw = {
+      ...SCORE_UPDATE_ENVELOPE,
+      payload: { score: { stage: "research", score: "not-a-number" } },
+    }
+    const result = parseScoreEdge(raw)
+    expect(result?.score).toBe(0)
+  })
+})
+
+describe("deriveHumanSummary for score_update (via parseActivityItem)", () => {
+  it("returns 'Score update from {agent_name}' for score_update", () => {
+    const raw: AgentEventEnvelopeRaw = {
+      type: "score_update",
+      run_id: "run-su-1",
+      agent_name: "JudgeAgent",
+      workflow: "scholar_pipeline",
+      stage: "research",
+      ts: "2026-03-15T05:10:00Z",
+      payload: { score: { stage: "research", score: 0.9 } },
+    }
+    const result = parseActivityItem(raw)
+    expect(result?.summary).toBe("Score update from JudgeAgent")
   })
 })
 

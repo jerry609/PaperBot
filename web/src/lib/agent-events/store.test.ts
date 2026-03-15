@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest"
 import { useAgentEventStore } from "./store"
-import type { ActivityFeedItem, AgentStatusEntry, CodexDelegationEntry, FileTouchedEntry, ToolCallEntry } from "./types"
+import type { ActivityFeedItem, AgentStatusEntry, CodexDelegationEntry, FileTouchedEntry, ScoreEdgeEntry, ToolCallEntry } from "./types"
 
 function makeItem(i: number): ActivityFeedItem {
   return {
@@ -282,5 +282,56 @@ describe("kanbanTasks", () => {
     expect(tasks).toHaveLength(1)
     expect(tasks[0].title).toBe("Updated Task")
     expect(tasks[0].status).toBe("done")
+  })
+})
+
+function makeScoreEdge(id: string, score = 0.8): ScoreEdgeEntry {
+  return {
+    id,
+    from_agent: "research",
+    to_agent: "scholar_pipeline",
+    stage: "research",
+    score,
+    ts: "2026-03-15T05:00:00Z",
+  }
+}
+
+describe("scoreEdges", () => {
+  beforeEach(() => {
+    useAgentEventStore.setState(useAgentEventStore.getInitialState(), true)
+  })
+
+  it("addScoreEdge adds entry to scoreEdges array", () => {
+    const entry = makeScoreEdge("research-scholar_pipeline-research")
+    useAgentEventStore.getState().addScoreEdge(entry)
+    expect(useAgentEventStore.getState().scoreEdges).toHaveLength(1)
+    expect(useAgentEventStore.getState().scoreEdges[0]).toEqual(entry)
+  })
+
+  it("addScoreEdge upserts (replaces) entry with same id", () => {
+    const entry = makeScoreEdge("edge-id-1", 0.5)
+    useAgentEventStore.getState().addScoreEdge(entry)
+    const updated = makeScoreEdge("edge-id-1", 0.9)
+    useAgentEventStore.getState().addScoreEdge(updated)
+    const edges = useAgentEventStore.getState().scoreEdges
+    expect(edges).toHaveLength(1)
+    expect(edges[0].score).toBe(0.9)
+  })
+
+  it("addScoreEdge does not deduplicate entries with different ids", () => {
+    useAgentEventStore.getState().addScoreEdge(makeScoreEdge("edge-A"))
+    useAgentEventStore.getState().addScoreEdge(makeScoreEdge("edge-B"))
+    expect(useAgentEventStore.getState().scoreEdges).toHaveLength(2)
+  })
+
+  it("addScoreEdge caps at 200 entries", () => {
+    for (let i = 0; i < 201; i++) {
+      useAgentEventStore.getState().addScoreEdge(makeScoreEdge(`edge-${i}`))
+    }
+    expect(useAgentEventStore.getState().scoreEdges).toHaveLength(200)
+  })
+
+  it("initial state has scoreEdges=[]", () => {
+    expect(useAgentEventStore.getState().scoreEdges).toEqual([])
   })
 })

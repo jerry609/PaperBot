@@ -106,3 +106,12 @@ export type CodexDelegationEntry = {
   reason_code?: string
   error?: string
 }
+
+export type ScoreEdgeEntry = {
+  id: string          // `${from_agent}-${to_agent}-${stage}` dedup key
+  from_agent: string  // pipeline stage that produced the score
+  to_agent: string    // workflow/pipeline context consuming the score
+  stage: string       // score.stage (research/code/quality/influence)
+  score: number
+  ts: string
+}

@@ -1,6 +1,6 @@
 "use client"
 
-import type { ActivityFeedItem, AgentStatus, AgentStatusEntry, AgentEventEnvelopeRaw, CodexDelegationEntry, ToolCallEntry, FileTouchedEntry } from "./types"
+import type { ActivityFeedItem, AgentStatus, AgentStatusEntry, AgentEventEnvelopeRaw, CodexDelegationEntry, ScoreEdgeEntry, ToolCallEntry, FileTouchedEntry } from "./types"
 
 const LIFECYCLE_TYPES = new Set([
   "agent_started",
@@ -178,4 +178,26 @@ export function parseCodexDelegation(raw: AgentEventEnvelopeRaw): CodexDelegatio
   }
 
   return entry
+}
+
+export function parseScoreEdge(raw: AgentEventEnvelopeRaw): ScoreEdgeEntry | null {
+  if (raw.type !== "score_update") return null
+
+  const payload = (raw.payload ?? {}) as Record<string, unknown>
+  const scoreObj = (payload.score ?? {}) as Record<string, unknown>
+
+  const stage = typeof scoreObj.stage === "string" ? scoreObj.stage : String(raw.stage ?? "")
+  const from_agent = String(raw.stage ?? raw.agent_name ?? "ScoreShareBus")
+  const to_agent = String(raw.workflow ?? "pipeline")
+  const score = typeof scoreObj.score === "number" ? scoreObj.score : 0
+  const id = `${from_agent}-${to_agent}-${stage}`
+
+  return {
+    id,
+    from_agent,
+    to_agent,
+    stage,
+    score,
+    ts: String(raw.ts ?? ""),
+  }
 }
