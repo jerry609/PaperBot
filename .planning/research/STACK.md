@@ -1,247 +1,188 @@
-# Technology Stack
+# Technology Stack — v1.2 Agent Dashboard Additions
 
-**Project:** PaperBot v2.0 — PostgreSQL Migration + Async Data Layer
-**Researched:** 2026-03-14
-**Confidence:** HIGH
+**Milestone:** v1.2 DeepCode Agent Dashboard (agent-agnostic proxy + multi-agent adapter layer)
+**Researched:** 2026-03-15
+**Confidence:** HIGH (agent SDK APIs verified via official docs and npm; transport patterns confirmed)
 
 ---
 
-## Principle: Surgical Additions Only
+## Principle: Additive Only
 
-The existing stack handles every concern except async PostgreSQL access and PG-native
-feature types. This document covers only the **new packages required for v2.0** and
-exactly how they integrate with existing `SessionProvider`, `SQLAlchemy 2.0`, and
-`alembic`. Nothing is added for its own sake.
+The existing stack covers every concern except CLI agent proxying, subprocess/PTY management,
+multi-agent adapter translation, and the control-path WebSocket needed for bidirectional
+chat-to-agent communication. This document covers only the **new capabilities required for v1.2**
+and exactly how they integrate with the existing FastAPI SSE, EventBus, and @xyflow/react stack.
+
+Nothing is added for its own sake. Three areas need new libraries:
+1. **Python backend** — subprocess management for CLI-based agents + agent adapter layer
+2. **Node.js (Next.js web)** — PTY process management + WebSocket relay for terminal display
+3. **Web frontend** — WebSocket upgrade for the XTerm terminal already on the studio page
 
 ---
 
 ## What Already Exists (Do NOT Re-add)
 
-| Capability | Existing Package | Status |
+| Capability | Package | Status |
 |---|---|---|
-| SQLAlchemy ORM | `SQLAlchemy>=2.0.0` | Installed. Already uses `future=True` mode. |
-| Schema migrations | `alembic>=1.13.0` | Installed. 27 migrations. `env.py` already PG-aware. |
-| psycopg3 sync driver | `psycopg[binary]>=3.2.0` | Installed. Used in `create_db_engine` for `prepare_threshold=0`. |
-| SQLite vector search | `sqlite-vec>=0.1.6` | Installed. Optional extra — replaced by pgvector in PG. |
+| SSE streaming | FastAPI `StreamingResponse` + `EventBus` | Ships in v1.1. All agent activity events go through this path. |
+| Agent event schema | `AgentEventEnvelope` (run_id, trace_id, span_id) | Extend; never create a parallel schema. |
+| DAG visualization | `@xyflow/react ^12.10.0` | In `web/package.json`. Reuse for team decomposition graph. |
+| Monaco editor | `@monaco-editor/react ^4.7.0` | In `web/package.json`. Keep on studio page. |
+| XTerm terminal | `xterm ^5.3.0` + `xterm-addon-fit ^0.8.0` | In `web/package.json`. Needs WebSocket addon added (see below). |
+| Chat streaming | Vercel AI SDK `ai ^5.0.116` | In `web/package.json`. Use for proxy chat stream surface. |
+| MCP tool surface | `@modelcontextprotocol/sdk ^1.25.1` | In `web/package.json`. PaperBot MCP server is v1.0 prerequisite. |
+| Zustand state | `zustand ^5.0.9` | In `web/package.json`. Use for agent activity store. |
+| React panel layout | `react-resizable-panels ^4.0.11` | In `web/package.json`. Use for three-panel IDE layout. |
 
 ---
 
-## New Additions Required
+## New Additions: Python Backend
 
-### Core: Async Driver
-
-| Technology | Version | Purpose | Why |
-|---|---|---|---|
-| `asyncpg` | `>=0.31.0` | Native async PostgreSQL binary-protocol driver | Fastest Python PG driver (5x faster than psycopg3 in async benchmarks). No libpq dependency — pure asyncio. SQLAlchemy async engine uses it via `postgresql+asyncpg://` URL. The existing `psycopg[binary]` stays for Alembic migrations (Alembic runs sync DDL; async drivers are not needed there). HIGH confidence — PyPI verified. |
-
-### Core: SQLAlchemy Async Extensions
+### 1. Agent SDK — Claude Code (Claude Agent SDK)
 
 | Technology | Version | Purpose | Why |
 |---|---|---|---|
-| `sqlalchemy[asyncio]` | `>=2.0.0` (install extra, not version bump) | Unlocks `create_async_engine`, `AsyncSession`, `async_sessionmaker` | SQLAlchemy's asyncio extension requires `greenlet` which is bundled via the `[asyncio]` extra. In SQLAlchemy 2.1+ (released Jan 2026) `greenlet` is no longer auto-installed — the extra is mandatory. Since `SQLAlchemy>=2.0.0` is already pinned, this is a re-install with the extra flag, not a version change. HIGH confidence — official SQLAlchemy 2.1 changelog verified. |
+| `@anthropic-ai/claude-agent-sdk` | `^0.2.47` (npm) | Programmatic control of Claude Code CLI | The official Anthropic SDK spawns the Claude Code CLI as a subprocess, communicating via JSON-lines over stdin/stdout. Provides `query()` for one-shot tasks and `ClaudeSDKClient` for stateful multi-turn sessions. Emits typed message objects: `SystemMessage`, `AssistantMessage`, `ResultMessage`, `CompactBoundaryMessage`, `StreamEvent` (with `includePartialMessages: true`). This is the correct integration surface — do NOT shell-exec `claude -p` manually; the SDK handles process lifecycle, permission callbacks, and streaming. **Node.js side only.** |
 
-### Core: PG-Native Feature Types
+The Claude Agent SDK is a **Node.js / TypeScript library** — it must run in the Next.js API route layer (or a dedicated Node.js sidecar), not in the Python FastAPI backend. Python interacts with it via the `claude -p --output-format stream-json` CLI flag pattern if needed from Python, or delegates to the Node.js layer.
+
+**Python alternative for Claude Code subprocess (when needed directly from FastAPI):**
+Use `asyncio.create_subprocess_exec` with `claude -p <prompt> --output-format stream-json --include-partial-messages` and stream stdout line-by-line as JSONL into `AgentEventEnvelope`. This is the adapter implementation pattern (see Architecture section).
+
+### 2. Agent SDK — Codex CLI
 
 | Technology | Version | Purpose | Why |
 |---|---|---|---|
-| `pgvector` | `>=0.4.2` | `Vector` column type for SQLAlchemy + pgvector PG extension | Replaces `sqlite-vec` LargeBinary blob approach. Provides typed `Vector(N)` mapped column, HNSW/IVFFlat index helpers, and cosine/L2/inner-product distance ops inside SQLAlchemy queries. Async-compatible via `register_vector_async` + `event.listens_for`. HIGH confidence — PyPI 0.4.2 verified, official pgvector-python repo confirmed SQLAlchemy 2.0 support. |
+| `@openai/codex-sdk` | `^0.112.0` (npm) | Programmatic control of OpenAI Codex CLI | Official TypeScript SDK (`npm install @openai/codex-sdk`, Node.js 18+). API: `new Codex()` → `codex.startThread()` → `thread.run(prompt)` for stateful sessions; `thread.runStreamed(prompt)` returns an async generator of structured events (tool calls, streaming responses, file change notifications). Threads persist in `~/.codex/sessions` and can be resumed via `resumeThread(threadId)`. Internally wraps `codex exec --json` JSONL stream. **Node.js side only.** |
 
-### Development Infrastructure
+For Python-side Codex integration, use `codex exec --json <prompt>` subprocess and parse JSONL events. Event types emitted: `thread.started`, `turn.started`, `turn.completed`, `turn.failed`, `item.*` (agent messages, reasoning, command executions, file changes, MCP tool calls, web searches, plan updates). The existing `codex_dispatcher.py` uses OpenAI API directly — replace with CLI-subprocess approach for the unified adapter, or keep API path as a fallback when the CLI is not installed.
+
+### 3. Agent SDK — OpenCode
 
 | Technology | Version | Purpose | Why |
 |---|---|---|---|
-| Docker image `pgvector/pgvector:pg17` | latest (PG 17.x) | Local dev PostgreSQL with pgvector bundled | Single image replaces `postgres:17` + manual `CREATE EXTENSION vector`. The official `pgvector/pgvector` Docker Hub image is maintained alongside the extension. PG 17.3+ required (17.0–17.2 have a symbol linking bug with pgvector). MEDIUM confidence — Docker Hub and pgvector GitHub verified. |
+| `@opencode-ai/sdk` | `latest` (npm) | Type-safe client for a running OpenCode server | OpenCode exposes a REST+SSE server. The TypeScript SDK wraps it: `createOpencodeClient()` connects to a running instance; `client.event.subscribe()` returns an SSE stream of typed events (`event.type`, `event.properties`). Session methods include `sessions.prompt()`, `sessions.command()`, `sessions.shell()`. OpenCode also supports non-interactive mode: `opencode -p "prompt" -f json` for scripted use. **Node.js side only.** |
+
+### 4. No New Python Packages Required
+
+The Python adapter layer is built using stdlib only:
+
+- `asyncio.create_subprocess_exec` — spawn agent CLI processes (already used in `repro/` executors)
+- `asyncio.StreamReader.readline()` — line-by-line JSONL parsing from agent stdout
+- `abc.ABC` + `abc.abstractmethod` — abstract `AgentAdapter` base class
+- `AgentEventEnvelope` — existing event schema (extend, not replace)
+
+No new Python packages are needed for the adapter layer. The existing `codex_dispatcher.py` and `claude_commander.py` contain the patterns to extract; the new `AgentAdapter` ABC unifies them.
 
 ---
 
-## Installation Changes
+## New Additions: Web Frontend (Next.js)
+
+### 5. XTerm WebSocket Addon (Migration + Addition)
+
+| Technology | Version | Purpose | Why |
+|---|---|---|---|
+| `@xterm/addon-attach` | `^0.11.0` | Attach XTerm terminal to a WebSocket for live PTY relay | The existing `xterm-addon-attach` (unscoped) is deprecated. The new `@xterm/addon-attach` is the official successor. Usage: `new AttachAddon(webSocket)` → `terminal.loadAddon(attachAddon)`. Required to relay PTY output from the backend to the in-browser XTerm terminal when an agent runs interactively. The existing `xterm ^5.3.0` and `xterm-addon-fit ^0.8.0` stay; only the attach addon changes. |
+
+Also migrate the import: `from 'xterm'` → `from '@xterm/xterm'` and `xterm-addon-fit` → `@xterm/addon-fit` for consistency with the scoped package ecosystem (the unscoped packages are deprecated).
+
+### 6. WebSocket Server (Backend — Next.js API Routes)
+
+No new npm package needed for WebSocket on the Next.js side. Next.js 16 supports WebSocket upgrade in API routes. However, for the PTY relay specifically, use the `ws` package which is already a transitive dependency of many existing packages (confirm with `ls node_modules/ws`). If not present:
+
+| Technology | Version | Purpose | Why |
+|---|---|---|---|
+| `ws` | `^8.18.0` | WebSocket server in Node.js API route | Low-level WebSocket server for the PTY relay path. The `@xterm/addon-attach` client expects a raw WebSocket, not Socket.io. `ws` is the minimal dependency — no overhead, well-maintained (Microsoft's node-pty documentation recommends it). |
+
+**Why WebSocket for PTY, SSE for agent events:** The PTY terminal requires bidirectional communication (user keystrokes → agent stdin; agent stdout → browser). SSE is unidirectional (server → client only). The agent activity event stream (tool calls, file changes, task status) uses the existing FastAPI SSE path. The terminal relay uses WebSocket. These are two separate channels.
+
+---
+
+## New Additions: Node.js Backend (PTY Management)
+
+### 7. node-pty (PTY Process Management)
+
+| Technology | Version | Purpose | Why |
+|---|---|---|---|
+| `node-pty` | `^1.1.0` | Spawn CLI agents in a pseudo-terminal | node-pty provides `forkpty(3)` bindings for Node.js, allowing CLI tools to behave as if they're running in a real terminal (color output, cursor control, interactive prompts). The Claude Code CLI and Codex CLI both detect whether they're connected to a TTY and behave differently in non-TTY mode — node-pty ensures agents get a real terminal environment. `pty.spawn()` returns an object with `onData()` (stream output to WebSocket) and `write()` (send user input). Platform support: Linux, macOS, Windows (Windows 10 1809+ ConPTY). Note: not thread-safe; use one pty per session, managed by a session map keyed on `run_id`. |
+
+**Where it runs:** In a Node.js sidecar or Next.js custom server (`server.js`), NOT in a Next.js API route handler (API routes are serverless-style and do not support long-lived processes). The sidecar pattern: Next.js custom server (`next start` with `server.js`) holds the pty sessions map; API routes communicate with it via in-process function calls or local IPC.
+
+**Alternative if no custom server:** Delegate PTY management entirely to the Python FastAPI backend using `asyncio.create_subprocess_exec` with `pty` module from Python stdlib for Linux/macOS. Python's `pty.openpty()` gives a file descriptor pair; wrap with asyncio for async reads. This avoids the Node.js sidecar but requires Python ≥3.10 (already required). Use this path when deploying in Docker (single-container, avoids Node.js process management complexity).
+
+---
+
+## Architecture Integration Map
+
+```
+User Browser
+    │
+    ├── SSE stream (EventSource)     → FastAPI /api/agent/events  → EventBus fan-out
+    │                                                                    │
+    │                                                              AgentEventEnvelope
+    │                                                                    │
+    │                                                       Agent Adapter (Python ABC)
+    │                                                      ┌──────────┴────────────┐
+    │                                               ClaudeAdapter         CodexAdapter
+    │                                              (subprocess:           (subprocess:
+    │                                               claude -p             codex exec --json)
+    │                                               --output-format
+    │                                               stream-json)
+    │
+    ├── WebSocket (ws)               → Next.js custom server → node-pty PTY process
+    │   (XTerm terminal I/O)              (pty session map)        (agent CLI)
+    │
+    └── HTTP fetch (chat proxy)      → Next.js API route   → @anthropic-ai/claude-agent-sdk
+        (Vercel AI SDK useChat)            /api/agent/chat    OR @openai/codex-sdk
+                                                               (SDK spawns CLI subprocess)
+```
+
+**Key boundary:** Python backend owns agent event observability (via adapter → EventBus → SSE).
+Node.js layer owns chat proxy and interactive PTY terminal (agent SDK + node-pty).
+Frontend owns visualization (@xyflow/react team graph, XTerm terminal, event feed panel).
+
+---
+
+## Recommended Stack Summary
+
+### Python Backend — New
+
+| Package | Version | Install | Notes |
+|---|---|---|---|
+| No new packages | — | — | Use stdlib asyncio subprocess + existing AgentEventEnvelope |
+
+### Node.js / Next.js — New
+
+| Package | Version | Install | Notes |
+|---|---|---|---|
+| `@anthropic-ai/claude-agent-sdk` | `^0.2.47` | `npm install` | Claude Code programmatic control |
+| `@openai/codex-sdk` | `^0.112.0` | `npm install` | Codex programmatic control |
+| `@opencode-ai/sdk` | `latest` | `npm install` | OpenCode REST+SSE client |
+| `node-pty` | `^1.1.0` | `npm install` | PTY process management |
+| `ws` | `^8.18.0` | `npm install` | WebSocket server (if not already transitive) |
+
+### Web Frontend — Migrate + Add
+
+| Package | Change | Version | Notes |
+|---|---|---|---|
+| `xterm` | Migrate to `@xterm/xterm` | `^5.3.0` | Scoped package, same API |
+| `xterm-addon-fit` | Migrate to `@xterm/addon-fit` | `^0.10.0` | Scoped package |
+| `@xterm/addon-attach` | **Add new** | `^0.11.0` | WebSocket attach for PTY relay |
+
+---
+
+## Installation
 
 ```bash
-# 1. Add asyncpg (new dependency)
-pip install "asyncpg>=0.31.0"
+# Web dashboard — add new agent SDKs and node-pty
+cd web
+npm install @anthropic-ai/claude-agent-sdk @openai/codex-sdk @opencode-ai/sdk
+npm install node-pty ws
+npm install @xterm/xterm @xterm/addon-fit @xterm/addon-attach
 
-# 2. Re-install SQLAlchemy with asyncio extra to pull in greenlet
-#    (required for SQLAlchemy 2.1+; safe on 2.0.x too)
-pip install "sqlalchemy[asyncio]>=2.0.0"
-
-# 3. Add pgvector Python type package (new dependency)
-pip install "pgvector>=0.4.2"
-
-# -- pyproject.toml changes --
-# In [project].dependencies:
-#   Change: "SQLAlchemy>=2.0.0"
-#   To:     "SQLAlchemy[asyncio]>=2.0.0"
-#
-# Add to [project].dependencies:
-#   "asyncpg>=0.31.0"
-#
-# Move sqlite-vec out of [project.optional-dependencies].search
-# and add pgvector in its place for PG installs:
-#   "pgvector>=0.4.2"
+# Remove deprecated unscoped xterm packages after migrating imports
+npm uninstall xterm xterm-addon-fit
 ```
-
-```bash
-# Docker: local PG dev environment
-docker run -d \
-  --name paperbot-pg \
-  -e POSTGRES_USER=paperbot \
-  -e POSTGRES_PASSWORD=paperbot \
-  -e POSTGRES_DB=paperbot \
-  -p 5432:5432 \
-  pgvector/pgvector:pg17
-
-# Set env var
-export PAPERBOT_DB_URL="postgresql+asyncpg://paperbot:paperbot@localhost:5432/paperbot"
-
-# Run migrations (Alembic uses sync psycopg3 — no change needed here)
-alembic upgrade head
-```
-
----
-
-## Integration with Existing Code
-
-### SessionProvider: Extend, Not Replace
-
-The existing `SessionProvider` wraps a sync engine. The pattern is to add an **async
-counterpart** `AsyncSessionProvider` in the same file, not to rewrite `SessionProvider`.
-Sync sessions remain necessary for Alembic migrations, tests using `tmp_path` SQLite,
-and any code that cannot easily be made async (e.g., ARQ workers running in threads).
-
-```python
-# New class — add to sqlalchemy_db.py alongside existing SessionProvider
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
-
-def create_async_db_engine(db_url: Optional[str] = None):
-    url = db_url or get_db_url()
-    # postgresql+asyncpg:// URL required; sqlite URLs need aiosqlite (not needed here)
-    return create_async_engine(url, pool_pre_ping=True)
-
-class AsyncSessionProvider:
-    def __init__(self, db_url: Optional[str] = None):
-        self.engine = create_async_db_engine(db_url)
-        self._factory = async_sessionmaker(
-            self.engine, class_=AsyncSession, expire_on_commit=False
-        )
-
-    def session(self) -> AsyncSession:
-        return self._factory()
-```
-
-Stores are then refactored one-by-one: each store's methods become `async def`, each
-`with provider.session() as s:` becomes `async with provider.session() as s:`, and
-`s.execute(select(...))` already returns `Result` in SQLAlchemy 2.0 — the await is
-the only mechanical change per call site.
-
-### Alembic: Stays Sync
-
-Alembic's `upgrade()` / `downgrade()` functions must remain synchronous. The existing
-`alembic/env.py` already uses `engine_from_config` with psycopg3 for PG URLs — no
-change needed. Do NOT switch `env.py` to `async_engine_from_config` unless running
-migrations programmatically inside a FastAPI lifespan (then use the `run_sync` pattern
-with `conn.run_sync(run_upgrade, cfg)` to avoid event loop conflicts).
-
-### JSONB: Replace `Text` + `json.dumps` Columns
-
-Models currently serialize dicts to `Text` (e.g., `payload_json`, `metadata_json`,
-`keywords_json`). On PG, migrate these to `JSONB` via Alembic `op.alter_column` +
-`server_default='{}'`. The ORM mapping changes from `Text` to
-`sqlalchemy.dialects.postgresql.JSONB`. Access via `model.payload` (dict) replaces
-`json.loads(model.payload_json)`.
-
-```python
-# Before (SQLite Text)
-from sqlalchemy import Text
-payload_json: Mapped[str] = mapped_column(Text, default="{}")
-
-# After (PG JSONB)
-from sqlalchemy.dialects.postgresql import JSONB
-payload: Mapped[dict] = mapped_column(JSONB, server_default="{}", nullable=False)
-```
-
-### tsvector: Replace FTS5 Virtual Tables
-
-The `0019_memory_fts5` migration already guards on `dialect != "sqlite"` and explicitly
-comments "Postgres uses pg_trgm / tsvector instead." The PG migration adds a new
-Alembic revision that:
-
-1. Adds a `search_vector tsvector` generated column (or trigger-maintained column) on
-   `memory_items.content`.
-2. Creates a GIN index: `CREATE INDEX ix_memory_items_fts ON memory_items USING gin(search_vector)`.
-3. Adds a `before insert or update` trigger calling
-   `to_tsvector('english', NEW.content)`.
-
-```python
-# In the Alembic upgrade function
-from sqlalchemy.dialects.postgresql import TSVECTOR
-
-op.add_column('memory_items',
-    sa.Column('search_vector', TSVECTOR(), nullable=True))
-op.create_index('ix_memory_items_fts', 'memory_items', ['search_vector'],
-    postgresql_using='gin')
-op.execute("""
-    CREATE OR REPLACE FUNCTION memory_items_fts_update() RETURNS trigger AS $$
-    BEGIN
-        NEW.search_vector := to_tsvector('english', COALESCE(NEW.content, ''));
-        RETURN NEW;
-    END;
-    $$ LANGUAGE plpgsql;
-""")
-op.execute("""
-    CREATE TRIGGER memory_items_fts_trigger
-    BEFORE INSERT OR UPDATE OF content ON memory_items
-    FOR EACH ROW EXECUTE FUNCTION memory_items_fts_update();
-""")
-```
-
-### pgvector: Replace `LargeBinary` Embedding Columns
-
-`MemoryItemModel.embedding` is currently `LargeBinary` (raw Float32 bytes for
-sqlite-vec). On PG, this becomes `Vector(N)` from `pgvector.sqlalchemy`.
-
-```python
-# Before (sqlite-vec)
-from sqlalchemy import LargeBinary
-embedding: Mapped[Optional[bytes]] = mapped_column(LargeBinary, nullable=True)
-
-# After (pgvector)
-from pgvector.sqlalchemy import Vector
-embedding: Mapped[Optional[list]] = mapped_column(Vector(1536), nullable=True)
-```
-
-Register pgvector type codec on AsyncSession connections:
-
-```python
-from pgvector.psycopg import register_vector_async  # noqa — psycopg3 variant
-from sqlalchemy import event
-
-@event.listens_for(async_engine.sync_engine, "connect")
-def connect(dbapi_connection, connection_record):
-    dbapi_connection.run_async(register_vector_async)
-```
-
----
-
-## Data Migration Tooling
-
-For migrating existing SQLite data to PG (existing users' `data/paperbot.db`):
-
-**Use pgloader** — the standard open-source CLI for SQLite-to-PostgreSQL migrations.
-It handles type coercion, sequences, and index recreation automatically.
-
-```bash
-# Install pgloader (system package, not a Python dep)
-apt-get install pgloader  # or brew install pgloader on macOS
-
-# Migrate schema + data in one command
-pgloader sqlite:///data/paperbot.db postgresql://paperbot:paperbot@localhost/paperbot
-```
-
-pgloader is a **system-level tool for one-time data migration only** — it is not a
-Python dependency and must not be added to `requirements.txt`. After pgloader copies
-the data, run `alembic upgrade head` on the PG database to apply any PG-specific
-migrations (tsvector columns, JSONB conversions, pgvector columns) that were skipped
-on SQLite.
 
 ---
 
@@ -249,59 +190,88 @@ on SQLite.
 
 | Category | Recommended | Alternative | Why Not |
 |---|---|---|---|
-| Async PG driver | `asyncpg` | `psycopg3[asyncio]` | psycopg3 is already installed for sync use. asyncpg is ~5x faster in benchmarks and is the de facto standard for SQLAlchemy async PG. The official FastAPI full-stack template uses psycopg3 for its simplicity (single driver), but PaperBot already has psycopg3 for Alembic — asyncpg adds maximum async throughput without replacing the sync driver. |
-| Vector type | `pgvector` | Raw `float[]` array column | `float[]` requires manual distance query SQL. `pgvector` provides typed `Vector(N)` with HNSW/IVFFlat index support and SQLAlchemy-integrated distance operators. No contest. |
-| FTS in PG | `tsvector` + GIN trigger | `pg_trgm` trigram index | `pg_trgm` supports fuzzy/partial matching; `tsvector` with `to_tsvector` provides true stemmed, ranked BM25-style search. For the academic paper domain (keywords, abstracts), stemmed full-text search is better. `pg_trgm` can be added later as a supplement if substring matching is needed. |
-| Local dev PG | `pgvector/pgvector:pg17` | `postgres:17` + manual extension install | The prebuilt image eliminates a `CREATE EXTENSION vector` step and avoids the need for OS-level pgvector compilation in CI. Zero extra setup cost. |
-| JSONB migration | Rename column, drop old | Keep Text column + add JSONB side-by-side | Dual-write is more work and more error-prone. Alembic ALTER COLUMN with server_default cast is clean within a transaction. |
-| Data migration tool | `pgloader` | Custom Python ETL script | pgloader handles type coercion, sequence reset, and index recreation automatically. A custom script would need to replicate all of that. pgloader is a one-time dev tool, not a runtime dependency. |
+| Claude Code proxying | `@anthropic-ai/claude-agent-sdk` npm | Raw `claude -p` subprocess with manual JSON parsing | The SDK handles process lifecycle, permission callbacks, streaming event objects, and session management. Manual parsing duplicates work already done in the SDK. |
+| Codex proxying | `@openai/codex-sdk` npm | `codex exec --json` subprocess directly | Same rationale — the SDK adds structured events, thread management, and `runStreamed()` async generator. Use CLI-subprocess path only in Python adapter fallback. |
+| PTY management | `node-pty` | Python `pty.openpty()` (stdlib) | node-pty integrates naturally with the Node.js WebSocket + xterm stack. Python pty module is viable in single-container deployments but requires asyncio wrapping and doesn't support Windows ConPTY. |
+| Terminal I/O transport | WebSocket (`ws` + `@xterm/addon-attach`) | Socket.io | Socket.io adds overhead (polling fallback, namespaces) for a use case that is simply PTY byte streaming. Raw `ws` is the right choice — it's what `@xterm/addon-attach` expects natively. |
+| Agent event transport | FastAPI SSE (existing) | WebSocket for events | Events are unidirectional server→client; SSE is the correct primitive and matches the existing EventBus infrastructure. Adding WebSocket for events would duplicate transport logic. |
+| OpenCode proxying | `@opencode-ai/sdk` + REST/SSE | Direct HTTP fetch with manual parsing | The SDK is generated from the server's OpenAPI spec — it's the authoritative typed interface. The SSE `event.subscribe()` method is the right path for real-time activity. |
+| Agent adapter in Python | Pure Python ABC + asyncio subprocess | LangChain agent abstraction | LangChain's agent abstractions assume it owns the agent loop. PaperBot's requirement is pure proxy/observation — it does NOT own the agent loop. A lightweight custom ABC costs zero dependencies and makes the contract explicit. |
 
 ---
 
 ## What NOT to Install
 
-| Library | Why Might You Think You Need It | Why You Don't |
+| Avoid | Why | Use Instead |
 |---|---|---|
-| `aiosqlite` | "Need async SQLite for tests" | Tests use sync SQLite sessions via the existing `SessionProvider`. The async layer only activates for PG URLs. Do not add async SQLite complexity to the test suite — it adds zero value and breaks the sync/async separation. |
-| `databases` (encode/databases) | "Thin async SQL layer" | Superseded by SQLAlchemy 2.0 async. Adds a second ORM-like layer on top of SQLAlchemy. Creates two competing DB abstractions in the same codebase. |
-| `tortoise-orm` | "Pure async ORM" | Would require rewriting 46 models from scratch. SQLAlchemy 2.0 async is the right choice when you already have an SA codebase. |
-| `alembic-utils` | "Helpers for PG-specific objects" | The tsvector triggers and functions are written once in raw SQL inside Alembic migrations. `alembic-utils` adds a dependency for a one-time setup task. |
-| `psycopg2` | "Might still need it" | `psycopg[binary]>=3.2.0` (psycopg3) is already installed. psycopg2 is a separate, older package. Never install both. |
-| `sqlmodel` | "Pydantic-integrated ORM" | SQLModel wraps SQLAlchemy with Pydantic models. Rewriting 46 SA models to SQLModel just to get Pydantic integration is not worth it. Pydantic models for API layer already exist separately. |
+| `socket.io` | Heavyweight transport layer with polling fallback, namespaces, rooms — unnecessary for a single PTY relay channel | Raw `ws` WebSocket + `@xterm/addon-attach` |
+| `blessed` / `ink` terminal output parsing | Designed for building TUI apps, not parsing other processes' terminal output | Parse JSONL events from agent SDKs directly; use xterm.js to render raw PTY bytes |
+| Any "universal agent framework" (LangGraph, AutoGen, CrewAI) | These assume ownership of the agent loop and orchestration logic. PaperBot v1.2 is explicitly a proxy/observer — the host agent decides; PaperBot visualizes | Custom `AgentAdapter` ABC with thin subprocess/SDK wrappers |
+| `xterm-addon-attach` (unscoped) | Deprecated; last published 2+ years ago | `@xterm/addon-attach ^0.11.0` |
+| `xterm` (unscoped) | Being deprecated in favor of scoped `@xterm/xterm` | Migrate imports to `@xterm/xterm` |
+| `puppeteer` / `playwright` for agent control | Browser automation overhead; agents are CLI tools, not web apps | Agent SDKs (`@anthropic-ai/claude-agent-sdk`, `@openai/codex-sdk`) |
+
+---
+
+## Agent Protocol Details
+
+### Claude Code CLI
+
+- **Headless mode:** `claude -p "<prompt>" --output-format stream-json --include-partial-messages`
+- **Event stream:** JSONL on stdout. Message types: `stream_event` (type: `message_start`, `content_block_start`, `content_block_delta`, `content_block_stop`, `message_stop`), `AssistantMessage`, `ResultMessage`, `SystemMessage`
+- **Session continuity:** `--continue` (last session) or `--resume <session_id>`
+- **SDK package:** `@anthropic-ai/claude-agent-sdk ^0.2.47` — wraps CLI subprocess; `query()` for one-shot, `ClaudeSDKClient` for multi-turn; `includePartialMessages: true` enables `StreamEvent` objects
+- **Confidence:** HIGH — official Anthropic docs verified at code.claude.com/docs/en/headless
+
+### OpenAI Codex CLI
+
+- **Non-interactive mode:** `codex exec --json "<prompt>"` — emits JSONL to stdout
+- **Event types:** `thread.started`, `turn.started`, `turn.completed`, `turn.failed`, `item.*` (covers agent messages, reasoning, command executions, file changes, MCP tool calls, web searches, plan updates)
+- **Session continuity:** `codex exec --resume <thread-id>`
+- **SDK package:** `@openai/codex-sdk ^0.112.0` — `Codex` class, `startThread()`, `thread.run()`, `thread.runStreamed()` (async generator of structured events)
+- **Confidence:** HIGH — developers.openai.com/codex/sdk verified, npm version 0.112.0 confirmed
+
+### OpenCode
+
+- **Non-interactive mode:** `opencode -p "<prompt>" -f json`
+- **Server mode:** `opencode serve` starts REST+SSE server; attach with `@opencode-ai/sdk`
+- **Event stream:** `client.event.subscribe()` — SSE stream of `{type, properties}` events
+- **Session methods:** `sessions.prompt()`, `sessions.command()`, `sessions.shell()`
+- **Confidence:** MEDIUM — opencode.ai/docs/sdk verified; event type schema not fully documented; validate against a running instance in Phase 1
 
 ---
 
 ## Version Compatibility
 
-| Package | Pin | Notes |
+| Package | Compatible With | Notes |
 |---|---|---|
-| `asyncpg>=0.31.0` | Lower-bound only | 0.31.0 (Nov 2025) adds Python 3.14 support. Requires Python ≥3.9. PaperBot CI tests on 3.10/3.11/3.12 — all compatible. |
-| `sqlalchemy[asyncio]>=2.0.0` | As existing | SQLAlchemy 2.1.0b1 (Jan 2026) dropped Python 3.9 support. The existing `>=2.0.0` pin may resolve to 2.1.x on 3.10/3.11/3.12 environments. To stay on stable 2.0.x, consider pinning `>=2.0.0,<2.1.0` until 2.1 stable is released. |
-| `pgvector>=0.4.2` | Lower-bound only | 0.4.2 is current (2025). Requires pgvector PG extension ≥0.5.0 for HNSW index support. `pgvector/pgvector:pg17` Docker image includes extension 0.8.x. |
-| `psycopg[binary]>=3.2.0` | Unchanged | Stays. Used by Alembic's sync `engine_from_config` for DDL migrations. The `prepare_threshold=0` connect arg in `alembic/env.py` already handles PgBouncer compatibility. |
-| PostgreSQL | 17.3+ | PG 17.0–17.2 have a symbol linking bug with pgvector. Use `pgvector/pgvector:pg17` which tracks latest PG 17 patch. |
+| `node-pty ^1.1.0` | Node.js 18+, Linux/macOS/Windows 10 1809+ | Not thread-safe; one PTY per session. Windows requires ConPTY (Win10 1809+). |
+| `@xterm/addon-attach ^0.11.0` | `@xterm/xterm ^5.x` | Must use scoped `@xterm/xterm`, not unscoped `xterm` package. |
+| `@anthropic-ai/claude-agent-sdk ^0.2.47` | Node.js 18+, requires `claude` CLI installed | SDK spawns `claude` CLI as subprocess — Claude Code must be installed and authenticated separately. |
+| `@openai/codex-sdk ^0.112.0` | Node.js 18+, requires `codex` CLI installed | SDK wraps `codex` CLI; Codex must be installed and authenticated. |
+| `ai ^5.0.116` (existing) | React 19, Next.js 16 | Already in package.json. Use `useChat` hook as the chat proxy surface — no upgrade needed for v1.2. |
+| `@xyflow/react ^12.10.0` (existing) | React 19 | Already in package.json. Extend with dynamic `setNodes`/`setEdges` for team decomposition graph updates from agent events. |
 
 ---
 
 ## Sources
 
-- [asyncpg PyPI — version 0.31.0 confirmed](https://pypi.org/project/asyncpg/) — HIGH confidence
-- [asyncpg GitHub MagicStack/asyncpg — Python 3.9–3.14, PG 9.5–18](https://github.com/MagicStack/asyncpg) — HIGH confidence
-- [SQLAlchemy 2.0 Asyncio Extension docs](https://docs.sqlalchemy.org/en/20/orm/extensions/asyncio.html) — HIGH confidence
-- [SQLAlchemy 2.1.0b1 release blog — greenlet no longer auto-installed](https://www.sqlalchemy.org/blog/2026/01/21/sqlalchemy-2.1.0b1-released/) — HIGH confidence
-- [SQLAlchemy 2.1 migration guide — Python 3.10 minimum](https://www.sqlalchemy.org/docs/21/changelog/migration_21.html) — HIGH confidence
-- [pgvector-python PyPI — version 0.4.2 confirmed](https://pypi.org/project/pgvector/) — HIGH confidence
-- [pgvector-python SQLAlchemy integration docs](https://deepwiki.com/pgvector/pgvector-python/3.1-sqlalchemy-integration) — MEDIUM confidence
-- [pgvector GitHub — Docker image pgvector/pgvector:pg17](https://github.com/pgvector/pgvector) — HIGH confidence
-- [Alembic tsvector + JSONB migration patterns](https://berkkaraal.com/blog/2024/09/19/setup-fastapi-project-with-async-sqlalchemy-2-alembic-postgresql-and-docker/) — MEDIUM confidence
-- [pgloader SQLite → PostgreSQL migration](https://pgloader.readthedocs.io/en/latest/ref/sqlite.html) — HIGH confidence
-- [psycopg3 vs asyncpg comparison (2026)](https://fernandoarteaga.dev/blog/psycopg-vs-asyncpg/) — MEDIUM confidence
-- Codebase: `src/paperbot/infrastructure/stores/sqlalchemy_db.py` — confirmed existing SessionProvider, psycopg3 connect args, future=True mode
-- Codebase: `alembic/versions/0019_memory_fts5.py` — confirmed FTS5 guard: `if dialect != "sqlite": return`
-- Codebase: `requirements.txt` + `pyproject.toml` — confirmed all existing deps and Python version matrix (3.10/3.11/3.12 in CI)
-- Codebase: `src/paperbot/infrastructure/stores/models.py` — confirmed LargeBinary embedding column, Text JSON columns pattern
+- [Claude Code headless/programmatic docs](https://code.claude.com/docs/en/headless) — HIGH confidence, verified 2026-03-15
+- [Claude Agent SDK overview](https://platform.claude.com/docs/en/agent-sdk/overview) — HIGH confidence
+- [Claude Agent SDK TypeScript releases](https://github.com/anthropics/claude-agent-sdk-typescript/releases) — HIGH confidence, v0.2.47 confirmed
+- [Codex SDK docs](https://developers.openai.com/codex/sdk/) — HIGH confidence, verified 2026-03-15
+- [@openai/codex-sdk npm](https://www.npmjs.com/package/@openai/codex-sdk) — HIGH confidence, v0.112.0 confirmed
+- [Codex non-interactive mode docs](https://developers.openai.com/codex/noninteractive/) — HIGH confidence
+- [OpenCode SDK docs](https://opencode.ai/docs/sdk/) — MEDIUM confidence (event type schema needs validation)
+- [node-pty npm](https://www.npmjs.com/package/node-pty) — HIGH confidence, v1.1.0 confirmed
+- [@xterm/addon-attach npm](https://www.npmjs.com/package/@xterm/addon-attach) — HIGH confidence, v0.11.0 confirmed
+- [Vercel AI SDK 5 blog post](https://vercel.com/blog/ai-sdk-5) — HIGH confidence
+- [FastAPI SSE vs WebSocket best practices 2025](https://potapov.me/en/make/websocket-sse-longpolling-realtime) — MEDIUM confidence
+- Codebase: `web/package.json` — confirmed existing deps (@xyflow/react, xterm, ai, @ai-sdk/*, @modelcontextprotocol/sdk)
+- Codebase: `src/paperbot/infrastructure/swarm/codex_dispatcher.py` — confirmed existing Codex API integration (to be replaced by adapter layer)
+- Codebase: `src/paperbot/infrastructure/swarm/claude_commander.py` — confirmed existing Claude API integration (to be replaced by adapter layer)
 
 ---
 
-*Stack research for: PostgreSQL migration + async data layer + PG-native features*
-*Researched: 2026-03-14*
+*Stack research for: v1.2 DeepCode Agent Dashboard — agent-agnostic proxy, multi-agent adapter layer, real-time visualization*
+*Researched: 2026-03-15*

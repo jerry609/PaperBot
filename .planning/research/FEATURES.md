@@ -1,157 +1,172 @@
-# Feature Landscape
+# Feature Research
 
-**Domain:** PostgreSQL migration + async data layer + systematic model refactoring (brownfield)
-**Researched:** 2026-03-14
-**Confidence:** HIGH — patterns are well-established; specific complexity estimates are from codebase analysis
+**Domain:** Agent-agnostic code agent dashboard/IDE
+**Researched:** 2026-03-15
+**Confidence:** HIGH — products in this space are publicly documented and actively evolving; specific UX patterns verified across multiple sources
 
 ---
 
 ## Scope Note
 
-This file covers **v2.0: PostgreSQL Migration & Data Layer Refactoring** only. The existing file
-covered v1.1 Agent Orchestration Dashboard. This milestone inherits a specific brownfield baseline:
+This file covers **v1.2 DeepCode Agent Dashboard** features only. It replaces the prior v2.0 PG migration
+feature file for the current research cycle. The question: what features do users expect from a dashboard
+that visualizes any code agent's activity?
 
-- 46 SQLAlchemy 2.0 `Mapped`/`mapped_column` models in a single `models.py` (1 500+ lines)
-- Sync `SessionProvider` + `session()` pattern across 17 stores
-- FTS5 virtual tables + sqlite-vec virtual table in `memory_store.py` and `document_index_store.py`
-- 92 JSON-serialized `Text` columns (hand-rolled `_json` suffix + `json.dumps/loads` helpers)
-- 32 Alembic migrations (SQLite chain)
-- `psycopg[binary]>=3.2.0` already in `pyproject.toml` — sync driver present, async driver absent
-- `create_async_engine` / `asyncpg` / `psycopg[async]` — none present anywhere in `src/`
+Competitors analyzed: Cursor, Windsurf, Cline (agent-IDE hybrids); LangSmith, AgentOps, Claude Code
+Agent Monitor (observability dashboards); OpenHands, SWE-agent (open-source agent UIs); GitHub Agent HQ,
+VS Code Multi-Agent view, Datadog AI Agents Console (enterprise control planes).
 
 ---
 
 ## Table Stakes
 
-Features that must exist for the milestone to be considered complete. Missing any of these means
-the migration is not production-ready.
+Features users assume exist. Missing these means the product feels incomplete or untrustworthy.
 
 | Feature | Why Expected | Complexity | Notes |
 |---------|--------------|------------|-------|
-| **PostgreSQL engine + async session factory** | AsyncSession + asyncpg replaces sync SessionProvider. Without this, no other feature in the milestone is possible. | MEDIUM | Replace `create_engine` / `sessionmaker` in `sqlalchemy_db.py` with `create_async_engine` / `async_sessionmaker`. New `AsyncSessionProvider` class. Keep sync path for Alembic env.py (sync is required for `run_migrations_online`). |
-| **Alembic env.py async-aware config** | Alembic must be able to apply migrations against PostgreSQL. Common trap: using sync Alembic env against async engine breaks in production. | MEDIUM | Standard pattern: add `run_async_migrations()` function in `env.py` using `AsyncEngine.begin()`. Sync fallback remains for SQLite CI tests. Alembic 1.13+ supports this natively. |
-| **Store-by-store async conversion (17 stores)** | Every store that calls `self._provider.session()` currently blocks the event loop when used in FastAPI async routes. 17 stores × ~10 methods each = ~170 method conversions. | HIGH | Each `def method` becomes `async def method` with `await session.execute()`, `await session.commit()`, `await session.refresh()`. Most critical path: `paper_store`, `memory_store`, `research_store`, `document_index_store`. ARQ worker stores need ARQ-specific session lifecycle (on_job_start/after_job_end hooks), not FastAPI DI. |
-| **Eager loading for all relationships** | Async SQLAlchemy silently breaks lazy loading — attribute access on an unloaded relationship raises `MissingGreenlet` in async context. All ORM relationships currently use default `lazy="select"` (sync). | HIGH | Audit every `relationship()` declaration in models.py. Most relationships are append-only audit trails (one-to-many) → use `lazy="write_only"`. For read paths: add `selectinload()` to queries that access related collections. `joinedload` for simple many-to-one FKs. |
-| **Text → JSONB column migration** | 92 `Text` columns storing hand-serialized JSON. PostgreSQL can store and query these natively as JSONB, which is both faster and queryable. Without this, the migration is superficial. | MEDIUM | Replace `Text` + `json.dumps/loads` helpers with `sqlalchemy.dialects.postgresql.JSONB`. Cross-DB compatibility: use `TypeDecorator` with `with_variant(JSONB(), "postgresql")` for columns that must still work in SQLite test env. Alembic migration: `op.alter_column(..., type_=JSONB, postgresql_using="col::jsonb")`. 92 columns across 46 models — batch by model group. |
-| **FTS5 → PostgreSQL tsvector (memory + documents)** | `memory_store._search_fts5()` and `document_index_store._search_fts5()` create SQLite-only virtual tables. These break on PostgreSQL silently (they fall back to no FTS). | HIGH | Two replacement strategies: (A) **Generated tsvector column** — `ALTER TABLE memory_items ADD COLUMN fts tsvector GENERATED ALWAYS AS (to_tsvector('english', content)) STORED` + GIN index. Query with `@@` operator via `func.to_tsvector(...).bool_op("@@")(func.plainto_tsquery(...))`. (B) **Application-side tsquery** — call `to_tsvector`/`plainto_tsquery` in SQLAlchemy Core expressions. Strategy A is preferred: index is maintained by PG automatically, no trigger management. Remove existing FTS5 virtual table creation + 3 insert/update/delete triggers per table. |
-| **sqlite-vec → pgvector (memory embeddings)** | `memory_store._ensure_vec()` creates `vec_items USING vec0(...)` virtual table. This is SQLite-only. `MemoryItemModel.embedding` stores raw `LargeBinary` blobs. | MEDIUM | Enable `pgvector` extension via Alembic: `op.execute("CREATE EXTENSION IF NOT EXISTS vector;")`. Replace `LargeBinary` with `pgvector.sqlalchemy.Vector(N_DIM)`. Replace `vec_items` virtual table with native column on `memory_items`. Replace `vec0 MATCH` query with pgvector cosine distance operator `<=>`. Register `vector` type in Alembic `ischema_names` to silence `alembic check` warnings. |
-| **Docker Compose for local PostgreSQL dev** | Developers need a PG instance without manual setup. This is the baseline dev environment assumption for all migration work. | LOW | `docker-compose.yml` with `postgres:16-alpine`, named volume, health check. `.env` update: `PAPERBOT_DB_URL=postgresql+asyncpg://paperbot:paperbot@localhost:5432/paperbot`. |
-| **Data migration tooling (SQLite → PG)** | Existing users have SQLite databases that contain real data. Without a migration path, the version upgrade is a breaking change with data loss. | HIGH | Two-phase approach: (1) `alembic upgrade head` against fresh PG to create schema; (2) data export script using pgloader or custom Python script to transfer rows. Key risks: FTS5 virtual tables cannot be exported by pgloader (skip them; they rebuild from source data). JSONB cast: pgloader handles `TEXT → JSONB` automatically if JSON is valid. Vector blobs: custom Python script to re-read `LargeBinary` bytes, decode as `float32` array, insert as pgvector. |
-| **Systematic model refactoring** | 46 models accumulated organically. Normalization, constraint correctness, and redundancy removal are required before PG adoption or the schema debt compounds. | HIGH | Four categories of work: (a) Add missing `NOT NULL` constraints (many nullable columns are never actually null); (b) Extract repeated JSON payload patterns into proper FK relationships where query frequency justifies it; (c) Add missing `UniqueConstraint` declarations that are currently enforced only in application code; (d) Normalize `String(64)` IDs to `String(36)` UUID columns where appropriate. Do not over-normalize: embedded `_json` arrays that are write-once and never filtered should stay as JSONB. |
-| **CI parity: PostgreSQL in test matrix** | Tests currently run on SQLite in-process (`:memory:` or `tmp_path`). Some behaviors diverge (JSONB operator support, tsvector syntax, pgvector operators). Without a CI PostgreSQL target, regressions will reach production. | MEDIUM | Add `pytest` fixture for PostgreSQL test database (use `pytest-asyncio` + `asyncpg` test URL). Keep existing SQLite fixtures for fast unit tests. Add a `@pytest.mark.postgres` marker for integration tests that require PG features. GitHub Actions matrix: add a `postgres:16` service container. |
+| **Real-time agent activity stream** | Every tool in this space (Cursor, Windsurf, LangSmith, AgentOps) shows live agent events. Users expect to see what the agent is doing *right now*, not after the fact. | MEDIUM | SSE infrastructure already exists in PaperBot. Needs a structured event feed component that auto-scrolls, with pause/resume control. Component: `ActivityFeed` consuming SSE stream. |
+| **Tool call log with arguments and results** | Cursor/Windsurf show each tool invocation inline. LangSmith records every tool call with input/output. Users need this to debug agent behavior and understand decisions. | MEDIUM | Each `AgentEventEnvelope` already has `run_id`/`trace_id`/`span_id`. Render tool name, truncated args, result status, and duration per event row. |
+| **File diff viewer for agent-modified files** | Cline requires diff approval before applying changes. Cursor shows diffs. Users expect to see exactly what files changed and how. This is the #1 safety primitive for code agents. | HIGH | Build on existing Monaco editor in studio page. Requires tracking which files an agent touched: `file_path`, `before`, `after` snapshots in event log. Render as Monaco diff editor (already available). |
+| **Agent session list** | Every dashboard (Claude Code Agent Monitor, AgentOps, OpenSync) shows a list of sessions. Users need to switch between sessions, see which are active vs completed. | LOW | Table of sessions: `session_id`, start time, agent type, status, task summary. Click-through to session detail. Built on existing `AgentEventModel` records. |
+| **Session detail view** | Clicking a session shows its full event timeline: all tool calls, file changes, LLM turns, errors. LangSmith waterfall view is the reference. | MEDIUM | Timeline component rendering ordered `AgentEventEnvelope` records for a `run_id`. Group by agent if sub-agents are present. |
+| **Agent status indicator (active/idle/error)** | Windsurf, Cursor, Claude Code Teams all have status badges. Users need to know if the agent is currently working, waiting for input, or failed. | LOW | Badge component driven by latest event type per `run_id`. States: running, waiting, complete, error, idle. Already modeled in event vocabulary. |
+| **Chat input → agent dispatch** | Cursor, Windsurf, OpenHands all have a chat box where you type a task and the agent executes it. This is the primary control surface. Without it, the dashboard is read-only (a monitor, not a controller). | HIGH | Proxy layer: chat input → HTTP/WebSocket/CLI to the configured agent. Agent-agnostic: send to Claude Code CLI, Codex API, or OpenCode depending on configured adapter. |
+| **Token usage and cost display** | AgentOps, Datadog, Claude Code Agent Monitor, SigNoz — all show token counts and cost per session. Developers actively track this because agent costs accumulate rapidly (Agent Teams cost was cited at $7.80 per complex task). | MEDIUM | Show input tokens, output tokens, estimated cost per session and cumulative. Cost formula: configurable pricing per model. Pull from `AgentEventEnvelope` token fields if populated, or from LLM provider responses via adapter layer. |
+| **Error and failure surfacing** | LangSmith highlights failed runs. Claude Code Agent Monitor tracks error states. Users need to know when an agent failed without reading a scroll of events. | LOW | Error badge + filter in session list. Error events rendered in red in the activity feed. Toast notification on agent failure. |
+| **Connection status** | Claude Code Agent Monitor and CliDeck show live/offline indicator. Users need to know if the dashboard is receiving events or disconnected. | LOW | SSE connection heartbeat indicator: connected (green dot), reconnecting (yellow), disconnected (red). |
 
 ---
 
 ## Differentiators
 
-Features that go beyond a minimum viable migration and meaningfully improve the system.
+Features that set this dashboard apart from pure monitoring tools and from agent-specific UIs.
 
 | Feature | Value Proposition | Complexity | Notes |
 |---------|-------------------|------------|-------|
-| **Hybrid search: pgvector + tsvector** | Current `_hybrid_merge()` in `memory_store.py` combines FTS5 (BM25) + sqlite-vec cosine similarity. PostgreSQL enables a proper hybrid search: `ts_rank` for text relevance + `<=>` cosine distance, merged by RRF (Reciprocal Rank Fusion). This is the production-quality RAG pattern. | MEDIUM | `ts_rank(fts, plainto_tsquery(...))` + `embedding <=> :query_vec` in a single CTE with RRF merge. Replaces the Python-side `_hybrid_merge()` function with a server-side SQL query. Fewer round-trips, better ranking. |
-| **GIN indexes on JSONB payload columns** | Once `_json` columns become JSONB, frequently-filtered payloads (e.g., `AgentEventModel.tags_json`, `MemoryItemModel.evidence_json`) can have GIN indexes for sub-document queries. Currently unindexable. | LOW | Per-column decision: only add GIN index if the column is actually queried with `@>`, `?`, or `?|` operators. Start with `agent_events.tags_json` and `memory_items.evidence_json` based on current query patterns. |
-| **Connection pooling configuration** | `asyncpg` + `create_async_engine` support `pool_size`, `max_overflow`, `pool_timeout`. Current sync SQLite has no meaningful pooling. Proper pooling is critical for FastAPI concurrency. PgBouncer-compatible: `prepare_threshold=0` already in `sqlalchemy_db.py` (a forward-looking comment). | LOW | Configure: `pool_size=10`, `max_overflow=20`, `pool_timeout=30`, `pool_recycle=1800`. Document PgBouncer connection string format. Parameterize via env vars. |
-| **ARRAY columns for list-of-strings payloads** | Some JSONB columns store flat string arrays (e.g., `keywords_json`, `venues_json`, `methods_json`, `topics_json`). PostgreSQL `ARRAY(Text)` is queryable with `ANY()`, supports GIN indexing with `gin__int_ops`, and avoids JSONB parsing overhead for flat lists. | LOW | Evaluate case-by-case. Arrays that need `ANY(:keyword) = ANY(column)` queries benefit. Arrays that are read-only aggregations (author lists, venue history) can stay JSONB. Do not convert everything. |
-| **Alembic branch for PG-only features** | Current Alembic chain has 32 SQLite-era migrations. PG migration can be a new branch head rather than a continuation, allowing clean separation between SQLite legacy and PG-native schema. | LOW | `alembic revision --autogenerate -m "pg_initial_schema" --head base` creates a fresh branch. Stamp PG databases at this revision. SQLite tests continue on the old chain. Use `alembic merge heads` only if cross-DB support is truly needed long-term. |
-| **Async ARQ worker with asyncpg sessions** | Current ARQ worker (`WorkerSettings`) uses sync stores which block its async event loop. Proper async ARQ + asyncpg integration uses `on_job_start`/`after_job_end` hooks with `AsyncSession` context vars. | MEDIUM | Pattern: ARQ `ctx["db"]` key holds `AsyncSession` created at job start, closed at job end. Each job function receives `ctx` and reads `ctx["db"]`. Avoids connection leaks across job boundaries. This is documented in the ARQ + SQLAlchemy community pattern (wazaari.dev). |
+| **Agent-agnostic proxy layer** | No other dashboard proxies chat to multiple heterogeneous agents behind a unified UI. GitHub Agent HQ approximates this but is GitHub-ecosystem-only. DeepCode targets any agent: Claude Code, Codex, OpenCode, custom. Users get one UI regardless of which agent they run. | HIGH | Adapter pattern: `BaseAgentAdapter` with implementations for `ClaudeCodeAdapter` (CLI subprocess/socket), `CodexAdapter` (REST API), `OpenCodeAdapter` (TBD). Config: user picks active agent in settings. Existing `codex_dispatcher.py` and `claude_commander.py` are the starting point. |
+| **Hybrid activity discovery (push + pull)** | Most dashboards require agents to push events explicitly. Pure pull (polling) misses events. PaperBot's design — agent pushes structured events via MCP tool + dashboard can discover independently — is more robust than either alone. This is rare in the market. | HIGH | Two channels: (1) MCP tool `log_agent_event` → event store; (2) hook-based discovery (file system watcher for `~/.claude/` logs, or OS-level hooks). Neither channel alone is sufficient. |
+| **Team decomposition visualization** | Claude Code Agent Teams launched Feb 2026. No existing dashboard renders agent-initiated team decomposition as a live graph. The Claude Code issue tracker feature request (#24537) confirmed this is an unmet need. xyflow/react is already in the web dashboard for DAG visualization. | HIGH | Render parent-child agent relationships as a live DAG. Nodes: agents. Edges: spawned-by relationships. Node state: running/waiting/complete/error. Update in real-time via SSE. Component: `AgentTeamGraph` built on `@xyflow/react` (already in codebase). |
+| **Dashboard control surface (task dispatch)** | Most monitoring dashboards are read-only. The ability to send new tasks, interrupt, or redirect agents from the web UI is rare. GitHub Agent HQ's "mission control" is the only comparable product. | MEDIUM | `TaskDispatch` panel: text input + submit → sends task to active agent via adapter. Interrupt button: sends interrupt signal (SIGINT for CLI agents, API cancel for API agents). Requires bi-directional communication, not just SSE. |
+| **Human-in-the-loop approval gate** | Cline already does this in the IDE (diff approval required before file writes). Surfacing this same approval UX in a web dashboard for any agent is novel. OpenAI Agents SDK, LangGraph, and Cloudflare Agents all support interrupt/resume patterns in code, but no web dashboard for code agents surfaces this cleanly. | HIGH | When agent emits `HUMAN_APPROVAL_REQUIRED` event: render approval modal with context (tool name, args, file diff). User approves/rejects → event sent back to agent via adapter. Agent resumes from saved state. Requires checkpoint/resume support in adapter layer. |
+| **Paper2Code workflow integration** | Unique to PaperBot. When the active task is a Paper2Code reproduction run, the dashboard surfaces paper metadata, reproduction plan, and code generation progress in dedicated panels — not just a generic event stream. No competitor has domain-aware agent dashboards. | MEDIUM | Detect `run_type: paper2code` in event envelope. Render enriched view: paper title/abstract, current phase (Planning → Blueprint → Generation → Verification), code files being generated. Standard run shows generic activity stream. |
+| **MCP tool surface visibility** | PaperBot exposes paper tools via MCP. When an agent calls a PaperBot MCP tool (e.g., `search_papers`, `analyze_paper`), the dashboard can show the tool call with paper-domain context (paper title, score, venue) rather than raw JSON. | LOW | Detect MCP tool call events where `tool_server: paperbot`. Render with PaperBot-specific formatting: paper card, score badge, venue tag. Fallback to raw JSON for non-PaperBot tool calls. |
+| **Session replay** | Claude Code issue #24537 proposed replay mode explicitly. AgentOps has session replay. Being able to scrub through a completed agent session is valuable for debugging complex multi-agent runs. No current web-based code agent dashboard offers this with a proper timeline scrubber. | HIGH | Store complete event sequence per `run_id` (already going into event log). Replay UI: timeline scrubber, playback speed control, step-by-step navigation. Requires ordered, timestamped event storage. |
 
 ---
 
 ## Anti-Features
 
-Features that seem valuable for this migration but should be explicitly avoided.
+Features that seem natural to build but should be explicitly excluded from v1.2.
 
-| Anti-Feature | Why Avoid | What to Do Instead |
-|--------------|-----------|-------------------|
-| **Full ORM re-architecture during migration** | Tempting to redesign relationships, add polymorphic inheritance, or switch to SQLModel while migrating. Scope explosion: each design change requires migration, store rewrite, test update, and integration validation. A data migration is already high-risk without adding schema redesign. | Migrate schema and async layer first. Model refactoring is a separate, bounded task within the milestone. Decouple: async conversion → JSONB/tsvector/pgvector → normalization. Never all three simultaneously on the same model. |
-| **`run_sync()` as the async migration strategy** | `run_sync()` lets sync store methods work inside `AsyncSession` without full conversion. Appealing as a shortcut. In practice it serializes all DB work through a greenlet, provides no real concurrency benefit, obscures errors, and is explicitly documented as "partial upgrade" not a destination. | Convert stores properly to `async def`. For the small number of sync-only callers (Alembic env.py, tests), use a separate sync engine instance. |
-| **SQLite + PostgreSQL dual-target parity** | Maintaining identical behavior on both databases requires `with_variant()` on every JSONB column, conditional FTS code paths, no pgvector columns, and no PG-specific operators. This is the current state and is the problem being solved. | Accept SQLite for fast unit tests only (no FTS, no vectors, no JSONB operators). PostgreSQL for integration tests and production. The test matrix has both, but SQLite tests cannot be expected to cover PG-native features. |
-| **Zero-downtime dual-write migration** | Running writes to both SQLite and PostgreSQL simultaneously during transition sounds safe but requires application-level dual-write logic, consistency checks, and a cutover procedure. For PaperBot's current scale (single-server, non-SLA), this complexity is not warranted. | Simple cutover: export SQLite data → apply Alembic on PG → migrate data via pgloader/script → update `PAPERBOT_DB_URL` → restart. Maintenance window acceptable. |
-| **pgloader for FTS5 virtual tables** | pgloader handles most SQLite → PG data migration automatically, but it cannot export FTS5 virtual tables (`memory_items_fts`, `document_chunks_fts`) or sqlite-vec virtual tables (`vec_items`). Attempting to pgload these tables will fail or produce garbage. | Skip virtual tables in pgloader. Regenerate FTS data: tsvector generated columns auto-populate on first `UPDATE` or can be bulk-populated via `UPDATE memory_items SET updated_at = updated_at`. For embeddings: re-run the embedding pipeline on existing content after migration. |
-| **Big-bang model normalization** | Normalizing all 46 models in a single Alembic revision is the highest-risk operation in the milestone. One constraint violation in production data stops the entire migration. | Normalize incrementally: one model group per Alembic revision. Test each revision against a copy of production data before applying. Use `ALTER TABLE ... ADD CONSTRAINT IF NOT EXISTS` to be idempotent. |
+| Anti-Feature | Why Requested | Why Problematic | Alternative |
+|--------------|---------------|-----------------|-------------|
+| **Custom agent orchestration runtime** | Users want PaperBot to orchestrate agents automatically (e.g., "spin up 3 agents for this task"). | Violates the core architectural constraint: host agents own orchestration. Building a competing runtime creates maintenance burden and undermines the skill-provider positioning. This is explicitly out of scope in PROJECT.md. | Surface team decomposition *initiated by the agent*, not by PaperBot. The agent decides the team; DeepCode visualizes it. |
+| **Per-agent custom UI skins** | Users of Claude Code may want a "Claude Code-branded" view; Codex users want different branding. | One UI per agent creates N maintenance paths. Defeats the agent-agnostic goal. Minor branding differences do not justify divergence. | Single unified dashboard. Agent type shown as a badge/label. Adapter handles protocol differences, not UI differences. |
+| **Real-time streaming of every LLM token** | Cursor streams token-by-token during generation. Users find it visually engaging. | Token streaming requires per-agent streaming support in the adapter layer, doubles SSE event volume, and creates complex UI state (partial text, cancellation mid-stream). The value — watching tokens appear — is not meaningful for a monitoring dashboard. | Show full LLM turn as a single event when complete. For latency transparency, show "LLM thinking..." spinner with elapsed time. |
+| **Full IDE replacement (built-in file editor)** | OpenHands and Cursor are full IDEs. Why not replace VS Code entirely? | PaperBot's studio page already has Monaco for editing, but a full IDE replacement requires language servers, extensions, debugging integration, and terminal multiplexing — months of scope. | Use Monaco for file viewing and diff display only. Terminal (XTerm) for command output. The user's actual IDE (VS Code, Cursor) remains the editing environment. |
+| **Agent training / fine-tuning integration** | AgentOps tracks sessions for eval datasets. Users may want to fine-tune agents from dashboard data. | Training data curation and fine-tuning is a separate product domain. Adding it to a visualization dashboard creates feature bloat and distracts from the core control-surface value. | Export session data as JSONL for external fine-tuning pipelines. Keep the dashboard read/control only. |
+| **Multi-user collaboration on agent sessions** | "Multiple developers watch the same agent session live" sounds useful for teams. | Requires real-time session sharing state, permission models, conflict resolution when two users send commands, and a WebSocket multiplexer. This is Tuple/Liveblocks territory, not a code agent dashboard. | One active user per session. Export/share session replays as read-only links. |
+| **Autonomous agent scheduling (cron-style)** | "Run this agent task every night" is a natural feature request. ARQ already does cron for DailyPaper. | Scheduling arbitrary agent tasks creates a mini-orchestration runtime within PaperBot, which contradicts the skill-provider constraint. Also requires agent credential storage, retry logic, and error notifications at scale. | DailyPaper cron workflow (already built) handles scheduled research tasks. Agent task scheduling for code work is out of scope. |
 
 ---
 
 ## Feature Dependencies
 
 ```
-Docker Compose (PostgreSQL local dev)
-  |
-  +-> Alembic env.py async config
-  |     |
-  |     +-> PostgreSQL engine + AsyncSessionProvider
-  |           |
-  |           +-> Store-by-store async conversion (17 stores)
-  |           |     |
-  |           |     +-> Async ARQ worker integration
-  |           |     |
-  |           |     +-> CI PostgreSQL test matrix
-  |           |
-  |           +-> Eager loading audit (all relationships)
-  |           |
-  |           +-> Text -> JSONB column migration
-  |           |     |
-  |           |     +-> GIN indexes on queryable JSONB columns
-  |           |     |
-  |           |     +-> ARRAY columns for flat string lists (optional)
-  |           |
-  |           +-> FTS5 -> tsvector (memory + documents)
-  |           |     |
-  |           |     +-> Hybrid pgvector + tsvector search
-  |           |
-  |           +-> sqlite-vec -> pgvector (memory embeddings)
-  |           |     |
-  |           |     +-> Hybrid pgvector + tsvector search
-  |           |
-  |           +-> Systematic model normalization
-  |
-  +-> Data migration tooling (SQLite -> PG)
+Chat input / Task dispatch
+    |
+    +--requires--> Agent adapter layer (ClaudeCodeAdapter / CodexAdapter / OpenCodeAdapter)
+    |                   |
+    |                   +--requires--> Agent-agnostic proxy interface (BaseAgentAdapter)
+    |
+    +--enhances--> Human-in-the-loop approval gate (needs bi-directional adapter, not just receive)
+
+Real-time activity stream
+    |
+    +--requires--> SSE infrastructure (already exists)
+    +--requires--> AgentEventEnvelope flowing into event log (partially built in v1.1)
+    |
+    +--enhances--> Session detail view / timeline
+    +--enhances--> Team decomposition graph
+    +--enhances--> File diff viewer (on file_changed events)
+
+File diff viewer
+    |
+    +--requires--> File snapshot capture in event log (file_path + before + after)
+    +--requires--> Monaco diff editor (already in studio page)
+
+Team decomposition graph (AgentTeamGraph)
+    |
+    +--requires--> Parent-child agent relationship in event envelope (agent_id + parent_agent_id)
+    +--requires--> @xyflow/react (already in codebase)
+    +--requires--> Real-time activity stream (updates graph state)
+
+Session replay
+    |
+    +--requires--> Ordered, timestamped event storage per run_id (event log)
+    +--requires--> Session detail view (shares timeline component)
+
+Token usage / cost display
+    |
+    +--requires--> Token counts in event envelope or adapter response
+    +--enhances--> Session list (cost-per-session column)
+
+Paper2Code workflow integration
+    |
+    +--requires--> run_type field in AgentEventEnvelope
+    +--requires--> Real-time activity stream
+    +--enhances--> Session detail view (domain-specific rendering)
+
+Human-in-the-loop approval gate
+    |
+    +--requires--> Agent adapter layer (needs bi-directional control, not SSE-only)
+    +--requires--> HUMAN_APPROVAL_REQUIRED event type in vocabulary
+    +--requires--> State persistence / checkpoint in adapter (agent must be resumable)
 ```
 
 ### Dependency Notes
 
-- **AsyncSessionProvider requires Docker Compose:** PG must be running locally before any async engine code can be tested.
-- **Store conversion requires eager loading audit:** Converting a store to async without fixing its lazy-loaded relationships will produce `MissingGreenlet` errors at runtime, not at conversion time. These must be done together per-store, not sequentially across the full codebase.
-- **JSONB migration requires Alembic PG target:** The `postgresql_using` cast expression in `op.alter_column` is PostgreSQL-only. Migration scripts must be run against PG, not SQLite.
-- **pgvector requires FTS5 → tsvector:** The hybrid search feature uses both. Neither can be delivered alone if hybrid search is the goal.
-- **Data migration tooling is independent:** pgloader/script migration of existing SQLite data can run after schema is in place. It is not on the critical path for new installations.
-- **Model normalization is last:** Schema constraints should be added after data is migrated. Adding `NOT NULL` constraints to a column with nulls in production data will fail. Normalization runs against real data, so data migration must precede it.
+- **Adapter layer is the critical dependency.** Chat dispatch, HITL approval, and interrupt control all require the adapter to be bidirectional — not just receive events but send commands back. Build the adapter interface early; it unblocks chat dispatch, control surface, and approval features simultaneously.
+- **Activity stream unblocks three features.** Real-time stream is prerequisite for team graph updates, session detail, and file diff triggering. Ship it first.
+- **Team graph requires agent_id in event envelope.** The Claude Code issue #24537 identified `agent_id` in hook payloads as the missing infrastructure prerequisite for any team visualization. This must be part of the event schema from the start; retrofitting it later requires re-logging all historical events.
+- **Session replay is independent.** It only requires event storage (already planned) and a timeline UI component. Can be added after core monitoring is stable without blocking other features.
+- **HITL approval conflicts with read-only SSE transport.** SSE is one-directional. Approval responses must go back via HTTP POST (or WebSocket). Design the adapter to accept both SSE (for receiving) and REST (for control) from the start.
 
 ---
 
 ## MVP Definition
 
-### Ship First (Milestone Core)
+### Launch With (v1.2 Core)
 
-The minimum needed to make PaperBot run on PostgreSQL with async stores.
+Minimum needed to validate the agent-agnostic dashboard concept.
 
-- [ ] Docker Compose PG setup — required for any local development
-- [ ] Alembic env.py async config — required to create PG schema
-- [ ] `AsyncSessionProvider` + `create_async_engine` — replaces sync engine
-- [ ] `paper_store` async conversion — highest-traffic store, most API routes depend on it
-- [ ] `memory_store` async conversion + FTS5 → tsvector + sqlite-vec → pgvector — memory system is a first-class feature
-- [ ] `document_index_store` async conversion + FTS5 → tsvector — document search depends on it
-- [ ] `research_store` async conversion — research tracks are core to paper workflows
-- [ ] Remaining 13 stores converted — stores that only write/read without FTS or vector search; low risk
-- [ ] Text → JSONB for all 92 columns — prerequisite for any JSONB indexing or querying
-- [ ] Eager loading audit — required per-store as part of async conversion
+- [ ] **Agent adapter layer** (BaseAgentAdapter + ClaudeCodeAdapter) — without this, there is no agent to visualize or control
+- [ ] **Real-time activity stream** (SSE → ActivityFeed component) — live events are the core value; a static dashboard is a monitoring tool, not a control surface
+- [ ] **Tool call log** (per-event rendering in activity feed) — users need to understand what the agent did
+- [ ] **Chat input → task dispatch** (send task to configured agent via adapter) — control is what makes this a dashboard, not a log viewer
+- [ ] **Session list + session detail** (timeline of events per run_id) — navigation between sessions
+- [ ] **Agent status indicator** (running / waiting / complete / error) — basic situational awareness
+- [ ] **Token usage / cost per session** — agents burn money; users need visibility immediately
+- [ ] **Connection status indicator** — trust signal; users need to know the dashboard is live
 
-### Add After MVP Validated
+### Add After Validation (v1.x)
 
-Once the app runs cleanly on PG in development:
+Once core monitoring + dispatch works with one agent:
 
-- [ ] Hybrid pgvector + tsvector search — improves retrieval quality, but BM25-only is functional
-- [ ] GIN indexes on JSONB columns — performance optimization, not correctness
-- [ ] Async ARQ worker integration — ARQ currently works with sync stores wrapped in thread pool; proper async integration is an improvement
-- [ ] Data migration tooling — needed only when upgrading existing SQLite installations
-- [ ] CI PostgreSQL service container — add after PG codebase is stable
+- [ ] **File diff viewer** — add when file_changed events are flowing; requires snapshot capture in event log
+- [ ] **Team decomposition graph** — add when Claude Code Teams events are present; requires agent_id in envelope
+- [ ] **CodexAdapter + OpenCodeAdapter** — second and third agent adapters; add after ClaudeCodeAdapter is stable
+- [ ] **Human-in-the-loop approval gate** — add after bidirectional adapter is proven; requires checkpoint/resume in adapter
+- [ ] **Paper2Code workflow integration** — enriched view for paper2code runs; add after generic activity stream is stable
+- [ ] **Hybrid activity discovery** — MCP push + filesystem discovery; add after event push path is proven
 
-### Defer to Post-v2.0
+### Future Consideration (v2+)
 
-- [ ] Systematic model normalization — correctness improvement, not functionality blocker
-- [ ] ARRAY columns for flat string lists — micro-optimization, schema change risk
-- [ ] Alembic branch strategy — architectural decision with no runtime impact
-- [ ] Connection pool tuning — production concern, not development milestone
+Features to defer until product-market fit is established:
+
+- [ ] **Session replay** — high value but high complexity; requires replay UI with scrubber; defer until event storage is stable
+- [ ] **MCP tool surface visibility** — paper-specific enrichment of tool calls; nice-to-have for PaperBot users
+- [ ] **Export session data** (JSONL, CSV) — useful for eval pipelines; low priority vs core features
 
 ---
 
@@ -159,60 +174,70 @@ Once the app runs cleanly on PG in development:
 
 | Feature | User Value | Implementation Cost | Priority |
 |---------|------------|---------------------|----------|
-| Docker Compose PG | HIGH (unblocks all dev) | LOW | P1 |
-| Alembic async env.py | HIGH (unblocks schema) | LOW | P1 |
-| AsyncSessionProvider | HIGH (core architecture) | LOW | P1 |
-| paper_store async | HIGH (most-used store) | MEDIUM | P1 |
-| memory_store async + FTS5/vec | HIGH (search is core) | HIGH | P1 |
-| research_store async | HIGH (tracks are core) | MEDIUM | P1 |
-| document_index_store async + FTS5 | MEDIUM | MEDIUM | P1 |
-| Remaining 13 stores async | HIGH (completeness) | HIGH (volume) | P1 |
-| Text → JSONB | HIGH (semantic correctness) | MEDIUM | P1 |
-| Eager loading audit | HIGH (correctness) | HIGH | P1 |
-| Hybrid pgvector + tsvector search | MEDIUM (quality boost) | MEDIUM | P2 |
-| Async ARQ worker | MEDIUM (worker efficiency) | MEDIUM | P2 |
-| GIN indexes on JSONB | MEDIUM (query performance) | LOW | P2 |
-| CI PostgreSQL matrix | HIGH (regression safety) | LOW | P2 |
-| Data migration tooling | HIGH (for existing users) | MEDIUM | P2 |
-| Model normalization | MEDIUM (schema hygiene) | HIGH | P3 |
-| ARRAY columns | LOW (micro-optimization) | LOW | P3 |
-| Connection pool tuning | MEDIUM (production ops) | LOW | P3 |
+| Agent adapter layer (BaseAgentAdapter + ClaudeCodeAdapter) | HIGH | HIGH | P1 |
+| Real-time activity stream (SSE → ActivityFeed) | HIGH | LOW (SSE exists) | P1 |
+| Tool call log | HIGH | LOW | P1 |
+| Chat input → task dispatch | HIGH | MEDIUM | P1 |
+| Session list + detail view | HIGH | MEDIUM | P1 |
+| Agent status indicator | HIGH | LOW | P1 |
+| Token usage / cost display | HIGH | MEDIUM | P1 |
+| Connection status indicator | MEDIUM | LOW | P1 |
+| File diff viewer | HIGH | MEDIUM | P2 |
+| Team decomposition graph | HIGH | HIGH | P2 |
+| CodexAdapter / OpenCodeAdapter | HIGH (for multi-agent) | MEDIUM | P2 |
+| Human-in-the-loop approval gate | HIGH (safety) | HIGH | P2 |
+| Paper2Code workflow integration | MEDIUM (PaperBot-specific) | MEDIUM | P2 |
+| Hybrid activity discovery | MEDIUM (robustness) | HIGH | P2 |
+| Session replay | HIGH | HIGH | P3 |
+| MCP tool surface visibility | MEDIUM | LOW | P3 |
+| Session data export (JSONL/CSV) | LOW | LOW | P3 |
 
-**Priority key:** P1 = milestone is incomplete without it; P2 = adds significant value, ship after P1 stable; P3 = polish/optimization.
+**Priority key:**
+- P1: Must have for v1.2 launch — without these, the dashboard is not functional
+- P2: Should have — add after P1 stable; these define the product's competitive position
+- P3: Nice to have — defer until post-validation
 
 ---
 
-## Complexity Drivers
+## Competitor Feature Analysis
 
-These are the aspects that make this migration harder than average:
+| Feature | Cursor/Windsurf/Cline | LangSmith/AgentOps | Claude Code Agent Monitor | GitHub Agent HQ | DeepCode (Our Approach) |
+|---------|-----------------------|--------------------|---------------------------|-----------------|-------------------------|
+| Real-time activity stream | IDE-embedded | Yes (web) | Yes (WebSocket) | Yes | Yes (SSE, existing infra) |
+| Tool call log | Yes (inline) | Yes (trace waterfall) | Yes | Partial | Yes |
+| File diff viewer | Yes (diff approval) | No | No | No | Yes (Monaco diff) |
+| Session list | Partial (history) | Yes | Yes | Yes | Yes |
+| Token cost tracking | Partial (Cursor: no; Cline: yes) | Yes | Yes (configurable pricing) | Yes (org-level) | Yes |
+| Chat → agent dispatch | Yes (native) | No | No | Yes | Yes (proxy model) |
+| Team decomposition graph | No | No | Partial (Kanban) | Partial | Yes (@xyflow/react) |
+| Agent-agnostic (multiple agents) | No (vendor-locked) | Partial (SDK-based) | Claude Code only | GitHub-ecosystem | Yes (any agent) |
+| Human-in-the-loop approval | Cline: Yes | Partial (SDK) | No | Partial | Planned |
+| Session replay | No | Partial (trace replay) | No | No | Planned |
+| Domain-aware enrichment | No | No | No | No | Yes (Paper2Code) |
+| MCP tool visibility | Cline: Yes | No | No | No | Yes (planned) |
 
-| Driver | Impact | Mitigation |
-|--------|--------|------------|
-| 17 stores × ~10 async method conversions | ~170 method rewrites | Prioritize by traffic; use store-by-store Alembic revisions to isolate risk |
-| Lazy loading is pervasive — default `lazy="select"` on all relationships | Runtime errors discovered only at test time, not at conversion time | Add `lazy="raise"` temporarily to all relationships after conversion; run full test suite to surface N+1 violations |
-| FTS5 + sqlite-vec virtual tables do not export | Data migration cannot use pgloader for these tables | Skip in pgloader; regenerate from source data after PG import |
-| 92 JSON Text columns need Alembic cast migrations | Each column needs `postgresql_using` cast; invalid JSON will cause migration failure | Pre-validate all JSON columns before migration: `SELECT id FROM table WHERE col IS NOT NULL AND col != '{}' AND (col::jsonb IS NULL)` — this will fail on bad JSON, surfacing rows to fix first |
-| ARQ worker and FastAPI share the same store classes | ARQ does not have FastAPI DI; session lifecycle is different | Use ARQ lifecycle hooks (`on_job_start`/`after_job_end`) to manage `AsyncSession` in worker context; do not use FastAPI `Depends` patterns in worker code |
-| `_ensure_fts5` and `_ensure_vec` are called on `__init__` of stores | Bootstrap code that runs at startup must detect DB type and skip SQLite-only setup | Add DB dialect check: `if session.bind.dialect.name == "postgresql"` before creating PG-specific structures |
+**Key insight:** No existing product combines agent-agnostic proxying with real-time team visualization and a web-based control surface. The closest is GitHub Agent HQ, but it is GitHub-ecosystem-only and not deployable as a self-hosted web UI. DeepCode's differentiation is: (1) any agent, (2) team graph via existing xyflow/react, (3) paper-domain enrichment, (4) self-hosted.
 
 ---
 
 ## Sources
 
-- [SQLAlchemy 2.0 Async I/O Documentation](https://docs.sqlalchemy.org/en/20/orm/extensions/asyncio.html) — AsyncSession, async_sessionmaker, selectinload, run_sync
-- [SQLAlchemy: The Async-ening](https://matt.sh/sqlalchemy-the-async-ening) — practical lazy loading pitfalls in async conversion
-- [FastAPI + SQLAlchemy 2.0 Modern Async Patterns](https://dev-faizan.medium.com/fastapi-sqlalchemy-2-0-modern-async-database-patterns-7879d39b6843) — session lifecycle, expire_on_commit
-- [ARQ + SQLAlchemy Done Right](https://wazaari.dev/blog/arq-sqlalchemy-done-right) — ARQ lifecycle hooks for async session management
-- [Alembic Batch Migrations (SQLite + PG)](https://alembic.sqlalchemy.org/en/latest/batch.html) — cross-database migration portability
-- [pgvector Python Library](https://github.com/pgvector/pgvector-python) — SQLAlchemy Vector type, Alembic integration, ischema_names fix
-- [SQLAlchemy PostgreSQL Dialect — JSONB](https://docs.sqlalchemy.org/en/20/dialects/postgresql.html) — JSONB type, GIN index, with_variant, MutableDict
-- [Alembic JSONB Column Migration Discussion](https://github.com/sqlalchemy/alembic/discussions/984) — Text → JSONB alter_column with postgresql_using cast
-- [PostgreSQL tsvector FTS with SQLAlchemy](https://amitosh.medium.com/full-text-search-fts-with-postgresql-and-sqlalchemy-edc436330a0c) — generated tsvector column, GIN index, ts_rank
-- [pgloader SQLite Reference](https://pgloader.readthedocs.io/en/latest/ref/sqlite.html) — data migration tool, type conversion, FK constraint handling
-- [How to Migrate from SQLite to PostgreSQL](https://render.com/articles/how-to-migrate-from-sqlite-to-postgresql) — boolean, datetime, JSON type differences
-- [Mixing Async/Sync in FastAPI](https://github.com/fastapi/fastapi/discussions/12995) — run_in_threadpool vs full async conversion
-- [Advanced SQLAlchemy 2.0 selectinload Strategies 2025](https://www.johal.in/advanced-sqlalchemy-2-0-selectinload-and-withparent-strategies-2025/) — selectinload pitfalls (composite PKs, recursive relations, fan-outs)
+- [GitHub Claude Code Issue #24537 — Agent Hierarchy Dashboard feature request](https://github.com/anthropics/claude-code/issues/24537) — comprehensive list of TUI/desktop dashboard features requested by community
+- [Claude Code Agent Monitor (hoangsonww/Claude-Code-Agent-Monitor)](https://github.com/hoangsonww/Claude-Code-Agent-Monitor) — open-source reference implementation: Kanban, activity feed, token cost, session timeline
+- [VS Code Multi-Agent Development Blog (Feb 2026)](https://code.visualstudio.com/blogs/2026/02/05/multi-agent-development) — VS Code Agent Sessions view, MCP Apps, agent session management patterns
+- [GitHub Agent HQ announcement](https://visualstudiomagazine.com/articles/2025/10/28/github-introduces-agent-hq-to-orchestrate-any-agent-any-way-you-work.aspx) — "any agent, any way you work" mission control concept
+- [LangSmith Observability](https://www.langchain.com/langsmith/observability) — waterfall trace view, custom dashboards, token/latency metrics
+- [AgentOps Learning Path](https://www.analyticsvidhya.com/blog/2025/12/agentops-learning-path/) — session replay, cost tracking, multi-agent workflow monitoring
+- [OpenHands Review and SDK](https://openhands.dev/) — chat panel + terminal + browser + VS Code integration reference UI
+- [Cursor vs Windsurf vs Cline comparison (UI Bakery)](https://uibakery.io/blog/cursor-vs-windsurf-vs-cline) — agent mode features, diff approval, MCP integration
+- [Claude Code Agent Teams (claude.fast)](https://claudefa.st/blog/guide/agents/agent-teams) — team architecture, task list, mailbox, context isolation
+- [Human-in-the-Loop: OpenAI Agents SDK](https://openai.github.io/openai-agents-js/guides/human-in-the-loop/) — interrupt/approve/resume patterns
+- [Cloudflare Agents HITL](https://developers.cloudflare.com/agents/concepts/human-in-the-loop/) — durable approval gates, checkpoint patterns
+- [CliDeck](https://github.com/rustykuntz/clideck) — multi-agent CLI session dashboard (Claude Code, Codex, Gemini CLI, OpenCode simultaneously)
+- [OpenSync](https://github.com/waynesutton/opensync) — cloud-synced dashboards for OpenCode, Claude Code, Codex
+- [Datadog Claude Code Monitoring](https://www.datadoghq.com/blog/claude-code-monitoring/) — enterprise AI Agents Console, adoption + reliability metrics
+- [15 AI Agent Observability Tools 2026 (AIMultiple)](https://research.aimultiple.com/agentic-monitoring/) — ecosystem survey, tool comparison
 
 ---
-*Feature research for: PostgreSQL migration + async data layer + model refactoring (PaperBot v2.0)*
-*Researched: 2026-03-14*
+*Feature research for: Agent-agnostic code agent dashboard/IDE (PaperBot v1.2 DeepCode)*
+*Researched: 2026-03-15*
