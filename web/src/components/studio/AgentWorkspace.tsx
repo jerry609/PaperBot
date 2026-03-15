@@ -258,7 +258,6 @@ function LeftRail({
   selectedPaperStatus,
   projectDir,
   contextLabel,
-  contextHint,
   activeAgents,
   subagentEvents,
   onOpenInVSCode,
@@ -271,7 +270,6 @@ function LeftRail({
   selectedPaperStatus: StudioPaperStatus
   projectDir: string | null
   contextLabel: string
-  contextHint: string
   activeAgents: number
   subagentEvents: number
   onOpenInVSCode: () => void
@@ -301,34 +299,36 @@ function LeftRail({
           </span>
         </div>
 
-        <dl className="mt-3 space-y-2 text-[11px]">
-          <div className="flex items-start justify-between gap-3 border-t border-slate-200 pt-2">
-            <dt className="shrink-0 font-semibold uppercase tracking-[0.14em] text-slate-500">Workspace</dt>
-            <dd className="min-w-0 text-right text-slate-700">{formatWorkspaceLabel(projectDir)}</dd>
+        <div className="mt-3 border-t border-slate-200 pt-3">
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Workspace</p>
+              <p className="mt-1 truncate text-[12px] font-medium text-slate-800">
+                {formatWorkspaceLabel(projectDir)}
+              </p>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 shrink-0 gap-1.5 px-2 text-[11px] text-slate-600 hover:text-slate-900"
+              onClick={onOpenInVSCode}
+              disabled={!projectDir}
+              title={projectDir ? `Open ${projectDir} in VS Code` : "Set up a workspace first"}
+            >
+              <ExternalLink className="h-3.5 w-3.5" />
+              Open
+            </Button>
           </div>
-          <div className="flex items-start justify-between gap-3">
-            <dt className="shrink-0 font-semibold uppercase tracking-[0.14em] text-slate-500">Context</dt>
-            <dd className="min-w-0 text-right text-slate-700">{contextLabel}</dd>
-          </div>
-          <div className="flex items-start justify-between gap-3">
-            <dt className="shrink-0 font-semibold uppercase tracking-[0.14em] text-slate-500">Subagents</dt>
-            <dd className="min-w-0 text-right text-slate-700">{activeAgents} active / {subagentEvents} total</dd>
-          </div>
-        </dl>
 
-        <p className="mt-2 line-clamp-2 text-[11px] text-slate-500">{contextHint}</p>
-
-        <Button
-          variant="outline"
-          size="sm"
-          className="mt-3 h-8 w-full justify-center gap-1.5 border-slate-200 text-slate-700"
-          onClick={onOpenInVSCode}
-          disabled={!projectDir}
-          title={projectDir ? `Open ${projectDir} in VS Code` : "Set up a workspace first"}
-        >
-          <ExternalLink className="h-3.5 w-3.5" />
-          Open Workspace
-        </Button>
+          <div className="mt-3 flex flex-wrap gap-1.5">
+            <span className="rounded-md border border-slate-200 bg-[#eef0ea] px-2 py-1 text-[10px] font-medium text-slate-600">
+              Context: {contextLabel}
+            </span>
+            <span className="rounded-md border border-slate-200 bg-[#eef0ea] px-2 py-1 text-[10px] font-medium text-slate-600">
+              Subagents: {activeAgents} / {subagentEvents}
+            </span>
+          </div>
+        </div>
       </div>
 
       <Tabs
@@ -825,7 +825,6 @@ export function AgentWorkspace({
               selectedPaperStatus={selectedPaperStatus}
               projectDir={projectDir}
               contextLabel={contextLabel}
-              contextHint={selectedPaper?.contextPackId || contextPack?.context_pack_id || "No context pack yet"}
               activeAgents={activeAgents}
               subagentEvents={codexDelegations.length}
               onOpenInVSCode={() => {
@@ -883,7 +882,6 @@ export function AgentWorkspace({
               selectedPaperStatus={selectedPaperStatus}
               projectDir={projectDir}
               contextLabel={contextLabel}
-              contextHint={selectedPaper?.contextPackId || contextPack?.context_pack_id || "No context pack yet"}
               activeAgents={activeAgents}
               subagentEvents={codexDelegations.length}
               onOpenInVSCode={() => {
