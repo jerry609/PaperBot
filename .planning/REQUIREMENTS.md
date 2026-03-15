@@ -70,8 +70,8 @@ Requirements for Agent Orchestration Dashboard milestone. Each maps to roadmap p
 
 ### Visualization
 
-- [ ] **VIZ-01**: User can view an agent task dependency DAG with real-time status color updates
-- [ ] **VIZ-02**: User can see cross-agent context sharing (ScoreShareBus data flow) in the dashboard
+- [x] **VIZ-01**: User can view an agent task dependency DAG with real-time status color updates
+- [x] **VIZ-02**: User can see cross-agent context sharing (ScoreShareBus data flow) in the dashboard
 
 ## v1.2 Requirements
 
@@ -228,8 +228,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CDX-01 | Phase 10 | Complete |
 | CDX-02 | Phase 10 | Complete |
 | CDX-03 | Phase 10 | Complete |
-| VIZ-01 | Phase 11 | Pending |
-| VIZ-02 | Phase 11 | Pending |
+| VIZ-01 | Phase 11 | Complete |
+| VIZ-02 | Phase 11 | Complete |
 | PGINFRA-01 | Phase 12 | Pending |
 | PGINFRA-02 | Phase 12 | Pending |
 | PGINFRA-03 | Phase 17 | Pending |

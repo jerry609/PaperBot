@@ -415,7 +415,7 @@ Phases execute in milestone order: 1-6 (v1.0) -> 7-11 (v1.1) -> 18-23 (v1.2) -> 
 | 8. Agent Event Vocabulary | 1/2 | In Progress|  | - |
 | 9. Three-Panel Dashboard | 2/2 | Complete   | 2026-03-15 | - |
 | 10. Agent Board + Codex Bridge | 3/3 | Complete   | 2026-03-15 | - |
-| 11. DAG Visualization | v1.1 | 0/2 | Not started | - |
+| 11. DAG Visualization | 1/2 | In Progress|  | - |
 | 18. Adapter Foundation | v1.2 | 0/? | Not started | - |
 | 19. Activity Stream + Session Management | v1.2 | 0/? | Not started | - |
 | 20. Chat + Control Surface | v1.2 | 0/? | Not started | - |
