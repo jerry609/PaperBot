@@ -185,3 +185,10 @@ def test_audit_uses_constants():
     assert "type=\"tool_result\"" not in source, (
         "_audit.py must not use raw type='tool_result' — use EventType.TOOL_RESULT"
     )
+
+
+def test_file_change_event_type():
+    """EventType.FILE_CHANGE is the string 'file_change'."""
+    from paperbot.application.collaboration.message_schema import EventType
+    assert EventType.FILE_CHANGE == "file_change"
+    assert isinstance(EventType.FILE_CHANGE, str)

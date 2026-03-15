@@ -142,6 +142,9 @@ class EventType:
     TOOL_RESULT: str = "tool_result"
     TOOL_ERROR: str = "tool_error"
 
+    # --- File change events ---
+    FILE_CHANGE: str = "file_change"
+
     # --- Existing types (documented for discoverability; callers should migrate gradually) ---
     JOB_START: str = "job_start"
     JOB_RESULT: str = "job_result"
