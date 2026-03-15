@@ -9,9 +9,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from repro.agents.base_agent import AgentResult, AgentStatus
-from repro.models import PaperContext, ReproPhase
-from repro.orchestrator import (
+from paperbot.repro.agents.base_agent import AgentResult, AgentStatus
+from paperbot.repro.models import PaperContext, ReproPhase
+from paperbot.repro.orchestrator import (
     Orchestrator,
     OrchestratorConfig,
     ParallelOrchestrator,

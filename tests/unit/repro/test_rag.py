@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from repro.rag.knowledge_base import BUILTIN_PATTERNS, CodeKnowledgeBase, CodePattern
+from paperbot.repro.rag.knowledge_base import BUILTIN_PATTERNS, CodeKnowledgeBase, CodePattern
 
 
 def test_code_pattern_to_context_renders_metadata_and_code():
