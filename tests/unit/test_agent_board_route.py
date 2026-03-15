@@ -168,6 +168,67 @@ def test_get_session_endpoint_returns_404_for_missing_session():
     assert resp.status_code == 404
 
 
+def test_create_task_endpoint_persists_studio_ad_hoc_task():
+    session = agent_board_route.BoardSession(
+        session_id="board-session-create-task",
+        paper_id="paper-create-task",
+        context_pack_id="cp-create-task",
+        workspace_dir="/tmp/paperbot-workspace",
+        user_id="user-create-task",
+    )
+    agent_board_route._persist_session(session, checkpoint="created", status="running")
+
+    with TestClient(api_main.app) as client:
+        resp = client.post(
+            f"/api/agent-board/sessions/{session.session_id}/tasks",
+            json={
+                "title": "Implement Studio Codex bridge",
+                "description": "Create a real Codex subagent task from Studio console.",
+                "assignee": "codex",
+                "tags": ["monitor"],
+            },
+        )
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["title"] == "Implement Studio Codex bridge"
+    assert payload["description"] == "Create a real Codex subagent task from Studio console."
+    assert payload["status"] == "planning"
+    assert payload["assignee"] == "claude"
+    assert "studio" in payload["tags"]
+    assert "ad_hoc" in payload["tags"]
+    assert "monitor" in payload["tags"]
+
+    persisted = agent_board_route._load_session(session.session_id)
+    assert persisted is not None
+    assert len(persisted.tasks) == 1
+    assert persisted.tasks[0].id == payload["id"]
+
+
+def test_create_task_endpoint_rejects_opencode_runtime():
+    session = agent_board_route.BoardSession(
+        session_id="board-session-opencode",
+        paper_id="paper-opencode",
+        context_pack_id="cp-opencode",
+        workspace_dir="/tmp/paperbot-workspace",
+        user_id="user-opencode",
+    )
+    agent_board_route._persist_session(session, checkpoint="created", status="running")
+
+    with TestClient(api_main.app) as client:
+        resp = client.post(
+            f"/api/agent-board/sessions/{session.session_id}/tasks",
+            json={
+                "title": "Try OpenCode",
+                "description": "Attempt to route Studio delegation into OpenCode.",
+                "assignee": "opencode",
+            },
+        )
+
+    assert resp.status_code == 400
+    assert "Only Codex delegation is wired right now" in resp.text
+
+
 def test_get_latest_session_by_paper_returns_latest_match():
     first = agent_board_route.BoardSession(
         session_id="board-session-latest-1",

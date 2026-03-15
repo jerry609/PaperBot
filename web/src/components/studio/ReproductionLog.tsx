@@ -5,15 +5,17 @@ import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Textarea } from "@/components/ui/textarea"
-import { useStudioStore, AgentAction } from "@/lib/store/studio-store"
+import { useStudioStore, AgentAction, type AgentTask as StudioAgentTask } from "@/lib/store/studio-store"
 import { useProjectContext } from "@/lib/store/project-context"
 import { readSSE } from "@/lib/sse"
+import { backendUrl } from "@/lib/backend-url"
 import { CodeBlock } from "@/components/ai-elements"
 import { DiffModal } from "./DiffViewer"
 import { WorkspaceSetupDialog } from "./WorkspaceSetupDialog"
 import { ContextDialogPanel } from "./ContextDialogPanel"
 import { AgentBoard } from "./AgentBoard"
 import { useContextPackGeneration } from "@/hooks/useContextPackGeneration"
+import type { StudioRuntimeInfo } from "@/lib/studio-runtime"
 import { cn } from "@/lib/utils"
 import {
     CheckCircle2,
@@ -48,6 +50,8 @@ interface ReproductionLogProps {
     onViewModeChange: (mode: ReproductionViewMode) => void
     hideNavigation?: boolean
     onOpenBoardWorkspace?: () => void
+    runtimeInfo: StudioRuntimeInfo
+    runtimeLoading: boolean
 }
 
 const actionIcons: Record<string, React.ElementType> = {
@@ -67,6 +71,54 @@ const actionColors: Record<string, { bg: string; text: string; border: string }>
     error: { bg: "bg-rose-50", text: "text-rose-700", border: "border-rose-200" },
     complete: { bg: "bg-emerald-50", text: "text-emerald-700", border: "border-emerald-200" },
     text: { bg: "bg-[#eef0ea]", text: "text-slate-800", border: "border-slate-200" },
+}
+
+function normalizeBoardTaskStatus(rawStatus: unknown): StudioAgentTask["status"] {
+    const status = typeof rawStatus === "string" ? rawStatus : "planning"
+    if (status === "ai_review") return "in_progress"
+    if (
+        status === "planning" ||
+        status === "in_progress" ||
+        status === "repairing" ||
+        status === "human_review" ||
+        status === "done" ||
+        status === "paused" ||
+        status === "cancelled"
+    ) {
+        return status
+    }
+    return "planning"
+}
+
+function normalizeBoardTaskFromBackend(rawTask: Record<string, unknown>, fallbackPaperId: string | null): StudioAgentTask {
+    return {
+        id: (rawTask.id as string) || `task-${Date.now()}`,
+        title: (rawTask.title as string) || "Untitled",
+        description: (rawTask.description as string) || "",
+        status: normalizeBoardTaskStatus(rawTask.status),
+        assignee: (rawTask.assignee as string) || "claude",
+        progress: (rawTask.progress as number) || 0,
+        tags: (rawTask.tags as string[]) || [],
+        subtasks: (rawTask.subtasks as StudioAgentTask["subtasks"]) || [],
+        codexOutput: (rawTask.codexOutput as string) || (rawTask.codex_output as string) || undefined,
+        generatedFiles: (rawTask.generatedFiles as string[]) || (rawTask.generated_files as string[]) || [],
+        reviewFeedback:
+            (rawTask.reviewFeedback as string) || (rawTask.review_feedback as string) || undefined,
+        lastError: (rawTask.lastError as string) || (rawTask.last_error as string) || undefined,
+        executionLog:
+            (rawTask.executionLog as StudioAgentTask["executionLog"]) ||
+            (rawTask.execution_log as StudioAgentTask["executionLog"]) ||
+            [],
+        paperId: (rawTask.paperId as string) || (rawTask.paper_id as string) || fallbackPaperId || undefined,
+        createdAt: (rawTask.createdAt as string) || (rawTask.created_at as string) || new Date().toISOString(),
+        updatedAt: (rawTask.updatedAt as string) || (rawTask.updated_at as string) || new Date().toISOString(),
+    }
+}
+
+function buildCodexTaskTitle(message: string): string {
+    const singleLine = message.replace(/\s+/g, " ").trim()
+    if (!singleLine) return "Studio Codex task"
+    return singleLine.length <= 72 ? singleLine : `${singleLine.slice(0, 69)}...`
 }
 
 function formatTime(date: Date): string {
@@ -173,6 +225,8 @@ export function ReproductionLog({
     onViewModeChange,
     hideNavigation = false,
     onOpenBoardWorkspace,
+    runtimeInfo,
+    runtimeLoading,
 }: ReproductionLogProps) {
     const router = useRouter()
     const {
@@ -180,6 +234,7 @@ export function ReproductionLog({
         tasks,
         activeTaskId,
         selectedPaperId,
+        boardSessionId,
         lastGenCodeResult,
         contextPack,
         contextPackLoading,
@@ -191,6 +246,10 @@ export function ReproductionLog({
         appendToLastAction,
         updateTaskStatus,
         updatePaper,
+        setBoardSessionId,
+        addAgentTask,
+        updateAgentTask,
+        setPipelinePhase,
     } = useStudioStore()
 
     const { generate: generateContextPack, status: genStatus } = useContextPackGeneration()
@@ -210,7 +269,7 @@ export function ReproductionLog({
     const [saving, setSaving] = useState(false)
     const [messageInput, setMessageInput] = useState("")
     const [showWorkspaceSetup, setShowWorkspaceSetup] = useState(false)
-    const [pendingAction, setPendingAction] = useState<"chat" | null>(null)
+    const [pendingAction, setPendingAction] = useState<"chat" | "delegate_codex" | null>(null)
     // Switch to context dialog when generation starts.
     useEffect(() => {
         if (contextPackLoading && viewMode !== "context") {
@@ -223,6 +282,16 @@ export function ReproductionLog({
     const activeTask = tasks.find(t => t.id === activeTaskId)
     const projectDir = selectedPaper?.outputDir || lastGenCodeResult?.outputDir || null
     const isBusy = status === "running"
+    const runtimeLabel = runtimeLoading
+        ? "Studio runtime"
+        : runtimeInfo.source === "anthropic_api"
+            ? "Anthropic API fallback"
+            : "Claude Code"
+    const messagePlaceholder = runtimeLoading
+        ? "Message Studio runtime..."
+        : runtimeInfo.source === "anthropic_api"
+            ? "Message fallback runtime..."
+            : "Message Claude Code..."
 
     const saveActiveFile = async () => {
         if (!projectDir || !activeFile || !activeFileData) return
@@ -252,6 +321,8 @@ export function ReproductionLog({
         }
         if (pendingAction === "chat") {
             runChatWithDir(directory)
+        } else if (pendingAction === "delegate_codex") {
+            runCodexDelegationWithDir(directory)
         }
         setPendingAction(null)
     }
@@ -262,6 +333,13 @@ export function ReproductionLog({
         if (!message) return
         setMessageInput("")
         await handleSendMessageWithDir(message, targetDir)
+    }
+
+    const runCodexDelegationWithDir = async (targetDir: string) => {
+        const message = messageInput.trim()
+        if (!message) return
+        setMessageInput("")
+        await handleDelegateToCodexWithDir(message, targetDir)
     }
 
     const handleSendMessage = async () => {
@@ -283,13 +361,47 @@ export function ReproductionLog({
         await handleSendMessageWithDir(message, projectDir || undefined)
     }
 
+    const ensureBoardSession = async (targetDir: string): Promise<string> => {
+        if (!selectedPaperId || !selectedPaper) {
+            throw new Error("Select or create a paper first.")
+        }
+
+        if (boardSessionId) {
+            return boardSessionId
+        }
+
+        const response = await fetch(backendUrl("/api/agent-board/sessions"), {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                paper_id: selectedPaperId,
+                context_pack_id: contextPack?.context_pack_id || "",
+                paper_title: selectedPaper.title,
+                workspace_dir: targetDir,
+            }),
+        })
+
+        if (!response.ok) {
+            const text = await response.text()
+            throw new Error(text || `Failed to create monitor session (${response.status})`)
+        }
+
+        const session = (await response.json()) as { session_id?: string }
+        if (!session.session_id) {
+            throw new Error("Monitor session response did not include a session_id")
+        }
+
+        setBoardSessionId(session.session_id)
+        return session.session_id
+    }
+
     const handleSendMessageWithDir = async (message: string, targetDir?: string) => {
         setStatus("running")
         setLastError(null)
         onViewModeChange("log")
 
         const taskId = addTask(`Chat — ${message.slice(0, 30)}${message.length > 30 ? "…" : ""}`)
-        addAction(taskId, { type: "thinking", content: `[${mode}] Sending to CC...` })
+        addAction(taskId, { type: "thinking", content: `[${mode}] Sending to ${runtimeLabel}...` })
 
         try {
             const res = await fetch("/api/studio/chat", {
@@ -401,6 +513,125 @@ export function ReproductionLog({
         }
     }
 
+    const handleDelegateToCodex = async () => {
+        if (!messageInput.trim() || isBusy) return
+
+        if (!selectedPaper) {
+            setLastError("Select or create a paper first.")
+            return
+        }
+
+        if (!projectDir) {
+            setPendingAction("delegate_codex")
+            setShowWorkspaceSetup(true)
+            return
+        }
+
+        const message = messageInput.trim()
+        setMessageInput("")
+        await handleDelegateToCodexWithDir(message, projectDir)
+    }
+
+    const handleDelegateToCodexWithDir = async (message: string, targetDir: string) => {
+        setStatus("running")
+        setLastError(null)
+
+        const taskTitle = buildCodexTaskTitle(message)
+        const logTaskId = addTask(`Codex — ${taskTitle}`)
+        addAction(logTaskId, { type: "thinking", content: "Preparing Codex delegation..." })
+
+        try {
+            const sessionId = await ensureBoardSession(targetDir)
+            const createRes = await fetch(backendUrl(`/api/agent-board/sessions/${sessionId}/tasks`), {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    title: taskTitle,
+                    description: message,
+                    workspace_dir: targetDir,
+                    assignee: "codex",
+                    tags: ["studio_console"],
+                }),
+            })
+
+            if (!createRes.ok) {
+                const text = await createRes.text()
+                throw new Error(text || `Failed to create Codex task (${createRes.status})`)
+            }
+
+            const rawTask = (await createRes.json()) as Record<string, unknown>
+            const task = normalizeBoardTaskFromBackend(rawTask, selectedPaperId)
+            addAgentTask(task)
+            addAction(logTaskId, {
+                type: "text",
+                content: `Delegated to Codex in session ${sessionId}. Open Monitor to inspect the live task graph.`,
+            })
+            updateTaskStatus(logTaskId, "running")
+            setPipelinePhase("executing")
+
+            const execRes = await fetch(
+                backendUrl(`/api/agent-board/tasks/${encodeURIComponent(task.id)}/execute`),
+                { method: "POST" },
+            )
+
+            if (!execRes.ok || !execRes.body) {
+                const text = await execRes.text()
+                throw new Error(text || `Failed to execute Codex task (${execRes.status})`)
+            }
+
+            for await (const evt of readSSE(execRes.body)) {
+                if (evt?.type === "progress") {
+                    const data = (evt.data ?? {}) as Record<string, unknown>
+                    const taskData = data.task as Record<string, unknown> | undefined
+                    if (taskData) {
+                        updateAgentTask(task.id, normalizeBoardTaskFromBackend(taskData, selectedPaperId))
+                    }
+
+                    const eventName = data.event as string | undefined
+                    if (eventName === "task_failed") {
+                        addAction(logTaskId, {
+                            type: "error",
+                            content: (data.error as string) || "Codex task failed",
+                        })
+                    } else if (eventName === "task_reviewed" && typeof data.feedback === "string" && data.feedback.trim()) {
+                        addAction(logTaskId, {
+                            type: "text",
+                            content: `Claude review: ${data.feedback as string}`,
+                        })
+                    } else if (eventName === "task_reviewing") {
+                        addAction(logTaskId, {
+                            type: "thinking",
+                            content: "Claude is reviewing Codex output...",
+                        })
+                    }
+                } else if (evt?.type === "result") {
+                    const data = (evt.data ?? {}) as Record<string, unknown>
+                    const success = Boolean(data.success)
+                    addAction(logTaskId, {
+                        type: "complete",
+                        content: success ? "Codex task completed" : "Codex task finished and needs review",
+                    })
+                    updateTaskStatus(logTaskId, success ? "completed" : "error")
+                    setStatus(success ? "success" : "error")
+                    setPipelinePhase(success ? "completed" : "idle")
+                    return
+                } else if (evt?.type === "error") {
+                    throw new Error(evt.message || "Codex task failed")
+                }
+            }
+
+            throw new Error("Codex task stream ended before a terminal result was received")
+        } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e)
+            addAction(logTaskId, { type: "error", content: msg })
+            updateTaskStatus(logTaskId, "error")
+            setLastError(msg)
+            setStatus("error")
+            setPipelinePhase("failed")
+            return
+        }
+    }
+
     const handleSessionCreated = (session: ContextPackSession) => {
         onViewModeChange("log")
         if (session.initial_prompt) {
@@ -428,7 +659,7 @@ export function ReproductionLog({
                     {([
                         { key: "context" as const, label: "Context", icon: Activity },
                         { key: "log" as const, label: "Chat", icon: MessageSquare },
-                        { key: "board" as const, label: "Agent Board", icon: LayoutDashboard },
+                        { key: "board" as const, label: "Monitor", icon: LayoutDashboard },
                     ]).map(({ key, label, icon: TabIcon }) => (
                         <button
                             key={key}
@@ -494,7 +725,7 @@ export function ReproductionLog({
                         onDeployToBoard={openAgentBoardWorkspace}
                     />
                 ) : viewMode === "board" ? (
-                    <AgentBoard paperId={selectedPaperId} />
+                    <AgentBoard paperId={selectedPaperId} monitorMode />
                 ) : activeFileData ? (
                     /* File Viewer */
                     <div className="h-full flex flex-col">
@@ -555,7 +786,7 @@ export function ReproductionLog({
                                         <p className="font-medium text-slate-900">Ready to chat</p>
                                         <p className="text-xs max-w-[280px]">
                                             {selectedPaper
-                                                ? "Send a message to start working with CC on this paper"
+                                                ? `Send a message to start working with ${runtimeLabel} on this paper`
                                                 : "Select or create a paper to get started"}
                                         </p>
                                     </div>
@@ -581,10 +812,32 @@ export function ReproductionLog({
                 /* Rich Input Area - CodePilot Style */
                 <div className="shrink-0 border-t border-slate-200 bg-[#f1f2ed] p-4">
                     <div className="overflow-hidden rounded-lg border border-slate-200 bg-[#e8ebe4]">
+                        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-[#eef0ea] px-4 py-2 text-xs">
+                            <div className="flex min-w-0 items-center gap-2">
+                                <span
+                                    className={cn(
+                                        "inline-flex items-center rounded-full border px-2 py-0.5 font-medium",
+                                        runtimeInfo.source === "claude_code"
+                                            ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                            : runtimeInfo.source === "anthropic_api"
+                                                ? "border-amber-200 bg-amber-50 text-amber-700"
+                                                : "border-slate-200 bg-slate-100 text-slate-600",
+                                    )}
+                                >
+                                    {runtimeLoading ? "Checking runtime" : runtimeInfo.label}
+                                </span>
+                                <span className="truncate text-slate-600">
+                                    {runtimeLoading ? "Resolving Claude Code status..." : runtimeInfo.statusLabel}
+                                </span>
+                            </div>
+                            <div className="truncate text-[11px] text-slate-500" title={runtimeInfo.cwd || runtimeInfo.actualCwd || undefined}>
+                                {runtimeInfo.workspaceLabel}
+                            </div>
+                        </div>
                         <Textarea
                             value={messageInput}
                             onChange={(e) => setMessageInput(e.target.value)}
-                            placeholder="Message CC..."
+                            placeholder={messagePlaceholder}
                             className="min-h-[60px] resize-none border-0 bg-transparent px-4 py-3 text-sm text-slate-800 placeholder:text-slate-400 focus-visible:ring-0"
                             onKeyDown={(e) => {
                                 if (e.key === 'Enter' && !e.shiftKey) {
@@ -627,6 +880,17 @@ export function ReproductionLog({
                                         <SelectItem value="claude-haiku-4-5">Haiku 4.5</SelectItem>
                                     </SelectContent>
                                 </Select>
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-8 gap-1.5 border-slate-200 bg-[#f7f7f4] text-xs text-slate-700 hover:bg-white"
+                                    onClick={handleDelegateToCodex}
+                                    disabled={!messageInput.trim() || isBusy}
+                                    title="Create a real Codex subagent task from this prompt"
+                                >
+                                    <Bot className="h-3.5 w-3.5" />
+                                    Codex
+                                </Button>
                                 {/* Send button */}
                                 <Button
                                     size="icon"

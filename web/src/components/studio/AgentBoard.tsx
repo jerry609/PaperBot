@@ -57,6 +57,7 @@ interface Props {
   focusMode?: boolean
   onBack?: () => void
   showSidebar?: boolean
+  monitorMode?: boolean
 }
 
 // LOG_LEVEL_STYLE, toLogTimestamp, extractPossibleFiles removed — now in TaskDetailPanel
@@ -448,7 +449,13 @@ function buildFlowEdges(
 // Main component
 // ---------------------------------------------------------------------------
 
-export function AgentBoard({ paperId, focusMode = false, onBack, showSidebar = true }: Props) {
+export function AgentBoard({
+  paperId,
+  focusMode = false,
+  onBack,
+  showSidebar = true,
+  monitorMode = false,
+}: Props) {
   const {
     agentTasks,
     boardSessionId,
@@ -1120,14 +1127,28 @@ export function AgentBoard({ paperId, focusMode = false, onBack, showSidebar = t
               Back
             </Button>
           )}
-          <h2 className="text-sm font-semibold text-zinc-800 truncate">
-            {focusMode ? paperTitle : "Agent Board"}
-          </h2>
-          {totalTasks > 0 && (
-            <span className="text-xs text-zinc-500 shrink-0">
-              {doneCount}/{totalTasks} completed
-            </span>
-          )}
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 min-w-0">
+              <h2 className="text-sm font-semibold text-zinc-800 truncate">
+                {focusMode ? paperTitle : monitorMode ? "Delegation Monitor" : "Agent Board"}
+              </h2>
+              {monitorMode ? (
+                <Badge variant="outline" className="shrink-0 border-zinc-200 bg-zinc-100 text-zinc-700">
+                  Read only
+                </Badge>
+              ) : null}
+              {totalTasks > 0 && (
+                <span className="text-xs text-zinc-500 shrink-0">
+                  {doneCount}/{totalTasks} completed
+                </span>
+              )}
+            </div>
+            {monitorMode ? (
+              <p className="mt-1 text-xs text-zinc-500">
+                Mirrors the latest task graph and subagent telemetry. Execution stays in Console.
+              </p>
+            ) : null}
+          </div>
         </div>
         <div className="flex items-center gap-2">
           {runError && (
@@ -1135,102 +1156,105 @@ export function AgentBoard({ paperId, focusMode = false, onBack, showSidebar = t
               {runError}
             </span>
           )}
-          {/* Pipeline controls */}
-          {(pipelinePhase === "executing" || pipelinePhase === "e2e_running" || pipelinePhase === "e2e_repairing") && (
+          {!monitorMode && (
             <>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => fetch(backendUrl(`/api/agent-board/sessions/${boardSessionId}/pause`), { method: 'POST' })}
-                disabled={!boardSessionId}
-                className="h-7 text-xs gap-1.5"
-              >
-                <Pause className="h-3.5 w-3.5" />
-                Pause
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={handleCancel}
-                disabled={!boardSessionId}
-                className="h-7 text-xs gap-1.5 text-red-600 border-red-200 hover:bg-red-50"
-              >
-                <Square className="h-3.5 w-3.5" />
-                Cancel
-              </Button>
-            </>
-          )}
-          {pipelinePhase === "paused" && (
-            <>
-              <Button
-                size="sm"
-                onClick={() => fetch(backendUrl(`/api/agent-board/sessions/${boardSessionId}/resume`), { method: 'POST' })}
-                disabled={!boardSessionId}
-                className="h-7 text-xs gap-1.5"
-              >
-                <Play className="h-3.5 w-3.5" />
-                Run
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={handleCancel}
-                disabled={!boardSessionId}
-                className="h-7 text-xs gap-1.5 text-red-600 border-red-200 hover:bg-red-50"
-              >
-                <Square className="h-3.5 w-3.5" />
-                Cancel
-              </Button>
-            </>
-          )}
-          {(pipelinePhase === "cancelled" || pipelinePhase === "failed") && (() => {
-            const hasIncomplete = filteredTasks.some(t => t.status !== "done" && t.status !== "human_review")
-            const hasCompleted = filteredTasks.some(t => t.status === "done" || t.status === "human_review")
-            const showContinue = hasIncomplete && hasCompleted
-            return (
-              <>
-                {showContinue && (
+              {(pipelinePhase === "executing" || pipelinePhase === "e2e_running" || pipelinePhase === "e2e_repairing") && (
+                <>
                   <Button
                     size="sm"
-                    onClick={handleContinue}
-                    disabled={running || !boardSessionId}
+                    variant="outline"
+                    onClick={() => fetch(backendUrl(`/api/agent-board/sessions/${boardSessionId}/pause`), { method: 'POST' })}
+                    disabled={!boardSessionId}
                     className="h-7 text-xs gap-1.5"
                   >
-                    {running ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <SkipForward className="h-3.5 w-3.5" />
-                    )}
-                    Continue
+                    <Pause className="h-3.5 w-3.5" />
+                    Pause
                   </Button>
-                )}
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={handleCancel}
+                    disabled={!boardSessionId}
+                    className="h-7 text-xs gap-1.5 text-red-600 border-red-200 hover:bg-red-50"
+                  >
+                    <Square className="h-3.5 w-3.5" />
+                    Cancel
+                  </Button>
+                </>
+              )}
+              {pipelinePhase === "paused" && (
+                <>
+                  <Button
+                    size="sm"
+                    onClick={() => fetch(backendUrl(`/api/agent-board/sessions/${boardSessionId}/resume`), { method: 'POST' })}
+                    disabled={!boardSessionId}
+                    className="h-7 text-xs gap-1.5"
+                  >
+                    <Play className="h-3.5 w-3.5" />
+                    Run
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={handleCancel}
+                    disabled={!boardSessionId}
+                    className="h-7 text-xs gap-1.5 text-red-600 border-red-200 hover:bg-red-50"
+                  >
+                    <Square className="h-3.5 w-3.5" />
+                    Cancel
+                  </Button>
+                </>
+              )}
+              {(pipelinePhase === "cancelled" || pipelinePhase === "failed") && (() => {
+                const hasIncomplete = filteredTasks.some(t => t.status !== "done" && t.status !== "human_review")
+                const hasCompleted = filteredTasks.some(t => t.status === "done" || t.status === "human_review")
+                const showContinue = hasIncomplete && hasCompleted
+                return (
+                  <>
+                    {showContinue && (
+                      <Button
+                        size="sm"
+                        onClick={handleContinue}
+                        disabled={running || !boardSessionId}
+                        className="h-7 text-xs gap-1.5"
+                      >
+                        {running ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <SkipForward className="h-3.5 w-3.5" />
+                        )}
+                        Continue
+                      </Button>
+                    )}
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={handleRestart}
+                      disabled={running || !boardSessionId}
+                      className="h-7 text-xs gap-1.5"
+                    >
+                      <RotateCcw className="h-3.5 w-3.5" />
+                      Restart
+                    </Button>
+                  </>
+                )
+              })()}
+              {runnableCount > 0 && pipelinePhase !== "executing" && pipelinePhase !== "paused" && pipelinePhase !== "cancelled" && pipelinePhase !== "failed" && pipelinePhase !== "e2e_running" && pipelinePhase !== "e2e_repairing" && (
                 <Button
                   size="sm"
-                  variant="outline"
-                  onClick={handleRestart}
+                  onClick={handleRunAll}
                   disabled={running || !boardSessionId}
                   className="h-7 text-xs gap-1.5"
                 >
-                  <RotateCcw className="h-3.5 w-3.5" />
-                  Restart
+                  {running ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Play className="h-3.5 w-3.5" />
+                  )}
+                  {running ? "Running..." : `Run All (${runnableCount})`}
                 </Button>
-              </>
-            )
-          })()}
-          {runnableCount > 0 && pipelinePhase !== "executing" && pipelinePhase !== "paused" && pipelinePhase !== "cancelled" && pipelinePhase !== "failed" && pipelinePhase !== "e2e_running" && pipelinePhase !== "e2e_repairing" && (
-            <Button
-              size="sm"
-              onClick={handleRunAll}
-              disabled={running || !boardSessionId}
-              className="h-7 text-xs gap-1.5"
-            >
-              {running ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Play className="h-3.5 w-3.5" />
               )}
-              {running ? "Running..." : `Run All (${runnableCount})`}
-            </Button>
+            </>
           )}
         </div>
       </div>
@@ -1287,7 +1311,7 @@ export function AgentBoard({ paperId, focusMode = false, onBack, showSidebar = t
       />
 
       {/* Workspace setup */}
-      {selectedPaper && (
+      {selectedPaper && !monitorMode && (
         <WorkspaceSetupDialog
           paper={selectedPaper}
           open={showWorkspaceSetup}

@@ -394,6 +394,14 @@ class TaskUpdateRequest(BaseModel):
     assignee: Optional[str] = None
 
 
+class CreateTaskRequest(BaseModel):
+    title: str
+    description: str
+    workspace_dir: Optional[str] = None
+    assignee: Literal["codex", "opencode"] = "codex"
+    tags: List[str] = Field(default_factory=list)
+
+
 class RunAllRequest(BaseModel):
     workspace_dir: Optional[str] = None
     reset_cancelled: bool = False
@@ -635,6 +643,61 @@ async def list_tasks(session_id: str):
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     return [task.model_dump() for task in session.tasks]
+
+
+@router.post("/sessions/{session_id}/tasks")
+async def create_task(session_id: str, request: CreateTaskRequest):
+    """Create an ad-hoc task in an existing session for Studio-triggered delegation."""
+    session = _load_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    title = request.title.strip()
+    description = request.description.strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="title is required")
+    if not description:
+        raise HTTPException(status_code=400, detail="description is required")
+    if request.assignee != "codex":
+        raise HTTPException(
+            status_code=400,
+            detail="Only Codex delegation is wired right now; OpenCode runtime is not available yet.",
+        )
+
+    if request.workspace_dir and request.workspace_dir.strip():
+        session.workspace_dir = str(_sanitize_workspace_dir(request.workspace_dir))
+
+    tags = [tag.strip() for tag in request.tags if isinstance(tag, str) and tag.strip()]
+    if "studio" not in tags:
+        tags.append("studio")
+    if "ad_hoc" not in tags:
+        tags.append("ad_hoc")
+
+    task = AgentTask(
+        id=f"task-{uuid.uuid4().hex[:12]}",
+        title=title,
+        description=description,
+        status="planning",
+        assignee="claude",
+        progress=0,
+        tags=tags,
+        paper_id=session.paper_id or None,
+    )
+    session.tasks.append(task)
+    _append_session_event(
+        session,
+        event="task_created",
+        level="info",
+        message="Studio created an ad-hoc subagent task.",
+        details={
+            "task_id": task.id,
+            "source": "studio_console",
+            "assignee_preference": request.assignee,
+            "workspace_dir": session.workspace_dir,
+        },
+    )
+    _persist_session(session, checkpoint="task_created", status="running")
+    return task.model_dump()
 
 
 @router.get("/sessions/{session_id}/sandbox")

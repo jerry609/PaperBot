@@ -426,10 +426,10 @@ describe("deriveHumanSummary for codex events (via parseActivityItem)", () => {
     },
   }
 
-  it("returns 'Task dispatched to {agent}: {title}' for codex_dispatched", () => {
+  it("returns 'Task dispatched to Codex: {title}' for codex_dispatched", () => {
     const raw: AgentEventEnvelopeRaw = { ...BASE, type: "codex_dispatched" }
     const result = parseActivityItem(raw)
-    expect(result?.summary).toBe("Task dispatched to codex-a1b2: Build ML pipeline")
+    expect(result?.summary).toBe("Task dispatched to Codex: Build ML pipeline")
   })
 
   it("returns 'Codex accepted task: {title}' for codex_accepted", () => {
@@ -456,5 +456,20 @@ describe("deriveHumanSummary for codex events (via parseActivityItem)", () => {
     }
     const result = parseActivityItem(raw)
     expect(result?.summary).toBe("Codex failed: Build ML pipeline (stagnation_detected)")
+  })
+
+  it("renders OpenCode label when assignee is opencode-*", () => {
+    const raw: AgentEventEnvelopeRaw = {
+      ...BASE,
+      type: "codex_completed",
+      agent_name: "opencode-a1b2",
+      payload: {
+        ...BASE.payload,
+        assignee: "opencode-a1b2",
+        files_generated: ["shell.tsx"],
+      },
+    }
+    const result = parseActivityItem(raw)
+    expect(result?.summary).toBe("OpenCode completed: Build ML pipeline (1 files)")
   })
 })

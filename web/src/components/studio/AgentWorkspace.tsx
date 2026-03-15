@@ -26,6 +26,8 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useAgentEventStore } from "@/lib/agent-events/store"
 import { useAgentEvents } from "@/lib/agent-events/useAgentEvents"
+import { useStudioRuntime } from "@/hooks/useStudioRuntime"
+import type { StudioRuntimeInfo } from "@/lib/studio-runtime"
 import { getAgentPresentation } from "@/lib/agent-runtime"
 import { useStudioStore, type AgentTask, type StudioPaperStatus } from "@/lib/store/studio-store"
 
@@ -148,6 +150,12 @@ function paperStatusClassName(status: StudioPaperStatus): string {
   return "border-zinc-200 bg-zinc-100 text-zinc-600"
 }
 
+function runtimeBadgeClassName(source: StudioRuntimeInfo["source"]): string {
+  if (source === "claude_code") return "border-emerald-200 bg-emerald-50 text-emerald-700"
+  if (source === "anthropic_api") return "border-amber-200 bg-amber-50 text-amber-700"
+  return "border-slate-200 bg-slate-100 text-slate-600"
+}
+
 function formatWorkspaceLabel(outputDir: string | null | undefined): string {
   if (!outputDir) return "Workspace not configured"
   const segments = outputDir.split("/").filter(Boolean)
@@ -181,8 +189,8 @@ function EmptyWorkspace({ onBack }: { onBack: () => void }) {
       <div className="max-w-md px-6 text-center">
         <h2 className="text-lg font-semibold text-slate-900">DeepCode Studio</h2>
         <p className="mt-2 text-sm text-slate-500">
-          Agent Board 不再作为独立产品入口展示，这里是 Studio 内部的 agent workspace。
-          先从论文工作区进入，再打开对应 paper 的 board。
+          Delegation Monitor 已经收进 Studio 主界面。先从论文工作区进入，再打开对应 paper 的
+          monitor 视图。
         </p>
         <Button className="mt-5" onClick={onBack}>
           Back to Studio
@@ -378,6 +386,8 @@ function RightInspector({
   subagentEvents,
   eventCount,
   fileCount,
+  runtimeInfo,
+  runtimeLoading,
   activeView,
   onViewChange,
 }: {
@@ -385,6 +395,8 @@ function RightInspector({
   subagentEvents: number
   eventCount: number
   fileCount: number
+  runtimeInfo: StudioRuntimeInfo
+  runtimeLoading: boolean
   activeView: InspectorView
   onViewChange: (value: InspectorView) => void
 }) {
@@ -396,8 +408,10 @@ function RightInspector({
         </p>
         <div className="mt-2 flex items-center justify-between gap-3">
           <div className="min-w-0">
-            <h2 className="text-sm font-semibold text-slate-900">CC / Subagent Monitor</h2>
+            <h2 className="text-sm font-semibold text-slate-900">Claude Code Runtime</h2>
             <p className="mt-1 text-[11px] text-slate-500">
+              {runtimeLoading ? "Checking Claude Code..." : runtimeInfo.statusLabel}
+              {" · "}
               {activeAgents} active agents, {subagentEvents} delegation events
             </p>
           </div>
@@ -406,17 +420,21 @@ function RightInspector({
         <div className="mt-3 grid grid-cols-2 gap-2">
           <div className="border border-slate-200 bg-slate-50 px-3 py-2">
             <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-              Activity
+              Runtime
             </p>
-            <p className="mt-1 text-sm font-semibold text-slate-900">{eventCount} events</p>
-            <p className="text-[11px] text-slate-500">Live runtime telemetry</p>
+            <p className="mt-1 text-sm font-semibold text-slate-900">
+              {runtimeLoading ? "Checking..." : runtimeInfo.label}
+            </p>
+            <p className="text-[11px] text-slate-500">{runtimeInfo.version ?? runtimeInfo.detail}</p>
           </div>
           <div className="border border-slate-200 bg-slate-50 px-3 py-2">
             <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-              Files
+              Workspace
             </p>
-            <p className="mt-1 text-sm font-semibold text-slate-900">{fileCount} touched</p>
-            <p className="text-[11px] text-slate-500">Observed in current monitor stream</p>
+            <p className="mt-1 text-sm font-semibold text-slate-900">{runtimeInfo.workspaceLabel}</p>
+            <p className="text-[11px] text-slate-500">
+              {eventCount} events · {fileCount} files touched
+            </p>
           </div>
         </div>
       </div>
@@ -479,10 +497,14 @@ function CenterSurface({
   selectedPaperId,
   activeView,
   onViewChange,
+  runtimeInfo,
+  runtimeLoading,
 }: {
   selectedPaperId: string
   activeView: CenterView
   onViewChange: (value: CenterView) => void
+  runtimeInfo: StudioRuntimeInfo
+  runtimeLoading: boolean
 }) {
   return (
     <div className="flex h-full min-h-0 flex-col bg-[#f1f2ed]">
@@ -511,7 +533,7 @@ function CenterSurface({
               }`}
             >
               <GitBranch className="h-3.5 w-3.5" />
-              Agent Board
+              Monitor
             </button>
             <button
               type="button"
@@ -529,10 +551,12 @@ function CenterSurface({
 
           <p className="text-xs text-slate-500">
             {activeView === "board"
-              ? "Task graph, controls, and execution state."
+              ? "Delegation graph and latest monitor session snapshot."
               : activeView === "context"
-                ? "Paper context pack and deployment actions."
-                : "Chat with CC, inspect file changes, and launch agents."}
+                ? "Paper context pack and monitor preparation actions."
+                : runtimeLoading
+                  ? "Checking Claude Code runtime..."
+                  : `Chat with ${runtimeInfo.label}, inspect file changes, and hand off to the monitor when needed.`}
           </p>
         </div>
       </div>
@@ -540,13 +564,15 @@ function CenterSurface({
       <div className="min-h-0 flex-1 bg-[#eceee8] p-3">
         <div className="h-full min-h-0 overflow-hidden border border-slate-200 bg-[#f7f7f4]">
           {activeView === "board" ? (
-            <AgentBoard paperId={selectedPaperId} showSidebar={false} />
+            <AgentBoard paperId={selectedPaperId} showSidebar={false} monitorMode />
           ) : (
             <ReproductionLog
               viewMode={activeView}
               onViewModeChange={onViewChange}
               hideNavigation
               onOpenBoardWorkspace={() => onViewChange("board")}
+              runtimeInfo={runtimeInfo}
+              runtimeLoading={runtimeLoading}
             />
           )}
         </div>
@@ -580,6 +606,7 @@ export function AgentWorkspace({
   onBackToStudio,
 }: AgentWorkspaceProps) {
   useAgentEvents()
+  const { info: runtimeInfo, loading: runtimeLoading } = useStudioRuntime()
 
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -773,7 +800,9 @@ export function AgentWorkspace({
 
           <div className="min-w-0">
             <div className="text-sm font-semibold text-slate-900">DeepCode Studio</div>
-            <div className="truncate text-[11px] text-slate-500">Unified agent workbench</div>
+            <div className="truncate text-[11px] text-slate-500">
+              {runtimeLoading ? "Checking Claude Code runtime..." : `${runtimeInfo.label} · ${runtimeInfo.statusLabel}`}
+            </div>
           </div>
 
           <div className="ml-auto flex items-center gap-2 overflow-hidden">
@@ -784,6 +813,20 @@ export function AgentWorkspace({
             </span>
             <Badge variant="outline" className="max-w-[320px] truncate border-slate-200 bg-slate-100 text-slate-700">
               {selectedPaperTitle}
+            </Badge>
+            <Badge
+              variant="outline"
+              className={`border ${runtimeBadgeClassName(runtimeInfo.source)}`}
+            >
+              {runtimeLoading ? "Checking runtime" : runtimeInfo.label}
+            </Badge>
+            {runtimeInfo.version ? (
+              <Badge variant="outline" className="border-slate-200 text-slate-600">
+                {runtimeInfo.version}
+              </Badge>
+            ) : null}
+            <Badge variant="outline" className="max-w-[200px] truncate border-slate-200 text-slate-600">
+              {runtimeInfo.workspaceLabel}
             </Badge>
             {selectedSessionId ? (
               <Badge variant="outline" className="border-slate-200 font-mono text-[11px] text-slate-600">
@@ -845,6 +888,8 @@ export function AgentWorkspace({
               selectedPaperId={selectedPaperId}
               activeView={centerView}
               onViewChange={setCenterView}
+              runtimeInfo={runtimeInfo}
+              runtimeLoading={runtimeLoading}
             />
           </div>
 
@@ -859,6 +904,8 @@ export function AgentWorkspace({
               subagentEvents={codexDelegations.length}
               eventCount={feed.length}
               fileCount={filesTouchedCount}
+              runtimeInfo={runtimeInfo}
+              runtimeLoading={runtimeLoading}
               activeView={inspectorView}
               onViewChange={setInspectorView}
             />
@@ -871,7 +918,7 @@ export function AgentWorkspace({
           <TabsList className="grid w-full grid-cols-4 rounded-none border-b bg-white p-0">
             <TabsTrigger value="threads" className="rounded-none">Threads</TabsTrigger>
             <TabsTrigger value="console" className="rounded-none">Console</TabsTrigger>
-            <TabsTrigger value="board" className="rounded-none">Board</TabsTrigger>
+            <TabsTrigger value="board" className="rounded-none">Graph</TabsTrigger>
             <TabsTrigger value="monitor" className="rounded-none">Monitor</TabsTrigger>
           </TabsList>
 
@@ -901,6 +948,8 @@ export function AgentWorkspace({
               onViewModeChange={setCenterView}
               hideNavigation
               onOpenBoardWorkspace={() => setCenterView("board")}
+              runtimeInfo={runtimeInfo}
+              runtimeLoading={runtimeLoading}
             />
           </TabsContent>
 
@@ -909,6 +958,8 @@ export function AgentWorkspace({
               selectedPaperId={selectedPaperId}
               activeView="board"
               onViewChange={setCenterView}
+              runtimeInfo={runtimeInfo}
+              runtimeLoading={runtimeLoading}
             />
           </TabsContent>
 
@@ -918,6 +969,8 @@ export function AgentWorkspace({
               subagentEvents={codexDelegations.length}
               eventCount={feed.length}
               fileCount={filesTouchedCount}
+              runtimeInfo={runtimeInfo}
+              runtimeLoading={runtimeLoading}
               activeView={inspectorView}
               onViewChange={setInspectorView}
             />

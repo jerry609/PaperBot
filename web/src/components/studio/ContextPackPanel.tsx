@@ -90,7 +90,7 @@ export function ContextPackPanel({ pack, onSessionCreated, onDeployToBoard, clas
     setError(null)
     clearAgentTasks()
     try {
-      // 1. Create agent board session (direct to backend like SSE calls)
+      // 1. Prepare the latest monitor session (direct to backend like SSE calls)
       const sessionRes = await fetch(backendUrl("/api/agent-board/sessions"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -100,11 +100,11 @@ export function ContextPackPanel({ pack, onSessionCreated, onDeployToBoard, clas
           paper_title: pack.paper?.title || "",
         }),
       })
-      if (!sessionRes.ok) throw new Error(`Failed to create board session (${sessionRes.status})`)
+      if (!sessionRes.ok) throw new Error(`Failed to prepare monitor session (${sessionRes.status})`)
       const session = await sessionRes.json()
       setBoardSessionId(session.session_id)
 
-      // 2. Start planning (SSE) -- CC decomposes the context pack into task cards
+      // 2. Seed the monitor graph from the current planning flow.
       //    Must go directly to backend; Next.js rewrite proxy buffers SSE.
       const planRes = await fetch(backendUrl(`/api/agent-board/sessions/${session.session_id}/plan`), {
         method: "POST",
@@ -147,7 +147,7 @@ export function ContextPackPanel({ pack, onSessionCreated, onDeployToBoard, clas
 
       onDeployToBoard?.()
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to deploy to board")
+      setError(err instanceof Error ? err.message : "Failed to open delegation monitor")
     } finally {
       setDeploying(false)
     }
@@ -249,7 +249,7 @@ export function ContextPackPanel({ pack, onSessionCreated, onDeployToBoard, clas
       <div className="flex justify-end gap-2">
         <Button variant="outline" onClick={handleDeployToBoard} disabled={deploying || creating}>
           <LayoutDashboard className="h-4 w-4 mr-1.5" />
-          {deploying ? "Opening..." : "Open Agent Board"}
+          {deploying ? "Preparing..." : "Open Monitor"}
         </Button>
         <Button onClick={handleCreateSession} disabled={creating || deploying}>
           {creating ? "Creating..." : "Create Repro Session"}

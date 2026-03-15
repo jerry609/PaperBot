@@ -15,11 +15,16 @@ import os
 import shutil
 import subprocess
 import tempfile
+import time
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Literal, AsyncGenerator
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from pydantic import BaseModel
+
+from paperbot.application.collaboration.agent_events import make_lifecycle_event
+from paperbot.application.collaboration.message_schema import EventType, make_event, new_run_id, new_trace_id
 
 from ..streaming import StreamEvent, sse_response
 
@@ -138,6 +143,504 @@ def build_prompt_with_context(message: str, paper: Optional[PaperContext], mode:
 
 
 log = logging.getLogger(__name__)
+
+
+@dataclass
+class _ToolInvocation:
+    tool_name: str
+    tool_id: str
+    arguments: Dict[str, Any]
+    started_at: float
+
+
+@dataclass
+class _PendingDelegation:
+    tool_name: str
+    tool_id: str
+    assignee: str
+    task_id: str
+    task_title: str
+
+
+@dataclass
+class _StudioTelemetryState:
+    run_id: str
+    trace_id: str
+    session_id: str
+    stage: str
+    tool_invocations: List[_ToolInvocation] = field(default_factory=list)
+    pending_delegations: List[_PendingDelegation] = field(default_factory=list)
+    runtime_terminal_emitted: bool = False
+
+
+def _append_eventlog(event_log, envelope) -> None:
+    if event_log is None or envelope is None:
+        return
+    try:
+        event_log.append(envelope)
+    except Exception:
+        log.debug("Failed to append studio telemetry event", exc_info=True)
+
+
+def _make_studio_lifecycle_event(
+    state: _StudioTelemetryState,
+    *,
+    status: str,
+    agent_name: str,
+    stage: str,
+    detail: Optional[str] = None,
+    role: str = "orchestrator",
+):
+    return make_lifecycle_event(
+        status=status,
+        agent_name=agent_name,
+        run_id=state.run_id,
+        trace_id=state.trace_id,
+        workflow="studio_chat",
+        stage=stage,
+        role=role,
+        detail=detail,
+    )
+
+
+def _make_studio_tool_event(
+    state: _StudioTelemetryState,
+    *,
+    event_type: str,
+    tool_name: str,
+    arguments: Optional[Dict[str, Any]] = None,
+    result_summary: str = "",
+    error: Optional[str] = None,
+    duration_ms: float = 0.0,
+):
+    return make_event(
+        run_id=state.run_id,
+        trace_id=state.trace_id,
+        workflow="studio_chat",
+        stage="tool_call",
+        attempt=0,
+        agent_name="claude",
+        role="orchestrator",
+        type=event_type,
+        payload={
+            "tool": tool_name,
+            "arguments": arguments or {},
+            "result_summary": result_summary,
+            "error": error,
+        },
+        metrics={"duration_ms": duration_ms},
+    )
+
+
+def _make_file_change_event(
+    state: _StudioTelemetryState,
+    *,
+    path: str,
+    status: str,
+):
+    return make_event(
+        run_id=state.run_id,
+        trace_id=state.trace_id,
+        workflow="studio_chat",
+        stage="tool_call",
+        attempt=0,
+        agent_name="claude",
+        role="orchestrator",
+        type=EventType.FILE_CHANGE,
+        payload={
+            "path": path,
+            "status": status,
+        },
+    )
+
+
+def _make_delegation_event(
+    state: _StudioTelemetryState,
+    *,
+    event_type: str,
+    delegation: _PendingDelegation,
+    error: Optional[str] = None,
+    reason_code: Optional[str] = None,
+):
+    payload: Dict[str, Any] = {
+        "task_id": delegation.task_id,
+        "task_title": delegation.task_title,
+        "session_id": state.session_id,
+        "assignee": delegation.assignee,
+    }
+    if error is not None:
+        payload["error"] = error
+    if reason_code is not None:
+        payload["reason_code"] = reason_code
+
+    return make_event(
+        run_id=state.run_id,
+        trace_id=state.trace_id,
+        workflow="studio_chat",
+        stage="delegation",
+        attempt=0,
+        agent_name=delegation.assignee,
+        role="worker",
+        type=event_type,
+        payload=payload,
+    )
+
+
+def _drain_pending_delegation_failures(
+    state: _StudioTelemetryState,
+    *,
+    error: str,
+    reason_code: str,
+) -> List:
+    emitted: List = []
+    while state.pending_delegations:
+        delegation = state.pending_delegations.pop(0)
+        emitted.append(
+            _make_delegation_event(
+                state,
+                event_type=EventType.CODEX_FAILED,
+                delegation=delegation,
+                error=error,
+                reason_code=reason_code,
+            )
+        )
+        emitted.append(
+            _make_studio_lifecycle_event(
+                state,
+                status=EventType.AGENT_ERROR,
+                agent_name=delegation.assignee,
+                stage="delegation",
+                detail=error,
+            )
+        )
+    return emitted
+
+
+def _extract_tool_path(tool_input: Dict[str, Any]) -> Optional[str]:
+    for key in ("path", "file_path", "filename", "target_file", "target_path"):
+        value = tool_input.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _looks_like_file_write(tool_name: str) -> bool:
+    normalized = tool_name.strip().lower()
+    return normalized in {
+        "write",
+        "write_file",
+        "edit",
+        "multiedit",
+        "str_replace_editor",
+        "create_file",
+        "replace",
+    }
+
+
+def _tool_key(tool_name: str, tool_id: str) -> str:
+    return f"{tool_name}:{tool_id}" if tool_id else tool_name
+
+
+def _pop_tool_invocation(
+    state: _StudioTelemetryState,
+    *,
+    tool_name: str,
+    tool_id: str,
+) -> Optional[_ToolInvocation]:
+    if tool_id:
+        key = _tool_key(tool_name, tool_id)
+        for idx, invocation in enumerate(state.tool_invocations):
+            if _tool_key(invocation.tool_name, invocation.tool_id) == key:
+                return state.tool_invocations.pop(idx)
+
+    for idx, invocation in enumerate(state.tool_invocations):
+        if invocation.tool_name == tool_name:
+            return state.tool_invocations.pop(idx)
+    return None
+
+
+def _truncate_text_field(value: Any, max_len: int = 120) -> str:
+    if isinstance(value, (dict, list)):
+        text = json.dumps(value, ensure_ascii=False)
+    else:
+        text = str(value or "")
+    return _truncate(text.strip(), max_len)
+
+
+def _extract_task_title(tool_input: Dict[str, Any], fallback: str) -> str:
+    for key in ("task_title", "title", "summary", "description", "prompt", "message", "instructions"):
+        value = tool_input.get(key)
+        if isinstance(value, str) and value.strip():
+            return _truncate(value.strip(), 96)
+    return fallback
+
+
+def _infer_subagent_runtime(tool_name: str, tool_input: Dict[str, Any]) -> Optional[str]:
+    normalized_name = tool_name.strip().lower()
+    delegation_tool_names = {
+        "task",
+        "spawn_agent",
+        "delegate",
+        "delegate_task",
+        "dispatch_agent",
+        "subagent",
+    }
+
+    candidate_values: List[str] = [normalized_name]
+    for key in (
+        "agent",
+        "assignee",
+        "delegate_to",
+        "runtime",
+        "executor",
+        "runner",
+        "subagent",
+        "subagent_type",
+        "model",
+        "backend",
+        "provider",
+        "target",
+    ):
+        value = tool_input.get(key)
+        if isinstance(value, str) and value.strip():
+            candidate_values.append(value.strip().lower())
+
+    for value in candidate_values:
+        if "opencode" in value or "open code" in value:
+            return "opencode"
+        if "codex" in value:
+            return "codex"
+        if value in {"claude", "cc"} or value.startswith("claude-") or value.startswith("cc-"):
+            return "claude"
+
+    if normalized_name in delegation_tool_names:
+        return "subagent"
+    return None
+
+
+def _register_delegation(
+    state: _StudioTelemetryState,
+    *,
+    tool_name: str,
+    tool_id: str,
+    tool_input: Dict[str, Any],
+) -> Optional[_PendingDelegation]:
+    runtime = _infer_subagent_runtime(tool_name, tool_input)
+    if runtime is None:
+        return None
+
+    suffix = (tool_id or f"{len(state.pending_delegations) + 1}").replace(":", "-")
+    assignee = f"{runtime}-{suffix[:6]}"
+    task_id = tool_id or f"studio-delegation-{len(state.pending_delegations) + 1}"
+    fallback_title = f"{tool_name} delegation"
+    task_title = _extract_task_title(tool_input, fallback_title)
+
+    delegation = _PendingDelegation(
+        tool_name=tool_name,
+        tool_id=tool_id,
+        assignee=assignee,
+        task_id=task_id,
+        task_title=task_title,
+    )
+    state.pending_delegations.append(delegation)
+    return delegation
+
+
+def _pop_delegation(
+    state: _StudioTelemetryState,
+    *,
+    tool_name: str,
+    tool_id: str,
+) -> Optional[_PendingDelegation]:
+    if tool_id:
+        key = _tool_key(tool_name, tool_id)
+        for idx, delegation in enumerate(state.pending_delegations):
+            if _tool_key(delegation.tool_name, delegation.tool_id) == key:
+                return state.pending_delegations.pop(idx)
+
+    for idx, delegation in enumerate(state.pending_delegations):
+        if delegation.tool_name == tool_name:
+            return state.pending_delegations.pop(idx)
+    return None
+
+
+def _is_tool_result_error(line_data: Dict[str, Any]) -> bool:
+    if bool(line_data.get("is_error")):
+        return True
+    if line_data.get("subtype") == "error":
+        return True
+    error_value = line_data.get("error")
+    return isinstance(error_value, str) and bool(error_value.strip())
+
+
+def _build_cli_telemetry_events(
+    line_data: Dict[str, Any],
+    state: _StudioTelemetryState,
+    *,
+    now_monotonic: Optional[float] = None,
+) -> List:
+    now = time.monotonic() if now_monotonic is None else now_monotonic
+    etype = str(line_data.get("type", "")).strip()
+    emitted: List = []
+
+    if etype == "assistant":
+        msg = line_data.get("message", {})
+        content_blocks = msg.get("content", []) if isinstance(msg, dict) else []
+        for block in content_blocks:
+            if not isinstance(block, dict):
+                continue
+            btype = str(block.get("type", "")).strip()
+            if btype == "thinking":
+                thinking = str(block.get("thinking", "")).strip()
+                if thinking:
+                    emitted.append(
+                        _make_studio_lifecycle_event(
+                            state,
+                            status=EventType.AGENT_WORKING,
+                            agent_name="claude",
+                            stage=state.stage,
+                            detail=_truncate(thinking, 160),
+                        )
+                    )
+            elif btype == "tool_use":
+                tool_name = str(block.get("name", "unknown")).strip() or "unknown"
+                tool_id = str(block.get("id", "")).strip()
+                tool_input = block.get("input", {})
+                arguments = tool_input if isinstance(tool_input, dict) else {}
+
+                state.tool_invocations.append(
+                    _ToolInvocation(
+                        tool_name=tool_name,
+                        tool_id=tool_id,
+                        arguments=arguments,
+                        started_at=now,
+                    )
+                )
+
+                emitted.append(
+                    _make_studio_lifecycle_event(
+                        state,
+                        status=EventType.AGENT_WORKING,
+                        agent_name="claude",
+                        stage=state.stage,
+                        detail=f"Using {tool_name}",
+                    )
+                )
+                emitted.append(
+                    _make_studio_tool_event(
+                        state,
+                        event_type=EventType.TOOL_CALL,
+                        tool_name=tool_name,
+                        arguments=arguments,
+                        result_summary="started",
+                    )
+                )
+
+                delegation = _register_delegation(
+                    state,
+                    tool_name=tool_name,
+                    tool_id=tool_id,
+                    tool_input=arguments,
+                )
+                if delegation is not None:
+                    emitted.append(
+                        _make_delegation_event(
+                            state,
+                            event_type=EventType.CODEX_DISPATCHED,
+                            delegation=delegation,
+                        )
+                    )
+                    emitted.append(
+                        _make_studio_lifecycle_event(
+                            state,
+                            status=EventType.AGENT_STARTED,
+                            agent_name=delegation.assignee,
+                            stage="delegation",
+                            detail=delegation.task_title,
+                        )
+                    )
+
+    elif etype == "tool_result":
+        tool_name = str(line_data.get("tool_name", "")).strip() or "unknown"
+        tool_id = str(line_data.get("tool_use_id") or line_data.get("tool_id") or "").strip()
+        invocation = _pop_tool_invocation(state, tool_name=tool_name, tool_id=tool_id)
+        duration_ms = max(0.0, (now - invocation.started_at) * 1000) if invocation else 0.0
+        arguments = invocation.arguments if invocation is not None else {}
+        result_summary = _truncate_text_field(line_data.get("content", ""), 240)
+        is_error = _is_tool_result_error(line_data)
+        error_text = _truncate_text_field(line_data.get("error") or line_data.get("content") or "", 240) if is_error else None
+
+        emitted.append(
+            _make_studio_tool_event(
+                state,
+                event_type=EventType.TOOL_ERROR if is_error else EventType.TOOL_RESULT,
+                tool_name=tool_name,
+                arguments=arguments,
+                result_summary=result_summary,
+                error=error_text,
+                duration_ms=duration_ms,
+            )
+        )
+
+        invocation_for_file = invocation
+        if invocation_for_file is not None and not is_error and _looks_like_file_write(invocation_for_file.tool_name):
+            path = _extract_tool_path(invocation_for_file.arguments)
+            if path:
+                emitted.append(
+                    _make_file_change_event(
+                        state,
+                        path=path,
+                        status="created" if "create" in invocation_for_file.tool_name.lower() else "modified",
+                    )
+                )
+
+        delegation = _pop_delegation(state, tool_name=tool_name, tool_id=tool_id)
+        if delegation is not None:
+            emitted.append(
+                _make_delegation_event(
+                    state,
+                    event_type=EventType.CODEX_FAILED if is_error else EventType.CODEX_COMPLETED,
+                    delegation=delegation,
+                    error=error_text,
+                    reason_code="tool_error" if is_error else None,
+                )
+            )
+            emitted.append(
+                _make_studio_lifecycle_event(
+                    state,
+                    status=EventType.AGENT_ERROR if is_error else EventType.AGENT_COMPLETED,
+                    agent_name=delegation.assignee,
+                    stage="delegation",
+                    detail=error_text if is_error else delegation.task_title,
+                )
+            )
+
+    elif etype == "result":
+        is_error = line_data.get("subtype") == "error" or _is_tool_result_error(line_data)
+        detail = _truncate_text_field(
+            line_data.get("error") or line_data.get("result") or "Studio chat turn completed",
+            240,
+        )
+        state.runtime_terminal_emitted = True
+        emitted.append(
+            _make_studio_lifecycle_event(
+                state,
+                status=EventType.AGENT_ERROR if is_error else EventType.AGENT_COMPLETED,
+                agent_name="claude",
+                stage=state.stage,
+                detail=detail,
+            )
+        )
+        if is_error:
+            emitted.extend(
+                _drain_pending_delegation_failures(
+                    state,
+                    error=detail,
+                    reason_code="runtime_error",
+                )
+            )
+
+    return emitted
 
 
 def _load_runtime_allowed_dirs() -> List[Path]:
@@ -441,7 +944,12 @@ def _truncate(s: str, max_len: int) -> str:
     return s if len(s) <= max_len else s[:max_len] + "..."
 
 
-async def stream_claude_cli(request: StudioChatRequest) -> AsyncGenerator[StreamEvent, None]:
+async def stream_claude_cli(
+    request: StudioChatRequest,
+    *,
+    telemetry_state: _StudioTelemetryState,
+    event_log=None,
+) -> AsyncGenerator[StreamEvent, None]:
     """Stream Claude CLI output as structured SSE events.
 
     Uses ``--output-format stream-json`` so we get real-time NDJSON events
@@ -451,6 +959,18 @@ async def stream_claude_cli(request: StudioChatRequest) -> AsyncGenerator[Stream
     claude_path = find_claude_cli()
 
     if not claude_path:
+        _append_eventlog(
+            event_log,
+            _make_studio_lifecycle_event(
+                telemetry_state,
+                status=EventType.AGENT_ERROR,
+                agent_name="claude",
+                stage=telemetry_state.stage,
+                detail="Claude CLI not found",
+                role="orchestrator",
+            ),
+        )
+        telemetry_state.runtime_terminal_emitted = True
         yield StreamEvent(
             type="error",
             message="Claude CLI not found. Please install it with: npm install -g @anthropic-ai/claude-code"
@@ -469,6 +989,29 @@ async def stream_claude_cli(request: StudioChatRequest) -> AsyncGenerator[Stream
     prompt = build_prompt_with_context(request.message, request.paper, effective_mode)
     cmd.extend(["-p", prompt, "--output-format", "stream-json", "--verbose"])
 
+    _append_eventlog(
+        event_log,
+        _make_studio_lifecycle_event(
+            telemetry_state,
+            status=EventType.AGENT_STARTED,
+            agent_name="claude",
+            stage=telemetry_state.stage,
+            detail=f"{effective_mode} turn started",
+            role="orchestrator",
+        ),
+    )
+    _append_eventlog(
+        event_log,
+        _make_studio_lifecycle_event(
+            telemetry_state,
+            status=EventType.AGENT_WORKING,
+            agent_name="claude",
+            stage=telemetry_state.stage,
+            detail="Connecting to Claude CLI",
+            role="orchestrator",
+        ),
+    )
+
     yield StreamEvent(
         type="progress",
         data={
@@ -484,6 +1027,18 @@ async def stream_claude_cli(request: StudioChatRequest) -> AsyncGenerator[Stream
         try:
             cwd = str(_resolve_cli_project_dir(request.project_dir))
         except ValueError as exc:
+            _append_eventlog(
+                event_log,
+                _make_studio_lifecycle_event(
+                    telemetry_state,
+                    status=EventType.AGENT_ERROR,
+                    agent_name="claude",
+                    stage=telemetry_state.stage,
+                    detail=str(exc),
+                    role="orchestrator",
+                ),
+            )
+            telemetry_state.runtime_terminal_emitted = True
             yield StreamEvent(type="error", message=str(exc))
             return
 
@@ -553,6 +1108,8 @@ async def stream_claude_cli(request: StudioChatRequest) -> AsyncGenerator[Stream
                     log.debug("Skipping non-JSON CLI line: %s", line[:120])
                     continue
 
+                for envelope in _build_cli_telemetry_events(data, telemetry_state):
+                    _append_eventlog(event_log, envelope)
                 for event in _parse_cli_event(data):
                     yield event
 
@@ -560,6 +1117,8 @@ async def stream_claude_cli(request: StudioChatRequest) -> AsyncGenerator[Stream
         if line_buffer.strip():
             try:
                 data = json.loads(line_buffer.strip())
+                for envelope in _build_cli_telemetry_events(data, telemetry_state):
+                    _append_eventlog(event_log, envelope)
                 for event in _parse_cli_event(data):
                     yield event
             except json.JSONDecodeError:
@@ -571,24 +1130,118 @@ async def stream_claude_cli(request: StudioChatRequest) -> AsyncGenerator[Stream
         if process.returncode != 0:
             error_msg = "".join(stderr_chunks).strip()
             if error_msg:
+                if not telemetry_state.runtime_terminal_emitted:
+                    _append_eventlog(
+                        event_log,
+                        _make_studio_lifecycle_event(
+                            telemetry_state,
+                            status=EventType.AGENT_ERROR,
+                            agent_name="claude",
+                            stage=telemetry_state.stage,
+                            detail=error_msg,
+                            role="orchestrator",
+                        ),
+                    )
+                    for envelope in _drain_pending_delegation_failures(
+                        telemetry_state,
+                        error=error_msg,
+                        reason_code="runtime_error",
+                    ):
+                        _append_eventlog(event_log, envelope)
+                    telemetry_state.runtime_terminal_emitted = True
                 yield StreamEvent(type="error", message=error_msg)
                 return
+        elif not telemetry_state.runtime_terminal_emitted:
+            _append_eventlog(
+                event_log,
+                _make_studio_lifecycle_event(
+                    telemetry_state,
+                    status=EventType.AGENT_COMPLETED,
+                    agent_name="claude",
+                    stage=telemetry_state.stage,
+                    detail="Studio chat turn completed",
+                    role="orchestrator",
+                ),
+            )
+            telemetry_state.runtime_terminal_emitted = True
 
     except FileNotFoundError:
+        detail = f"Claude CLI not found at: {claude_path}"
+        if not telemetry_state.runtime_terminal_emitted:
+            _append_eventlog(
+                event_log,
+                _make_studio_lifecycle_event(
+                    telemetry_state,
+                    status=EventType.AGENT_ERROR,
+                    agent_name="claude",
+                    stage=telemetry_state.stage,
+                    detail=detail,
+                    role="orchestrator",
+                ),
+            )
+            telemetry_state.runtime_terminal_emitted = True
         yield StreamEvent(
             type="error",
-            message=f"Claude CLI not found at: {claude_path}"
+            message=detail
         )
     except Exception as e:
+        detail = f"Claude CLI error: {str(e)}"
+        if not telemetry_state.runtime_terminal_emitted:
+            _append_eventlog(
+                event_log,
+                _make_studio_lifecycle_event(
+                    telemetry_state,
+                    status=EventType.AGENT_ERROR,
+                    agent_name="claude",
+                    stage=telemetry_state.stage,
+                    detail=detail,
+                    role="orchestrator",
+                ),
+            )
+            for envelope in _drain_pending_delegation_failures(
+                telemetry_state,
+                error=detail,
+                reason_code="runtime_error",
+            ):
+                _append_eventlog(event_log, envelope)
+            telemetry_state.runtime_terminal_emitted = True
         yield StreamEvent(
             type="error",
-            message=f"Claude CLI error: {str(e)}"
+            message=detail
         )
 
 
-async def stream_anthropic_api(request: StudioChatRequest) -> AsyncGenerator[StreamEvent, None]:
+async def stream_anthropic_api(
+    request: StudioChatRequest,
+    *,
+    telemetry_state: _StudioTelemetryState,
+    event_log=None,
+) -> AsyncGenerator[StreamEvent, None]:
     """Fallback: Stream response using Anthropic API directly."""
     effective_mode = resolve_execution_mode(request.mode)
+
+    _append_eventlog(
+        event_log,
+        _make_studio_lifecycle_event(
+            telemetry_state,
+            status=EventType.AGENT_STARTED,
+            agent_name="claude",
+            stage=telemetry_state.stage,
+            detail=f"{effective_mode} turn started",
+            role="orchestrator",
+        ),
+    )
+    _append_eventlog(
+        event_log,
+        _make_studio_lifecycle_event(
+            telemetry_state,
+            status=EventType.AGENT_WORKING,
+            agent_name="claude",
+            stage=telemetry_state.stage,
+            detail="Using Anthropic API fallback",
+            role="orchestrator",
+        ),
+    )
 
     yield StreamEvent(
         type="progress",
@@ -605,6 +1258,18 @@ async def stream_anthropic_api(request: StudioChatRequest) -> AsyncGenerator[Str
 
         api_key = os.getenv("ANTHROPIC_API_KEY", "")
         if not api_key:
+            _append_eventlog(
+                event_log,
+                _make_studio_lifecycle_event(
+                    telemetry_state,
+                    status=EventType.AGENT_ERROR,
+                    agent_name="claude",
+                    stage=telemetry_state.stage,
+                    detail="ANTHROPIC_API_KEY not set",
+                    role="orchestrator",
+                ),
+            )
+            telemetry_state.runtime_terminal_emitted = True
             yield StreamEvent(type="error", message="ANTHROPIC_API_KEY not set")
             return
 
@@ -658,12 +1323,43 @@ async def stream_anthropic_api(request: StudioChatRequest) -> AsyncGenerator[Str
                 "model": request.model,
             }
         )
+        _append_eventlog(
+            event_log,
+            _make_studio_lifecycle_event(
+                telemetry_state,
+                status=EventType.AGENT_COMPLETED,
+                agent_name="claude",
+                stage=telemetry_state.stage,
+                detail="Studio chat turn completed",
+                role="orchestrator",
+            ),
+        )
+        telemetry_state.runtime_terminal_emitted = True
 
     except Exception as e:
-        yield StreamEvent(type="error", message=f"API error: {str(e)}")
+        detail = f"API error: {str(e)}"
+        if not telemetry_state.runtime_terminal_emitted:
+            _append_eventlog(
+                event_log,
+                _make_studio_lifecycle_event(
+                    telemetry_state,
+                    status=EventType.AGENT_ERROR,
+                    agent_name="claude",
+                    stage=telemetry_state.stage,
+                    detail=detail,
+                    role="orchestrator",
+                ),
+            )
+            telemetry_state.runtime_terminal_emitted = True
+        yield StreamEvent(type="error", message=detail)
 
 
-async def studio_chat_stream(request: StudioChatRequest) -> AsyncGenerator[StreamEvent, None]:
+async def studio_chat_stream(
+    request: StudioChatRequest,
+    *,
+    telemetry_state: _StudioTelemetryState,
+    event_log=None,
+) -> AsyncGenerator[StreamEvent, None]:
     """Stream studio chat response - tries Claude CLI first, falls back to API."""
 
     # Check if Claude CLI is available
@@ -671,7 +1367,11 @@ async def studio_chat_stream(request: StudioChatRequest) -> AsyncGenerator[Strea
 
     if claude_path:
         # Use Claude CLI
-        async for event in stream_claude_cli(request):
+        async for event in stream_claude_cli(
+            request,
+            telemetry_state=telemetry_state,
+            event_log=event_log,
+        ):
             yield event
     else:
         # Fallback to Anthropic API
@@ -682,12 +1382,16 @@ async def studio_chat_stream(request: StudioChatRequest) -> AsyncGenerator[Strea
                 "message": "Claude CLI not found, using Anthropic API directly",
             }
         )
-        async for event in stream_anthropic_api(request):
+        async for event in stream_anthropic_api(
+            request,
+            telemetry_state=telemetry_state,
+            event_log=event_log,
+        ):
             yield event
 
 
 @router.post("/studio/chat")
-async def studio_chat(request: StudioChatRequest):
+async def studio_chat(http_request: Request, request: StudioChatRequest):
     """
     Interactive chat for DeepStudio with Claude CLI integration.
 
@@ -698,7 +1402,27 @@ async def studio_chat(request: StudioChatRequest):
 
     Returns Server-Sent Events with streaming text.
     """
-    return sse_response(studio_chat_stream(request), workflow="studio_chat")
+    run_id = new_run_id()
+    trace_id = new_trace_id()
+    session_id = request.session_id or f"studio-{run_id[:8]}"
+    telemetry_state = _StudioTelemetryState(
+        run_id=run_id,
+        trace_id=trace_id,
+        session_id=session_id,
+        stage=resolve_execution_mode(request.mode).lower(),
+    )
+    event_log = getattr(http_request.app.state, "event_log", None)
+
+    return sse_response(
+        studio_chat_stream(
+            request,
+            telemetry_state=telemetry_state,
+            event_log=event_log,
+        ),
+        workflow="studio_chat",
+        run_id=run_id,
+        trace_id=trace_id,
+    )
 
 
 @router.get("/studio/status")
