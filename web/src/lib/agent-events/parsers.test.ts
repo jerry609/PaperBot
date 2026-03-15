@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { parseActivityItem, parseAgentStatus, parseToolCall, parseFileTouched } from "./parsers"
+import { parseActivityItem, parseAgentStatus, parseToolCall, parseFileTouched, parseCodexDelegation } from "./parsers"
 import type { AgentEventEnvelopeRaw } from "./types"
 
 const BASE_ENVELOPE: AgentEventEnvelopeRaw = {
@@ -222,5 +222,132 @@ describe("parseFileTouched", () => {
       payload: { ...FILE_CHANGE_ENVELOPE.payload, path: "" },
     }
     expect(parseFileTouched(raw)).toBeNull()
+  })
+})
+
+describe("parseCodexDelegation", () => {
+  const CODEX_DISPATCHED: AgentEventEnvelopeRaw = {
+    type: "codex_dispatched",
+    run_id: "run-cdx-1",
+    trace_id: "trace-cdx-1",
+    agent_name: "Orchestrator",
+    workflow: "repro",
+    stage: "delegation",
+    ts: "2026-03-15T03:00:00Z",
+    payload: {
+      task_id: "task-abc",
+      task_title: "Implement auth module",
+      assignee: "codex-a1b2",
+      session_id: "sess-001",
+    },
+  }
+
+  it("returns CodexDelegationEntry for codex_dispatched", () => {
+    const result = parseCodexDelegation(CODEX_DISPATCHED)
+    expect(result).not.toBeNull()
+    expect(result?.event_type).toBe("codex_dispatched")
+    expect(result?.task_id).toBe("task-abc")
+    expect(result?.task_title).toBe("Implement auth module")
+    expect(result?.assignee).toBe("codex-a1b2")
+    expect(result?.session_id).toBe("sess-001")
+    expect(result?.ts).toBe("2026-03-15T03:00:00Z")
+  })
+
+  it("returns CodexDelegationEntry for codex_accepted", () => {
+    const raw: AgentEventEnvelopeRaw = { ...CODEX_DISPATCHED, type: "codex_accepted" }
+    const result = parseCodexDelegation(raw)
+    expect(result).not.toBeNull()
+    expect(result?.event_type).toBe("codex_accepted")
+  })
+
+  it("returns CodexDelegationEntry with files_generated for codex_completed", () => {
+    const raw: AgentEventEnvelopeRaw = {
+      ...CODEX_DISPATCHED,
+      type: "codex_completed",
+      payload: {
+        ...CODEX_DISPATCHED.payload,
+        files_generated: ["src/auth.ts", "src/auth.test.ts"],
+      },
+    }
+    const result = parseCodexDelegation(raw)
+    expect(result).not.toBeNull()
+    expect(result?.event_type).toBe("codex_completed")
+    expect(result?.files_generated).toEqual(["src/auth.ts", "src/auth.test.ts"])
+  })
+
+  it("returns CodexDelegationEntry with reason_code for codex_failed", () => {
+    const raw: AgentEventEnvelopeRaw = {
+      ...CODEX_DISPATCHED,
+      type: "codex_failed",
+      payload: {
+        ...CODEX_DISPATCHED.payload,
+        reason_code: "max_iterations_exhausted",
+        error: "Agent exhausted maximum iterations",
+      },
+    }
+    const result = parseCodexDelegation(raw)
+    expect(result).not.toBeNull()
+    expect(result?.event_type).toBe("codex_failed")
+    expect(result?.reason_code).toBe("max_iterations_exhausted")
+    expect(result?.error).toBe("Agent exhausted maximum iterations")
+  })
+
+  it("returns null for non-codex event types", () => {
+    const raw = { ...CODEX_DISPATCHED, type: "agent_started" }
+    expect(parseCodexDelegation(raw)).toBeNull()
+  })
+
+  it("generates deterministic id from type + task_id + ts", () => {
+    const result = parseCodexDelegation(CODEX_DISPATCHED)
+    expect(result?.id).toBe("codex_dispatched-task-abc-2026-03-15T03:00:00Z")
+  })
+})
+
+describe("deriveHumanSummary for codex events (via parseActivityItem)", () => {
+  const BASE: AgentEventEnvelopeRaw = {
+    run_id: "run-cdx-2",
+    trace_id: "trace-cdx-2",
+    agent_name: "codex-a1b2",
+    workflow: "repro",
+    stage: "delegation",
+    ts: "2026-03-15T04:00:00Z",
+    payload: {
+      task_id: "task-xyz",
+      task_title: "Build ML pipeline",
+      assignee: "codex-a1b2",
+      session_id: "sess-002",
+    },
+  }
+
+  it("returns 'Task dispatched to {agent}: {title}' for codex_dispatched", () => {
+    const raw: AgentEventEnvelopeRaw = { ...BASE, type: "codex_dispatched" }
+    const result = parseActivityItem(raw)
+    expect(result?.summary).toBe("Task dispatched to codex-a1b2: Build ML pipeline")
+  })
+
+  it("returns 'Codex accepted task: {title}' for codex_accepted", () => {
+    const raw: AgentEventEnvelopeRaw = { ...BASE, type: "codex_accepted" }
+    const result = parseActivityItem(raw)
+    expect(result?.summary).toBe("Codex accepted task: Build ML pipeline")
+  })
+
+  it("returns 'Codex completed: {title} (N files)' for codex_completed", () => {
+    const raw: AgentEventEnvelopeRaw = {
+      ...BASE,
+      type: "codex_completed",
+      payload: { ...BASE.payload, files_generated: ["a.ts", "b.ts", "c.ts"] },
+    }
+    const result = parseActivityItem(raw)
+    expect(result?.summary).toBe("Codex completed: Build ML pipeline (3 files)")
+  })
+
+  it("returns 'Codex failed: {title} (reason_code)' for codex_failed", () => {
+    const raw: AgentEventEnvelopeRaw = {
+      ...BASE,
+      type: "codex_failed",
+      payload: { ...BASE.payload, reason_code: "stagnation_detected" },
+    }
+    const result = parseActivityItem(raw)
+    expect(result?.summary).toBe("Codex failed: Build ML pipeline (stagnation_detected)")
   })
 })

@@ -1,10 +1,12 @@
 "use client"
 
 import { create } from "zustand"
-import type { ActivityFeedItem, AgentStatusEntry, FileTouchedEntry, ToolCallEntry } from "./types"
+import type { AgentTask } from "@/lib/store/studio-store"
+import type { ActivityFeedItem, AgentStatusEntry, CodexDelegationEntry, FileTouchedEntry, ToolCallEntry } from "./types"
 
 const FEED_MAX = 200
 const TOOL_TIMELINE_MAX = 100
+const CODEX_DELEGATIONS_MAX = 100
 
 interface AgentEventState {
   // SSE connection status
@@ -32,6 +34,14 @@ interface AgentEventState {
   setSelectedRunId: (id: string | null) => void
   selectedFile: FileTouchedEntry | null
   setSelectedFile: (file: FileTouchedEntry | null) => void
+
+  // Codex delegation events — newest first, capped at CODEX_DELEGATIONS_MAX
+  codexDelegations: CodexDelegationEntry[]
+  addCodexDelegation: (entry: CodexDelegationEntry) => void
+
+  // Kanban task board — upserted by task id
+  kanbanTasks: AgentTask[]
+  upsertKanbanTask: (task: AgentTask) => void
 }
 
 export const useAgentEventStore = create<AgentEventState>((set) => ({
@@ -79,4 +89,22 @@ export const useAgentEventStore = create<AgentEventState>((set) => ({
   setSelectedRunId: (id) => set({ selectedRunId: id }),
   selectedFile: null,
   setSelectedFile: (file) => set({ selectedFile: file }),
+
+  codexDelegations: [],
+  addCodexDelegation: (entry) =>
+    set((s) => ({
+      codexDelegations: [entry, ...s.codexDelegations].slice(0, CODEX_DELEGATIONS_MAX),
+    })),
+
+  kanbanTasks: [],
+  upsertKanbanTask: (task) =>
+    set((s) => {
+      const idx = s.kanbanTasks.findIndex((t) => t.id === task.id)
+      if (idx === -1) {
+        return { kanbanTasks: [...s.kanbanTasks, task] }
+      }
+      const next = [...s.kanbanTasks]
+      next[idx] = { ...next[idx], ...task }
+      return { kanbanTasks: next }
+    }),
 }))

@@ -93,3 +93,16 @@ export type FileTouchedEntry = {
   oldContent?: string
   newContent?: string
 }
+
+export type CodexDelegationEntry = {
+  id: string
+  event_type: "codex_dispatched" | "codex_accepted" | "codex_completed" | "codex_failed"
+  task_id: string
+  task_title: string
+  assignee: string
+  session_id: string
+  ts: string
+  files_generated?: string[]
+  reason_code?: string
+  error?: string
+}

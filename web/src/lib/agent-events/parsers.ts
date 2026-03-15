@@ -1,6 +1,6 @@
 "use client"
 
-import type { ActivityFeedItem, AgentStatus, AgentStatusEntry, AgentEventEnvelopeRaw, ToolCallEntry, FileTouchedEntry } from "./types"
+import type { ActivityFeedItem, AgentStatus, AgentStatusEntry, AgentEventEnvelopeRaw, CodexDelegationEntry, ToolCallEntry, FileTouchedEntry } from "./types"
 
 const LIFECYCLE_TYPES = new Set([
   "agent_started",
@@ -38,6 +38,25 @@ function deriveHumanSummary(raw: AgentEventEnvelopeRaw): string {
   if (t === "tool_result" || t === "tool_error" || t === "tool_call") {
     const tool = String(payload.tool ?? t)
     return `Tool: ${tool} — ${String(payload.result_summary ?? "").slice(0, 80)}`
+  }
+  if (t === "codex_dispatched") {
+    const assignee = String(payload.assignee ?? raw.agent_name ?? "Codex")
+    const title = String(payload.task_title ?? "")
+    return `Task dispatched to ${assignee}: ${title}`
+  }
+  if (t === "codex_accepted") {
+    const title = String(payload.task_title ?? "")
+    return `Codex accepted task: ${title}`
+  }
+  if (t === "codex_completed") {
+    const title = String(payload.task_title ?? "")
+    const files = Array.isArray(payload.files_generated) ? payload.files_generated.length : 0
+    return `Codex completed: ${title} (${files} files)`
+  }
+  if (t === "codex_failed") {
+    const title = String(payload.task_title ?? "")
+    const reason = String(payload.reason_code ?? "unknown")
+    return `Codex failed: ${title} (${reason})`
   }
   if (t === "job_start") return `Job started: ${raw.stage}`
   if (t === "job_result") return `Job finished: ${raw.stage}`
@@ -86,6 +105,13 @@ export function parseToolCall(raw: AgentEventEnvelopeRaw): ToolCallEntry | null 
 
 const FILE_CHANGE_TYPES = new Set(["file_change"])
 
+const CODEX_DELEGATION_TYPES = new Set([
+  "codex_dispatched",
+  "codex_accepted",
+  "codex_completed",
+  "codex_failed",
+])
+
 export function parseFileTouched(raw: AgentEventEnvelopeRaw): FileTouchedEntry | null {
   const t = String(raw.type ?? "")
   const payload = (raw.payload ?? {}) as Record<string, unknown>
@@ -119,4 +145,37 @@ export function parseFileTouched(raw: AgentEventEnvelopeRaw): FileTouchedEntry |
     oldContent: typeof payload.old_content === "string" ? payload.old_content : undefined,
     newContent: typeof payload.new_content === "string" ? payload.new_content : undefined,
   }
+}
+
+export function parseCodexDelegation(raw: AgentEventEnvelopeRaw): CodexDelegationEntry | null {
+  const t = String(raw.type ?? "")
+  if (!CODEX_DELEGATION_TYPES.has(t)) return null
+
+  const payload = (raw.payload ?? {}) as Record<string, unknown>
+  const task_id = String(payload.task_id ?? "")
+  const task_title = String(payload.task_title ?? "")
+  const assignee = String(payload.assignee ?? raw.agent_name ?? "")
+  const session_id = String(payload.session_id ?? "")
+  const ts = String(raw.ts ?? "")
+
+  const entry: CodexDelegationEntry = {
+    id: `${t}-${task_id}-${ts}`,
+    event_type: t as CodexDelegationEntry["event_type"],
+    task_id,
+    task_title,
+    assignee,
+    session_id,
+    ts,
+  }
+
+  if (t === "codex_completed" && Array.isArray(payload.files_generated)) {
+    entry.files_generated = payload.files_generated as string[]
+  }
+
+  if (t === "codex_failed") {
+    if (typeof payload.reason_code === "string") entry.reason_code = payload.reason_code
+    if (typeof payload.error === "string") entry.error = payload.error
+  }
+
+  return entry
 }

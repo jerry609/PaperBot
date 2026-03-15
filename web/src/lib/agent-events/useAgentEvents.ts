@@ -3,13 +3,13 @@
 import { useEffect, useRef } from "react"
 import { readSSE } from "@/lib/sse"
 import { useAgentEventStore } from "./store"
-import { parseActivityItem, parseAgentStatus, parseToolCall, parseFileTouched } from "./parsers"
+import { parseActivityItem, parseAgentStatus, parseToolCall, parseFileTouched, parseCodexDelegation } from "./parsers"
 import type { AgentEventEnvelopeRaw } from "./types"
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"
 
 export function useAgentEvents() {
-  const { setConnected, addFeedItem, updateAgentStatus, addToolCall, addFileTouched } = useAgentEventStore()
+  const { setConnected, addFeedItem, updateAgentStatus, addToolCall, addFileTouched, addCodexDelegation } = useAgentEventStore()
   const abortRef = useRef<AbortController | null>(null)
 
   useEffect(() => {
@@ -40,6 +40,9 @@ export function useAgentEvents() {
 
           const fileTouched = parseFileTouched(raw)
           if (fileTouched) addFileTouched(fileTouched)
+
+          const codexDel = parseCodexDelegation(raw)
+          if (codexDel) addCodexDelegation(codexDel)
         }
       } catch (err) {
         if ((err as Error)?.name !== "AbortError") {
@@ -55,5 +58,5 @@ export function useAgentEvents() {
     return () => {
       controller.abort()
     }
-  }, [setConnected, addFeedItem, updateAgentStatus, addToolCall, addFileTouched])
+  }, [setConnected, addFeedItem, updateAgentStatus, addToolCall, addFileTouched, addCodexDelegation])
 }

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest"
 import { useAgentEventStore } from "./store"
-import type { ActivityFeedItem, AgentStatusEntry, FileTouchedEntry, ToolCallEntry } from "./types"
+import type { ActivityFeedItem, AgentStatusEntry, CodexDelegationEntry, FileTouchedEntry, ToolCallEntry } from "./types"
 
 function makeItem(i: number): ActivityFeedItem {
   return {
@@ -211,5 +211,76 @@ describe("useAgentEventStore", () => {
       expect(state.selectedRunId).toBeNull()
       expect(state.selectedFile).toBeNull()
     })
+  })
+})
+
+function makeCodexDelegation(i: number): CodexDelegationEntry {
+  return {
+    id: `codex_dispatched-task-${i}-2026-03-15T00:00:00Z`,
+    event_type: "codex_dispatched",
+    task_id: `task-${i}`,
+    task_title: `Task ${i}`,
+    assignee: "codex-a1b2",
+    session_id: "sess-001",
+    ts: "2026-03-15T00:00:00Z",
+  }
+}
+
+function makeAgentTask(id: string, title: string): import("@/lib/store/studio-store").AgentTask {
+  return {
+    id,
+    title,
+    description: "Test task",
+    status: "planning",
+    assignee: "claude",
+    progress: 0,
+    tags: [],
+    createdAt: "2026-03-15T00:00:00Z",
+    updatedAt: "2026-03-15T00:00:00Z",
+    subtasks: [],
+  }
+}
+
+describe("codexDelegations", () => {
+  beforeEach(() => {
+    useAgentEventStore.setState(useAgentEventStore.getInitialState(), true)
+  })
+
+  it("addCodexDelegation adds entry to codexDelegations array", () => {
+    const entry = makeCodexDelegation(1)
+    useAgentEventStore.getState().addCodexDelegation(entry)
+    expect(useAgentEventStore.getState().codexDelegations[0]).toEqual(entry)
+  })
+
+  it("addCodexDelegation caps at 100 entries", () => {
+    for (let i = 0; i < 101; i++) {
+      useAgentEventStore.getState().addCodexDelegation(makeCodexDelegation(i))
+    }
+    expect(useAgentEventStore.getState().codexDelegations).toHaveLength(100)
+  })
+})
+
+describe("kanbanTasks", () => {
+  beforeEach(() => {
+    useAgentEventStore.setState(useAgentEventStore.getInitialState(), true)
+  })
+
+  it("upsertKanbanTask adds new task when id not found", () => {
+    const task = makeAgentTask("t1", "First Task")
+    useAgentEventStore.getState().upsertKanbanTask(task)
+    const tasks = useAgentEventStore.getState().kanbanTasks
+    expect(tasks).toHaveLength(1)
+    expect(tasks[0].id).toBe("t1")
+  })
+
+  it("upsertKanbanTask merges updates when id already exists", () => {
+    const task = makeAgentTask("t1", "First Task")
+    useAgentEventStore.getState().upsertKanbanTask(task)
+    const updated = { ...task, title: "Updated Task", status: "done" as const }
+    useAgentEventStore.getState().upsertKanbanTask(updated)
+    const tasks = useAgentEventStore.getState().kanbanTasks
+    expect(tasks).toHaveLength(1)
+    expect(tasks[0].title).toBe("Updated Task")
+    expect(tasks[0].status).toBe("done")
   })
 })
