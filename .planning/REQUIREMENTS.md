@@ -263,13 +263,39 @@ Which phases cover which requirements. Updated during roadmap creation.
 - v1.1 requirements: 15 total
 - Mapped to phases: 15
 - Unmapped: 0
-- v1.2 requirements: 24 total (ADAPT x6, MONIT x5, CTRL x3, SESS x5, VIS x4, DOMAIN x2)
-- Mapped to phases: 0 ⚠️ (awaiting roadmap)
-- Unmapped: 24
+- v1.2 requirements: 25 total (ADAPT x6, MONIT x5, CTRL x3, SESS x5, VIS x4, DOMAIN x2)
+- Mapped to phases: 25
+- Unmapped: 0
 - v2.0 requirements: 25 total (counted: PGINFRA x4, ASYNC x5, PGNAT x3, MODEL x3, TEST x4, CI x3, MON x3)
 - Mapped to phases: 25
 - Unmapped: 0
 
+| ADAPT-01 | Phase 18 | Pending |
+| ADAPT-02 | Phase 18 | Pending |
+| ADAPT-03 | Phase 18 | Pending |
+| ADAPT-04 | Phase 22 | Pending |
+| ADAPT-05 | Phase 22 | Pending |
+| ADAPT-06 | Phase 18 | Pending |
+| MONIT-01 | Phase 19 | Pending |
+| MONIT-02 | Phase 19 | Pending |
+| MONIT-03 | Phase 19 | Pending |
+| MONIT-04 | Phase 19 | Pending |
+| MONIT-05 | Phase 19 | Pending |
+| CTRL-01 | Phase 20 | Pending |
+| CTRL-02 | Phase 20 | Pending |
+| CTRL-03 | Phase 23 | Pending |
+| SESS-01 | Phase 19 | Pending |
+| SESS-02 | Phase 19 | Pending |
+| SESS-03 | Phase 19 | Pending |
+| SESS-04 | Phase 20 | Pending |
+| SESS-05 | Phase 20 | Pending |
+| VIS-01 | Phase 21 | Pending |
+| VIS-02 | Phase 21 | Pending |
+| VIS-03 | Phase 21 | Pending |
+| VIS-04 | Phase 21 | Pending |
+| DOMAIN-01 | Phase 23 | Pending |
+| DOMAIN-02 | Phase 23 | Pending |
+
 ---
 *Requirements defined: 2026-03-14*
-*Last updated: 2026-03-15 after v1.2 milestone requirements added*
+*Last updated: 2026-03-15 after v1.2 roadmap created (phases 18-23)*

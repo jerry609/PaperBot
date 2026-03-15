@@ -1,13 +1,13 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.1
-milestone_name: Agent Orchestration Dashboard
+milestone: v1.2
+milestone_name: DeepCode Agent Dashboard
 status: verifying
 stopped_at: Completed 09-02-PLAN.md
 last_updated: "2026-03-15T03:30:20.504Z"
 last_activity: 2026-03-15 — Completed 09-02-PLAN.md tasks 1-2 (three-panel agent dashboard UI)
 progress:
-  total_phases: 15
+  total_phases: 21
   completed_phases: 7
   total_plans: 13
   completed_plans: 13
@@ -20,7 +20,7 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-15)
 
 **Core value:** Paper-specific capability layer surfaced as standard MCP tools + agent-agnostic dashboard
-**Current focus:** v1.2 DeepCode Agent Dashboard -- defining requirements
+**Current focus:** v1.2 DeepCode Agent Dashboard -- roadmap created, ready for phase planning
 
 ## Current Position
 
@@ -35,7 +35,7 @@ Last activity: 2026-03-15 — Completed 09-02-PLAN.md tasks 1-2 (three-panel age
 |-----------|--------|--------|
 | v1.0 MCP Server | 1-6 | In progress (phases 3, 6 remaining) |
 | v1.1 Agent Orchestration Dashboard | 7-11 | Planned (EventBus/SSE partially built) |
-| v1.2 DeepCode Agent Dashboard | TBD | Defining requirements |
+| v1.2 DeepCode Agent Dashboard | 18-23 | Roadmap created 2026-03-15 |
 | v2.0 PostgreSQL Migration | 12-17 | Roadmap created 2026-03-14 |
 
 ## Performance Metrics
@@ -108,6 +108,12 @@ Recent decisions affecting current work:
 ### Pending Todos
 
 None.
+
+- [v1.2 roadmap] Adapter layer (Phase 18) gates all v1.2 features; nothing ships without BaseAgentAdapter + ClaudeCodeAdapter
+- [v1.2 roadmap] SSE id: field fix and run-scoped filtering land in Phase 19, not retrofitted later
+- [v1.2 roadmap] CodexAdapter and OpenCodeAdapter deferred to Phase 22 until ClaudeCodeAdapter proven in production
+- [v1.2 roadmap] CTRL-03 (HITL) and DOMAIN-01/02 grouped in Phase 23 -- both require stable panels + adapter state machine
+- [v1.2 roadmap] CHAT_DELTA events excluded from ring buffer (live fan-out only) to prevent buffer saturation at 40 tokens/sec
 
 ### Blockers/Concerns
 

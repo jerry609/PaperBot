@@ -4,6 +4,7 @@
 
 - ✅ **v1.0 MCP Server** - Phases 1-6 (complete)
 - 📋 **v1.1 Agent Orchestration Dashboard** - Phases 7-11 (planned)
+- 📋 **v1.2 DeepCode Agent Dashboard** - Phases 18-23 (planned)
 - 📋 **v2.0 PostgreSQL Migration & Data Layer Refactoring** - Phases 12-17 (planned)
 
 ## Phases
@@ -98,6 +99,21 @@ Plans:
 - [ ] **Phase 10: Agent Board + Codex Bridge** - Kanban board generalization, Codex worker agent definition, and overflow delegation
 - [ ] **Phase 11: DAG Visualization** - Task dependency DAG and cross-agent context sharing visualization
 
+### v1.2 DeepCode Agent Dashboard
+
+**Milestone Goal:** Unify the agent interaction model into a single agent-agnostic architecture where PaperBot's web UI (DeepCode) proxies chat to the user's chosen code agent, visualizes agent activity (teams, tasks, files) in real-time, and provides control commands — without hardcoding orchestration logic.
+
+**Phase Numbering:**
+- Integer phases (18, 19, 20...): Planned milestone work
+- Decimal phases (18.1, 18.2): Urgent insertions (marked with INSERTED)
+
+- [ ] **Phase 18: Adapter Foundation** - BaseAgentAdapter ABC, ClaudeCodeAdapter (persistent REPL mode), AgentProxyService, agent config, hybrid discovery
+- [ ] **Phase 19: Activity Stream + Session Management** - SSE reliability fixes, run-scoped filtering, ActivityFeed, session list/detail, token/cost tracking
+- [ ] **Phase 20: Chat + Control Surface** - AgentChatPanel, interrupt/cancel control, session replay with timeline scrubber, checkpoint/restore
+- [ ] **Phase 21: Visualization Panels** - TeamDAGPanel (@xyflow/react), Monaco file diff panel, agent card grid, swim lane timeline
+- [ ] **Phase 22: Additional Agent Adapters** - CodexAdapter (JSONL), OpenCodeAdapter (HTTP/ACP), agent selection settings UI
+- [ ] **Phase 23: HITL + Domain Enrichment** - Human-in-the-loop approval modal, Paper2Code enriched view, PaperBot MCP tool card rendering
+
 ### v2.0 PostgreSQL Migration & Data Layer Refactoring
 
 **Milestone Goal:** Migrate from SQLite to PostgreSQL, convert all 17 stores to async SQLAlchemy (asyncpg + AsyncSession), add PG-native features (tsvector, JSONB, pgvector), and systematically refactor all 46 data models.
@@ -190,6 +206,100 @@ Plans:
 
 Plans:
 - [ ] 11-01: TBD
+
+### Phase 18: Adapter Foundation
+**Goal**: The dashboard can connect to and control Claude Code via a stable, agent-agnostic adapter interface — with persistent sessions, typed events, and config-driven agent selection
+**Depends on**: Phase 11 (v1.1 milestone complete; EventBus/SSE infrastructure and event vocabulary available)
+**Requirements**: ADAPT-01, ADAPT-02, ADAPT-03, ADAPT-06
+**Success Criteria** (what must be TRUE):
+  1. User can select Claude Code as the active agent in settings and the selection persists in `.paperbot/agent.yaml`
+  2. Sending a message to the agent uses a persistent REPL/stdin-mode subprocess — not a new process per message — so context is retained across turns without reloading full context each time
+  3. Structured agent events (FILE_CHANGED, TEAM_UPDATE, TASK_UPDATE, CHAT_DELTA, CHAT_DONE) arrive in the EventBus within 1 second of emission with no duplicate events on SSE reconnect (SSE `id:` field emitted, seq-based recovery)
+  4. Dashboard discovers agent activity through both agent-pushed MCP events and independent discovery (filesystem watch or polling), whichever arrives first
+  5. Adding a second adapter type requires only a new class in `infrastructure/adapters/agent/` with no changes to AgentProxyService, API routes, or frontend components
+**Plans**: TBD
+
+Plans:
+- [ ] 18-01: TBD
+- [ ] 18-02: TBD
+- [ ] 18-03: TBD
+
+### Phase 19: Activity Stream + Session Management
+**Goal**: Users can see a reliable real-time activity stream scoped to their current session, navigate session history, and track token cost per run
+**Depends on**: Phase 18 (adapter must deliver events before stream or session views have meaningful content)
+**Requirements**: MONIT-01, MONIT-02, MONIT-03, MONIT-04, MONIT-05, SESS-01, SESS-02, SESS-03
+**Success Criteria** (what must be TRUE):
+  1. User sees a scrolling ActivityFeed showing only events for the active run_id that auto-scrolls to the latest event and can be paused without dropping events
+  2. User sees a tool call log entry for every tool invocation showing tool name, arguments, result status (success/error), and elapsed duration
+  3. User sees an agent status badge (running / waiting / complete / error / idle) and a connection status indicator (connected / reconnecting / disconnected) that update without page refresh
+  4. Errors are surfaced prominently: failed tool calls render in red, an error badge appears on the agent status indicator, and a toast notification fires on agent-level failure
+  5. User can open a session list showing all past and active runs with agent type, status, start time, and estimated cost per session
+  6. User can click any session to view its full ordered event timeline filtered to that run_id
+  7. User can see input token count, output token count, and estimated dollar cost for each session
+**Plans**: TBD
+
+Plans:
+- [ ] 19-01: TBD
+- [ ] 19-02: TBD
+- [ ] 19-03: TBD
+
+### Phase 20: Chat + Control Surface
+**Goal**: Users can dispatch tasks to the agent, interrupt running work, and step through or restore completed sessions
+**Depends on**: Phase 19 (session management must exist for replay and restore; Phase 18 bidirectional adapter required for interrupt and checkpoint)
+**Requirements**: CTRL-01, CTRL-02, SESS-04, SESS-05
+**Success Criteria** (what must be TRUE):
+  1. User can type a task in the chat input and submit it to the configured agent — the message routes through AgentProxyService to the adapter without the dashboard containing any agent-specific dispatch logic
+  2. User can click an interrupt/cancel button during a running agent turn and the agent stops within 5 seconds; the button is disabled when no agent is actively running
+  3. User can replay a completed session using a timeline scrubber that steps through events in their original sequence, pausing at any step to inspect state
+  4. User can save a checkpoint of the current session and restore from any prior checkpoint, with each checkpoint addressable independently
+**Plans**: TBD
+
+Plans:
+- [ ] 20-01: TBD
+- [ ] 20-02: TBD
+
+### Phase 21: Visualization Panels
+**Goal**: Users can see live team decomposition as a DAG, file diffs in Monaco, per-agent cost cards, and agent swim lanes — all driven by a single extended Zustand store with no duplicate SSE connections
+**Depends on**: Phase 19 (clean, session-scoped event stream required before panels have meaningful data; Phase 20 studio layout as panel anchor)
+**Requirements**: VIS-01, VIS-02, VIS-03, VIS-04
+**Success Criteria** (what must be TRUE):
+  1. User sees a live DAG of agent-reported team decomposition (nodes = agents, edges = delegation relationships) that updates in real-time as TEAM_UPDATE events arrive, rendered with @xyflow/react
+  2. User sees a Monaco diff editor showing the before/after file content for any file the agent modified, triggered automatically by FILE_CHANGED events
+  3. User sees a card grid where each active agent has a card showing: cost so far, context window usage percentage with a color-graded bar, status badge, and latest action text
+  4. User sees agent swim lanes where each agent occupies a vertical lane and events are plotted chronologically along a shared timeline axis
+**Plans**: TBD
+
+Plans:
+- [ ] 21-01: TBD
+- [ ] 21-02: TBD
+
+### Phase 22: Additional Agent Adapters
+**Goal**: Users can switch between Claude Code, Codex, and OpenCode via a settings toggle, and the dashboard renders correctly regardless of which agent is active — validating that the adapter abstraction does not collapse to lowest-common-denominator
+**Depends on**: Phase 18 (ClaudeCodeAdapter must be proven stable before the abstraction is validated against two more concrete agents)
+**Requirements**: ADAPT-04, ADAPT-05
+**Success Criteria** (what must be TRUE):
+  1. User can select Codex in settings and send a task that routes through CodexAdapter using subprocess + JSONL (`codex exec --json`); session context persists across turns via thread resumption without reloading full context
+  2. User can select OpenCode in settings and send a task that routes through OpenCodeAdapter using HTTP REST+SSE; events normalize to the same AgentEventEnvelope schema as ClaudeCode and Codex
+  3. All three adapters produce identical event shapes in ActivityFeed and TeamDAGPanel — no conditional adapter-specific rendering code exists in any frontend component
+**Plans**: TBD
+
+Plans:
+- [ ] 22-01: TBD
+- [ ] 22-02: TBD
+
+### Phase 23: HITL + Domain Enrichment
+**Goal**: Users can approve or reject proposed agent actions before execution, and Paper2Code sessions and PaperBot MCP tool calls surface paper-specific context automatically
+**Depends on**: Phase 21 (frontend panels must be stable before adding modal overlay; Phase 18 IDLE/PROCESSING/AWAITING_INPUT state machine required to prevent command injection during approval wait)
+**Requirements**: CTRL-03, DOMAIN-01, DOMAIN-02
+**Success Criteria** (what must be TRUE):
+  1. When an agent emits a HUMAN_APPROVAL_REQUIRED event, an approval modal appears showing the proposed action; user can approve or reject and the agent resumes or aborts accordingly without timing out the session
+  2. When the active session has run_type paper2code, the dashboard shows an enriched header: paper title, abstract snippet, reproduction stage progress bar, and current stage name alongside the standard activity feed
+  3. When PaperBot MCP tool calls appear in the tool call log, they render with a paper-specific card (title, venue, quality score badge) rather than raw JSON arguments
+**Plans**: TBD
+
+Plans:
+- [ ] 23-01: TBD
+- [ ] 23-02: TBD
 
 ### Phase 12: PG Infrastructure & Schema
 **Goal**: PaperBot runs against PostgreSQL with a complete, PG-compatible schema — tsvector, JSONB, and pgvector columns in place — without crashing on any SQLite-only code path
@@ -290,7 +400,7 @@ Plans:
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 3 -> 4 -> 5 -> 6 (v1.0) -> 7 -> 8 -> ... -> 11 (v1.1) -> 12 -> 13 -> ... -> 17 (v2.0)
+Phases execute in milestone order: 1-6 (v1.0) -> 7-11 (v1.1) -> 18-23 (v1.2) -> 12-17 (v2.0)
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
@@ -305,6 +415,12 @@ Phases execute in numeric order: 3 -> 4 -> 5 -> 6 (v1.0) -> 7 -> 8 -> ... -> 11 
 | 9. Three-Panel Dashboard | 2/2 | Complete   | 2026-03-15 | - |
 | 10. Agent Board + Codex Bridge | v1.1 | 0/? | Not started | - |
 | 11. DAG Visualization | v1.1 | 0/? | Not started | - |
+| 18. Adapter Foundation | v1.2 | 0/? | Not started | - |
+| 19. Activity Stream + Session Management | v1.2 | 0/? | Not started | - |
+| 20. Chat + Control Surface | v1.2 | 0/? | Not started | - |
+| 21. Visualization Panels | v1.2 | 0/? | Not started | - |
+| 22. Additional Agent Adapters | v1.2 | 0/? | Not started | - |
+| 23. HITL + Domain Enrichment | v1.2 | 0/? | Not started | - |
 | 12. PG Infrastructure & Schema | v2.0 | 0/? | Not started | - |
 | 13. Test Infrastructure | v2.0 | 0/? | Not started | - |
 | 14. Async Data Layer | v2.0 | 0/? | Not started | - |
