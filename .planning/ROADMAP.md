@@ -142,8 +142,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 08-01-PLAN.md — Python EventType vocabulary constants, lifecycle/tool-call helpers, _audit.py migration with TDD
-- [ ] 08-02-PLAN.md — Frontend TypeScript types, parsers, Zustand store, SSE hook, display components (ActivityFeed, AgentStatusPanel, ToolCallTimeline), test harness page
+- [x] 08-01-PLAN.md — Python EventType vocabulary constants, lifecycle/tool-call helpers, _audit.py migration with TDD
+- [x] 08-02-PLAN.md — Frontend TypeScript types, parsers, Zustand store, SSE hook, display components (ActivityFeed, AgentStatusPanel, ToolCallTimeline), test harness page
 
 ### Phase 9: Three-Panel Dashboard
 **Goal**: Users can observe agent work in a three-panel IDE layout with file-level detail

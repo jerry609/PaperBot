@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: DeepCode Agent Dashboard
 status: planning
-stopped_at: null
+stopped_at: "Completed 08-02-PLAN.md"
 last_updated: "2026-03-15"
-last_activity: 2026-03-15 -- Milestone v1.2 started
+last_activity: 2026-03-15 -- Phase 08 Plan 02 complete (frontend agent event consumer layer)
 progress:
   total_phases: 17
   completed_phases: 5
-  total_plans: 11
-  completed_plans: 10
-  percent: 26
+  total_plans: 12
+  completed_plans: 11
+  percent: 27
 ---
 
 # Project State
@@ -25,10 +25,10 @@ See: .planning/PROJECT.md (updated 2026-03-15)
 
 ## Current Position
 
-Phase: Not started (defining requirements)
-Plan: —
-Status: Defining requirements
-Last activity: 2026-03-15 — Milestone v1.2 started
+Phase: 8 of 17 (Agent Event Vocabulary)
+Plan: 2 completed
+Status: Active — executing phase plans
+Last activity: 2026-03-15 — Completed 08-02-PLAN.md (frontend event consumer layer)
 
 ## Milestones
 
@@ -65,6 +65,7 @@ Last activity: 2026-03-15 — Milestone v1.2 started
 | Phase 07-eventbus-sse-foundation P01 | 3 | 2 tasks | 3 files |
 | Phase 07 P02 | 4 | 2 tasks | 3 files |
 | Phase 08-agent-event-vocabulary P01 | 2min | 2 tasks | 4 files |
+| Phase 08-agent-event-vocabulary P02 | 6min | 2 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -92,7 +93,9 @@ Recent decisions affecting current work:
 - [Phase 07-02]: asyncio.wait_for(q.get(), timeout=15.0) drives both delivery and idle heartbeat at single await point
 - [Phase 08-agent-event-vocabulary]: EventType is a plain class with string annotations (not enum) — constants usable as str directly without .value unwrapping
 - [Phase 08-agent-event-vocabulary]: make_tool_call_event auto-generates run_id/trace_id if not provided — callers can omit for standalone tool logging
-- [Phase 08-agent-event-vocabulary]: _audit.py migration: only the type= argument changed to use EventType constants; all sanitization logic unchanged
+- [Phase 08-agent-event-vocabulary P02]: Zustand 5 create() single-call form (no curry) for non-persisted stores — store test reset uses getInitialState() not plain setState
+- [Phase 08-agent-event-vocabulary P02]: useAgentEvents hook mounted exactly once at page root — child components read Zustand store (no duplicate SSE connections)
+- [Phase 08-agent-event-vocabulary P02]: tool_call type added to TOOL_TYPES in parsers.ts alongside tool_result and tool_error (handles pre-result events)
 
 ### Pending Todos
 
@@ -107,6 +110,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-15T02:36:53.329Z
-Stopped at: Completed 08-01-PLAN.md
+Last session: 2026-03-15T10:41:05Z
+Stopped at: Completed 08-02-PLAN.md
 Resume file: None
