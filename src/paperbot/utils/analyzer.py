@@ -778,11 +778,13 @@ class CodeAnalyzer:
         return round(min(1.0, ratio * 2.0), 2)
 
     def _split_dependency_spec(self, spec: str) -> tuple[str, Optional[str]]:
-        match = re.match(r'^([A-Za-z0-9_.-]+)\s*(?:==|>=|<=|~=|!=|>|<)?\s*(.*)$', spec)
-        if not match:
-            return spec, None
-        version = match.group(2).strip() or None
-        return match.group(1), version
+        normalized = spec.strip()
+        for operator in ('==', '>=', '<=', '~=', '!=', '>', '<'):
+            if operator not in normalized:
+                continue
+            name, version = normalized.split(operator, 1)
+            return name.strip(), version.strip() or None
+        return normalized, None
 
     def _normalize_dependency_version(self, value: Any) -> Optional[str]:
         if isinstance(value, str):

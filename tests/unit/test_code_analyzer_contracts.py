@@ -54,3 +54,22 @@ async def test_code_analyzer_returns_stable_contracts(tmp_path):
     assert quality["documentation_metrics"]["has_readme"] is True
     assert quality["overall_score"] > 0
 
+
+@pytest.mark.asyncio
+async def test_code_analyzer_parses_requirement_operators_without_regex_backtracking(tmp_path):
+    (tmp_path / "requirements.txt").write_text(
+        "fastapi==0.109.0\n"
+        "pydantic>=2.6.0\n"
+        "uvicorn\n",
+        encoding="utf-8",
+    )
+
+    analyzer = CodeAnalyzer({})
+
+    dependencies = await analyzer.analyze_dependencies(tmp_path)
+
+    assert dependencies["direct_dependencies"]["python"] == [
+        {"name": "fastapi", "version": "0.109.0"},
+        {"name": "pydantic", "version": "2.6.0"},
+        {"name": "uvicorn", "version": None},
+    ]
