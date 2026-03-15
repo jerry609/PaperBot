@@ -192,3 +192,33 @@ def test_file_change_event_type():
     from paperbot.application.collaboration.message_schema import EventType
     assert EventType.FILE_CHANGE == "file_change"
     assert isinstance(EventType.FILE_CHANGE, str)
+
+
+# --- Codex delegation constants (Phase 10 / CDX-03) ---
+
+def test_codex_dispatched_event_type():
+    """EventType.CODEX_DISPATCHED is the string 'codex_dispatched'."""
+    from paperbot.application.collaboration.message_schema import EventType
+    assert EventType.CODEX_DISPATCHED == "codex_dispatched"
+    assert isinstance(EventType.CODEX_DISPATCHED, str)
+
+
+def test_codex_accepted_event_type():
+    """EventType.CODEX_ACCEPTED is the string 'codex_accepted'."""
+    from paperbot.application.collaboration.message_schema import EventType
+    assert EventType.CODEX_ACCEPTED == "codex_accepted"
+    assert isinstance(EventType.CODEX_ACCEPTED, str)
+
+
+def test_codex_completed_event_type():
+    """EventType.CODEX_COMPLETED is the string 'codex_completed'."""
+    from paperbot.application.collaboration.message_schema import EventType
+    assert EventType.CODEX_COMPLETED == "codex_completed"
+    assert isinstance(EventType.CODEX_COMPLETED, str)
+
+
+def test_codex_failed_event_type():
+    """EventType.CODEX_FAILED is the string 'codex_failed'."""
+    from paperbot.application.collaboration.message_schema import EventType
+    assert EventType.CODEX_FAILED == "codex_failed"
+    assert isinstance(EventType.CODEX_FAILED, str)
