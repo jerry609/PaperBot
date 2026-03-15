@@ -286,7 +286,12 @@ class ScholarWorkflowCoordinator:
         
         code_result = ctx.code_analysis_result
         has_code = bool(code_result)
-        health_score = code_result.get("health_score", 0.0) if code_result else 0.0
+        raw_score = code_result.get("reproducibility_score") if code_result else None
+        if raw_score is None:
+            raw_score = code_result.get("health_score", 0.0) if code_result else 0.0
+        health_score = float(raw_score or 0.0)
+        if health_score <= 1.0:
+            health_score *= 100.0
         is_empty = code_result.get("is_empty_repo", False) if code_result else False
         
         score = create_code_score(has_code, health_score, is_empty)
@@ -429,10 +434,15 @@ class ScholarWorkflowCoordinator:
                     from paperbot.domain.paper import CodeMeta
                     code_meta = CodeMeta(
                         repo_url=getattr(ctx.paper, 'github_url', '') or '',
-                        stars=ctx.code_analysis_result.get('stars', 0),
-                        forks=ctx.code_analysis_result.get('forks', 0),
+                        stars=ctx.code_analysis_result.get('stars', 0) or 0,
+                        forks=ctx.code_analysis_result.get('forks', 0) or 0,
                         has_readme=ctx.code_analysis_result.get('has_readme', False),
-                        last_commit_date=ctx.code_analysis_result.get('last_commit_date'),
+                        updated_at=ctx.code_analysis_result.get('updated_at'),
+                        last_commit_date=(
+                            ctx.code_analysis_result.get('last_commit_date')
+                            or ctx.code_analysis_result.get('updated_at')
+                        ),
+                        reproducibility_score=ctx.code_analysis_result.get('reproducibility_score'),
                     )
                 except ImportError:
                     pass
