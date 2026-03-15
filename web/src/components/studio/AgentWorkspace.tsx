@@ -330,11 +330,15 @@ function LeftRail({
 function RightInspector({
   activeAgents,
   subagentEvents,
+  eventCount,
+  fileCount,
   activeView,
   onViewChange,
 }: {
   activeAgents: number
   subagentEvents: number
+  eventCount: number
+  fileCount: number
   activeView: InspectorView
   onViewChange: (value: InspectorView) => void
 }) {
@@ -350,6 +354,23 @@ function RightInspector({
             <p className="mt-1 text-[11px] text-slate-500">
               {activeAgents} active agents, {subagentEvents} delegation events
             </p>
+          </div>
+        </div>
+
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          <div className="border border-slate-200 bg-slate-50 px-3 py-2">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+              Activity
+            </p>
+            <p className="mt-1 text-sm font-semibold text-slate-900">{eventCount} events</p>
+            <p className="text-[11px] text-slate-500">Live runtime telemetry</p>
+          </div>
+          <div className="border border-slate-200 bg-slate-50 px-3 py-2">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+              Files
+            </p>
+            <p className="mt-1 text-sm font-semibold text-slate-900">{fileCount} touched</p>
+            <p className="text-[11px] text-slate-500">Observed in current monitor stream</p>
           </div>
         </div>
       </div>
@@ -744,7 +765,7 @@ export function AgentWorkspace({
           </div>
         </div>
 
-        <div className="grid gap-3 border-t border-slate-200 bg-slate-50 px-4 py-3 md:grid-cols-2 xl:grid-cols-5">
+        <div className="grid gap-3 border-t border-slate-200 bg-slate-50 px-4 py-3 md:grid-cols-2 xl:grid-cols-4">
           <WorkbenchMetric
             label="Paper"
             value={selectedPaperTitle}
@@ -764,11 +785,6 @@ export function AgentWorkspace({
             label="Subagents"
             value={`${activeAgents} active / ${codexDelegations.length} total`}
             hint="CC delegation runtime"
-          />
-          <WorkbenchMetric
-            label="Activity"
-            value={`${feed.length} events / ${filesTouchedCount} files`}
-            hint="Live runtime telemetry"
           />
         </div>
       </div>
@@ -807,6 +823,8 @@ export function AgentWorkspace({
             <RightInspector
               activeAgents={activeAgents}
               subagentEvents={codexDelegations.length}
+              eventCount={feed.length}
+              fileCount={filesTouchedCount}
               activeView={inspectorView}
               onViewChange={setInspectorView}
             />
@@ -854,6 +872,8 @@ export function AgentWorkspace({
             <RightInspector
               activeAgents={activeAgents}
               subagentEvents={codexDelegations.length}
+              eventCount={feed.length}
+              fileCount={filesTouchedCount}
               activeView={inspectorView}
               onViewChange={setInspectorView}
             />
