@@ -1,3 +1,5 @@
+import { Agent } from "undici"
+
 import { backendBaseUrl, withBackendAuth } from "./auth-headers"
 
 export type ProxyMethod = "DELETE" | "GET" | "HEAD" | "PATCH" | "POST" | "PUT"
@@ -22,7 +24,17 @@ type TextProxyOptions = ProxyOptions & {
   responseHeaders?: HeadersInit
 }
 
+type StreamProxyOptions = ProxyOptions & {
+  dispatcher?: Agent
+  passthroughNonStreamResponse?: boolean
+  responseContentType?: string
+}
+
 const DEFAULT_TIMEOUT_MS = 120_000
+const SSE_DISPATCHER = new Agent({
+  bodyTimeout: 0,
+  headersTimeout: 0,
+})
 
 export function apiBaseUrl(): string {
   return backendBaseUrl()
@@ -65,11 +77,58 @@ export async function proxyText(
   }
 }
 
+export async function proxyStream(
+  req: Request,
+  upstreamUrl: string,
+  method: ProxyMethod,
+  options: StreamProxyOptions = {},
+): Promise<Response> {
+  const requestOptions = {
+    responseContentType: "text/event-stream",
+    timeoutMs: 0,
+    ...options,
+  }
+
+  try {
+    const upstream = await fetchUpstream(req, upstreamUrl, method, requestOptions, {
+      dispatcher: requestOptions.dispatcher ?? SSE_DISPATCHER,
+    })
+    const upstreamContentType = upstream.headers.get("content-type") || ""
+
+    if (
+      requestOptions.passthroughNonStreamResponse &&
+      !upstreamContentType.includes("text/event-stream")
+    ) {
+      const text = await upstream.text()
+      return buildTextResponse(text, upstream, {
+        responseContentType: "application/json",
+        responseHeaders: undefined,
+      })
+    }
+
+    const headers = new Headers()
+    headers.set(
+      "Content-Type",
+      upstreamContentType || requestOptions.responseContentType || "text/event-stream",
+    )
+    headers.set("Cache-Control", "no-cache")
+    headers.set("Connection", "keep-alive")
+
+    return new Response(upstream.body, {
+      status: upstream.status,
+      headers,
+    })
+  } catch (error) {
+    return handleProxyError(error, upstreamUrl, requestOptions.onError)
+  }
+}
+
 async function fetchUpstream(
   req: Request,
   upstreamUrl: string,
   method: ProxyMethod,
   options: ProxyOptions,
+  init: RequestInit & { dispatcher?: Agent } = {},
 ): Promise<Response> {
   const controller = options.timeoutMs === 0 ? null : new AbortController()
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS
@@ -78,12 +137,13 @@ async function fetchUpstream(
 
   try {
     return await fetch(upstreamUrl, {
+      ...init,
       method,
       headers: await resolveHeaders(req, body, options),
       body,
       cache: options.cache,
       signal: controller?.signal,
-    })
+    } as RequestInit & { dispatcher?: Agent })
   } finally {
     if (timeout) {
       clearTimeout(timeout)

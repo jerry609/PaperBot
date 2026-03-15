@@ -10,7 +10,7 @@ vi.mock("./auth-headers", () => ({
   withBackendAuth: withBackendAuthMock,
 }))
 
-import { apiBaseUrl, proxyJson, proxyText } from "./backend-proxy"
+import { apiBaseUrl, proxyJson, proxyStream, proxyText } from "./backend-proxy"
 
 describe("apiBaseUrl", () => {
   it("uses the shared backend base URL helper", () => {
@@ -171,5 +171,82 @@ describe("backend proxy helpers", () => {
       },
     )
     expect(res.status).toBe(200)
+  })
+
+  it("passes through SSE responses without buffering", async () => {
+    withBackendAuthMock.mockResolvedValue({
+      "Content-Type": "application/json",
+      authorization: "Bearer stream-token",
+    })
+
+    const fetchMock = vi.fn(async () =>
+      new Response("data: ping\n\n", {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      }),
+    )
+    global.fetch = fetchMock as typeof fetch
+
+    const req = new Request("https://localhost/api/studio/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt: "hello" }),
+    })
+    const res = await proxyStream(req, "https://backend/api/studio/chat", "POST", {
+      auth: true,
+      responseContentType: "text/event-stream",
+    })
+
+    expect(withBackendAuthMock).toHaveBeenCalledTimes(1)
+    const calls = fetchMock.mock.calls as unknown[][]
+    const init = calls[0]?.[1] as
+      | (RequestInit & { dispatcher?: unknown })
+      | undefined
+    expect(init).toBeDefined()
+    expect(init).toMatchObject({
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        authorization: "Bearer stream-token",
+      },
+      body: JSON.stringify({ prompt: "hello" }),
+    })
+    expect(init?.signal).toBeUndefined()
+    expect(init?.dispatcher).toBeDefined()
+    expect(res.headers.get("content-type")).toContain("text/event-stream")
+    expect(await res.text()).toContain("data: ping")
+  })
+
+  it("returns JSON when a stream route falls back to a non-stream response", async () => {
+    withBackendAuthMock.mockResolvedValue({
+      Accept: "text/event-stream, application/json",
+      "Content-Type": "application/json",
+      authorization: "Bearer stream-token",
+    })
+
+    const fetchMock = vi.fn(async () =>
+      new Response(new TextEncoder().encode(JSON.stringify({ done: true })), { status: 200 }),
+    )
+    global.fetch = fetchMock as typeof fetch
+
+    const req = new Request("https://localhost/api/research/paperscool/daily", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query: "llm" }),
+    })
+    const res = await proxyStream(
+      req,
+      "https://backend/api/research/paperscool/daily",
+      "POST",
+      {
+        accept: "text/event-stream, application/json",
+        auth: true,
+        passthroughNonStreamResponse: true,
+        responseContentType: "text/event-stream",
+      },
+    )
+
+    expect(res.headers.get("content-type")).toContain("application/json")
+    await expect(res.json()).resolves.toEqual({ done: true })
   })
 })
