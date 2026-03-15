@@ -65,8 +65,8 @@ Requirements for Agent Orchestration Dashboard milestone. Each maps to roadmap p
 ### Codex Bridge
 
 - [ ] **CDX-01**: Claude Code can delegate tasks to Codex via custom agent definition (codex-worker.md)
-- [ ] **CDX-02**: Paper2Code pipeline stages can overflow from Claude Code to Codex when workload is high
-- [ ] **CDX-03**: User can observe Codex delegation events in the agent activity feed
+- [x] **CDX-02**: Paper2Code pipeline stages can overflow from Claude Code to Codex when workload is high
+- [x] **CDX-03**: User can observe Codex delegation events in the agent activity feed
 
 ### Visualization
 
@@ -226,8 +226,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | FILE-01 | Phase 9 | Complete |
 | FILE-02 | Phase 9 | Complete |
 | CDX-01 | Phase 10 | Pending |
-| CDX-02 | Phase 10 | Pending |
-| CDX-03 | Phase 10 | Pending |
+| CDX-02 | Phase 10 | Complete |
+| CDX-03 | Phase 10 | Complete |
 | VIZ-01 | Phase 11 | Pending |
 | VIZ-02 | Phase 11 | Pending |
 | PGINFRA-01 | Phase 12 | Pending |
