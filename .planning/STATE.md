@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Agent Orchestration Dashboard
 status: verifying
-stopped_at: Completed 10-01-PLAN.md
-last_updated: "2026-03-15T04:10:04.279Z"
+stopped_at: Completed 10-02-PLAN.md
+last_updated: "2026-03-15T04:12:57.059Z"
 last_activity: 2026-03-15 — Completed 09-02-PLAN.md tasks 1-2 (three-panel agent dashboard UI)
 progress:
   total_phases: 21
   completed_phases: 7
   total_plans: 16
-  completed_plans: 14
+  completed_plans: 15
 ---
 
 # Project State
@@ -69,6 +69,7 @@ Last activity: 2026-03-15 — Completed 09-02-PLAN.md tasks 1-2 (three-panel age
 | Phase 09 P02 | 8min | 2 tasks | 6 files |
 | Phase 09-three-panel-dashboard P02 | 8min | 3 tasks | 6 files |
 | Phase 10-agent-board-codex-bridge P01 | 5min | 1 tasks | 6 files |
+| Phase 10-agent-board-codex-bridge P02 | 8 | 2 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -107,6 +108,9 @@ Recent decisions affecting current work:
 - [Phase 09-three-panel-dashboard]: Human visual verification PASSED: dashboard layout, resizable panels, sidebar nav, and empty states confirmed working
 - [Phase 10-agent-board-codex-bridge]: [Phase 10-01] _emit_codex_event uses _get_event_log_from_container() lazy helper for testability without live FastAPI app
 - [Phase 10-agent-board-codex-bridge]: [Phase 10-01] _should_overflow_to_codex is a stub only — actual Codex overflow wiring in Orchestrator.run() deferred to a later plan
+- [Phase 10-agent-board-codex-bridge]: getAllByText instead of getByText for Radix UI components — ScrollArea renders content in multiple DOM nodes causing duplicate text matches
+- [Phase 10-agent-board-codex-bridge]: vitest environmentMatchGlobs: jsdom for src/components/**/*.test.tsx, node for all other tests (faster pure-logic tests)
+- [Phase 10-agent-board-codex-bridge]: extractCodexFailureReason iterates executionLog from end (most recent), checks event==='task_failed' + codex_diagnostics.reason_code, falls back to lastError
 
 ### Pending Todos
 
@@ -127,6 +131,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-15T04:10:04.271Z
-Stopped at: Completed 10-01-PLAN.md
+Last session: 2026-03-15T04:12:57.053Z
+Stopped at: Completed 10-02-PLAN.md
 Resume file: None

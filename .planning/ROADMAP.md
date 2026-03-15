@@ -413,7 +413,7 @@ Phases execute in milestone order: 1-6 (v1.0) -> 7-11 (v1.1) -> 18-23 (v1.2) -> 
 | 7. EventBus + SSE Foundation | v1.1 | 2/2 | Complete | 2026-03-14 |
 | 8. Agent Event Vocabulary | 1/2 | In Progress|  | - |
 | 9. Three-Panel Dashboard | 2/2 | Complete   | 2026-03-15 | - |
-| 10. Agent Board + Codex Bridge | 1/3 | In Progress|  | - |
+| 10. Agent Board + Codex Bridge | 2/3 | In Progress|  | - |
 | 11. DAG Visualization | v1.1 | 0/? | Not started | - |
 | 18. Adapter Foundation | v1.2 | 0/? | Not started | - |
 | 19. Activity Stream + Session Management | v1.2 | 0/? | Not started | - |
