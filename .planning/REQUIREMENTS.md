@@ -45,9 +45,9 @@ Requirements for Agent Orchestration Dashboard milestone. Each maps to roadmap p
 
 ### Event System
 
-- [ ] **EVNT-01**: User can view a real-time scrolling activity feed showing agent events as they happen
-- [ ] **EVNT-02**: User can see each agent's lifecycle status (idle, working, completed, errored) at a glance
-- [ ] **EVNT-03**: User can view a structured tool call timeline showing tool name, arguments, result summary, and duration
+- [x] **EVNT-01**: User can view a real-time scrolling activity feed showing agent events as they happen
+- [x] **EVNT-02**: User can see each agent's lifecycle status (idle, working, completed, errored) at a glance
+- [x] **EVNT-03**: User can view a structured tool call timeline showing tool name, arguments, result summary, and duration
 - [x] **EVNT-04**: Agent events are pushed to connected dashboard clients in real-time via SSE (no polling)
 
 ### Dashboard
@@ -166,9 +166,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | MCP-11 | Phase 5 | Complete |
 | MCP-12 | Phase 5 | Complete |
 | MCP-13 | Phase 6 | Complete |
-| EVNT-01 | Phase 8 | Pending |
-| EVNT-02 | Phase 8 | Pending |
-| EVNT-03 | Phase 8 | Pending |
+| EVNT-01 | Phase 8 | Complete |
+| EVNT-02 | Phase 8 | Complete |
+| EVNT-03 | Phase 8 | Complete |
 | EVNT-04 | Phase 7 | Complete |
 | DASH-01 | Phase 9 | Pending |
 | DASH-02 | Phase 10 | Pending |

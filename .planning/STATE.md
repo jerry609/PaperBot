@@ -1,16 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.0
-milestone_name: MCP Server
+milestone: v1.1
+milestone_name: Agent Orchestration Dashboard
 status: planning
-stopped_at: Completed 07-02-PLAN.md
-last_updated: "2026-03-14T06:59:08.790Z"
+stopped_at: Completed 08-01-PLAN.md
+last_updated: "2026-03-15T02:36:53.333Z"
 last_activity: 2026-03-14 -- v2.0 roadmap created (phases 12-17)
 progress:
   total_phases: 15
   completed_phases: 5
-  total_plans: 9
-  completed_plans: 9
+  total_plans: 11
+  completed_plans: 10
   percent: 26
 ---
 
@@ -65,6 +65,7 @@ Progress: [████░░░░░░░░░░░░░] 26%
 | Phase 06-agent-skills P01 | 3 | 2 tasks | 5 files |
 | Phase 07-eventbus-sse-foundation P01 | 3 | 2 tasks | 3 files |
 | Phase 07 P02 | 4 | 2 tasks | 3 files |
+| Phase 08-agent-event-vocabulary P01 | 2min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -90,6 +91,9 @@ Recent decisions affecting current work:
 - [Phase 07-02]: Late import of EventBusEventLog inside _get_bus() prevents circular import (events.py loaded at app creation before bus is wired)
 - [Phase 07-02]: No wrap_generator() in events.py: events carry own AgentEventEnvelope fields; second envelope layer would confuse consumers
 - [Phase 07-02]: asyncio.wait_for(q.get(), timeout=15.0) drives both delivery and idle heartbeat at single await point
+- [Phase 08-agent-event-vocabulary]: EventType is a plain class with string annotations (not enum) — constants usable as str directly without .value unwrapping
+- [Phase 08-agent-event-vocabulary]: make_tool_call_event auto-generates run_id/trace_id if not provided — callers can omit for standalone tool logging
+- [Phase 08-agent-event-vocabulary]: _audit.py migration: only the type= argument changed to use EventType constants; all sanitization logic unchanged
 
 ### Pending Todos
 
@@ -104,6 +108,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-14T06:48:05.569Z
-Stopped at: Completed 07-02-PLAN.md
+Last session: 2026-03-15T02:36:53.329Z
+Stopped at: Completed 08-01-PLAN.md
 Resume file: None
