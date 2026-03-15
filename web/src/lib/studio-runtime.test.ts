@@ -19,6 +19,7 @@ describe("buildStudioRuntimeInfo", () => {
         claude_cli: true,
         claude_path: "/usr/local/bin/claude",
         claude_version: "2.1.76",
+        code_mode_enabled: true,
       },
       {
         cwd: "/home/master1/Projects/PaperBot",
@@ -28,6 +29,7 @@ describe("buildStudioRuntimeInfo", () => {
     expect(info.source).toBe("claude_code")
     expect(info.label).toBe("Claude Code")
     expect(info.statusLabel).toBe("CLI 2.1.76")
+    expect(info.codeModeEnabled).toBe(true)
     expect(info.workspaceLabel).toBe(".../Projects/PaperBot")
     expect(info.detail).toContain("Running in")
   })
@@ -38,6 +40,7 @@ describe("buildStudioRuntimeInfo", () => {
         claude_cli: false,
         fallback: "anthropic_api",
         error: "Failed to check Claude CLI status",
+        code_mode_enabled: false,
       },
       {
         cwd: "/tmp",
@@ -47,6 +50,7 @@ describe("buildStudioRuntimeInfo", () => {
     expect(info.source).toBe("anthropic_api")
     expect(info.label).toBe("Anthropic API fallback")
     expect(info.statusLabel).toBe("Claude Code unavailable")
+    expect(info.codeModeEnabled).toBe(false)
     expect(info.detail).toBe("Failed to check Claude CLI status")
     expect(info.workspaceLabel).toBe("/tmp")
   })

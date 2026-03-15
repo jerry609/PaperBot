@@ -31,7 +31,17 @@ from ..streaming import StreamEvent, sse_response
 router = APIRouter()
 
 Mode = Literal["Code", "Plan", "Ask"]
-Model = Literal["claude-sonnet-4-5", "claude-opus-4-5", "claude-haiku-4-5"]
+DEFAULT_STUDIO_MODEL = "sonnet"
+_LEGACY_MODEL_ALIASES = {
+    "claude-sonnet-4-5": "sonnet",
+    "claude-opus-4-5": "opus",
+    "claude-haiku-4-5": "haiku",
+}
+_API_FALLBACK_MODEL_ALIASES = {
+    "sonnet": "claude-sonnet-4-5-20250514",
+    "opus": "claude-opus-4-5-20250514",
+    "haiku": "claude-haiku-4-5-20250514",
+}
 
 
 class PaperContext(BaseModel):
@@ -48,7 +58,7 @@ class ChatMessage(BaseModel):
 class StudioChatRequest(BaseModel):
     message: str
     mode: Mode = "Code"
-    model: Model = "claude-sonnet-4-5"
+    model: str = DEFAULT_STUDIO_MODEL
     paper: Optional[PaperContext] = None
     project_dir: Optional[str] = None
     history: List[ChatMessage] = []
@@ -95,29 +105,24 @@ def get_mode_flags(mode: Mode) -> List[str]:
     return []
 
 
-def get_model_id(model: Model, for_cli: bool = False) -> str:
-    """Map model selection to Claude model ID.
+def _normalize_requested_model(model: Optional[str]) -> str:
+    requested = (model or "").strip()
+    if not requested:
+        return DEFAULT_STUDIO_MODEL
+    return _LEGACY_MODEL_ALIASES.get(requested, requested)
 
-    Args:
-        model: The model selection from the UI
-        for_cli: If True, returns CLI-friendly alias; if False, returns full model ID for API
+
+def get_model_id(model: Optional[str], for_cli: bool = False) -> str:
+    """Resolve a requested model for Claude CLI or API fallback.
+
+    Claude Code accepts either short aliases such as ``sonnet`` / ``opus`` or
+    a full model name. The Studio UI therefore forwards the user-provided value
+    instead of forcing an outdated hard-coded list.
     """
+    normalized = _normalize_requested_model(model)
     if for_cli:
-        # Claude CLI accepts short aliases
-        cli_mapping = {
-            "claude-sonnet-4-5": "sonnet",
-            "claude-opus-4-5": "opus",
-            "claude-haiku-4-5": "haiku",
-        }
-        return cli_mapping.get(model, "sonnet")
-    else:
-        # Full model IDs for Anthropic API
-        api_mapping = {
-            "claude-sonnet-4-5": "claude-sonnet-4-5-20250514",
-            "claude-opus-4-5": "claude-opus-4-5-20250514",
-            "claude-haiku-4-5": "claude-haiku-4-5-20250514",
-        }
-        return api_mapping.get(model, "claude-sonnet-4-5-20250514")
+        return normalized
+    return _API_FALLBACK_MODEL_ALIASES.get(normalized, normalized)
 
 
 def build_prompt_with_context(message: str, paper: Optional[PaperContext], mode: Mode) -> str:
@@ -1447,6 +1452,7 @@ async def studio_status():
             "claude_cli": True,
             "claude_path": claude_path,
             "claude_version": version,
+            "code_mode_enabled": is_code_mode_enabled(),
         }
 
     return {
@@ -1454,6 +1460,7 @@ async def studio_status():
         "claude_path": None,
         "claude_version": None,
         "fallback": "anthropic_api",
+        "code_mode_enabled": is_code_mode_enabled(),
     }
 
 

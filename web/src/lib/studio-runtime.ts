@@ -2,6 +2,7 @@ export interface StudioRuntimeStatusResponse {
   claude_cli?: boolean
   claude_path?: string | null
   claude_version?: string | null
+  code_mode_enabled?: boolean
   fallback?: string | null
   error?: string | null
 }
@@ -23,6 +24,7 @@ export interface StudioRuntimeInfo {
   detail: string
   version: string | null
   claudePath: string | null
+  codeModeEnabled: boolean | null
   cwd: string | null
   actualCwd: string | null
   workspaceLabel: string
@@ -53,6 +55,7 @@ export function buildStudioRuntimeInfo(
   const actualCwd = cleanString(cwdPayload?.actual_cwd)
   const version = cleanString(status?.claude_version)
   const claudePath = cleanString(status?.claude_path)
+  const codeModeEnabled = typeof status?.code_mode_enabled === "boolean" ? status.code_mode_enabled : null
   const error = cleanString(status?.error) ?? cleanString(cwdPayload?.error)
   const workspaceLabel = formatRuntimePath(cwd ?? actualCwd)
 
@@ -64,6 +67,7 @@ export function buildStudioRuntimeInfo(
       detail: cwd ? `Running in ${workspaceLabel}` : "CLI connected to the current Studio workspace",
       version,
       claudePath,
+      codeModeEnabled,
       cwd,
       actualCwd,
       workspaceLabel,
@@ -79,6 +83,7 @@ export function buildStudioRuntimeInfo(
       detail: error ?? "Studio is falling back to the direct Anthropic API path.",
       version,
       claudePath,
+      codeModeEnabled,
       cwd,
       actualCwd,
       workspaceLabel,
@@ -93,6 +98,7 @@ export function buildStudioRuntimeInfo(
     detail: "Fetching Studio runtime metadata...",
     version: null,
     claudePath: null,
+    codeModeEnabled: null,
     cwd: null,
     actualCwd: null,
     workspaceLabel,

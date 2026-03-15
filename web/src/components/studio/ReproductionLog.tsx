@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Textarea } from "@/components/ui/textarea"
 import { useStudioStore, AgentAction, type AgentTask as StudioAgentTask } from "@/lib/store/studio-store"
@@ -119,6 +120,39 @@ function buildCodexTaskTitle(message: string): string {
     const singleLine = message.replace(/\s+/g, " ").trim()
     if (!singleLine) return "Studio Codex task"
     return singleLine.length <= 72 ? singleLine : `${singleLine.slice(0, 69)}...`
+}
+
+function effectivePermissionMode(
+    mode: Mode,
+    codeModeEnabled: boolean | null,
+): "acceptEdits" | "plan" | "default" {
+    if (mode === "Code") return codeModeEnabled === false ? "plan" : "acceptEdits"
+    if (mode === "Plan") return "plan"
+    return "default"
+}
+
+function buildStudioCommandPreview(
+    runtimeInfo: StudioRuntimeInfo,
+    mode: Mode,
+    model: string,
+): string {
+    if (runtimeInfo.source === "anthropic_api") {
+        return "Fallback path: direct Anthropic API call, not Claude Code CLI"
+    }
+    if (runtimeInfo.source !== "claude_code") {
+        return "Resolving Claude Code CLI surface..."
+    }
+
+    const normalizedModel = model.trim() || "sonnet"
+    const permissionMode = effectivePermissionMode(mode, runtimeInfo.codeModeEnabled)
+    const parts = ["claude", "--model", normalizedModel]
+
+    if (permissionMode !== "default") {
+        parts.push("--permission-mode", permissionMode)
+    }
+
+    parts.push("-p", "--output-format", "stream-json", "--verbose")
+    return parts.join(" ")
 }
 
 function formatTime(date: Date): string {
@@ -263,7 +297,7 @@ export function ReproductionLog({
 
     const [status, setStatus] = useState<StepStatus>("idle")
     const [mode, setMode] = useState<Mode>("Code")
-    const [model, setModel] = useState("claude-sonnet-4-5")
+    const [model, setModel] = useState("sonnet")
     const [lastError, setLastError] = useState<string | null>(null)
     const [diffAction, setDiffAction] = useState<AgentAction | null>(null)
     const [saving, setSaving] = useState(false)
@@ -287,6 +321,10 @@ export function ReproductionLog({
         : runtimeInfo.source === "anthropic_api"
             ? "Anthropic API fallback"
             : "Claude Code"
+    const commandPreview = useMemo(
+        () => buildStudioCommandPreview(runtimeInfo, mode, model),
+        [runtimeInfo, mode, model],
+    )
     const messagePlaceholder = runtimeLoading
         ? "Message Studio runtime..."
         : runtimeInfo.source === "anthropic_api"
@@ -813,22 +851,27 @@ export function ReproductionLog({
                 <div className="shrink-0 border-t border-slate-200 bg-[#f1f2ed] p-4">
                     <div className="overflow-hidden rounded-lg border border-slate-200 bg-[#e8ebe4]">
                         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-[#eef0ea] px-4 py-2 text-xs">
-                            <div className="flex min-w-0 items-center gap-2">
-                                <span
-                                    className={cn(
-                                        "inline-flex items-center rounded-full border px-2 py-0.5 font-medium",
-                                        runtimeInfo.source === "claude_code"
-                                            ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                                            : runtimeInfo.source === "anthropic_api"
-                                                ? "border-amber-200 bg-amber-50 text-amber-700"
-                                                : "border-slate-200 bg-slate-100 text-slate-600",
-                                    )}
-                                >
-                                    {runtimeLoading ? "Checking runtime" : runtimeInfo.label}
-                                </span>
-                                <span className="truncate text-slate-600">
-                                    {runtimeLoading ? "Resolving Claude Code status..." : runtimeInfo.statusLabel}
-                                </span>
+                            <div className="min-w-0">
+                                <div className="flex min-w-0 items-center gap-2">
+                                    <span
+                                        className={cn(
+                                            "inline-flex items-center rounded-full border px-2 py-0.5 font-medium",
+                                            runtimeInfo.source === "claude_code"
+                                                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                                : runtimeInfo.source === "anthropic_api"
+                                                    ? "border-amber-200 bg-amber-50 text-amber-700"
+                                                    : "border-slate-200 bg-slate-100 text-slate-600",
+                                        )}
+                                    >
+                                        {runtimeLoading ? "Checking runtime" : runtimeInfo.label}
+                                    </span>
+                                    <span className="truncate text-slate-600">
+                                        {runtimeLoading ? "Resolving Claude Code status..." : runtimeInfo.statusLabel}
+                                    </span>
+                                </div>
+                                <div className="mt-1 truncate font-mono text-[10px] text-slate-500">
+                                    {commandPreview}
+                                </div>
                             </div>
                             <div className="truncate text-[11px] text-slate-500" title={runtimeInfo.cwd || runtimeInfo.actualCwd || undefined}>
                                 {runtimeInfo.workspaceLabel}
@@ -870,16 +913,13 @@ export function ReproductionLog({
                             </div>
                             <div className="flex items-center gap-2">
                                 {/* Model selector */}
-                                <Select value={model} onValueChange={setModel}>
-                                    <SelectTrigger className="h-7 w-[130px] border-slate-200 bg-[#f7f7f4] text-xs text-slate-700">
-                                        <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="claude-sonnet-4-5">Sonnet 4.5</SelectItem>
-                                        <SelectItem value="claude-opus-4-5">Opus 4.5</SelectItem>
-                                        <SelectItem value="claude-haiku-4-5">Haiku 4.5</SelectItem>
-                                    </SelectContent>
-                                </Select>
+                                <Input
+                                    value={model}
+                                    onChange={(event) => setModel(event.target.value)}
+                                    placeholder="sonnet / opus / claude-sonnet-4-6"
+                                    className="h-8 w-[220px] border-slate-200 bg-[#f7f7f4] text-xs text-slate-700"
+                                    title="Claude Code model alias or full model name"
+                                />
                                 <Button
                                     variant="outline"
                                     size="sm"
