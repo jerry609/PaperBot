@@ -1,45 +1,181 @@
-import { withBackendAuth } from "./auth-headers"
+import { backendBaseUrl, withBackendAuth } from "./auth-headers"
 
-type ProxyTextOptions = {
-  accept?: string
-  auth?: boolean
-  responseContentType?: string
+export type ProxyMethod = "DELETE" | "GET" | "HEAD" | "PATCH" | "POST" | "PUT"
+
+type ProxyErrorContext = {
+  error: unknown
+  isTimeout: boolean
+  upstreamUrl: string
 }
 
+type ProxyOptions = {
+  accept?: string
+  auth?: boolean
+  contentType?: string
+  onError?: (context: ProxyErrorContext) => Response
+  timeoutMs?: number
+}
+
+type TextProxyOptions = ProxyOptions & {
+  responseContentType?: string
+  responseHeaders?: HeadersInit
+}
+
+const DEFAULT_TIMEOUT_MS = 120_000
+
 export function apiBaseUrl(): string {
-  return process.env.PAPERBOT_API_BASE_URL || "http://127.0.0.1:8000"
+  return backendBaseUrl()
+}
+
+export async function proxyJson(
+  req: Request,
+  upstreamUrl: string,
+  method: ProxyMethod,
+  options: TextProxyOptions = {},
+): Promise<Response> {
+  return proxyText(req, upstreamUrl, method, {
+    accept: options.accept ?? "application/json",
+    responseContentType: options.responseContentType ?? "application/json",
+    ...options,
+  })
 }
 
 export async function proxyText(
   req: Request,
   upstreamUrl: string,
-  method: string,
-  options: ProxyTextOptions = {},
+  method: ProxyMethod,
+  options: TextProxyOptions = {},
 ): Promise<Response> {
-  const normalizedMethod = method.toUpperCase()
-  const headers: Record<string, string> = {
-    Accept: options.accept || "application/json",
+  const requestOptions = {
+    accept: "application/json",
+    ...options,
   }
 
-  let body: string | undefined
-  if (normalizedMethod !== "GET" && normalizedMethod !== "HEAD") {
-    body = await req.text()
-    headers["Content-Type"] = req.headers.get("content-type") || "application/json"
+  try {
+    const upstream = await fetchUpstream(req, upstreamUrl, method, requestOptions)
+    const text = await upstream.text()
+
+    return buildTextResponse(text, upstream, {
+      responseContentType: requestOptions.responseContentType,
+      responseHeaders: requestOptions.responseHeaders,
+    })
+  } catch (error) {
+    return handleProxyError(error, upstreamUrl, requestOptions.onError)
+  }
+}
+
+async function fetchUpstream(
+  req: Request,
+  upstreamUrl: string,
+  method: ProxyMethod,
+  options: ProxyOptions,
+): Promise<Response> {
+  const controller = options.timeoutMs === 0 ? null : new AbortController()
+  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS
+  const timeout = controller ? setTimeout(() => controller.abort(), timeoutMs) : null
+  const body = await resolveBody(req, method)
+
+  try {
+    return await fetch(upstreamUrl, {
+      method,
+      headers: await resolveHeaders(req, body, options),
+      body,
+      signal: controller?.signal,
+    })
+  } finally {
+    if (timeout) {
+      clearTimeout(timeout)
+    }
+  }
+}
+
+async function resolveHeaders(
+  req: Request,
+  body: string | undefined,
+  options: ProxyOptions,
+): Promise<HeadersInit> {
+  const headers: Record<string, string> = {}
+
+  if (options.accept) {
+    headers.Accept = options.accept
   }
 
-  const upstreamHeaders = options.auth ? await withBackendAuth(req, headers) : headers
-  const upstream = await fetch(upstreamUrl, {
-    method: normalizedMethod,
-    headers: upstreamHeaders,
-    body,
-  })
-  const text = await upstream.text()
+  if (body !== undefined) {
+    headers["Content-Type"] =
+      options.contentType || req.headers.get("content-type") || "application/json"
+  }
+
+  if (options.auth) {
+    return withBackendAuth(req, headers)
+  }
+
+  return headers
+}
+
+async function resolveBody(
+  req: Request,
+  method: ProxyMethod,
+): Promise<string | undefined> {
+  if (method === "GET" || method === "HEAD" || req.body === null) {
+    return undefined
+  }
+
+  return req.text()
+}
+
+function buildTextResponse(
+  text: string,
+  upstream: Response,
+  options: Pick<TextProxyOptions, "responseContentType" | "responseHeaders">,
+): Response {
+  const headers = new Headers(options.responseHeaders)
+  headers.set("Cache-Control", "no-cache")
+
+  const contentType =
+    upstream.headers.get("content-type") || options.responseContentType
+
+  if (contentType && upstream.status !== 204 && text.length > 0) {
+    headers.set("Content-Type", contentType)
+  }
+
+  if (upstream.status === 204 || text.length === 0) {
+    return new Response(null, {
+      status: upstream.status,
+      headers,
+    })
+  }
 
   return new Response(text, {
     status: upstream.status,
-    headers: {
-      "Content-Type": upstream.headers.get("content-type") || options.responseContentType || "application/json",
-      "Cache-Control": "no-cache",
-    },
+    headers,
   })
+}
+
+function handleProxyError(
+  error: unknown,
+  upstreamUrl: string,
+  onError?: (context: ProxyErrorContext) => Response,
+): Response {
+  const isTimeout = error instanceof Error && error.name === "AbortError"
+  const context = {
+    error,
+    isTimeout,
+    upstreamUrl,
+  }
+
+  if (onError) {
+    return onError(context)
+  }
+
+  const detail = error instanceof Error ? error.message : String(error)
+
+  return Response.json(
+    {
+      detail: isTimeout
+        ? `Upstream API timed out: ${upstreamUrl}`
+        : `Upstream API unreachable: ${upstreamUrl}`,
+      error: detail,
+    },
+    { status: 502 },
+  )
 }
