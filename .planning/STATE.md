@@ -1,13 +1,13 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.1
-milestone_name: Agent Orchestration Dashboard
+milestone: v1.2
+milestone_name: DeepCode Agent Dashboard
 status: planning
-stopped_at: Completed 08-01-PLAN.md
-last_updated: "2026-03-15T02:36:53.333Z"
-last_activity: 2026-03-14 -- v2.0 roadmap created (phases 12-17)
+stopped_at: null
+last_updated: "2026-03-15"
+last_activity: 2026-03-15 -- Milestone v1.2 started
 progress:
-  total_phases: 15
+  total_phases: 17
   completed_phases: 5
   total_plans: 11
   completed_plans: 10
@@ -18,26 +18,25 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-03-14)
+See: .planning/PROJECT.md (updated 2026-03-15)
 
-**Core value:** Paper-specific capability layer surfaced as standard MCP tools + agent orchestration dashboard
-**Current focus:** v1.1 Agent Orchestration Dashboard -- Phase 7 (EventBus + SSE Foundation)
+**Core value:** Paper-specific capability layer surfaced as standard MCP tools + agent-agnostic dashboard
+**Current focus:** v1.2 DeepCode Agent Dashboard -- defining requirements
 
 ## Current Position
 
-Phase: 7 of 17 (EventBus + SSE Foundation)
-Plan: 0 of ? in current phase
-Status: Ready to plan
-Last activity: 2026-03-14 -- v2.0 roadmap created (phases 12-17)
-
-Progress: [████░░░░░░░░░░░░░] 26%
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-03-15 — Milestone v1.2 started
 
 ## Milestones
 
 | Milestone | Phases | Status |
 |-----------|--------|--------|
 | v1.0 MCP Server | 1-6 | In progress (phases 3, 6 remaining) |
-| v1.1 Agent Orchestration Dashboard | 7-11 | Planned |
+| v1.1 Agent Orchestration Dashboard | 7-11 | Planned (EventBus/SSE partially built) |
+| v1.2 DeepCode Agent Dashboard | TBD | Defining requirements |
 | v2.0 PostgreSQL Migration | 12-17 | Roadmap created 2026-03-14 |
 
 ## Performance Metrics

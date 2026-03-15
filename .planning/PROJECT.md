@@ -2,11 +2,11 @@
 
 ## What This Is
 
-PaperBot is a multi-agent research workflow framework for academic paper discovery, analysis, and reproduction. It provides a FastAPI backend with SSE streaming, a Next.js web dashboard, and a terminal CLI. The platform is evolving toward a Skill-Driven Architecture where PaperBot acts as a capability provider, exposing paper-specific tools via MCP and providing an agent orchestration dashboard for Claude Code and Codex.
+PaperBot is a multi-agent research workflow framework for academic paper discovery, analysis, and reproduction. It provides a FastAPI backend with SSE streaming, a Next.js web dashboard, and a terminal CLI. The platform follows a Skill-Driven Architecture where PaperBot acts as a capability provider, exposing paper-specific tools via MCP. The web dashboard (DeepCode) serves as an agent-agnostic visualization and control surface — proxying chat to whichever code agent the user configures (Claude Code, Codex, OpenCode, etc.) and displaying real-time agent activity, team decomposition, and file changes.
 
 ## Core Value
 
-Paper-specific capability layer: understanding, reproduction, verification, and context — surfaced as standard MCP tools that any agent can consume, with a visual dashboard for agent orchestration.
+Paper-specific capability layer: understanding, reproduction, verification, and context — surfaced as standard MCP tools that any agent can consume, with an agent-agnostic dashboard that visualizes and controls whatever code agent the user runs.
 
 ## Requirements
 
@@ -31,7 +31,7 @@ Paper-specific capability layer: understanding, reproduction, verification, and 
 
 ### Active
 
-<!-- Current scope: v1.1 Agent Orchestration Dashboard + v2.0 PG Migration -->
+<!-- Current scope: v1.1 Agent Orchestration Dashboard + v1.2 DeepCode Agent Dashboard + v2.0 PG Migration -->
 
 - [ ] Codex subagent bridge for Claude Code (custom agent definition)
 - [ ] Agent orchestration dashboard (replaces studio page)
@@ -39,6 +39,11 @@ Paper-specific capability layer: understanding, reproduction, verification, and 
 - [ ] Three-panel IDE layout (tasks | agent activity | files)
 - [ ] Live SSE streaming for real-time agent activity
 - [ ] Paper2Code overflow delegation workflow (Claude Code → Codex)
+- [ ] Agent-agnostic proxy layer (chat proxies to user-configured agent: Claude Code, Codex, OpenCode)
+- [ ] Multi-agent adapter layer (unified interface for different code agents)
+- [ ] Agent activity discovery (hybrid: agent pushes events + dashboard discovers independently)
+- [ ] Team visualization (agent-initiated team decomposition reflected in dashboard)
+- [ ] Dashboard control surface (send commands/tasks to agents from web UI)
 - [ ] PostgreSQL migration (replace SQLite)
 - [ ] Async data layer (AsyncSession + asyncpg)
 - [ ] Systematic data model refactoring
@@ -46,19 +51,23 @@ Paper-specific capability layer: understanding, reproduction, verification, and 
 
 ### Out of Scope
 
-- Custom agent orchestration runtime — host agents (Claude Code) own orchestration
-- Per-host adapters — one MCP surface serves all
+- Custom agent orchestration runtime — host agents own orchestration, PaperBot visualizes
+- Building any code agent (Claude Code, Codex, OpenCode) — uses existing tools
 - Business logic duplication — tools must reuse existing services
-- Building Codex itself — uses existing Codex CLI
+- Hardcoded agent pipeline logic — agent decides team composition and delegation
+- Per-agent custom UI — one unified dashboard serves all agents
 
 ## Context
 
 - Architecture pivot from AgentSwarm to Skill-Driven Architecture (2026-03-13)
-- Existing `codex_dispatcher.py` and `claude_commander.py` in infrastructure/swarm/
+- Further pivot: DeepCode as agent-agnostic dashboard, not Claude Code-specific (2026-03-15)
+- Problem identified: chat mode split between Claude Code CLI connection vs direct API Codex calls — needs unification
+- Existing `codex_dispatcher.py` and `claude_commander.py` in infrastructure/swarm/ — to be replaced by unified adapter
 - Existing `AgentEventEnvelope` with run_id/trace_id/span_id in application/collaboration/
 - Studio page exists with Monaco editor and XTerm terminal
 - @xyflow/react already in web dashboard for DAG visualization
-- MCP server (v1.0 milestone) is prerequisite — provides tool surface for agent integration
+- MCP server (v1.0 milestone) provides tool surface for agent integration
+- v1.1 EventBus + SSE foundation (phases 7-8) partially built
 - Dev branch synced to origin/dev at 2e5173d (2026-03-14)
 - Current DB: SQLite with 46 models, sync Session, FTS5 virtual tables, optional sqlite-vec
 
@@ -66,11 +75,24 @@ Paper-specific capability layer: understanding, reproduction, verification, and 
 
 - **MCP prerequisite**: v1.0 MCP server must be functional before agent orchestration
 - **Reuse**: Event logging must extend existing AgentEventEnvelope, not create parallel system
-- **Claude Code bridge**: Codex integration is a Claude Code agent definition, not PaperBot server code
+- **Agent-agnostic**: Dashboard must work with any code agent, not hardcode Claude Code or Codex specifics
+- **No orchestration logic**: PaperBot does NOT decompose tasks — the host agent does; PaperBot visualizes
 - **Studio integration**: Dashboard integrates with existing Monaco/XTerm, not replaces them
 - **Transport**: SSE for live updates (existing infrastructure)
 
-## Current Milestone: v1.1 Agent Orchestration Dashboard
+## Current Milestone: v1.2 DeepCode Agent Dashboard
+
+**Goal:** Unify the agent interaction model into a single agent-agnostic architecture where PaperBot's web UI (DeepCode) proxies chat to the user's chosen code agent, visualizes agent activity (teams, tasks, files) in real-time, and provides control commands — without hardcoding orchestration logic.
+
+**Target features:**
+- Agent-agnostic proxy layer (chat → Claude Code / Codex / OpenCode / etc.)
+- Multi-agent adapter layer (unified interface abstracting agent-specific APIs/CLIs)
+- Hybrid activity discovery (agent pushes events via MCP + dashboard discovers independently)
+- Team visualization (agent-initiated team decomposition rendered in dashboard)
+- Dashboard control surface (send commands/tasks back to agents)
+- Real-time agent activity stream (builds on v1.1 EventBus/SSE)
+
+## Previous Milestone: v1.1 Agent Orchestration Dashboard
 
 **Goal:** Build a Codex subagent bridge for Claude Code and a real-time agent orchestration dashboard in PaperBot's web UI, enabling the Paper2Code overflow delegation workflow.
 
@@ -109,5 +131,10 @@ Paper-specific capability layer: understanding, reproduction, verification, and 
 | Systematic model refactoring | 46 models accumulated organically; normalize, add constraints, remove redundancy | — Pending |
 | Docker PG for local dev | Standard dev setup, matches production topology | — Pending |
 
+| DeepCode = agent-agnostic dashboard | Chat split (CLI vs API) was wrong; unify into proxy model where PaperBot doesn't care which agent | — Pending |
+| Agent-initiated team decomposition | Agent decides how to split work; dashboard visualizes, doesn't orchestrate | — Pending |
+| Hybrid activity discovery | Agent pushes structured events + dashboard can discover independently | — Pending |
+| Dashboard + control (not pure display) | Users need to send commands/tasks, not just watch | — Pending |
+
 ---
-*Last updated: 2026-03-14 after v2.0 milestone added*
+*Last updated: 2026-03-15 after v1.2 milestone added*
