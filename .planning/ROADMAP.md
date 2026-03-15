@@ -187,12 +187,12 @@ Plans:
   3. Claude Code can delegate tasks to Codex via the codex-worker.md custom agent definition
   4. Paper2Code pipeline stages can overflow from Claude Code to Codex when workload exceeds capacity
   5. User can observe Codex delegation events (dispatched, accepted, completed, failed) in the activity feed
-**Plans**: TBD
+**Plans**: 3 plans
 
 Plans:
-- [ ] 10-01: TBD
-- [ ] 10-02: TBD
-- [ ] 10-03: TBD
+- [ ] 10-01-PLAN.md — Backend: Codex EventType constants, delegation event emission in agent_board.py, Paper2Code overflow stub (TDD)
+- [ ] 10-02-PLAN.md — Frontend: CodexDelegationEntry type, parseCodexDelegation parser, KanbanBoard component with agent badges and error states (TDD)
+- [ ] 10-03-PLAN.md — Glue: codex-worker.md sub-agent definition, dashboard Panels/Kanban view toggle, human verification
 
 ### Phase 11: DAG Visualization
 **Goal**: Users can see task dependencies and cross-agent data flow visually
@@ -413,7 +413,7 @@ Phases execute in milestone order: 1-6 (v1.0) -> 7-11 (v1.1) -> 18-23 (v1.2) -> 
 | 7. EventBus + SSE Foundation | v1.1 | 2/2 | Complete | 2026-03-14 |
 | 8. Agent Event Vocabulary | 1/2 | In Progress|  | - |
 | 9. Three-Panel Dashboard | 2/2 | Complete   | 2026-03-15 | - |
-| 10. Agent Board + Codex Bridge | v1.1 | 0/? | Not started | - |
+| 10. Agent Board + Codex Bridge | v1.1 | 0/3 | Planned | - |
 | 11. DAG Visualization | v1.1 | 0/? | Not started | - |
 | 18. Adapter Foundation | v1.2 | 0/? | Not started | - |
 | 19. Activity Stream + Session Management | v1.2 | 0/? | Not started | - |
