@@ -30,6 +30,10 @@ type StreamProxyOptions = ProxyOptions & {
   responseContentType?: string
 }
 
+type BinaryProxyOptions = ProxyOptions & {
+  responseHeaders?: HeadersInit
+}
+
 const DEFAULT_TIMEOUT_MS = 120_000
 const SSE_DISPATCHER = new Agent({
   bodyTimeout: 0,
@@ -120,6 +124,35 @@ export async function proxyStream(
     })
   } catch (error) {
     return handleProxyError(error, upstreamUrl, requestOptions.onError)
+  }
+}
+
+export async function proxyBinary(
+  req: Request,
+  upstreamUrl: string,
+  method: ProxyMethod,
+  options: BinaryProxyOptions = {},
+): Promise<Response> {
+  try {
+    const upstream = await fetchUpstream(req, upstreamUrl, method, options)
+    const headers = new Headers(options.responseHeaders)
+    headers.set("Cache-Control", "no-cache")
+    headers.set(
+      "Content-Type",
+      upstream.headers.get("content-type") || "application/octet-stream",
+    )
+
+    const contentDisposition = upstream.headers.get("content-disposition")
+    if (contentDisposition) {
+      headers.set("Content-Disposition", contentDisposition)
+    }
+
+    return new Response(upstream.body, {
+      status: upstream.status,
+      headers,
+    })
+  } catch (error) {
+    return handleProxyError(error, upstreamUrl, options.onError)
   }
 }
 
