@@ -33,6 +33,33 @@ class _CaptureInfluenceCalculator:
         return _FakeInfluence()
 
 
+def _sample_code_analysis_result():
+    return {
+        "reproducibility_score": 82.0,
+        "updated_at": "2026-03-01T00:00:00+00:00",
+        "last_commit_date": "2026-03-02T00:00:00+00:00",
+        "has_readme": True,
+        "stars": 12,
+        "forks": 3,
+    }
+
+
+def _build_coordinator_with_code_result(tmp_path, *, influence_calculator=None):
+    coordinator = ScholarWorkflowCoordinator({"output_dir": str(tmp_path), "enable_fail_fast": False})
+    coordinator._research_agent = SimpleNamespace(process=AsyncMock(return_value={"venue_tier": 1}))
+    coordinator._code_analysis_agent = SimpleNamespace(
+        process=AsyncMock(return_value=_sample_code_analysis_result())
+    )
+    coordinator._quality_agent = SimpleNamespace(
+        process=AsyncMock(return_value={"quality_score": 0.71, "quality_scores": {"repo": {"overall_score": 0.71}}})
+    )
+    coordinator._influence_calculator = influence_calculator or SimpleNamespace(
+        calculate=lambda paper, code_meta: _FakeInfluence()
+    )
+    coordinator._report_writer = None
+    return coordinator
+
+
 @pytest.mark.asyncio
 async def test_workflow_coordinator_publishes_all_four_stage_scores(tmp_path):
     coordinator = ScholarWorkflowCoordinator({"output_dir": str(tmp_path), "enable_fail_fast": False})
@@ -73,25 +100,7 @@ async def test_workflow_coordinator_publishes_all_four_stage_scores(tmp_path):
 
 @pytest.mark.asyncio
 async def test_workflow_coordinator_uses_reproducibility_score_for_code_stage(tmp_path):
-    coordinator = ScholarWorkflowCoordinator({"output_dir": str(tmp_path), "enable_fail_fast": False})
-    coordinator._research_agent = SimpleNamespace(process=AsyncMock(return_value={"venue_tier": 1}))
-    coordinator._code_analysis_agent = SimpleNamespace(
-        process=AsyncMock(
-            return_value={
-                "reproducibility_score": 82.0,
-                "updated_at": "2026-03-01T00:00:00+00:00",
-                "last_commit_date": "2026-03-02T00:00:00+00:00",
-                "has_readme": True,
-                "stars": 12,
-                "forks": 3,
-            }
-        )
-    )
-    coordinator._quality_agent = SimpleNamespace(
-        process=AsyncMock(return_value={"quality_score": 0.71, "quality_scores": {"repo": {"overall_score": 0.71}}})
-    )
-    coordinator._influence_calculator = SimpleNamespace(calculate=lambda paper, code_meta: _FakeInfluence())
-    coordinator._report_writer = None
+    coordinator = _build_coordinator_with_code_result(tmp_path)
 
     paper = SimpleNamespace(
         paper_id="paper-repro",
@@ -117,26 +126,11 @@ async def test_workflow_coordinator_uses_reproducibility_score_for_code_stage(tm
 
 @pytest.mark.asyncio
 async def test_workflow_coordinator_passes_aligned_code_meta_to_influence(tmp_path):
-    coordinator = ScholarWorkflowCoordinator({"output_dir": str(tmp_path), "enable_fail_fast": False})
-    coordinator._research_agent = SimpleNamespace(process=AsyncMock(return_value={"venue_tier": 1}))
-    coordinator._code_analysis_agent = SimpleNamespace(
-        process=AsyncMock(
-            return_value={
-                "reproducibility_score": 82.0,
-                "updated_at": "2026-03-01T00:00:00+00:00",
-                "last_commit_date": "2026-03-02T00:00:00+00:00",
-                "has_readme": True,
-                "stars": 12,
-                "forks": 3,
-            }
-        )
-    )
-    coordinator._quality_agent = SimpleNamespace(
-        process=AsyncMock(return_value={"quality_score": 0.71, "quality_scores": {"repo": {"overall_score": 0.71}}})
-    )
     influence_calculator = _CaptureInfluenceCalculator()
-    coordinator._influence_calculator = influence_calculator
-    coordinator._report_writer = None
+    coordinator = _build_coordinator_with_code_result(
+        tmp_path,
+        influence_calculator=influence_calculator,
+    )
 
     paper = SimpleNamespace(
         paper_id="paper-meta",
