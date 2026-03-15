@@ -1,7 +1,11 @@
 import { auth } from "@/auth"
 
 export function backendBaseUrl(): string {
-  return process.env.BACKEND_BASE_URL || "http://127.0.0.1:8000"
+  return (
+    process.env.BACKEND_BASE_URL ||
+    process.env.PAPERBOT_API_BASE_URL ||
+    "http://127.0.0.1:8000"
+  )
 }
 
 export async function withBackendAuth(
@@ -35,4 +39,3 @@ export async function withBackendAuth(
   }
   return headers
 }
-

@@ -1,13 +1,5 @@
-import { NextRequest, NextResponse } from "next/server"
-import { backendBaseUrl } from "@/app/api/_utils/auth-headers"
+import { apiBaseUrl, proxyJson } from "@/app/api/_utils/backend-proxy"
 
-export async function POST(req: NextRequest) {
-  const body = await req.json()
-  const res = await fetch(`${backendBaseUrl()}/api/auth/register`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  })
-  const data = await res.json().catch(() => null)
-  return NextResponse.json(data, { status: res.status })
+export async function POST(req: Request) {
+  return proxyJson(req, `${apiBaseUrl()}/api/auth/register`, "POST")
 }
