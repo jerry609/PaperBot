@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { Columns3, LayoutGrid } from "lucide-react"
+import { Columns3, LayoutGrid, GitBranch } from "lucide-react"
 import { useAgentEvents } from "@/lib/agent-events/useAgentEvents"
 import { useAgentEventStore } from "@/lib/agent-events/store"
 import { SplitPanels } from "@/components/layout/SplitPanels"
@@ -9,12 +9,13 @@ import { TasksPanel } from "@/components/agent-dashboard/TasksPanel"
 import { ActivityFeed } from "@/components/agent-events/ActivityFeed"
 import { FileListPanel } from "@/components/agent-dashboard/FileListPanel"
 import { KanbanBoard } from "@/components/agent-dashboard/KanbanBoard"
+import { AgentDagPanel } from "@/components/agent-dashboard/AgentDagPanel"
 import { useStudioStore } from "@/lib/store/studio-store"
 
 export default function AgentDashboardPage() {
   useAgentEvents()
 
-  const [viewMode, setViewMode] = useState<"panels" | "kanban">("panels")
+  const [viewMode, setViewMode] = useState<"panels" | "kanban" | "dag">("panels")
 
   const studioTasks = useStudioStore((s) => s.agentTasks)
   const eventKanbanTasks = useAgentEventStore((s) => s.kanbanTasks)
@@ -41,18 +42,30 @@ export default function AgentDashboardPage() {
           >
             <LayoutGrid className="h-4 w-4" />
           </button>
+          <button
+            onClick={() => setViewMode("dag")}
+            className={`p-1.5 rounded ${viewMode === "dag" ? "bg-muted" : "hover:bg-muted/50"}`}
+            title="DAG view"
+            aria-label="Switch to DAG view"
+          >
+            <GitBranch className="h-4 w-4" />
+          </button>
         </div>
       </header>
       <div className="flex-1 min-h-0">
-        {viewMode === "panels" ? (
+        {viewMode === "panels" && (
           <SplitPanels
             storageKey="agent-dashboard"
             rail={<TasksPanel />}
             list={<ActivityFeed />}
             detail={<FileListPanel />}
           />
-        ) : (
+        )}
+        {viewMode === "kanban" && (
           <KanbanBoard tasks={kanbanTasks} />
+        )}
+        {viewMode === "dag" && (
+          <AgentDagPanel />
         )}
       </div>
     </div>
