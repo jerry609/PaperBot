@@ -1,0 +1,135 @@
+name: sonarcloud
+
+on:
+  push:
+    branches:
+      - master
+      - dev
+  pull_request:
+    branches:
+      - master
+      - dev
+  workflow_dispatch:
+
+concurrency:
+  group: sonarcloud-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scan:
+    name: SonarCloud Scan
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      pull-requests: read
+    env:
+      PYTHONPATH: src
+      PAPERBOT_DB_URL: sqlite:///data/paperbot-ci.db
+      SONAR_ORGANIZATION: ${{ vars.SONAR_ORGANIZATION || 'jerry609' }}
+      SONAR_PROJECT_KEY: ${{ vars.SONAR_PROJECT_KEY || 'jerry609_PaperBot' }}
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check SonarCloud settings
+        id: sonar_config
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${SONAR_TOKEN}" ]; then
+            echo "scan_enabled=false" >> "${GITHUB_OUTPUT}"
+            {
+              echo "### SonarCloud scan skipped"
+              echo
+              echo "Repository secret SONAR_TOKEN is not configured."
+              echo "The workflow remains available and will start scanning once the secret is added."
+            } >> "${GITHUB_STEP_SUMMARY}"
+            exit 0
+          fi
+          echo "scan_enabled=true" >> "${GITHUB_OUTPUT}"
+
+      - name: Set up Python
+        if: steps.sonar_config.outputs.scan_enabled == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cache pip
+        if: steps.sonar_config.outputs.scan_enabled == 'true'
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-sonar-pip-${{ hashFiles('requirements-ci.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-sonar-pip-
+
+      - name: Install backend dependencies
+        if: steps.sonar_config.outputs.scan_enabled == 'true'
+        run: |
+          python -m pip install -U pip
+          python -m pip install -r requirements-ci.txt
+
+      - name: Run backend tests with coverage
+        if: steps.sonar_config.outputs.scan_enabled == 'true'
+        run: bash scripts/ci/run_backend_offline_gates.sh --cov=src --cov-report=xml:coverage.xml
+
+      - name: Set up Node.js
+        if: steps.sonar_config.outputs.scan_enabled == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install web dependencies
+        if: steps.sonar_config.outputs.scan_enabled == 'true'
+        working-directory: web
+        run: npm ci
+
+      - name: Run web tests with coverage
+        if: steps.sonar_config.outputs.scan_enabled == 'true'
+        working-directory: web
+        run: npm run test:coverage
+
+      - name: Cache SonarCloud packages
+        if: steps.sonar_config.outputs.scan_enabled == 'true'
+        uses: actions/cache@v4
+        with:
+          path: ~/.sonar/cache
+          key: ${{ runner.os }}-sonar-cache
+          restore-keys: |
+            ${{ runner.os }}-sonar-cache
+
+      - name: SonarCloud scan
+        if: steps.sonar_config.outputs.scan_enabled == 'true'
+        uses: SonarSource/sonarqube-scan-action@a31c9398be7ace6bbfaf30c0bd5d415f843d45e9 # v7.0.0
+        with:
+          args: >
+            -Dsonar.organization=${{ env.SONAR_ORGANIZATION }}
+            -Dsonar.projectKey=${{ env.SONAR_PROJECT_KEY }}
+            -Dsonar.qualitygate.wait=true
+            -Dsonar.qualitygate.timeout=300
+
+  fork_notice:
+    name: Fork PR notice
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork
+    runs-on: ubuntu-latest
+    steps:
+      - name: Record skip reason for fork PR
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Fork PR detected; SonarCloud scan is skipped because GitHub Actions does not expose repository secrets to workflows from forks."
+          {
+            echo "### Fork PR SonarCloud scan skipped"
+            echo
+            echo "This pull request comes from a fork, so GitHub Actions cannot access the repository secrets needed for SonarCloud analysis."
+            echo
+            echo "Run the scan on a branch inside the main repository if you need PR decoration before merge."
+          } >> "${GITHUB_STEP_SUMMARY}"

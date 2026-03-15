@@ -30,6 +30,9 @@ Thumbs.db
 logs/
 /data/
 /papers/
+.coverage
+coverage.xml
+.scannerwork/
 debug_*.txt
 debug_*.json
 response.html
@@ -54,6 +57,8 @@ reports/
 
 # Node.js
 node_modules/
+coverage/
+web/coverage/
 cli/dist/
 npm-debug.log
 
