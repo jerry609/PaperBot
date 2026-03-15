@@ -1,5 +1,6 @@
 export const runtime = "nodejs"
 
+import { withBackendAuth } from "@/app/api/_utils/auth-headers"
 import { apiBaseUrl } from "@/app/api/research/_base"
 
 export async function GET(req: Request) {
@@ -9,7 +10,7 @@ export async function GET(req: Request) {
   try {
     const res = await fetch(upstream, {
       method: "GET",
-      headers: { Accept: "*/*" },
+      headers: await withBackendAuth(req, { Accept: "*/*" }),
     })
     const body = await res.arrayBuffer()
     return new Response(body, {
