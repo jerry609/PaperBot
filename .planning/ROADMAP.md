@@ -139,11 +139,11 @@ Plans:
   2. User can see at a glance whether each agent is idle, working, completed, or errored
   3. User can view a structured tool call timeline showing tool name, arguments, result summary, and duration for each call
   4. New event types extend AgentEventEnvelope (no parallel event schema created)
-**Plans**: TBD
+**Plans**: 2 plans
 
 Plans:
-- [ ] 08-01: TBD
-- [ ] 08-02: TBD
+- [ ] 08-01-PLAN.md — Python EventType vocabulary constants, lifecycle/tool-call helpers, _audit.py migration with TDD
+- [ ] 08-02-PLAN.md — Frontend TypeScript types, parsers, Zustand store, SSE hook, display components (ActivityFeed, AgentStatusPanel, ToolCallTimeline), test harness page
 
 ### Phase 9: Three-Panel Dashboard
 **Goal**: Users can observe agent work in a three-panel IDE layout with file-level detail
@@ -302,7 +302,7 @@ Phases execute in numeric order: 3 -> 4 -> 5 -> 6 (v1.0) -> 7 -> 8 -> ... -> 11 
 | 5. Transport & Entry Point | v1.0 | 1/1 | Complete | 2026-03-14 |
 | 6. Agent Skills | v1.0 | 1/1 | Complete | 2026-03-14 |
 | 7. EventBus + SSE Foundation | v1.1 | 2/2 | Complete | 2026-03-14 |
-| 8. Agent Event Vocabulary | v1.1 | 0/? | Not started | - |
+| 8. Agent Event Vocabulary | v1.1 | 0/2 | Not started | - |
 | 9. Three-Panel Dashboard | v1.1 | 0/? | Not started | - |
 | 10. Agent Board + Codex Bridge | v1.1 | 0/? | Not started | - |
 | 11. DAG Visualization | v1.1 | 0/? | Not started | - |
