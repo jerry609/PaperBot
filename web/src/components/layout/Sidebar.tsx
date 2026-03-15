@@ -29,6 +29,7 @@ import {
   LogOut,
   LogIn,
   ChevronUp,
+  Monitor,
 } from "lucide-react"
 
 type SidebarProps = React.HTMLAttributes<HTMLDivElement> & {
@@ -43,6 +44,7 @@ const routes = [
   { label: "Papers", icon: FileText, href: "/papers" },
   { label: "Workflows", icon: Workflow, href: "/workflows" },
   { label: "DeepCode Studio", icon: Code2, href: "/studio" },
+  { label: "Agent Dashboard", icon: Monitor, href: "/agent-dashboard" },
   { label: "Wiki", icon: BookOpen, href: "/wiki" },
   { label: "Settings", icon: Settings, href: "/settings" },
 ]
