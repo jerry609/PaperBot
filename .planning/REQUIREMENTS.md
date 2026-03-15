@@ -1,7 +1,7 @@
 # Requirements: PaperBot
 
 **Defined:** 2026-03-14
-**Core Value:** Paper-specific capability layer surfaced as standard MCP tools + agent orchestration dashboard
+**Core Value:** Paper-specific capability layer surfaced as standard MCP tools + agent-agnostic dashboard
 
 ## v1.0 Requirements
 
@@ -73,6 +73,53 @@ Requirements for Agent Orchestration Dashboard milestone. Each maps to roadmap p
 - [ ] **VIZ-01**: User can view an agent task dependency DAG with real-time status color updates
 - [ ] **VIZ-02**: User can see cross-agent context sharing (ScoreShareBus data flow) in the dashboard
 
+## v1.2 Requirements
+
+Requirements for DeepCode Agent Dashboard milestone. Agent-agnostic proxy + visualization + control.
+
+### Agent Adapter Layer
+
+- [ ] **ADAPT-01**: User can configure which code agent to use (Claude Code, Codex, OpenCode) in settings
+- [ ] **ADAPT-02**: System provides a BaseAgentAdapter interface abstracting agent-specific protocols
+- [ ] **ADAPT-03**: User can interact with Claude Code via ClaudeCodeAdapter (subprocess + stream-json, stateful sessions)
+- [ ] **ADAPT-04**: User can interact with Codex via CodexAdapter (REST API + JSONL events)
+- [ ] **ADAPT-05**: User can interact with OpenCode via OpenCodeAdapter (HTTP/ACP protocol)
+- [ ] **ADAPT-06**: Dashboard discovers agent activity through hybrid channels (agent push + independent discovery)
+
+### Activity Monitoring
+
+- [ ] **MONIT-01**: User sees real-time agent activity stream (SSE → ActivityFeed component with auto-scroll and pause)
+- [ ] **MONIT-02**: User sees tool call log with tool name, arguments, result status, and duration per event
+- [ ] **MONIT-03**: User sees agent status indicator (running/waiting/complete/error/idle)
+- [ ] **MONIT-04**: User sees connection status indicator (connected/reconnecting/disconnected)
+- [ ] **MONIT-05**: User sees errors surfaced prominently (error badge, red rendering, toast notification on failure)
+
+### Chat & Control
+
+- [ ] **CTRL-01**: User can send tasks to the configured agent via chat input in the web UI
+- [ ] **CTRL-02**: User can interrupt or cancel a running agent from the dashboard
+- [ ] **CTRL-03**: User can approve or reject agent actions via human-in-the-loop approval modal
+
+### Session Management
+
+- [ ] **SESS-01**: User can see a list of sessions (active/completed) with status, agent type, and cost
+- [ ] **SESS-02**: User can view session detail with full event timeline for a run_id
+- [ ] **SESS-03**: User can see token usage and estimated cost per session (input/output tokens, model pricing)
+- [ ] **SESS-04**: User can replay completed sessions with timeline scrubber and step-by-step navigation
+- [ ] **SESS-05**: User can checkpoint and restore agent sessions, branching like git
+
+### Visualization
+
+- [ ] **VIS-01**: User sees agent-initiated team decomposition as a live DAG (@xyflow/react)
+- [ ] **VIS-02**: User sees file diffs for agent-modified files via Monaco diff editor
+- [ ] **VIS-03**: User sees agent card grid (per-agent: cost, context %, status, latest action, color-graded context bar)
+- [ ] **VIS-04**: User sees agent swim lanes (each agent gets a vertical lane showing events chronologically)
+
+### Domain Integration
+
+- [ ] **DOMAIN-01**: User sees enriched Paper2Code view when run_type is paper2code (paper metadata, stage progress)
+- [ ] **DOMAIN-02**: User sees paper-specific rendering for PaperBot MCP tool calls (paper card, score badge)
+
 ## v2.0 Requirements
 
 Requirements for PostgreSQL Migration & Data Layer Refactoring milestone.
@@ -135,13 +182,15 @@ Explicitly excluded. Documented to prevent scope creep.
 
 | Feature | Reason |
 |---------|--------|
-| Custom agent orchestration runtime | Host agents (Claude Code) own orchestration; PaperBot is a skill provider |
-| Per-host adapters | One MCP surface serves all agents; no Claude Code vs Codex vs Cursor adapters |
-| Visual workflow builder | Massive scope, low value for code-defined pipelines (Paper2Code stages are in code) |
-| Agent chat interface | Duplicates Claude Code/Codex conversation UX; dashboard shows output, not input |
-| Real-time code editing in dashboard | IDE's job; dashboard shows diffs read-only and deep-links to VS Code |
-| Codex CLI wrapper | Agent definition is a file, not server-side Codex management |
-| Business logic duplication | Dashboard calls existing API endpoints; no reimplementation of analysis/tracking |
+| Custom agent orchestration runtime | Host agents own orchestration; PaperBot visualizes, not decomposes tasks |
+| Per-agent custom UI skins | One unified dashboard for all agents; agent type shown as badge/label |
+| Real-time token-by-token LLM streaming | Doubles SSE volume; show full turn on completion with "thinking..." spinner |
+| Full IDE replacement (language servers, extensions, debugging) | Monaco for diffs only; user's IDE remains the editing environment |
+| Agent training / fine-tuning integration | Separate product domain; export session data as JSONL instead |
+| Multi-user collaboration on sessions | Requires real-time sharing, permissions, conflict resolution — too complex |
+| Autonomous agent scheduling (cron-style) | Creates mini-orchestration runtime, contradicts skill-provider constraint |
+| Visual workflow builder | Massive scope, low value for code-defined pipelines |
+| Business logic duplication | Dashboard calls existing API endpoints; no reimplementation |
 
 ## Traceability
 
@@ -214,10 +263,13 @@ Which phases cover which requirements. Updated during roadmap creation.
 - v1.1 requirements: 15 total
 - Mapped to phases: 15
 - Unmapped: 0
+- v1.2 requirements: 24 total (ADAPT x6, MONIT x5, CTRL x3, SESS x5, VIS x4, DOMAIN x2)
+- Mapped to phases: 0 ⚠️ (awaiting roadmap)
+- Unmapped: 24
 - v2.0 requirements: 25 total (counted: PGINFRA x4, ASYNC x5, PGNAT x3, MODEL x3, TEST x4, CI x3, MON x3)
 - Mapped to phases: 25
 - Unmapped: 0
 
 ---
 *Requirements defined: 2026-03-14*
-*Last updated: 2026-03-14 after v2.0 roadmap created (phases 12-17)*
+*Last updated: 2026-03-15 after v1.2 milestone requirements added*
