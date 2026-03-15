@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from unittest.mock import AsyncMock
+
 import pytest
 
 from paperbot.agents.code_analysis.agent import CodeAnalysisAgent
@@ -10,14 +12,12 @@ from paperbot.agents.quality.agent import QualityAgent
 async def test_single_repo_mode_preserves_placeholder_result():
     agent = CodeAnalysisAgent({})
     placeholder = agent._placeholder("https://github.com/example/repo", "clone_failed")
-
-    async def fake_process_batch(_links):
-        return {
+    agent._process_batch = AsyncMock(  # type: ignore[method-assign]
+        return_value={
             "repositories_analyzed": 1,
             "analysis_results": [placeholder],
         }
-
-    agent._process_batch = fake_process_batch  # type: ignore[method-assign]
+    )
 
     result = await agent.process(repo_url="https://github.com/example/repo")
 
@@ -53,7 +53,7 @@ def test_flatten_result_maps_code_meta_contract_fields():
 
     assert flattened["updated_at"] == "2026-03-01T00:00:00+00:00"
     assert flattened["last_commit_date"] == "2026-03-02T00:00:00+00:00"
-    assert flattened["reproducibility_score"] == 82.0
+    assert flattened["reproducibility_score"] == pytest.approx(82.0)
     assert flattened["has_readme"] is True
 
 
@@ -69,7 +69,7 @@ async def test_quality_agent_accepts_flat_workflow_code_analysis_result():
         }
     )
 
-    assert result["quality_score"] == 0.72
+    assert result["quality_score"] == pytest.approx(0.72)
     assert "README" in " ".join(result["strengths"])
 
 

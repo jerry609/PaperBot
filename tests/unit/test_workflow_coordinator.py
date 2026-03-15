@@ -112,7 +112,7 @@ async def test_workflow_coordinator_uses_reproducibility_score_for_code_stage(tm
 
     score_events = [event for event in event_log.events if event.type == "score_update"]
     code_event = next(event for event in score_events if event.stage == "code")
-    assert code_event.payload["score"]["score"] == 82.0
+    assert code_event.payload["score"]["score"] == pytest.approx(82.0)
 
 
 @pytest.mark.asyncio
@@ -152,7 +152,7 @@ async def test_workflow_coordinator_passes_aligned_code_meta_to_influence(tmp_pa
     assert influence_calculator.code_meta is not None
     assert influence_calculator.code_meta.updated_at == "2026-03-01T00:00:00+00:00"
     assert influence_calculator.code_meta.last_commit_date == "2026-03-02T00:00:00+00:00"
-    assert influence_calculator.code_meta.reproducibility_score == 82.0
+    assert influence_calculator.code_meta.reproducibility_score == pytest.approx(82.0)
 
 
 @pytest.mark.asyncio

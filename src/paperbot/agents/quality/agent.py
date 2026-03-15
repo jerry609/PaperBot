@@ -234,30 +234,33 @@ class QualityAgent(BaseAgent):
             if not file_paths:
                 return 0.0
 
-            test_files = [
-                path for path in file_paths
-                if path.startswith('tests/')
-                or '/tests/' in path
-                or path.endswith('_test.py')
-                or path.endswith('.spec.ts')
-                or path.endswith('.test.ts')
-                or path.endswith('.test.tsx')
-                or path.endswith('.spec.js')
-                or path.endswith('.test.js')
-            ]
-            code_files = [
-                path for path in file_paths
-                if path.endswith(('.py', '.ts', '.tsx', '.js', '.jsx'))
-                and path not in test_files
-            ]
-            if not code_files:
+            test_count = sum(1 for path in file_paths if self._is_test_file(path))
+            code_count = sum(
+                1 for path in file_paths if self._is_source_file(path) and not self._is_test_file(path)
+            )
+            if not code_count:
                 return 0.0
 
-            ratio = len(test_files) / max(1, len(code_files))
+            ratio = test_count / code_count
             return min(1.0, max(0.0, ratio * 2.0))
         except Exception as e:
             self.log_error(e)
             return 0.0
+
+    def _is_test_file(self, path: str) -> bool:
+        return (
+            path.startswith('tests/')
+            or '/tests/' in path
+            or path.endswith('_test.py')
+            or path.endswith('.spec.ts')
+            or path.endswith('.test.ts')
+            or path.endswith('.test.tsx')
+            or path.endswith('.spec.js')
+            or path.endswith('.test.js')
+        )
+
+    def _is_source_file(self, path: str) -> bool:
+        return path.endswith(('.py', '.ts', '.tsx', '.js', '.jsx'))
 
     def _calculate_overall_score(self, scores: Dict[str, float]) -> float:
         """计算总体质量分数"""
