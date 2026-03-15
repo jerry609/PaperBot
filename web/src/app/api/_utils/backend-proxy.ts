@@ -135,7 +135,6 @@ export async function proxyBinary(
 ): Promise<Response> {
   try {
     const upstream = await fetchUpstream(req, upstreamUrl, method, options)
-    const body = await upstream.arrayBuffer()
     const headers = new Headers(options.responseHeaders)
     headers.set("Cache-Control", "no-cache")
     headers.set(
@@ -148,7 +147,7 @@ export async function proxyBinary(
       headers.set("Content-Disposition", contentDisposition)
     }
 
-    return new Response(body, {
+    return new Response(upstream.body, {
       status: upstream.status,
       headers,
     })
