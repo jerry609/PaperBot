@@ -1,22 +1,8 @@
-export const runtime = "nodejs"
+import { apiBaseUrl, proxyText } from "@/app/api/_utils/backend-proxy"
 
-function apiBaseUrl() {
-  return process.env.PAPERBOT_API_BASE_URL || "http://127.0.0.1:8000"
-}
+export const runtime = "nodejs"
 
 export async function GET(req: Request) {
   const url = new URL(req.url)
-  const upstream = await fetch(`${apiBaseUrl()}/api/runbook/files?${url.searchParams.toString()}`, {
-    method: "GET",
-    headers: { Accept: "application/json" },
-  })
-  const text = await upstream.text()
-  return new Response(text, {
-    status: upstream.status,
-    headers: {
-      "Content-Type": upstream.headers.get("content-type") || "application/json",
-      "Cache-Control": "no-cache",
-    },
-  })
+  return proxyText(req, `${apiBaseUrl()}/api/runbook/files?${url.searchParams.toString()}`, "GET")
 }
-
