@@ -37,7 +37,6 @@ import {
 } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import Editor from "@monaco-editor/react"
-import { useTheme } from "next-themes"
 import type { ContextPackSession } from "@/lib/types/p2c"
 
 type StepStatus = "idle" | "running" | "success" | "error"
@@ -62,12 +61,12 @@ const actionIcons: Record<string, React.ElementType> = {
 }
 
 const actionColors: Record<string, { bg: string; text: string; border: string }> = {
-    thinking: { bg: "bg-purple-50 dark:bg-purple-950/30", text: "text-purple-600 dark:text-purple-400", border: "border-purple-200 dark:border-purple-800" },
-    file_change: { bg: "bg-blue-50 dark:bg-blue-950/30", text: "text-blue-600 dark:text-blue-400", border: "border-blue-200 dark:border-blue-800" },
-    function_call: { bg: "bg-orange-50 dark:bg-orange-950/30", text: "text-orange-600 dark:text-orange-400", border: "border-orange-200 dark:border-orange-800" },
-    error: { bg: "bg-red-50 dark:bg-red-950/30", text: "text-red-600 dark:text-red-400", border: "border-red-200 dark:border-red-800" },
-    complete: { bg: "bg-green-50 dark:bg-green-950/30", text: "text-green-600 dark:text-green-400", border: "border-green-200 dark:border-green-800" },
-    text: { bg: "bg-muted/50", text: "text-foreground", border: "border-border" },
+    thinking: { bg: "bg-slate-100", text: "text-slate-700", border: "border-slate-200" },
+    file_change: { bg: "bg-slate-100", text: "text-slate-700", border: "border-slate-200" },
+    function_call: { bg: "bg-stone-100", text: "text-stone-700", border: "border-stone-200" },
+    error: { bg: "bg-rose-50", text: "text-rose-700", border: "border-rose-200" },
+    complete: { bg: "bg-emerald-50", text: "text-emerald-700", border: "border-emerald-200" },
+    text: { bg: "bg-[#eef0ea]", text: "text-slate-800", border: "border-slate-200" },
 }
 
 function formatTime(date: Date): string {
@@ -176,7 +175,6 @@ export function ReproductionLog({
     onOpenBoardWorkspace,
 }: ReproductionLogProps) {
     const router = useRouter()
-    const { theme } = useTheme()
     const {
         papers,
         tasks,
@@ -423,10 +421,10 @@ export function ReproductionLog({
     }
 
     return (
-        <div className="h-full w-full flex-1 flex flex-col min-w-0 min-h-0 bg-background">
+        <div className="flex h-full min-h-0 w-full flex-1 flex-col bg-[#f5f5f2]">
             {/* Tab Navigation */}
             {!hideNavigation && (
-                <div className="flex items-center shrink-0 border-b">
+                <div className="flex shrink-0 items-center border-b border-slate-200 bg-[#eef0ea]">
                     {([
                         { key: "context" as const, label: "Context", icon: Activity },
                         { key: "log" as const, label: "Chat", icon: MessageSquare },
@@ -442,16 +440,16 @@ export function ReproductionLog({
                                 onViewModeChange(key)
                             }}
                             className={cn(
-                                "flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium transition-colors relative",
+                                "relative flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium transition-colors",
                                 viewMode === key
-                                    ? "text-foreground"
-                                    : "text-muted-foreground hover:text-foreground/80"
+                                    ? "text-slate-900"
+                                    : "text-slate-500 hover:text-slate-700"
                             )}
                         >
                             <TabIcon className="h-3.5 w-3.5" />
                             {label}
                             {viewMode === key && (
-                                <span className="absolute bottom-0 left-2 right-2 h-0.5 bg-primary rounded-full" />
+                                <span className="absolute bottom-0 left-2 right-2 h-0.5 rounded-full bg-slate-600" />
                             )}
                         </button>
                     ))}
@@ -460,7 +458,7 @@ export function ReproductionLog({
 
             {/* Error banner */}
             {(lastError || contextPackError) && (
-                <div className="px-4 py-2 flex items-start gap-2 shrink-0 bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400">
+                <div className="flex shrink-0 items-start gap-2 border-b border-rose-200 bg-rose-50 px-4 py-2 text-rose-700">
                     <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
                     <span className="text-xs">{contextPackError || lastError}</span>
                 </div>
@@ -500,10 +498,10 @@ export function ReproductionLog({
                 ) : activeFileData ? (
                     /* File Viewer */
                     <div className="h-full flex flex-col">
-                        <div className="px-4 py-2 border-b flex items-center justify-between bg-muted/30 shrink-0">
+                        <div className="flex shrink-0 items-center justify-between border-b border-slate-200 bg-[#eceee8] px-4 py-2">
                             <div className="flex items-center gap-2 text-sm">
-                                <FileCode className="h-4 w-4 text-muted-foreground" />
-                                <span className="font-medium">{activeFileData.name}</span>
+                                <FileCode className="h-4 w-4 text-slate-500" />
+                                <span className="font-medium text-slate-900">{activeFileData.name}</span>
                             </div>
                             <div className="flex items-center gap-2">
                                 <Button
@@ -518,7 +516,7 @@ export function ReproductionLog({
                                 </Button>
                                 <button
                                     onClick={() => setActiveFile("")}
-                                    className="p-1.5 rounded hover:bg-muted transition-colors"
+                                    className="rounded p-1.5 transition-colors hover:bg-slate-200"
                                     title="Close"
                                 >
                                     <X className="h-4 w-4" />
@@ -530,7 +528,7 @@ export function ReproductionLog({
                                 height="100%"
                                 language={activeFileData.language}
                                 value={activeFileData.content}
-                                theme={theme === "dark" ? "vs-dark" : "light"}
+                                theme="light"
                                 onChange={(value) => updateFile(activeFileData.name, value || "")}
                                 options={{
                                     minimap: { enabled: false },
@@ -546,15 +544,15 @@ export function ReproductionLog({
                     </div>
                 ) : (
                     /* Chat Timeline */
-                    <ScrollArea className="h-full">
+                    <ScrollArea className="h-full bg-[#f5f5f2]">
                         <div className="p-4">
                             {!activeTask || activeTask.actions.length === 0 ? (
-                                <div className="flex flex-col items-center justify-center text-muted-foreground py-20 space-y-4">
-                                    <div className="w-16 h-16 rounded-full bg-muted/50 flex items-center justify-center">
+                                <div className="flex flex-col items-center justify-center space-y-4 py-20 text-slate-500">
+                                    <div className="flex h-16 w-16 items-center justify-center rounded-2xl border border-slate-200 bg-[#eceee8]">
                                         <MessageSquare className="h-8 w-8 opacity-30" />
                                     </div>
                                     <div className="text-center space-y-2">
-                                        <p className="font-medium">Ready to chat</p>
+                                        <p className="font-medium text-slate-900">Ready to chat</p>
                                         <p className="text-xs max-w-[280px]">
                                             {selectedPaper
                                                 ? "Send a message to start working with CC on this paper"
@@ -581,13 +579,13 @@ export function ReproductionLog({
 
             {viewMode === "log" && (
                 /* Rich Input Area - CodePilot Style */
-                <div className="border-t p-4 shrink-0">
-                    <div className="border rounded-xl bg-muted/30 overflow-hidden">
+                <div className="shrink-0 border-t border-slate-200 bg-[#f1f2ed] p-4">
+                    <div className="overflow-hidden rounded-lg border border-slate-200 bg-[#e8ebe4]">
                         <Textarea
                             value={messageInput}
                             onChange={(e) => setMessageInput(e.target.value)}
                             placeholder="Message CC..."
-                            className="border-0 bg-transparent resize-none min-h-[60px] focus-visible:ring-0 px-4 py-3"
+                            className="min-h-[60px] resize-none border-0 bg-transparent px-4 py-3 text-sm text-slate-800 placeholder:text-slate-400 focus-visible:ring-0"
                             onKeyDown={(e) => {
                                 if (e.key === 'Enter' && !e.shiftKey) {
                                     e.preventDefault()
@@ -595,18 +593,18 @@ export function ReproductionLog({
                                 }
                             }}
                         />
-                        <div className="px-3 py-2 flex items-center justify-between border-t bg-background/50">
+                        <div className="flex items-center justify-between border-t border-slate-200 bg-[#f3f4f0] px-3 py-2">
                             <div className="flex items-center gap-2">
                                 {/* Paper attachment indicator */}
                                 {selectedPaper && (
-                                    <div className="flex items-center gap-1.5 px-2 py-1 bg-muted rounded-md text-xs text-muted-foreground">
+                                    <div className="flex items-center gap-1.5 rounded-md border border-slate-200 bg-[#f7f7f4] px-2 py-1 text-xs text-slate-600">
                                         <FileText className="h-3.5 w-3.5" />
                                         <span className="max-w-[150px] truncate">{selectedPaper.title}</span>
                                     </div>
                                 )}
                                 {/* Mode selector */}
                                 <Select value={mode} onValueChange={(v) => setMode(v as Mode)}>
-                                    <SelectTrigger className="h-7 w-[90px] text-xs border-0 bg-muted">
+                                    <SelectTrigger className="h-7 w-[96px] border-slate-200 bg-[#f7f7f4] text-xs text-slate-700">
                                         <Code className="h-3.5 w-3.5 mr-1" />
                                         <SelectValue />
                                     </SelectTrigger>
@@ -620,7 +618,7 @@ export function ReproductionLog({
                             <div className="flex items-center gap-2">
                                 {/* Model selector */}
                                 <Select value={model} onValueChange={setModel}>
-                                    <SelectTrigger className="h-7 w-[130px] text-xs border-0 bg-muted">
+                                    <SelectTrigger className="h-7 w-[130px] border-slate-200 bg-[#f7f7f4] text-xs text-slate-700">
                                         <SelectValue />
                                     </SelectTrigger>
                                     <SelectContent>
@@ -632,7 +630,7 @@ export function ReproductionLog({
                                 {/* Send button */}
                                 <Button
                                     size="icon"
-                                    className="h-8 w-8 rounded-full"
+                                    className="h-8 w-8 rounded-md bg-slate-700 text-white hover:bg-slate-600"
                                     onClick={handleSendMessage}
                                     disabled={!messageInput.trim() || isBusy}
                                 >

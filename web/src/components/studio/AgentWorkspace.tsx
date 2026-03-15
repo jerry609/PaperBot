@@ -36,6 +36,7 @@ import { ReproductionLog } from "./ReproductionLog"
 
 type LeftRailView = "threads" | "tasks" | "workspace"
 type CenterView = "log" | "context" | "board"
+type WorkspaceFocusView = Exclude<CenterView, "context">
 type InspectorView = "live" | "tools" | "files" | "agents" | "graph"
 
 interface AgentWorkspaceProps {
@@ -417,41 +418,121 @@ function CenterSurface({
   activeView: CenterView
   onViewChange: (value: CenterView) => void
 }) {
+  const workspaceFocus: WorkspaceFocusView = activeView === "board" ? "board" : "log"
+  const isBoardFocused = workspaceFocus === "board"
+
+  const switchWorkspaceFocus = (nextView: WorkspaceFocusView) => {
+    onViewChange(nextView)
+  }
+
   return (
-    <div className="flex h-full min-h-0 flex-col bg-slate-50">
-      <div className="border-b border-slate-200 bg-white px-4 py-2">
-        <Tabs
-          value={activeView}
-          onValueChange={(value) => onViewChange(value as CenterView)}
-          className="flex h-full flex-col"
-        >
-          <TabsList className="grid w-full max-w-[360px] grid-cols-3 rounded-lg bg-slate-100 p-1">
-            <TabsTrigger value="log" className="text-xs data-[state=active]:bg-white data-[state=active]:text-slate-900">
-              <MessageSquare className="mr-1.5 h-3.5 w-3.5" />
-              Console
-            </TabsTrigger>
-            <TabsTrigger value="context" className="text-xs data-[state=active]:bg-white data-[state=active]:text-slate-900">
-              <Sparkles className="mr-1.5 h-3.5 w-3.5" />
+    <div className="flex h-full min-h-0 flex-col bg-[#f1f2ed]">
+      <div className="border-b border-slate-200 bg-[#f4f5f1] px-4 py-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => onViewChange(workspaceFocus)}
+              className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
+                activeView === "context"
+                  ? "border-slate-200 bg-[#f8f8f5] text-slate-500 hover:border-slate-300 hover:text-slate-700"
+                  : "border-slate-300 bg-[#dfe4dc] text-slate-900"
+              }`}
+            >
+              <MessageSquare className="h-3.5 w-3.5" />
+              Console + Board
+            </button>
+            <button
+              type="button"
+              onClick={() => onViewChange("context")}
+              className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
+                activeView === "context"
+                  ? "border-slate-300 bg-[#dfe4dc] text-slate-900"
+                  : "border-slate-200 bg-[#f8f8f5] text-slate-500 hover:border-slate-300 hover:text-slate-700"
+              }`}
+            >
+              <Sparkles className="h-3.5 w-3.5" />
               Context
-            </TabsTrigger>
-            <TabsTrigger value="board" className="text-xs data-[state=active]:bg-white data-[state=active]:text-slate-900">
-              <GitBranch className="mr-1.5 h-3.5 w-3.5" />
-              Board
-            </TabsTrigger>
-          </TabsList>
-        </Tabs>
+            </button>
+          </div>
+
+          {activeView !== "context" ? (
+            <div className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-[#e7e9e3] p-1">
+              <button
+                type="button"
+                onClick={() => switchWorkspaceFocus("log")}
+                className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                  !isBoardFocused
+                    ? "bg-[#f6f7f3] text-slate-900 shadow-sm"
+                    : "text-slate-500 hover:text-slate-700"
+                }`}
+              >
+                <MessageSquare className="h-3.5 w-3.5" />
+                Console lead
+              </button>
+              <button
+                type="button"
+                onClick={() => switchWorkspaceFocus("board")}
+                className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                  isBoardFocused
+                    ? "bg-[#f6f7f3] text-slate-900 shadow-sm"
+                    : "text-slate-500 hover:text-slate-700"
+                }`}
+              >
+                <GitBranch className="h-3.5 w-3.5" />
+                Board lead
+              </button>
+            </div>
+          ) : null}
+        </div>
       </div>
 
-      <div className="min-h-0 flex-1 bg-slate-50">
-        {activeView === "board" ? (
-          <AgentBoard paperId={selectedPaperId} showSidebar={false} />
-        ) : (
+      <div className="min-h-0 flex-1 bg-[#f1f2ed]">
+        {activeView === "context" ? (
           <ReproductionLog
-            viewMode={activeView}
+            viewMode="context"
             onViewModeChange={onViewChange}
             hideNavigation
             onOpenBoardWorkspace={() => onViewChange("board")}
           />
+        ) : (
+          <div className="h-full min-h-0 bg-[#eceee8] p-3">
+            <div
+              className={`grid h-full min-h-0 gap-3 ${
+                isBoardFocused
+                  ? "grid-cols-1 xl:grid-cols-[minmax(0,0.92fr)_minmax(0,1.08fr)]"
+                  : "grid-cols-1 xl:grid-cols-[minmax(0,1.08fr)_minmax(0,0.92fr)]"
+              }`}
+            >
+              <section className="flex min-h-[320px] min-w-0 flex-col overflow-hidden border border-slate-200 bg-[#f7f7f4]">
+                <div className="flex items-center justify-between border-b border-slate-200 bg-[#eef0ea] px-4 py-2.5">
+                  <div>
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+                      CC Console
+                    </p>
+                    <p className="mt-1 text-xs text-slate-600">
+                      Chat stream, file diffs, and command/tool output stay visible beside the board.
+                    </p>
+                  </div>
+                  <span className="rounded-full border border-slate-200 bg-[#f7f7f4] px-2 py-1 text-[10px] font-medium text-slate-600">
+                    {isBoardFocused ? "Secondary pane" : "Primary pane"}
+                  </span>
+                </div>
+                <div className="min-h-0 flex-1">
+                  <ReproductionLog
+                    viewMode="log"
+                    onViewModeChange={onViewChange}
+                    hideNavigation
+                    onOpenBoardWorkspace={() => switchWorkspaceFocus("board")}
+                  />
+                </div>
+              </section>
+
+              <section className="flex min-h-[320px] min-w-0 overflow-hidden border border-slate-200 bg-[#f3f3f2]">
+                <AgentBoard paperId={selectedPaperId} showSidebar={false} />
+              </section>
+            </div>
+          </div>
         )}
       </div>
     </div>
