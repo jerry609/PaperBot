@@ -1,9 +1,11 @@
 "use client"
 
+import { useMemo } from "react"
 import { Loader2, CheckCircle2, XCircle, Circle, Wifi, WifiOff } from "lucide-react"
 import { useAgentEventStore } from "@/lib/agent-events/store"
 import type { AgentStatusEntry, AgentStatus } from "@/lib/agent-events/types"
 import { getAgentPresentation } from "@/lib/agent-runtime"
+import { buildSubagentActivityGroups } from "@/lib/agent-events/subagent-groups"
 
 function statusConfig(status: AgentStatus) {
   switch (status) {
@@ -42,7 +44,17 @@ function statusConfig(status: AgentStatus) {
   }
 }
 
-function AgentStatusBadge({ entry, compact }: { entry: AgentStatusEntry; compact?: boolean }) {
+function AgentStatusBadge({
+  entry,
+  compact,
+  workerRunId,
+  onOpenWorkerRun,
+}: {
+  entry: AgentStatusEntry
+  compact?: boolean
+  workerRunId?: string | null
+  onOpenWorkerRun: (workerRunId: string) => void
+}) {
   const cfg = statusConfig(entry.status)
   const Icon = cfg.icon
   const presentation = getAgentPresentation(entry.agent_name)
@@ -50,11 +62,21 @@ function AgentStatusBadge({ entry, compact }: { entry: AgentStatusEntry; compact
   const displayName = compact
     ? presentation.shortLabel
     : fullLabel
+  const interactive = presentation.kind === "subagent" && Boolean(workerRunId)
 
   return (
-    <div
-      className={`flex min-w-0 items-center gap-2 rounded-lg border px-3 py-2 ${cfg.bgClass}`}
-      title={entry.agent_name}
+    <button
+      type="button"
+      className={`flex min-w-0 items-center gap-2 rounded-lg border px-3 py-2 text-left ${cfg.bgClass} ${
+        interactive ? "transition-colors hover:bg-white/80" : ""
+      }`}
+      title={interactive ? "Open worker details" : entry.agent_name}
+      onClick={() => {
+        if (workerRunId) {
+          onOpenWorkerRun(workerRunId)
+        }
+      }}
+      disabled={!interactive}
     >
       <Icon
         size={14}
@@ -64,14 +86,21 @@ function AgentStatusBadge({ entry, compact }: { entry: AgentStatusEntry; compact
         <div className="truncate text-xs font-medium text-zinc-900">{displayName}</div>
         <div className={`text-xs ${cfg.colorClass}`}>{cfg.label}</div>
       </div>
-    </div>
+    </button>
   )
 }
 
 export function AgentStatusPanel({ compact = false }: { compact?: boolean }) {
   const agentStatuses = useAgentEventStore((s) => s.agentStatuses)
   const connected = useAgentEventStore((s) => s.connected)
+  const codexDelegations = useAgentEventStore((s) => s.codexDelegations)
+  const toolCalls = useAgentEventStore((s) => s.toolCalls)
+  const openWorkerRun = useAgentEventStore((s) => s.openWorkerRun)
   const entries = Object.values(agentStatuses)
+  const latestWorkerRunByAssignee = useMemo(() => {
+    const groups = buildSubagentActivityGroups(codexDelegations, toolCalls)
+    return new Map(groups.map((group) => [group.assignee, group.workerRunId]))
+  }, [codexDelegations, toolCalls])
 
   return (
     <div className="flex flex-col gap-2 p-3">
@@ -98,7 +127,13 @@ export function AgentStatusPanel({ compact = false }: { compact?: boolean }) {
       ) : (
         <div className={compact ? "grid grid-cols-1 gap-2" : "grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4"}>
           {entries.map((entry) => (
-            <AgentStatusBadge key={entry.agent_name} entry={entry} compact={compact} />
+            <AgentStatusBadge
+              key={entry.agent_name}
+              entry={entry}
+              compact={compact}
+              workerRunId={latestWorkerRunByAssignee.get(entry.agent_name) ?? null}
+              onOpenWorkerRun={openWorkerRun}
+            />
           ))}
         </div>
       )}

@@ -213,6 +213,25 @@ describe("useAgentEventStore", () => {
       expect(state.selectedFile).toBeNull()
     })
   })
+
+  describe("monitor inspector state", () => {
+    it("setInspectorView updates the active monitor tab", () => {
+      useAgentEventStore.getState().setInspectorView("agents")
+      expect(useAgentEventStore.getState().inspectorView).toBe("agents")
+    })
+
+    it("setSelectedWorkerRunId updates the selected worker run", () => {
+      useAgentEventStore.getState().setSelectedWorkerRunId("worker-run-abc")
+      expect(useAgentEventStore.getState().selectedWorkerRunId).toBe("worker-run-abc")
+    })
+
+    it("openWorkerRun switches the monitor to workers and selects the run", () => {
+      useAgentEventStore.getState().openWorkerRun("worker-run-open")
+      const state = useAgentEventStore.getState()
+      expect(state.inspectorView).toBe("agents")
+      expect(state.selectedWorkerRunId).toBe("worker-run-open")
+    })
+  })
 })
 
 function makeCodexDelegation(i: number): CodexDelegationEntry {

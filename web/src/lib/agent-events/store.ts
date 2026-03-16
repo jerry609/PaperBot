@@ -9,6 +9,8 @@ const TOOL_TIMELINE_MAX = 100
 const CODEX_DELEGATIONS_MAX = 100
 const SCORE_EDGES_MAX = 200
 
+export type AgentInspectorView = "live" | "tools" | "files" | "agents" | "graph"
+
 interface AgentEventState {
   // SSE connection status
   connected: boolean
@@ -47,6 +49,13 @@ interface AgentEventState {
   // Kanban task board — upserted by task id
   kanbanTasks: AgentTask[]
   upsertKanbanTask: (task: AgentTask) => void
+
+  // Monitor inspector state
+  inspectorView: AgentInspectorView
+  setInspectorView: (view: AgentInspectorView) => void
+  selectedWorkerRunId: string | null
+  setSelectedWorkerRunId: (workerRunId: string | null) => void
+  openWorkerRun: (workerRunId: string) => void
 }
 
 export const useAgentEventStore = create<AgentEventState>((set) => ({
@@ -124,4 +133,13 @@ export const useAgentEventStore = create<AgentEventState>((set) => ({
       next[idx] = { ...next[idx], ...task }
       return { kanbanTasks: next }
     }),
+
+  inspectorView: "live",
+  setInspectorView: (view) => set({ inspectorView: view }),
+  selectedWorkerRunId: null,
+  setSelectedWorkerRunId: (workerRunId) => set({ selectedWorkerRunId: workerRunId }),
+  openWorkerRun: (workerRunId) => set({
+    inspectorView: "agents",
+    selectedWorkerRunId: workerRunId,
+  }),
 }))

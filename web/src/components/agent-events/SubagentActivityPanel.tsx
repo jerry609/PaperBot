@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useMemo } from "react"
 import {
   ArrowLeft,
   Cpu,
@@ -378,11 +378,12 @@ export function SubagentActivityPanel() {
   const toolCalls = useAgentEventStore((state) => state.toolCalls)
   const feed = useAgentEventStore((state) => state.feed)
   const filesTouched = useAgentEventStore((state) => state.filesTouched)
+  const selectedWorkerRunId = useAgentEventStore((state) => state.selectedWorkerRunId)
+  const setSelectedWorkerRunId = useAgentEventStore((state) => state.setSelectedWorkerRunId)
   const groups = useMemo(
     () => buildSubagentActivityGroups(codexDelegations, toolCalls),
     [codexDelegations, toolCalls],
   )
-  const [selectedWorkerRunId, setSelectedWorkerRunId] = useState<string | null>(null)
 
   const selectedGroup = useMemo(
     () =>

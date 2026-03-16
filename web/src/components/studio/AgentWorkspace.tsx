@@ -24,7 +24,8 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { useAgentEventStore } from "@/lib/agent-events/store"
+import { useAgentEventStore, type AgentInspectorView } from "@/lib/agent-events/store"
+import { buildSubagentActivityGroups } from "@/lib/agent-events/subagent-groups"
 import { useAgentEvents } from "@/lib/agent-events/useAgentEvents"
 import { useStudioRuntime } from "@/hooks/useStudioRuntime"
 import type { StudioRuntimeInfo } from "@/lib/studio-runtime"
@@ -37,7 +38,6 @@ import { ReproductionLog } from "./ReproductionLog"
 
 type LeftRailView = "threads" | "tasks" | "workspace"
 type CenterView = "log" | "context" | "board" | "commands"
-type InspectorView = "live" | "tools" | "files" | "agents" | "graph"
 type MobileView = "threads" | "console" | "monitor"
 
 interface AgentWorkspaceProps {
@@ -396,6 +396,9 @@ function RightInspector({
   runtimeLoading,
   activeView,
   onViewChange,
+  selectedWorkerTitle,
+  selectedWorkerLabel,
+  onClearWorkerSelection,
 }: {
   activeAgents: number
   subagentEvents: number
@@ -403,8 +406,11 @@ function RightInspector({
   fileCount: number
   runtimeInfo: StudioRuntimeInfo
   runtimeLoading: boolean
-  activeView: InspectorView
-  onViewChange: (value: InspectorView) => void
+  activeView: AgentInspectorView
+  onViewChange: (value: AgentInspectorView) => void
+  selectedWorkerTitle: string | null
+  selectedWorkerLabel: string | null
+  onClearWorkerSelection: () => void
 }) {
   return (
     <div className="flex h-full min-h-0 flex-col bg-[#f8f9f6] text-slate-900">
@@ -445,6 +451,29 @@ function RightInspector({
           <p className="mt-3 text-[11px] text-slate-500">
             {runtimeInfo.workspaceLabel} · {subagentEvents} worker runs · {fileCount} files touched
           </p>
+
+          {activeView === "agents" && selectedWorkerTitle ? (
+            <div className="mt-3 flex items-center justify-between gap-2 rounded-2xl border border-slate-200 bg-[#f7f8f4] px-3 py-2">
+              <div className="min-w-0">
+                <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+                  Inspecting Worker
+                </div>
+                <div className="truncate text-[12px] font-medium text-slate-800">
+                  {selectedWorkerLabel ? `${selectedWorkerLabel} · ` : ""}
+                  {selectedWorkerTitle}
+                </div>
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-7 rounded-full px-2 text-[11px] text-slate-600"
+                onClick={onClearWorkerSelection}
+              >
+                Clear
+              </Button>
+            </div>
+          ) : null}
         </div>
       </div>
 
@@ -454,7 +483,7 @@ function RightInspector({
 
       <Tabs
         value={activeView}
-        onValueChange={(value) => onViewChange(value as InspectorView)}
+        onValueChange={(value) => onViewChange(value as AgentInspectorView)}
         className="flex flex-1 min-h-0 flex-col"
       >
         <div className="border-b border-slate-200 bg-slate-50 px-3 py-3">
@@ -622,7 +651,6 @@ export function AgentWorkspace({
   const router = useRouter()
   const searchParams = useSearchParams()
   const [leftRailView, setLeftRailView] = useState<LeftRailView>("threads")
-  const [inspectorView, setInspectorView] = useState<InspectorView>("live")
   const desktopLayoutRef = useRef<HTMLDivElement | null>(null)
   const [desktopWidth, setDesktopWidth] = useState(0)
   const [dragState, setDragState] = useState<DragState | null>(null)
@@ -650,8 +678,13 @@ export function AgentWorkspace({
 
   const agentStatuses = useAgentEventStore((state) => state.agentStatuses)
   const codexDelegations = useAgentEventStore((state) => state.codexDelegations)
+  const toolCalls = useAgentEventStore((state) => state.toolCalls)
   const feed = useAgentEventStore((state) => state.feed)
   const filesTouched = useAgentEventStore((state) => state.filesTouched)
+  const inspectorView = useAgentEventStore((state) => state.inspectorView)
+  const setInspectorView = useAgentEventStore((state) => state.setInspectorView)
+  const selectedWorkerRunId = useAgentEventStore((state) => state.selectedWorkerRunId)
+  const setSelectedWorkerRunId = useAgentEventStore((state) => state.setSelectedWorkerRunId)
 
   const requestedPaperId = searchParams.get("paperId") || searchParams.get("paper_id")
   const requestedSurface = normalizeCenterView(searchParams.get("surface"), defaultCenterView)
@@ -690,6 +723,20 @@ export function AgentWorkspace({
   const showMonitorInspector = centerView === "board"
   const mobileView: MobileView =
     mobilePinnedView === "threads" ? "threads" : centerViewToMobileView(centerView)
+  const workerGroups = useMemo(
+    () => buildSubagentActivityGroups(codexDelegations, toolCalls),
+    [codexDelegations, toolCalls],
+  )
+  const selectedWorkerGroup = useMemo(
+    () =>
+      selectedWorkerRunId
+        ? workerGroups.find((group) => group.workerRunId === selectedWorkerRunId) ?? null
+        : null,
+    [selectedWorkerRunId, workerGroups],
+  )
+  const selectedWorkerPresentation = selectedWorkerGroup
+    ? getAgentPresentation(selectedWorkerGroup.assignee)
+    : null
   const contextLabel = contextPackLoading
     ? "Generating"
     : contextPack?.context_pack_id || selectedPaper?.contextPackId
@@ -896,6 +943,9 @@ export function AgentWorkspace({
                   runtimeLoading={runtimeLoading}
                   activeView={inspectorView}
                   onViewChange={setInspectorView}
+                  selectedWorkerTitle={selectedWorkerGroup?.taskTitle ?? null}
+                  selectedWorkerLabel={selectedWorkerPresentation?.label ?? null}
+                  onClearWorkerSelection={() => setSelectedWorkerRunId(null)}
                 />
               </div>
             </>
@@ -977,6 +1027,9 @@ export function AgentWorkspace({
               runtimeLoading={runtimeLoading}
               activeView={inspectorView}
               onViewChange={setInspectorView}
+              selectedWorkerTitle={selectedWorkerGroup?.taskTitle ?? null}
+              selectedWorkerLabel={selectedWorkerPresentation?.label ?? null}
+              onClearWorkerSelection={() => setSelectedWorkerRunId(null)}
             />
           </TabsContent>
         </Tabs>

@@ -32,27 +32,57 @@ function formatTimestamp(ts: string): string {
   }
 }
 
-function ActivityFeedRow({ item }: { item: ActivityFeedItem }) {
+function getWorkerRunId(item: ActivityFeedItem): string | null {
+  const payload = item.raw.payload
+  if (!payload || typeof payload !== "object") return null
+  const workerRunId = (payload as Record<string, unknown>).worker_run_id
+  return typeof workerRunId === "string" && workerRunId.trim().length > 0 ? workerRunId : null
+}
+
+function ActivityFeedRow({
+  item,
+  onOpenWorkerRun,
+}: {
+  item: ActivityFeedItem
+  onOpenWorkerRun: (workerRunId: string) => void
+}) {
   const timeStr = formatTimestamp(item.ts)
   const colorClass = getTypeColor(item.type)
   const presentation = getAgentPresentation(item.agent_name)
+  const workerRunId = getWorkerRunId(item)
+  const interactive = workerRunId !== null
 
   return (
-    <li className="flex items-start gap-2 border-b border-zinc-200 py-1.5 text-sm last:border-0">
-      <span className="mt-0.5 shrink-0 font-mono text-xs text-zinc-400">{timeStr}</span>
-      <span
-        className={`shrink-0 rounded border border-zinc-200 bg-zinc-100 px-1.5 py-0.5 text-xs font-medium ${colorClass}`}
-        title={item.agent_name}
+    <li className="border-b border-zinc-200 text-sm last:border-0">
+      <button
+        type="button"
+        className={`flex w-full items-start gap-2 py-1.5 text-left ${
+          interactive ? "rounded-md px-1 transition-colors hover:bg-white" : ""
+        }`}
+        onClick={() => {
+          if (workerRunId) {
+            onOpenWorkerRun(workerRunId)
+          }
+        }}
+        disabled={!interactive}
+        title={interactive ? "Open worker details" : item.agent_name}
       >
-        {presentation.shortLabel}
-      </span>
-      <span className="truncate text-zinc-700">{item.summary}</span>
+        <span className="mt-0.5 shrink-0 font-mono text-xs text-zinc-400">{timeStr}</span>
+        <span
+          className={`shrink-0 rounded border border-zinc-200 bg-zinc-100 px-1.5 py-0.5 text-xs font-medium ${colorClass}`}
+          title={item.agent_name}
+        >
+          {presentation.shortLabel}
+        </span>
+        <span className="truncate text-zinc-700">{item.summary}</span>
+      </button>
     </li>
   )
 }
 
 export function ActivityFeed() {
   const feed = useAgentEventStore((s) => s.feed)
+  const openWorkerRun = useAgentEventStore((s) => s.openWorkerRun)
   const visibleFeed = feed.filter((item) => !HIDDEN_LIVE_EVENT_TYPES.has(item.type))
 
   return (
@@ -75,7 +105,11 @@ export function ActivityFeed() {
           ) : (
             <ul className="px-2 py-1">
               {visibleFeed.map((item) => (
-                <ActivityFeedRow key={item.id} item={item} />
+                <ActivityFeedRow
+                  key={item.id}
+                  item={item}
+                  onOpenWorkerRun={openWorkerRun}
+                />
               ))}
             </ul>
           )}
