@@ -19,11 +19,12 @@ describe("studio-store", () => {
   })
 
   it("round-trips per-paper cached state when switching papers", () => {
-    const { addPaper, selectPaper } = useStudioStore.getState()
+    const { addPaper, addTask, selectPaper } = useStudioStore.getState()
     const firstId = addPaper({ title: "Paper A", abstract: "A" })
     const secondId = addPaper({ title: "Paper B", abstract: "B" })
 
     selectPaper(firstId)
+    const taskId = addTask("Chat — paper A")
 
     const progress: StageProgressEvent = {
       stage: "extract",
@@ -66,7 +67,7 @@ describe("studio-store", () => {
     useStudioStore.getState().setContextPackError("boom")
     useStudioStore.getState().appendGenerationProgress(progress)
     useStudioStore.getState().appendLiveObservations(observations)
-    useStudioStore.getState().setActiveTask("task-1")
+    useStudioStore.getState().setActiveTask(taskId)
 
     selectPaper(secondId)
 
@@ -86,7 +87,7 @@ describe("studio-store", () => {
     expect(restored.contextPackError).toBe("boom")
     expect(restored.generationProgress).toEqual([progress])
     expect(restored.liveObservations).toEqual([observations])
-    expect(restored.activeTaskId).toBe("task-1")
+    expect(restored.activeTaskId).toBe(taskId)
   })
 
   it("appends text to the last action when streaming", () => {
@@ -103,6 +104,95 @@ describe("studio-store", () => {
     const task = useStudioStore.getState().tasks.find(t => t.id === taskId)
     expect(task?.actions).toHaveLength(1)
     expect(task?.actions[0].content).toBe("hello world")
+  })
+
+  it("reuses the last thinking action instead of appending duplicate status rows", () => {
+    const { addPaper, addTask, upsertThinkingAction, selectPaper } = useStudioStore.getState()
+
+    const paperId = addPaper({ title: "Paper D", abstract: "D" })
+    selectPaper(paperId)
+
+    const taskId = addTask("Run task")
+    upsertThinkingAction(taskId, "Connecting to Claude CLI...")
+    upsertThinkingAction(taskId, "Thinking...")
+
+    const task = useStudioStore.getState().tasks.find(t => t.id === taskId)
+    expect(task?.actions).toHaveLength(1)
+    expect(task?.actions[0].type).toBe("thinking")
+    expect(task?.actions[0].content).toBe("Thinking...")
+  })
+
+  it("stores chat history on the active thread and updates the latest activity time", () => {
+    const { addPaper, addTask, addAction, appendTaskHistory } = useStudioStore.getState()
+
+    addPaper({ title: "Paper Persist", abstract: "A" })
+    const taskId = addTask("Chat — restore me")
+    const beforeUpdate = useStudioStore.getState().tasks.find((task) => task.id === taskId)?.updatedAt
+    addAction(taskId, { type: "user", content: "How does this work?" })
+    addAction(taskId, { type: "text", content: "It works like this." })
+    appendTaskHistory(taskId, { role: "user", content: "How does this work?" })
+    appendTaskHistory(taskId, { role: "assistant", content: "It works like this." })
+
+    const state = useStudioStore.getState()
+    const task = state.tasks.find((item) => item.id === taskId)
+    expect(task).toBeDefined()
+    expect(task?.history).toEqual([
+      { role: "user", content: "How does this work?" },
+      { role: "assistant", content: "It works like this." },
+    ])
+    expect(task?.createdAt).toBeInstanceOf(Date)
+    expect(task?.updatedAt).toBeInstanceOf(Date)
+    expect(task?.actions[0].timestamp).toBeInstanceOf(Date)
+    expect(task?.updatedAt.getTime()).toBeGreaterThanOrEqual(beforeUpdate?.getTime() ?? 0)
+    expect(state.activeTaskId).toBe(taskId)
+  })
+
+  it("renames a thread without replacing its identity", () => {
+    const { addPaper, addTask, renameTask } = useStudioStore.getState()
+
+    addPaper({ title: "Paper Rename", abstract: "A" })
+    const taskId = addTask("New thread")
+    renameTask(taskId, "Investigate training instability")
+
+    const task = useStudioStore.getState().tasks.find((item) => item.id === taskId)
+    expect(task?.id).toBe(taskId)
+    expect(task?.name).toBe("Investigate training instability")
+  })
+
+  it("merges tool results into the latest matching function call", () => {
+    const { addPaper, addTask, addAction, attachResultToLatestFunctionCall } = useStudioStore.getState()
+
+    addPaper({ title: "Paper Tools", abstract: "A" })
+    const taskId = addTask("Tool thread")
+    addAction(taskId, {
+      type: "function_call",
+      content: "read_file()",
+      metadata: {
+        functionName: "read_file",
+        params: { path: "src/demo.py" },
+      },
+    })
+
+    const attached = attachResultToLatestFunctionCall(taskId, "read_file", "file contents")
+    const task = useStudioStore.getState().tasks.find((item) => item.id === taskId)
+
+    expect(attached).toBe(true)
+    expect(task?.actions).toHaveLength(1)
+    expect(task?.actions[0].metadata?.result).toBe("file contents")
+  })
+
+  it("preserves the previous paper's active thread when adding a new paper", () => {
+    const { addPaper, addTask, selectPaper } = useStudioStore.getState()
+
+    const firstId = addPaper({ title: "Paper One", abstract: "A" })
+    const taskId = addTask("Chat — thread one")
+
+    const secondId = addPaper({ title: "Paper Two", abstract: "B" })
+    expect(useStudioStore.getState().selectedPaperId).toBe(secondId)
+    expect(useStudioStore.getState().activeTaskId).toBeNull()
+
+    selectPaper(firstId)
+    expect(useStudioStore.getState().activeTaskId).toBe(taskId)
   })
 
   it("preserves provided agent task ids so backend progress updates map correctly", () => {
@@ -258,5 +348,16 @@ describe("studio-store", () => {
     setContextPack(pack)
     const selected = useStudioStore.getState().papers.find((paper) => paper.id === paperId)
     expect(selected?.contextPackId).toBe("cp-context-123")
+  })
+
+  it("marks Codex log tasks with codex kind so chat thread lists can hide them", () => {
+    const { addPaper, selectPaper, addTask } = useStudioStore.getState()
+
+    const paperId = addPaper({ title: "Paper Codex", abstract: "A" })
+    selectPaper(paperId)
+
+    const codexTaskId = addTask("Codex — fix flaky test")
+    const task = useStudioStore.getState().tasks.find(item => item.id === codexTaskId)
+    expect(task?.kind).toBe("codex")
   })
 })

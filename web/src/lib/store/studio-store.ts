@@ -2,7 +2,12 @@ import { create } from 'zustand'
 import type { ReproContextPack, StageObservationsEvent, StageProgressEvent } from '@/lib/types/p2c'
 
 // Agent Action Types
-export type ActionType = 'thinking' | 'file_change' | 'function_call' | 'mcp_call' | 'error' | 'complete' | 'text'
+export type ActionType = 'thinking' | 'file_change' | 'function_call' | 'mcp_call' | 'error' | 'complete' | 'text' | 'user'
+
+export interface TaskMessage {
+    role: 'user' | 'assistant'
+    content: string
+}
 
 export interface AgentAction {
     id: string
@@ -31,9 +36,12 @@ export interface AgentAction {
 export interface Task {
     id: string
     name: string
+    kind: 'chat' | 'codex'
     status: 'running' | 'completed' | 'pending' | 'error'
     actions: AgentAction[]
     createdAt: Date
+    updatedAt: Date
+    history: TaskMessage[]
     paperId?: string  // Link task to a paper
 }
 
@@ -159,7 +167,7 @@ export interface StudioPaper {
 
 const STORAGE_KEY = 'paperbot-studio-papers'
 const RUNTIME_STORAGE_KEY = 'paperbot-studio-runtime'
-const RUNTIME_STORAGE_VERSION = 1
+const RUNTIME_STORAGE_VERSION = 2
 
 function generateId(): string {
     return `paper-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`
@@ -202,6 +210,7 @@ interface PersistedRuntimeState {
     selectedPaperId: string | null
     paperCache: Record<string, PerPaperCache>
     boardSessionByPaper: Record<string, string>
+    tasks: Task[]
     agentTasks: AgentTask[]
     pipelinePhase: PipelinePhase
     e2eState: E2EState | null
@@ -215,6 +224,7 @@ function _defaultRuntimeState(): PersistedRuntimeState {
         selectedPaperId: null,
         paperCache: {},
         boardSessionByPaper: {},
+        tasks: [],
         agentTasks: [],
         pipelinePhase: 'idle',
         e2eState: null,
@@ -239,6 +249,103 @@ function _normalizePaperCache(cache: unknown): Record<string, PerPaperCache> {
         }
     }
     return normalized
+}
+
+function _normalizeDate(value: unknown): Date {
+    if (value instanceof Date) return value
+    if (typeof value === 'string' || typeof value === 'number') {
+        const parsed = new Date(value)
+        if (!Number.isNaN(parsed.getTime())) return parsed
+    }
+    return new Date()
+}
+
+function _normalizeTaskHistory(value: unknown): TaskMessage[] {
+    if (!Array.isArray(value)) return []
+    return value.flatMap((item) => {
+        if (!item || typeof item !== 'object') return []
+        const role = (item as { role?: unknown }).role
+        const content = (item as { content?: unknown }).content
+        if ((role !== 'user' && role !== 'assistant') || typeof content !== 'string') {
+            return []
+        }
+        const trimmed = content.trim()
+        if (!trimmed) return []
+        return [{ role, content }]
+    })
+}
+
+function _normalizeTaskKind(value: unknown, name: unknown): Task['kind'] {
+    if (value === 'chat' || value === 'codex') return value
+    if (typeof name === 'string' && name.startsWith('Codex —')) return 'codex'
+    return 'chat'
+}
+
+function _normalizeTaskActions(value: unknown): AgentAction[] {
+    if (!Array.isArray(value)) return []
+    return value.flatMap((item) => {
+        if (!item || typeof item !== 'object') return []
+        const action = item as Partial<AgentAction>
+        if (typeof action.id !== 'string' || typeof action.content !== 'string') return []
+        const type: ActionType =
+            action.type === 'thinking' ||
+            action.type === 'file_change' ||
+            action.type === 'function_call' ||
+            action.type === 'mcp_call' ||
+            action.type === 'error' ||
+            action.type === 'complete' ||
+            action.type === 'text' ||
+            action.type === 'user'
+                ? action.type
+                : 'text'
+
+        return [{
+            id: action.id,
+            type,
+            timestamp: _normalizeDate(action.timestamp),
+            content: action.content,
+            metadata: action.metadata,
+        }]
+    })
+}
+
+function _normalizeTasks(value: unknown): Task[] {
+    if (!Array.isArray(value)) return []
+    return value.flatMap((item) => {
+        if (!item || typeof item !== 'object') return []
+        const task = item as Partial<Task>
+        if (typeof task.id !== 'string' || typeof task.name !== 'string') return []
+        const createdAt = _normalizeDate(task.createdAt)
+        const updatedAt = _normalizeDate(task.updatedAt ?? task.createdAt)
+        return [{
+            id: task.id,
+            name: task.name,
+            kind: _normalizeTaskKind(task.kind, task.name),
+            status:
+                task.status === 'running' ||
+                task.status === 'completed' ||
+                task.status === 'pending' ||
+                task.status === 'error'
+                    ? task.status
+                    : 'pending',
+            actions: _normalizeTaskActions(task.actions),
+            createdAt,
+            updatedAt,
+            history: _normalizeTaskHistory(task.history),
+            paperId: typeof task.paperId === 'string' ? task.paperId : undefined,
+        }]
+    })
+}
+
+function _resolveActiveTaskId(taskId: string | null | undefined, tasks: Task[], paperId: string | null): string | null {
+    if (!paperId) return null
+    if (taskId && tasks.some((task) => task.id === taskId && task.paperId === paperId)) {
+        return taskId
+    }
+    const latestTask = tasks
+        .filter((task) => task.paperId === paperId)
+        .sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime())[0]
+    return latestTask?.id ?? null
 }
 
 function loadRuntimeStateFromStorage(): PersistedRuntimeState {
@@ -278,6 +385,7 @@ function loadRuntimeStateFromStorage(): PersistedRuntimeState {
             selectedPaperId,
             paperCache: _normalizePaperCache(parsed.paperCache),
             boardSessionByPaper,
+            tasks: _normalizeTasks(parsed.tasks),
             agentTasks: Array.isArray(parsed.agentTasks) ? (parsed.agentTasks as AgentTask[]) : [],
             pipelinePhase:
                 typeof parsed.pipelinePhase === 'string' ? (parsed.pipelinePhase as PipelinePhase) : base.pipelinePhase,
@@ -352,9 +460,13 @@ interface StudioState {
 
     // Task actions
     addTask: (name: string) => string
+    renameTask: (taskId: string, name: string) => void
     updateTaskStatus: (taskId: string, status: Task['status']) => void
     addAction: (taskId: string, action: Omit<AgentAction, 'id' | 'timestamp'>) => void
+    upsertThinkingAction: (taskId: string, content: string) => void
+    attachResultToLatestFunctionCall: (taskId: string, functionName: string, result: unknown) => boolean
     appendToLastAction: (taskId: string, text: string) => void
+    appendTaskHistory: (taskId: string, message: TaskMessage) => void
     setActiveTask: (taskId: string | null) => void
     setSelectedFileForDiff: (filename: string | null) => void
     setPaperDraft: (partial: Partial<PaperDraft>) => void
@@ -505,10 +617,22 @@ export const useStudioStore = create<StudioState>((set, get) => ({
         }
         set(state => {
             const newPapers = [...state.papers, newPaper]
+            const nextCache = { ...state._paperCache }
+            if (state.selectedPaperId) {
+                nextCache[state.selectedPaperId] = {
+                    contextPack: state.contextPack,
+                    contextPackLoading: state.contextPackLoading,
+                    contextPackError: state.contextPackError,
+                    generationProgress: state.generationProgress,
+                    liveObservations: state.liveObservations,
+                    activeTaskId: state.activeTaskId,
+                }
+            }
             savePapersToStorage(newPapers)
             return {
                 papers: newPapers,
                 selectedPaperId: id,
+                _paperCache: nextCache,
                 // Sync paperDraft with new paper
                 paperDraft: {
                     title: newPaper.title,
@@ -517,6 +641,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
                 },
                 lastGenCodeResult: null,
                 workspaceSnapshotId: null,
+                activeTaskId: null,
                 contextPack: null,
                 contextPackLoading: false,
                 contextPackError: null,
@@ -560,6 +685,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
                 selectedPaperId: newSelectedPaperId,
                 _paperCache: newCache,
                 boardSessionByPaper: nextBoardSessionByPaper,
+                tasks: state.tasks.filter(task => task.paperId !== paperId),
                 agentTasks: state.agentTasks.filter(task => task.paperId !== paperId),
                 boardSessionId:
                     newSelectedPaperId && nextBoardSessionByPaper[newSelectedPaperId]
@@ -567,6 +693,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
                         : null,
                 // Clear draft if deleted paper was selected
                 ...(state.selectedPaperId === paperId ? {
+                    activeTaskId: null,
                     paperDraft: { title: '', abstract: '', methodSection: '' },
                     lastGenCodeResult: null,
                     contextPack: null,
@@ -609,7 +736,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
             lastGenCodeResult: paper?.lastGenCodeResult || null,
             workspaceSnapshotId: null,
             // Restore cached per-paper state, or defaults
-            activeTaskId: cached?.activeTaskId ?? null,
+            activeTaskId: _resolveActiveTaskId(cached?.activeTaskId ?? null, state.tasks, paperId),
             contextPack: cached?.contextPack ?? null,
             contextPackLoading: cached?.contextPackLoading ?? false,
             contextPackError: cached?.contextPackError ?? null,
@@ -645,6 +772,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
             papers,
             selectedPaperId,
             _paperCache: runtime.paperCache,
+            tasks: runtime.tasks,
             agentTasks: runtime.agentTasks,
             boardSessionByPaper: mergedBoardSessionByPaper,
             boardSessionId,
@@ -661,7 +789,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
                 : { title: '', abstract: '', methodSection: '' },
             lastGenCodeResult: selectedPaper?.lastGenCodeResult || null,
             workspaceSnapshotId: null,
-            activeTaskId: cached?.activeTaskId ?? null,
+            activeTaskId: _resolveActiveTaskId(cached?.activeTaskId ?? null, runtime.tasks, selectedPaperId),
             contextPack: cached?.contextPack ?? null,
             contextPackLoading: false,
             contextPackError: cached?.contextPackError ?? null,
@@ -680,15 +808,19 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     // Task actions
     addTask: (name) => {
         const state = get()
-        const id = `task-${Date.now()}`
+        const id = `task-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`
         const paperId = state.selectedPaperId
+        const now = new Date()
         set(currentState => ({
             tasks: [...currentState.tasks, {
                 id,
                 name,
+                kind: name.startsWith('Codex —') ? 'codex' : 'chat',
                 status: 'running',
                 actions: [],
-                createdAt: new Date(),
+                createdAt: now,
+                updatedAt: now,
+                history: [],
                 paperId: paperId || undefined,
             }],
             activeTaskId: id
@@ -710,6 +842,18 @@ export const useStudioStore = create<StudioState>((set, get) => ({
             }
         }
         return id
+    },
+
+    renameTask: (taskId, name) => {
+        const trimmed = name.trim()
+        if (!trimmed) return
+        set(state => ({
+            tasks: state.tasks.map(task =>
+                task.id === taskId
+                    ? { ...task, name: trimmed, updatedAt: new Date() }
+                    : task,
+            ),
+        }))
     },
 
     addAgentTask: (task) => {
@@ -754,7 +898,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     updateTaskStatus: (taskId, status) => {
         set(state => ({
             tasks: state.tasks.map(t =>
-                t.id === taskId ? { ...t, status } : t
+                t.id === taskId ? { ...t, status, updatedAt: new Date() } : t
             )
         }))
     },
@@ -768,10 +912,89 @@ export const useStudioStore = create<StudioState>((set, get) => ({
         set(state => ({
             tasks: state.tasks.map(t =>
                 t.id === taskId
-                    ? { ...t, actions: [...t.actions, newAction] }
+                    ? { ...t, actions: [...t.actions, newAction], updatedAt: newAction.timestamp }
                     : t
             )
         }))
+    },
+
+    upsertThinkingAction: (taskId, content) => {
+        const normalized = content.trim()
+        if (!normalized) return
+
+        set(state => ({
+            tasks: state.tasks.map(task => {
+                if (task.id !== taskId) return task
+
+                const lastAction = task.actions[task.actions.length - 1]
+                const updatedAt = new Date()
+
+                if (lastAction?.type === 'thinking') {
+                    if (lastAction.content === normalized) {
+                        return task
+                    }
+                    const updatedAction: AgentAction = {
+                        ...lastAction,
+                        content: normalized,
+                    }
+                    return {
+                        ...task,
+                        actions: [...task.actions.slice(0, -1), updatedAction],
+                        updatedAt,
+                    }
+                }
+
+                const newAction: AgentAction = {
+                    id: `action-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`,
+                    type: 'thinking',
+                    content: normalized,
+                    timestamp: updatedAt,
+                }
+                return {
+                    ...task,
+                    actions: [...task.actions, newAction],
+                    updatedAt,
+                }
+            }),
+        }))
+    },
+
+    attachResultToLatestFunctionCall: (taskId, functionName, result) => {
+        const state = get()
+        const targetTask = state.tasks.find(task => task.id === taskId)
+        if (!targetTask) return false
+
+        for (let index = targetTask.actions.length - 1; index >= 0; index -= 1) {
+            const action = targetTask.actions[index]
+            if (
+                action.type === 'function_call' &&
+                action.metadata?.functionName === functionName &&
+                action.metadata?.result === undefined
+            ) {
+                const updatedAction: AgentAction = {
+                    ...action,
+                    metadata: {
+                        ...action.metadata,
+                        result,
+                    },
+                }
+                set(currentState => ({
+                    tasks: currentState.tasks.map(task => {
+                        if (task.id !== taskId) return task
+                        const nextActions = [...task.actions]
+                        nextActions[index] = updatedAction
+                        return {
+                            ...task,
+                            actions: nextActions,
+                            updatedAt: new Date(),
+                        }
+                    }),
+                }))
+                return true
+            }
+        }
+
+        return false
     },
 
     appendToLastAction: (taskId, text) => {
@@ -781,8 +1004,24 @@ export const useStudioStore = create<StudioState>((set, get) => ({
                 const last = t.actions[t.actions.length - 1]
                 if (last.type !== 'text') return t
                 const updated = { ...last, content: last.content + text }
-                return { ...t, actions: [...t.actions.slice(0, -1), updated] }
+                return { ...t, actions: [...t.actions.slice(0, -1), updated], updatedAt: new Date() }
             })
+        }))
+    },
+
+    appendTaskHistory: (taskId, message) => {
+        const content = message.content.trim()
+        if (!content) return
+        set(state => ({
+            tasks: state.tasks.map(task =>
+                task.id === taskId
+                    ? {
+                        ...task,
+                        history: [...task.history, { role: message.role, content }],
+                        updatedAt: new Date(),
+                    }
+                    : task,
+            ),
         }))
     },
 
@@ -878,6 +1117,7 @@ function _snapshotRuntimeState(state: StudioState): PersistedRuntimeState {
         selectedPaperId: state.selectedPaperId,
         paperCache,
         boardSessionByPaper,
+        tasks: state.tasks,
         agentTasks: state.agentTasks,
         pipelinePhase: state.pipelinePhase,
         e2eState: state.e2eState,

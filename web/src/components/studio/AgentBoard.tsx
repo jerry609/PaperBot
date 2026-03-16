@@ -1130,7 +1130,7 @@ export function AgentBoard({
           <div className="min-w-0">
             <div className="flex items-center gap-2 min-w-0">
               <h2 className="text-sm font-semibold text-zinc-800 truncate">
-                {focusMode ? paperTitle : monitorMode ? "Delegation Monitor" : "Agent Board"}
+                {focusMode ? paperTitle : monitorMode ? "Monitor" : "Agent Board"}
               </h2>
               {monitorMode ? (
                 <Badge variant="outline" className="shrink-0 border-zinc-200 bg-zinc-100 text-zinc-700">
@@ -1145,7 +1145,7 @@ export function AgentBoard({
             </div>
             {monitorMode ? (
               <p className="mt-1 text-xs text-zinc-500">
-                Mirrors the latest task graph and subagent telemetry. Execution stays in Console.
+                Mirrors the latest task graph and runtime activity. Execution stays in Chat.
               </p>
             ) : null}
           </div>

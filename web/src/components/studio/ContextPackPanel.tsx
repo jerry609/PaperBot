@@ -147,7 +147,7 @@ export function ContextPackPanel({ pack, onSessionCreated, onDeployToBoard, clas
 
       onDeployToBoard?.()
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to open delegation monitor")
+      setError(err instanceof Error ? err.message : "Failed to open monitor")
     } finally {
       setDeploying(false)
     }

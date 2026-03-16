@@ -1,15 +1,15 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
-from fastapi.testclient import TestClient
-
-from paperbot.api import main as api_main
 from paperbot.api.routes import studio_chat
 from paperbot.api.routes.studio_chat import (
+    ChatMessage,
     StudioChatRequest,
     StudioCommandRequest,
     build_claude_cli_command_args,
+    build_prompt_with_context,
     build_management_command,
 )
 
@@ -71,6 +71,23 @@ def test_build_claude_cli_command_args_includes_print_mode_flags_and_effective_m
     ]
 
 
+def test_build_prompt_with_context_includes_recent_history_blocks():
+    prompt = build_prompt_with_context(
+        "Apply the same fix to the API client",
+        paper=None,
+        mode="Code",
+        history=[
+            ChatMessage(role="user", content="Inspect the failing loader test"),
+            ChatMessage(role="assistant", content="The test is failing on a missing fixture."),
+        ],
+    )
+
+    assert "# Conversation History" in prompt
+    assert "## User\nInspect the failing loader test" in prompt
+    assert "## Assistant\nThe test is failing on a missing fixture." in prompt
+    assert "# User Request\nApply the same fix to the API client" in prompt
+
+
 def test_build_management_command_uses_safe_noninteractive_defaults(monkeypatch):
     monkeypatch.setattr(studio_chat, "find_claude_cli", lambda: "/usr/local/bin/claude")
     monkeypatch.setattr(studio_chat, "find_opencode_cli", lambda: "/usr/local/bin/opencode")
@@ -122,18 +139,20 @@ def test_studio_command_route_executes_safe_management_command(monkeypatch, tmp_
 
     monkeypatch.setattr(studio_chat.subprocess, "run", fake_run)
 
-    with TestClient(api_main.app) as client:
-        resp = client.post(
-            "/api/studio/command",
-            json={
-                "runtime": "claude",
-                "command": "mcp",
-                "project_dir": str(tmp_path),
-            },
-        )
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
 
-    assert resp.status_code == 200
-    payload = resp.json()
+    monkeypatch.setattr(studio_chat.asyncio, "to_thread", fake_to_thread)
+
+    payload = asyncio.run(
+        studio_chat.studio_command(
+            StudioCommandRequest(
+                runtime="claude",
+                command="mcp",
+                project_dir=str(tmp_path),
+            )
+        )
+    )
     assert payload["ok"] is True
     assert payload["stdout"] == "configured-mcp\n"
     assert payload["command"] == ["/usr/local/bin/claude", "mcp", "list"]

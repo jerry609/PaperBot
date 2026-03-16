@@ -23,6 +23,47 @@ interface WorkspaceSetupDialogProps {
     onCancel: () => void
 }
 
+interface StudioCwdPayload {
+    cwd?: string | null
+    home?: string | null
+    allowed_prefixes?: string[] | null
+    allowlist_mutation_enabled?: boolean | null
+}
+
+async function readErrorDetail(res: Response, fallback: string): Promise<string> {
+    const text = await res.text()
+    try {
+        const payload = JSON.parse(text) as { detail?: string }
+        return payload.detail || fallback
+    } catch {
+        return text || fallback
+    }
+}
+
+function trimTrailingSlashes(directory: string): string {
+    const trimmed = directory.trim()
+    if (!trimmed) return ""
+    const normalized = trimmed.replace(/\/+$/g, "")
+    return normalized || "/"
+}
+
+function deriveAllowDirCandidate(directory: string, choice: "current" | "custom"): string {
+    const normalized = trimTrailingSlashes(directory)
+    if (!normalized || normalized === "/") return normalized
+    if (choice === "current") return normalized
+
+    const lastSlash = normalized.lastIndexOf("/")
+    if (lastSlash <= 0) return normalized
+    return normalized.slice(0, lastSlash)
+}
+
+function buildDisallowedDirectoryMessage(directory: string, allowedPrefixes: string[]): string {
+    if (allowedPrefixes.length === 0) {
+        return `"${directory}" is outside the allowed workspace roots. Choose a directory under the current Studio workspace or /tmp.`
+    }
+    return `"${directory}" is outside the allowed workspace roots. Choose a directory under: ${allowedPrefixes.join(", ")}.`
+}
+
 export function WorkspaceSetupDialog({
     paper,
     open,
@@ -36,17 +77,28 @@ export function WorkspaceSetupDialog({
     const [error, setError] = useState<string | null>(null)
     const [validating, setValidating] = useState(false)
     const [pendingAllowDir, setPendingAllowDir] = useState<string | null>(null)
+    const [allowedPrefixes, setAllowedPrefixes] = useState<string[]>([])
+    const [allowlistMutationEnabled, setAllowlistMutationEnabled] = useState(false)
 
     // Fetch current working directory on mount
     useEffect(() => {
         if (open) {
             setLoading(true)
             setError(null)
+            setPendingAllowDir(null)
+            setAllowedPrefixes([])
+            setAllowlistMutationEnabled(false)
             fetch("/api/studio/cwd")
                 .then((res) => res.json())
-                .then((data) => {
+                .then((data: StudioCwdPayload) => {
                     const dir = data.cwd || data.home || "/tmp"
                     setCurrentDir(dir)
+                    setAllowedPrefixes(
+                        Array.isArray(data.allowed_prefixes)
+                            ? data.allowed_prefixes.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+                            : []
+                    )
+                    setAllowlistMutationEnabled(data.allowlist_mutation_enabled === true)
                     // Suggest a paper-specific subdirectory
                     const safeName = paper.title
                         .toLowerCase()
@@ -75,19 +127,18 @@ export function WorkspaceSetupDialog({
         })
         if (!res.ok) {
             if (res.status === 403) {
-                // Extract parent directory to add as allowed prefix
-                const parts = directory.replace(/\/+$/, "").split("/")
-                const parentDir = parts.length > 1 ? parts.slice(0, -1).join("/") : directory
-                setPendingAllowDir(parentDir)
+                if (!allowlistMutationEnabled) {
+                    setPendingAllowDir(null)
+                    setError(
+                        `${buildDisallowedDirectoryMessage(directory, allowedPrefixes)} Runtime allowlist changes are disabled in this environment.`
+                    )
+                    return false
+                }
+                const allowDir = deriveAllowDirCandidate(directory, choice)
+                setPendingAllowDir(allowDir || null)
                 return false
             }
-            const text = await res.text()
-            try {
-                const payload = JSON.parse(text) as { detail?: string }
-                setError(payload.detail || `Directory is not available (${res.status})`)
-            } catch {
-                setError(text || `Directory is not available (${res.status})`)
-            }
+            setError(await readErrorDetail(res, `Directory is not available (${res.status})`))
             return false
         }
         const data = await res.json() as { project_dir?: string }
@@ -124,12 +175,15 @@ export function WorkspaceSetupDialog({
                 body: JSON.stringify({ directory: pendingAllowDir }),
             })
             if (!res.ok) {
-                const text = await res.text()
-                try {
-                    const payload = JSON.parse(text) as { detail?: string }
-                    setError(payload.detail || "Failed to add directory to allowed list")
-                } catch {
-                    setError(text || "Failed to add directory to allowed list")
+                const detail = await readErrorDetail(res, "Failed to add directory to allowed list")
+                if (res.status === 403 && detail === "runtime allowlist mutation is disabled") {
+                    setPendingAllowDir(null)
+                    const directory = choice === "current" ? currentDir : customDir.trim()
+                    setError(
+                        `${buildDisallowedDirectoryMessage(directory, allowedPrefixes)} Runtime allowlist changes are disabled in this environment.`
+                    )
+                } else {
+                    setError(detail)
                 }
                 return
             }

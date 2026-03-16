@@ -40,7 +40,11 @@ describe("studio cwd route", () => {
     expect(fallback).toBeInstanceOf(Response)
     expect(fallback?.status).toBe(200)
     await expect(fallback?.json()).resolves.toEqual({
-      cwd: process.env.HOME || "/tmp",
+      cwd: process.cwd(),
+      actual_cwd: process.cwd(),
+      home: process.env.HOME || "/tmp",
+      allowed_prefixes: [process.cwd(), "/tmp"],
+      allowlist_mutation_enabled: false,
       source: "fallback",
       error: "Failed to get working directory from backend",
     })

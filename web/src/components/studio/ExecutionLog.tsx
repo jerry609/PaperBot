@@ -4,11 +4,12 @@ import { useState } from "react"
 import { useStudioStore, AgentAction } from "@/lib/store/studio-store"
 import { CodeBlock } from "@/components/ai-elements"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { Bot, FileCode, Wrench, Plug, AlertCircle, CheckCircle2, Search, Terminal, ChevronDown, ChevronRight, Clock, Sparkles } from "lucide-react"
+import { Bot, FileCode, Wrench, Plug, AlertCircle, CheckCircle2, Search, Terminal, ChevronDown, ChevronRight, Clock, Sparkles, User } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { DiffModal } from "./DiffViewer"
 
 const actionIcons: Record<string, React.ElementType> = {
+    user: User,
     thinking: Sparkles,
     file_change: FileCode,
     function_call: Wrench,
@@ -22,6 +23,7 @@ const actionIcons: Record<string, React.ElementType> = {
 }
 
 const actionColors: Record<string, { bg: string; text: string; border: string }> = {
+    user: { bg: "bg-slate-900", text: "text-white", border: "border-slate-900" },
     thinking: { bg: "bg-purple-50 dark:bg-purple-950/30", text: "text-purple-600 dark:text-purple-400", border: "border-purple-200 dark:border-purple-800" },
     file_change: { bg: "bg-blue-50 dark:bg-blue-950/30", text: "text-blue-600 dark:text-blue-400", border: "border-blue-200 dark:border-blue-800" },
     function_call: { bg: "bg-orange-50 dark:bg-orange-950/30", text: "text-orange-600 dark:text-orange-400", border: "border-orange-200 dark:border-orange-800" },
@@ -145,6 +147,10 @@ function ActionItem({ action, onViewDiff, isLast }: ActionItemProps) {
                         ) : action.type === 'error' ? (
                             <div className={cn("text-sm rounded-md border p-2", colors.bg, colors.border)}>
                                 <span className={colors.text}>{action.content}</span>
+                            </div>
+                        ) : action.type === 'user' ? (
+                            <div className="rounded-xl bg-slate-900 px-3 py-2 text-sm leading-relaxed text-white">
+                                {action.content}
                             </div>
                         ) : action.type === 'complete' ? (
                             <div className="flex items-center gap-2">

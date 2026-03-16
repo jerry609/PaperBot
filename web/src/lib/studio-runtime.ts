@@ -15,6 +15,8 @@ export interface StudioRuntimeCwdResponse {
   cwd?: string | null
   actual_cwd?: string | null
   home?: string | null
+  allowed_prefixes?: string[] | null
+  allowlist_mutation_enabled?: boolean | null
   source?: string | null
   error?: string | null
 }

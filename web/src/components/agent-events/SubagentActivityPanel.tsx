@@ -54,14 +54,14 @@ export function SubagentActivityPanel() {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex items-center justify-between border-b border-zinc-200 px-3 py-2">
-        <h3 className="text-sm font-semibold text-zinc-900">Subagent Activity</h3>
+        <h3 className="text-sm font-semibold text-zinc-900">Delegations</h3>
         <span className="text-xs text-zinc-500">{codexDelegations.length} events</span>
       </div>
 
       <ScrollArea className="flex-1 min-h-0">
         {codexDelegations.length === 0 ? (
           <div className="flex h-20 items-center justify-center text-sm text-zinc-500">
-            No subagent dispatches yet
+            No delegation activity yet
           </div>
         ) : (
           <ul className="space-y-1 px-3 py-2">

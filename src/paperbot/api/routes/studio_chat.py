@@ -274,7 +274,28 @@ def build_management_command(
     return cmd
 
 
-def build_prompt_with_context(message: str, paper: Optional[PaperContext], mode: Mode) -> str:
+def _format_history_for_prompt(history: List[ChatMessage]) -> str:
+    lines: List[str] = []
+
+    for msg in history[-10:]:
+        content = msg.content.strip()
+        if not content:
+            continue
+        role = "User" if msg.role == "user" else "Assistant"
+        lines.append(f"## {role}\n{content}")
+
+    if not lines:
+        return ""
+
+    return "# Conversation History\n\n" + "\n\n".join(lines)
+
+
+def build_prompt_with_context(
+    message: str,
+    paper: Optional[PaperContext],
+    mode: Mode,
+    history: Optional[List[ChatMessage]] = None,
+) -> str:
     """Build the prompt with paper context if available."""
     parts = []
 
@@ -282,6 +303,11 @@ def build_prompt_with_context(message: str, paper: Optional[PaperContext], mode:
         parts.append(f"# Paper Context\n**Title:** {paper.title}\n\n**Abstract:** {paper.abstract}")
         if paper.method_section:
             parts.append(f"\n**Method Section:** {paper.method_section}")
+        parts.append("\n---\n")
+
+    history_block = _format_history_for_prompt(history or [])
+    if history_block:
+        parts.append(history_block)
         parts.append("\n---\n")
 
     if mode == "Code":
@@ -847,10 +873,45 @@ def _allowed_workdir_prefixes() -> List[Path]:
     return unique
 
 
+def _runtime_allowlist_mutation_enabled() -> bool:
+    return os.getenv("PAPERBOT_RUNBOOK_ALLOWLIST_MUTATION", "false").lower() == "true"
+
+
 def _is_under_prefix(path: Path, prefix: Path) -> bool:
     path_real = os.path.realpath(str(path))
     prefix_real = os.path.realpath(str(prefix))
     return path_real == prefix_real or path_real.startswith(prefix_real + os.sep)
+
+
+def _path_is_existing_dir(path: Path) -> bool:
+    try:
+        return path.exists() and path.is_dir()
+    except Exception:
+        return False
+
+
+def _preferred_studio_workspace_dir(actual_cwd: Path) -> Path:
+    allowed_prefixes = _allowed_workdir_prefixes()
+    temp_root = Path(tempfile.gettempdir()).resolve()
+    repo_like_cwd = "paperbot" in str(actual_cwd).lower()
+
+    if not repo_like_cwd and _path_is_existing_dir(actual_cwd):
+        return actual_cwd
+
+    for prefix in allowed_prefixes:
+        if prefix in {temp_root, actual_cwd}:
+            continue
+        if _path_is_existing_dir(prefix):
+            return prefix
+
+    if _path_is_existing_dir(actual_cwd):
+        return actual_cwd
+
+    for prefix in allowed_prefixes:
+        if _path_is_existing_dir(prefix):
+            return prefix
+
+    return temp_root
 
 
 def _resolve_cli_project_dir(raw: Optional[str]) -> Path:
@@ -1132,7 +1193,7 @@ async def stream_claude_cli(
         return
 
     effective_mode = resolve_execution_mode(request.mode)
-    prompt = build_prompt_with_context(request.message, request.paper, effective_mode)
+    prompt = build_prompt_with_context(request.message, request.paper, effective_mode, request.history)
     cmd = [claude_path, *build_claude_cli_command_args(request, effective_mode=effective_mode, prompt=prompt)]
 
     _append_eventlog(
@@ -1690,27 +1751,15 @@ async def studio_status():
 @router.get("/studio/cwd")
 async def studio_cwd():
     """Get the current working directory for Claude CLI session."""
-    # Default to user's home directory or a sensible default
-    default_cwd = os.path.expanduser("~")
-
-    # Try to get the current working directory
-    cwd = os.getcwd()
-
-    # Check if we're in a reasonable project directory
-    # If we're in the PaperBot source directory, suggest a better location
-    if "PaperBot" in cwd or "paperbot" in cwd.lower():
-        # Suggest a projects directory instead
-        projects_dir = os.path.expanduser("~/Projects")
-        if os.path.isdir(projects_dir):
-            suggested_cwd = projects_dir
-        else:
-            suggested_cwd = os.path.expanduser("~/Documents")
-    else:
-        suggested_cwd = cwd
+    home = str(Path.home())
+    actual_cwd = Path(os.getcwd()).resolve()
+    suggested_cwd = _preferred_studio_workspace_dir(actual_cwd)
 
     return {
-        "cwd": suggested_cwd,
-        "actual_cwd": cwd,
-        "home": default_cwd,
+        "cwd": str(suggested_cwd),
+        "actual_cwd": str(actual_cwd),
+        "home": home,
         "source": "system",
+        "allowed_prefixes": [str(prefix) for prefix in _allowed_workdir_prefixes()],
+        "allowlist_mutation_enabled": _runtime_allowlist_mutation_enabled(),
     }

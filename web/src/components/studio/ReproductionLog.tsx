@@ -8,10 +8,9 @@ import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Textarea } from "@/components/ui/textarea"
-import { useStudioStore, AgentAction, type AgentTask as StudioAgentTask } from "@/lib/store/studio-store"
+import { useStudioStore, AgentAction } from "@/lib/store/studio-store"
 import { useProjectContext } from "@/lib/store/project-context"
 import { readSSE } from "@/lib/sse"
-import { backendUrl } from "@/lib/backend-url"
 import { CodeBlock } from "@/components/ai-elements"
 import { DiffModal } from "./DiffViewer"
 import { WorkspaceSetupDialog } from "./WorkspaceSetupDialog"
@@ -26,6 +25,7 @@ import {
     type LastCommandOutput as CliLastCommandOutput,
 } from "./CliCommandRunner"
 import { useContextPackGeneration } from "@/hooks/useContextPackGeneration"
+import { parseStudioSlashCommand } from "@/lib/studio-slash"
 import type { StudioRuntimeInfo } from "@/lib/studio-runtime"
 import { cn } from "@/lib/utils"
 import {
@@ -33,6 +33,7 @@ import {
     AlertCircle,
     FileText,
     Bot,
+    User,
     FileCode,
     Wrench,
     Terminal,
@@ -68,6 +69,7 @@ interface ReproductionLogProps {
 }
 
 const actionIcons: Record<string, React.ElementType> = {
+    user: User,
     thinking: Loader2,
     file_change: FileCode,
     function_call: Wrench,
@@ -78,6 +80,7 @@ const actionIcons: Record<string, React.ElementType> = {
 }
 
 const actionColors: Record<string, { bg: string; text: string; border: string }> = {
+    user: { bg: "bg-slate-700", text: "text-white", border: "border-slate-700" },
     thinking: { bg: "bg-slate-100", text: "text-slate-700", border: "border-slate-200" },
     file_change: { bg: "bg-slate-100", text: "text-slate-700", border: "border-slate-200" },
     function_call: { bg: "bg-stone-100", text: "text-stone-700", border: "border-stone-200" },
@@ -86,52 +89,33 @@ const actionColors: Record<string, { bg: string; text: string; border: string }>
     text: { bg: "bg-[#eef0ea]", text: "text-slate-800", border: "border-slate-200" },
 }
 
-function normalizeBoardTaskStatus(rawStatus: unknown): StudioAgentTask["status"] {
-    const status = typeof rawStatus === "string" ? rawStatus : "planning"
-    if (status === "ai_review") return "in_progress"
-    if (
-        status === "planning" ||
-        status === "in_progress" ||
-        status === "repairing" ||
-        status === "human_review" ||
-        status === "done" ||
-        status === "paused" ||
-        status === "cancelled"
-    ) {
-        return status
-    }
-    return "planning"
-}
-
-function normalizeBoardTaskFromBackend(rawTask: Record<string, unknown>, fallbackPaperId: string | null): StudioAgentTask {
-    return {
-        id: (rawTask.id as string) || `task-${Date.now()}`,
-        title: (rawTask.title as string) || "Untitled",
-        description: (rawTask.description as string) || "",
-        status: normalizeBoardTaskStatus(rawTask.status),
-        assignee: (rawTask.assignee as string) || "claude",
-        progress: (rawTask.progress as number) || 0,
-        tags: (rawTask.tags as string[]) || [],
-        subtasks: (rawTask.subtasks as StudioAgentTask["subtasks"]) || [],
-        codexOutput: (rawTask.codexOutput as string) || (rawTask.codex_output as string) || undefined,
-        generatedFiles: (rawTask.generatedFiles as string[]) || (rawTask.generated_files as string[]) || [],
-        reviewFeedback:
-            (rawTask.reviewFeedback as string) || (rawTask.review_feedback as string) || undefined,
-        lastError: (rawTask.lastError as string) || (rawTask.last_error as string) || undefined,
-        executionLog:
-            (rawTask.executionLog as StudioAgentTask["executionLog"]) ||
-            (rawTask.execution_log as StudioAgentTask["executionLog"]) ||
-            [],
-        paperId: (rawTask.paperId as string) || (rawTask.paper_id as string) || fallbackPaperId || undefined,
-        createdAt: (rawTask.createdAt as string) || (rawTask.created_at as string) || new Date().toISOString(),
-        updatedAt: (rawTask.updatedAt as string) || (rawTask.updated_at as string) || new Date().toISOString(),
-    }
-}
-
-function buildCodexTaskTitle(message: string): string {
+function buildChatThreadTitle(message: string): string {
     const singleLine = message.replace(/\s+/g, " ").trim()
-    if (!singleLine) return "Studio Codex task"
-    return singleLine.length <= 72 ? singleLine : `${singleLine.slice(0, 69)}...`
+    if (!singleLine) return "New thread"
+    return singleLine.length <= 56 ? singleLine : `${singleLine.slice(0, 53)}...`
+}
+
+function normalizeThinkingMessage(value: unknown): string | null {
+    if (typeof value !== "string") return null
+    const normalized = value.replace(/\s+/g, " ").trim()
+    return normalized || null
+}
+
+function isGenericThinkingMessage(message: string): boolean {
+    return /^(\[[^\]]+\] sending to .+|thinking|connecting(?: to [^.]+)?|working|processing|waiting)\.{0,3}$/i.test(message.trim())
+}
+
+function shouldReplaceThinkingMessage(current: string | null, next: string): boolean {
+    if (!current) return true
+    if (current === next) return false
+
+    const currentIsGeneric = isGenericThinkingMessage(current)
+    const nextIsGeneric = isGenericThinkingMessage(next)
+
+    if (!currentIsGeneric && nextIsGeneric) {
+        return false
+    }
+    return true
 }
 
 function effectivePermissionMode(
@@ -163,7 +147,7 @@ type SlashCommandItem = {
     command: string
     label: string
     description: string
-    group: "Modes" | "Actions" | "Views" | "Models" | "Options" | "Quick Commands"
+    group: "Modes" | "Views" | "Models" | "Options" | "Quick Commands"
     keywords: string[]
     icon: React.ElementType
     onSelect: (remainder: string) => void
@@ -335,11 +319,12 @@ function ActionItem({ action, onViewDiff, isLast }: ActionItemProps) {
     const colors = actionColors[iconKey] || actionColors[action.type] || actionColors.text
 
     const hasExpandableContent = Boolean(action.metadata?.params || action.metadata?.result)
+    const hasToolResult = action.metadata?.result !== undefined
     const stringifyPayload = (payload: unknown): string =>
         typeof payload === "string" ? payload : JSON.stringify(payload, null, 2) || ""
 
     return (
-        <div className="relative flex gap-2.5">
+        <div className="group relative flex gap-2.5">
             {!isLast && (
                 <div className="absolute left-2.5 top-6 bottom-0 w-px bg-slate-200" />
             )}
@@ -371,11 +356,21 @@ function ActionItem({ action, onViewDiff, isLast }: ActionItemProps) {
                                 </div>
                             </div>
                         ) : action.type === 'function_call' && action.metadata?.functionName ? (
-                            <div className="space-y-0.5">
+                            <div className="space-y-1">
                                 <div className="flex items-center gap-2">
-                                    <code className={cn("text-[10px] font-mono px-1 py-0.5 rounded", colors.bg, colors.text)}>
+                                    <code className={cn("rounded-full px-2 py-0.5 text-[10px] font-mono", colors.bg, colors.text)}>
                                         {action.metadata.functionName}()
                                     </code>
+                                    <span
+                                        className={cn(
+                                            "rounded-full border px-1.5 py-0.5 text-[10px] uppercase tracking-[0.12em]",
+                                            hasToolResult
+                                                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                                : "border-slate-200 bg-white text-slate-500",
+                                        )}
+                                    >
+                                        {hasToolResult ? "Done" : "Running"}
+                                    </span>
                                     {hasExpandableContent && (
                                         <button
                                             onClick={() => setExpanded(!expanded)}
@@ -396,18 +391,33 @@ function ActionItem({ action, onViewDiff, isLast }: ActionItemProps) {
                                     </div>
                                 )}
                             </div>
+                        ) : action.type === 'thinking' ? (
+                            <div className="inline-flex max-w-full items-start gap-2 rounded-full border border-slate-200 bg-white/80 px-2.5 py-1 text-[10px] uppercase tracking-[0.14em] text-slate-500">
+                                <span className="shrink-0 font-medium text-slate-400">Thinking</span>
+                                <span className="min-w-0 whitespace-pre-wrap normal-case tracking-normal text-slate-500">
+                                    {action.content}
+                                </span>
+                            </div>
                         ) : action.type === 'error' ? (
                             <div className={cn("text-xs rounded-md border px-2 py-1.5", colors.bg, colors.border)}>
                                 <span className={colors.text}>{action.content}</span>
                             </div>
+                        ) : action.type === 'user' ? (
+                            <div className="ml-auto max-w-[86%] rounded-[20px] bg-slate-700 px-3.5 py-2.5 text-[12px] leading-6 text-white shadow-sm">
+                                {action.content}
+                            </div>
                         ) : action.type === 'complete' ? (
-                            <span className={cn("text-xs font-medium", colors.text)}>Completed</span>
+                            <span className={cn("rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1 text-[10px] font-medium uppercase tracking-[0.12em]", colors.text)}>
+                                Run complete
+                            </span>
                         ) : (
-                            <p className="whitespace-pre-wrap text-xs leading-relaxed text-slate-700">{action.content}</p>
+                            <div className="max-w-[88%] rounded-[20px] border border-slate-200 bg-[#f7f8f4] px-3.5 py-2.5 text-[12px] leading-6 text-slate-800 shadow-[0_1px_0_rgba(255,255,255,0.6)_inset]">
+                                <p className="whitespace-pre-wrap">{action.content}</p>
+                            </div>
                         )}
                     </div>
 
-                    <div className="flex shrink-0 items-center gap-1 text-[9px] text-slate-400">
+                    <div className="flex shrink-0 items-center gap-1 text-[9px] text-slate-400 opacity-0 transition-opacity group-hover:opacity-100">
                         <Clock className="h-2 w-2" />
                         {formatTime(action.timestamp)}
                     </div>
@@ -431,7 +441,6 @@ export function ReproductionLog({
         tasks,
         activeTaskId,
         selectedPaperId,
-        boardSessionId,
         lastGenCodeResult,
         contextPack,
         contextPackLoading,
@@ -439,14 +448,15 @@ export function ReproductionLog({
         generationProgress,
         liveObservations,
         addTask,
+        renameTask,
         addAction,
+        upsertThinkingAction,
+        attachResultToLatestFunctionCall,
         appendToLastAction,
+        appendTaskHistory,
         updateTaskStatus,
         updatePaper,
-        setBoardSessionId,
-        addAgentTask,
-        updateAgentTask,
-        setPipelinePhase,
+        setActiveTask,
     } = useStudioStore()
 
     const { generate: generateContextPack, status: genStatus } = useContextPackGeneration()
@@ -470,12 +480,10 @@ export function ReproductionLog({
     const [composerCursor, setComposerCursor] = useState(0)
     const [activeCliCommand, setActiveCliCommand] = useState<CliActiveCommand | null>(null)
     const [chatDraftBeforeUtility, setChatDraftBeforeUtility] = useState("")
-    const [codexMode, setCodexMode] = useState(false)
     const [runningCliCommand, setRunningCliCommand] = useState(false)
     const [lastCommandOutput, setLastCommandOutput] = useState<CliLastCommandOutput | null>(null)
     const [slashSelectedIndex, setSlashSelectedIndex] = useState(0)
     const [showWorkspaceSetup, setShowWorkspaceSetup] = useState(false)
-    const [pendingAction, setPendingAction] = useState<"chat" | "delegate_codex" | null>(null)
     const [showAdvancedOptions, setShowAdvancedOptions] = useState(false)
     const [continueLast, setContinueLast] = useState(false)
     const [resumeSession, setResumeSession] = useState("")
@@ -506,7 +514,17 @@ export function ReproductionLog({
         }
     }, [knownModelAliases, modelOption])
 
-    const activeTask = tasks.find(t => t.id === activeTaskId)
+    const activeTask = useMemo(
+        () =>
+            tasks.find(
+                (task) =>
+                    task.id === activeTaskId &&
+                    (!selectedPaperId || task.paperId === selectedPaperId),
+            ) ?? null,
+        [activeTaskId, selectedPaperId, tasks],
+    )
+    const activeChatTask = activeTask?.kind === "chat" ? activeTask : null
+    const visibleTask = activeChatTask
     const projectDir = selectedPaper?.outputDir || lastGenCodeResult?.outputDir || null
     const isBusy = status === "running"
     const runtimeLabel = runtimeLoading
@@ -525,7 +543,6 @@ export function ReproductionLog({
     const selectedEffort = effort === "default" ? null : effort
     const missingCustomModel = modelOption === "custom" && requestedModel.length === 0
     const commandMode = Boolean(activeCliCommand)
-    const utilityMode = commandMode || codexMode
     const commandRuntimeUnavailable = activeCliCommand
         ? activeCliCommand.runtime === "claude"
             ? runtimeInfo.source !== "claude_code"
@@ -597,14 +614,20 @@ export function ReproductionLog({
             : "Message Claude Code..."
     const composerPlaceholder = commandMode
         ? `Edit args for ${buildCommandPreview(activeCliCommand!.runtime, activeCliCommand!.preset, "").trim()} and press Enter to run`
-        : codexMode
-            ? "Describe the Codex subagent task and press Enter to delegate"
         : messagePlaceholder
     const composerPreview = commandMode
         ? buildCommandPreview(activeCliCommand!.runtime, activeCliCommand!.preset, messageInput)
-        : codexMode
-            ? `codex ${messageInput.trim() || "<task>"}`.trim()
         : commandPreview
+    const composerHeaderMeta =
+        commandMode || showAdvancedOptions || advancedOptionsCount > 0
+            ? composerPreview
+            : `${runtimeLabel} · ${mode} · ${requestedModel || "model pending"}`
+
+    useEffect(() => {
+        if (activeTask && activeTask.kind !== "chat") {
+            setActiveTask(null)
+        }
+    }, [activeTask, setActiveTask])
 
     const saveActiveFile = async () => {
         if (!projectDir || !activeFile || !activeFileData) return
@@ -632,12 +655,7 @@ export function ReproductionLog({
         if (selectedPaperId) {
             updatePaper(selectedPaperId, { outputDir: directory })
         }
-        if (pendingAction === "chat") {
-            runChatWithDir(directory)
-        } else if (pendingAction === "delegate_codex") {
-            runCodexDelegationWithDir(directory)
-        }
-        setPendingAction(null)
+        runChatWithDir(directory)
     }
 
     const runChatWithDir = async (targetDir: string) => {
@@ -650,13 +668,6 @@ export function ReproductionLog({
         }
         setMessageInput("")
         await handleSendMessageWithDir(message, targetDir)
-    }
-
-    const runCodexDelegationWithDir = async (targetDir: string) => {
-        const message = messageInput.trim()
-        if (!message) return
-        setMessageInput("")
-        await handleDelegateToCodexWithDir(message, targetDir)
     }
 
     const handleSendMessage = async () => {
@@ -672,7 +683,6 @@ export function ReproductionLog({
                 setLastError("Select or create a paper first.")
                 return
             }
-            setPendingAction("chat")
             setShowWorkspaceSetup(true)
             return
         }
@@ -682,47 +692,28 @@ export function ReproductionLog({
         await handleSendMessageWithDir(message, projectDir || undefined)
     }
 
-    const ensureBoardSession = async (targetDir: string): Promise<string> => {
-        if (!selectedPaperId || !selectedPaper) {
-            throw new Error("Select or create a paper first.")
-        }
-
-        if (boardSessionId) {
-            return boardSessionId
-        }
-
-        const response = await fetch(backendUrl("/api/agent-board/sessions"), {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                paper_id: selectedPaperId,
-                context_pack_id: contextPack?.context_pack_id || "",
-                paper_title: selectedPaper.title,
-                workspace_dir: targetDir,
-            }),
-        })
-
-        if (!response.ok) {
-            const text = await response.text()
-            throw new Error(text || `Failed to create monitor session (${response.status})`)
-        }
-
-        const session = (await response.json()) as { session_id?: string }
-        if (!session.session_id) {
-            throw new Error("Monitor session response did not include a session_id")
-        }
-
-        setBoardSessionId(session.session_id)
-        return session.session_id
-    }
-
     const handleSendMessageWithDir = async (message: string, targetDir?: string) => {
         setStatus("running")
         setLastError(null)
         onViewModeChange("log")
 
-        const taskId = addTask(`Chat — ${message.slice(0, 30)}${message.length > 30 ? "…" : ""}`)
-        addAction(taskId, { type: "thinking", content: `[${mode}] Sending to ${runtimeLabel}...` })
+        const threadTitle = buildChatThreadTitle(message)
+        const existingHistory = activeChatTask?.history ?? []
+        const taskId =
+            activeChatTask?.id ??
+            addTask(threadTitle)
+        let assistantResponse = ""
+        let assistantHistoryCommitted = false
+
+        if (activeChatTask && activeChatTask.history.length === 0 && activeChatTask.actions.length === 0) {
+            renameTask(taskId, threadTitle)
+        }
+
+        const initialThinking = `[${mode}] Sending to ${runtimeLabel}...`
+        addAction(taskId, { type: "user", content: message })
+        appendTaskHistory(taskId, { role: "user", content: message })
+        upsertThinkingAction(taskId, initialThinking)
+        updateTaskStatus(taskId, "running")
 
         try {
             const res = await fetch("/api/studio/chat", {
@@ -737,6 +728,8 @@ export function ReproductionLog({
                         abstract: selectedPaper.abstract,
                         method_section: selectedPaper.methodSection,
                     } : undefined,
+                    history: existingHistory,
+                    session_id: taskId,
                     project_dir: targetDir,
                     context_pack_id: contextPack?.context_pack_id,
                     continue_last: continueLast,
@@ -755,13 +748,30 @@ export function ReproductionLog({
             if (!res.ok || !res.body) {
                 throw new Error(`Failed to send message (${res.status})`)
             }
-
-            updateTaskStatus(taskId, "running")
-
             // Track whether the last action is a text block so we can
             // append to it (producing one continuous bubble) instead of
             // creating a new action per chunk.
             let lastActionIsText = false
+            let lastStreamActionType: "thinking" | "text" | "tool" | "other" = "thinking"
+            let lastThinkingContent: string | null = initialThinking
+
+            const pushThinking = (value: unknown) => {
+                const message = normalizeThinkingMessage(value)
+                if (!message) return
+
+                if (lastStreamActionType === "thinking") {
+                    if (!shouldReplaceThinkingMessage(lastThinkingContent, message)) {
+                        return
+                    }
+                    upsertThinkingAction(taskId, message)
+                } else {
+                    addAction(taskId, { type: "thinking", content: message })
+                }
+
+                lastStreamActionType = "thinking"
+                lastThinkingContent = message
+                lastActionIsText = false
+            }
 
             for await (const evt of readSSE(res.body)) {
                 if (evt?.type === "progress") {
@@ -772,15 +782,20 @@ export function ReproductionLog({
                         // Streaming text — append to current text bubble
                         const text = (data.text as string) || ""
                         if (text) {
+                            assistantResponse += text
                             if (lastActionIsText) {
                                 appendToLastAction(taskId, text)
                             } else {
                                 addAction(taskId, { type: "text", content: text })
                                 lastActionIsText = true
                             }
+                            lastStreamActionType = "text"
+                            lastThinkingContent = null
                         }
                     } else if (cliEvent === "tool_use") {
                         lastActionIsText = false
+                        lastStreamActionType = "tool"
+                        lastThinkingContent = null
                         addAction(taskId, {
                             type: "function_call",
                             content: `${data.tool_name}()`,
@@ -790,44 +805,66 @@ export function ReproductionLog({
                             },
                         })
                     } else if (cliEvent === "tool_result") {
-                        // Attach result to the most recent function_call action
                         lastActionIsText = false
-                        addAction(taskId, {
-                            type: "function_call",
-                            content: `${data.tool_name}() result`,
-                            metadata: {
-                                functionName: data.tool_name as string,
-                                result: data.content as string,
-                            },
-                        })
+                        lastStreamActionType = "tool"
+                        lastThinkingContent = null
+                        const functionName = data.tool_name as string
+                        const attached = attachResultToLatestFunctionCall(
+                            taskId,
+                            functionName,
+                            data.content as string,
+                        )
+                        if (!attached) {
+                            addAction(taskId, {
+                                type: "function_call",
+                                content: `${functionName}()`,
+                                metadata: {
+                                    functionName,
+                                    result: data.content as string,
+                                },
+                            })
+                        }
                     } else if (cliEvent === "thinking") {
-                        lastActionIsText = false
-                        addAction(taskId, { type: "thinking", content: (data.text as string) || "Thinking..." })
+                        pushThinking((data.text as string) || "Thinking...")
                     } else if (data.keepalive) {
                         // Keepalive heartbeat — ignore
                     } else if (data.message) {
                         // Legacy status messages (e.g. "Connecting to Claude CLI...")
-                        lastActionIsText = false
-                        addAction(taskId, { type: "thinking", content: data.message as string })
+                        pushThinking(data.message as string)
                     } else if (data.delta) {
                         // Fallback: legacy plain-text streaming (API fallback path)
                         const text = data.delta as string
+                        assistantResponse += text
                         if (lastActionIsText) {
                             appendToLastAction(taskId, text)
                         } else {
                             addAction(taskId, { type: "text", content: text })
                             lastActionIsText = true
                         }
+                        lastStreamActionType = "text"
+                        lastThinkingContent = null
                     }
                 } else if (evt?.type === "result") {
                     const data = (evt.data ?? {}) as Record<string, unknown>
-                    const summary = data.num_turns
-                        ? `Completed in ${data.num_turns} turns`
-                        : "Completed"
-                    addAction(taskId, { type: "complete", content: summary })
+                    const finalContent =
+                        assistantResponse || (typeof data.content === "string" ? data.content : "")
+                    if (finalContent.trim() && !assistantHistoryCommitted) {
+                        appendTaskHistory(taskId, { role: "assistant", content: finalContent })
+                        assistantHistoryCommitted = true
+                    }
+                    if (!finalContent.trim()) {
+                        const summary = data.num_turns
+                            ? `Completed in ${data.num_turns} turns`
+                            : "Completed"
+                        addAction(taskId, { type: "complete", content: summary })
+                    }
                     updateTaskStatus(taskId, "completed")
                     setStatus("success")
                 } else if (evt?.type === "error") {
+                    if (assistantResponse.trim() && !assistantHistoryCommitted) {
+                        appendTaskHistory(taskId, { role: "assistant", content: assistantResponse })
+                        assistantHistoryCommitted = true
+                    }
                     addAction(taskId, { type: "error", content: evt.message || "Chat failed" })
                     updateTaskStatus(taskId, "error")
                     setLastError(evt.message || "Chat failed")
@@ -837,129 +874,13 @@ export function ReproductionLog({
             }
         } catch (e) {
             const msg = e instanceof Error ? e.message : String(e)
+            if (assistantResponse.trim() && !assistantHistoryCommitted) {
+                appendTaskHistory(taskId, { role: "assistant", content: assistantResponse })
+            }
             addAction(taskId, { type: "error", content: msg })
             updateTaskStatus(taskId, "error")
             setLastError(msg)
             setStatus("error")
-        }
-    }
-
-    const handleDelegateToCodex = async () => {
-        if (!messageInput.trim() || isBusy) return
-
-        if (!selectedPaper) {
-            setLastError("Select or create a paper first.")
-            return
-        }
-
-        if (!projectDir) {
-            setPendingAction("delegate_codex")
-            setShowWorkspaceSetup(true)
-            return
-        }
-
-        const message = messageInput.trim()
-        setMessageInput("")
-        await handleDelegateToCodexWithDir(message, projectDir)
-    }
-
-    const handleDelegateToCodexWithDir = async (message: string, targetDir: string) => {
-        setStatus("running")
-        setLastError(null)
-
-        const taskTitle = buildCodexTaskTitle(message)
-        const logTaskId = addTask(`Codex — ${taskTitle}`)
-        addAction(logTaskId, { type: "thinking", content: "Preparing Codex delegation..." })
-
-        try {
-            const sessionId = await ensureBoardSession(targetDir)
-            const createRes = await fetch(backendUrl(`/api/agent-board/sessions/${sessionId}/tasks`), {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    title: taskTitle,
-                    description: message,
-                    workspace_dir: targetDir,
-                    assignee: "codex",
-                    tags: ["studio_console"],
-                }),
-            })
-
-            if (!createRes.ok) {
-                const text = await createRes.text()
-                throw new Error(text || `Failed to create Codex task (${createRes.status})`)
-            }
-
-            const rawTask = (await createRes.json()) as Record<string, unknown>
-            const task = normalizeBoardTaskFromBackend(rawTask, selectedPaperId)
-            addAgentTask(task)
-            addAction(logTaskId, {
-                type: "text",
-                content: `Delegated to Codex in session ${sessionId}. Open Monitor to inspect the live task graph.`,
-            })
-            updateTaskStatus(logTaskId, "running")
-            setPipelinePhase("executing")
-
-            const execRes = await fetch(
-                backendUrl(`/api/agent-board/tasks/${encodeURIComponent(task.id)}/execute`),
-                { method: "POST" },
-            )
-
-            if (!execRes.ok || !execRes.body) {
-                const text = await execRes.text()
-                throw new Error(text || `Failed to execute Codex task (${execRes.status})`)
-            }
-
-            for await (const evt of readSSE(execRes.body)) {
-                if (evt?.type === "progress") {
-                    const data = (evt.data ?? {}) as Record<string, unknown>
-                    const taskData = data.task as Record<string, unknown> | undefined
-                    if (taskData) {
-                        updateAgentTask(task.id, normalizeBoardTaskFromBackend(taskData, selectedPaperId))
-                    }
-
-                    const eventName = data.event as string | undefined
-                    if (eventName === "task_failed") {
-                        addAction(logTaskId, {
-                            type: "error",
-                            content: (data.error as string) || "Codex task failed",
-                        })
-                    } else if (eventName === "task_reviewed" && typeof data.feedback === "string" && data.feedback.trim()) {
-                        addAction(logTaskId, {
-                            type: "text",
-                            content: `Claude review: ${data.feedback as string}`,
-                        })
-                    } else if (eventName === "task_reviewing") {
-                        addAction(logTaskId, {
-                            type: "thinking",
-                            content: "Claude is reviewing Codex output...",
-                        })
-                    }
-                } else if (evt?.type === "result") {
-                    const data = (evt.data ?? {}) as Record<string, unknown>
-                    const success = Boolean(data.success)
-                    addAction(logTaskId, {
-                        type: "complete",
-                        content: success ? "Codex task completed" : "Codex task finished and needs review",
-                    })
-                    updateTaskStatus(logTaskId, success ? "completed" : "error")
-                    setStatus(success ? "success" : "error")
-                    setPipelinePhase(success ? "completed" : "idle")
-                    return
-                } else if (evt?.type === "error") {
-                    throw new Error(evt.message || "Codex task failed")
-                }
-            }
-
-            throw new Error("Codex task stream ended before a terminal result was received")
-        } catch (e) {
-            const msg = e instanceof Error ? e.message : String(e)
-            addAction(logTaskId, { type: "error", content: msg })
-            updateTaskStatus(logTaskId, "error")
-            setLastError(msg)
-            setStatus("error")
-            setPipelinePhase("failed")
-            return
         }
     }
 
@@ -971,11 +892,10 @@ export function ReproductionLog({
     }
 
     const handleSelectCliCommand = (command: CliActiveCommand, nextArgs?: string, restoreDraft?: string) => {
-        if (!utilityMode) {
+        if (!commandMode) {
             setChatDraftBeforeUtility(restoreDraft ?? messageInput)
         }
 
-        setCodexMode(false)
         setActiveCliCommand(command)
         setMessageInput(nextArgs ?? command.preset.defaultArgs)
         setLastError(null)
@@ -991,27 +911,19 @@ export function ReproductionLog({
         setChatDraftBeforeUtility("")
     }
 
-    const activateCodexMode = (nextMessage = "", restoreDraft?: string) => {
-        if (!utilityMode) {
-            setChatDraftBeforeUtility(restoreDraft ?? messageInput)
+    const executeCliCommand = async (command = activeCliCommand, args = messageInput) => {
+        if (!command || runningCliCommand) return
+
+        const selectedRuntimeUnavailable =
+            command.runtime === "claude"
+                ? runtimeInfo.source !== "claude_code"
+                : !runtimeInfo.opencodeAvailable
+        if (selectedRuntimeUnavailable) {
+            setLastError("Selected command runtime is unavailable")
+            return
         }
 
-        setActiveCliCommand(null)
-        setCodexMode(true)
-        setMessageInput(nextMessage)
-        setLastError(null)
-    }
-
-    const handleClearCodexMode = () => {
-        setCodexMode(false)
-        setMessageInput(chatDraftBeforeUtility)
-        setChatDraftBeforeUtility("")
-    }
-
-    const executeCliCommand = async () => {
-        if (!activeCliCommand || runningCliCommand || commandRuntimeUnavailable) return
-
-        const preview = buildCommandPreview(activeCliCommand.runtime, activeCliCommand.preset, messageInput)
+        const preview = buildCommandPreview(command.runtime, command.preset, args)
         setRunningCliCommand(true)
         setLastError(null)
 
@@ -1024,9 +936,9 @@ export function ReproductionLog({
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                    runtime: activeCliCommand.runtime,
-                    command: activeCliCommand.preset.command,
-                    args: messageInput.trim(),
+                    runtime: command.runtime,
+                    command: command.preset.command,
+                    args: args.trim(),
                     project_dir: projectDir ?? undefined,
                 }),
             })
@@ -1050,14 +962,131 @@ export function ReproductionLog({
         }
     }
 
+    const setSlashScaffold = (command: string, value = "") => {
+        const nextValue = value.trim() ? `/${command} ${value.trim()}` : `/${command} `
+        setMessageInput(nextValue)
+        setLastError(null)
+    }
+
+    const handleSlashSubmit = async (): Promise<boolean> => {
+        const parsed = parseStudioSlashCommand(messageInput, knownModelAliases)
+        if (!parsed) return false
+
+        setLastError(null)
+
+        if (parsed.kind === "mode") {
+            setMode(parsed.mode)
+            setMessageInput(parsed.remainder)
+            return true
+        }
+
+        if (parsed.kind === "view") {
+            if (parsed.view === "board") {
+                openAgentBoardWorkspace()
+            } else {
+                onViewModeChange(parsed.view)
+            }
+            setMessageInput("")
+            return true
+        }
+
+        if (parsed.kind === "continue") {
+            setContinueLast(parsed.enabled)
+            setMessageInput(parsed.remainder)
+            return true
+        }
+
+        if (parsed.kind === "model") {
+            setModelOption(parsed.modelOption)
+            setCustomModel(parsed.customModel)
+            setMessageInput(parsed.remainder)
+            return true
+        }
+
+        if (parsed.kind === "effort") {
+            setEffort(parsed.effort)
+            setMessageInput(parsed.remainder)
+            return true
+        }
+
+        if (parsed.kind === "resume") {
+            setResumeSession(parsed.value)
+            setMessageInput("")
+            return true
+        }
+
+        if (parsed.kind === "session") {
+            setCliSessionId(parsed.value)
+            setMessageInput("")
+            return true
+        }
+
+        if (parsed.kind === "agent") {
+            setAgentOverride(parsed.value)
+            setMessageInput("")
+            return true
+        }
+
+        if (parsed.kind === "tools") {
+            setToolsText(parsed.value)
+            setMessageInput("")
+            return true
+        }
+
+        if (parsed.kind === "allowed_tools") {
+            setAllowedToolsText(parsed.value)
+            setMessageInput("")
+            return true
+        }
+
+        if (parsed.kind === "add_dirs") {
+            setAddDirsText(parsed.value)
+            setMessageInput("")
+            return true
+        }
+
+        if (parsed.kind === "mcp_config") {
+            setMcpConfigText(parsed.value)
+            setMessageInput("")
+            return true
+        }
+
+        if (parsed.kind === "settings") {
+            setSettingsText(parsed.value)
+            setMessageInput("")
+            return true
+        }
+
+        const preset = getCommandPresets(parsed.runtime).find((item) => item.id === parsed.presetId)
+        if (!preset) {
+            setLastError(`Unknown quick command: ${parsed.presetId}`)
+            return true
+        }
+
+        const command: CliActiveCommand = {
+            runtime: parsed.runtime,
+            preset,
+        }
+        const nextArgs = parsed.args || preset.defaultArgs
+        handleSelectCliCommand(command, nextArgs, "")
+        await executeCliCommand(command, nextArgs)
+        return true
+    }
+
     const handleComposerSubmit = () => {
         if (commandMode) {
             void executeCliCommand()
             return
         }
 
-        if (codexMode) {
-            void handleDelegateToCodex()
+        if (messageInput.trim().startsWith("/")) {
+            void handleSlashSubmit().then((handled) => {
+                if (!handled) {
+                    void handleSendMessage()
+                } else {
+                    focusComposerToEnd()
+                }
+            })
             return
         }
 
@@ -1066,7 +1095,7 @@ export function ReproductionLog({
 
     const normalizedComposerCursor = Math.min(composerCursor, messageInput.length)
     const activeSlashMatch = useMemo<SlashTriggerMatch | null>(() => {
-        if (utilityMode) return null
+        if (commandMode) return null
         const beforeCursor = messageInput.slice(0, normalizedComposerCursor)
         const match = beforeCursor.match(/(^|\s)\/([^\s/]*)$/)
         if (!match) return null
@@ -1078,7 +1107,7 @@ export function ReproductionLog({
             start: normalizedComposerCursor - token.length - 1,
             end: normalizedComposerCursor,
         }
-    }, [messageInput, normalizedComposerCursor, utilityMode])
+    }, [commandMode, messageInput, normalizedComposerCursor])
     const slashPaletteActive = Boolean(activeSlashMatch)
     const slashQuery = activeSlashMatch?.query ?? ""
     const slashToken = activeSlashMatch?.token ?? ""
@@ -1181,18 +1210,6 @@ export function ReproductionLog({
             },
         },
         {
-            id: "action-codex",
-            command: "codex",
-            label: "Codex delegation",
-            description: "Turn the composer into a Codex subagent delegation prompt.",
-            group: "Actions",
-            keywords: ["delegate", "subagent", "agent", "task"],
-            icon: Bot,
-            onSelect: (remainder) => {
-                activateCodexMode(remainder, remainder)
-            },
-        },
-        {
             id: "view-chat",
             command: "chat",
             label: "Open chat",
@@ -1222,13 +1239,25 @@ export function ReproductionLog({
             id: "view-monitor",
             command: "monitor",
             label: "Open monitor",
-            description: "Jump to the agent board and delegation monitor.",
+            description: "Open Monitor for task graph, runtime, and delegation activity.",
             group: "Views",
             keywords: ["board", "agents", "subagents"],
             icon: LayoutDashboard,
             onSelect: (remainder) => {
                 openAgentBoardWorkspace()
                 setMessageInput(remainder)
+            },
+        },
+        {
+            id: "model-generic",
+            command: "model",
+            label: "Set model",
+            description: "Type /model <alias-or-full-name> and press Enter to apply it.",
+            group: "Models",
+            keywords: ["model", "alias", "custom"],
+            icon: Bot,
+            onSelect: () => {
+                setSlashScaffold("model")
             },
         },
         ...knownModelAliases.map((alias) => ({
@@ -1269,6 +1298,102 @@ export function ReproductionLog({
             onSelect: (remainder) => {
                 setContinueLast(false)
                 setMessageInput(remainder)
+            },
+        },
+        {
+            id: "option-resume-session",
+            command: "resume",
+            label: "Resume session",
+            description: "Type /resume <session-id> and press Enter to set or clear it.",
+            group: "Options",
+            keywords: ["resume", "session", "id"],
+            icon: Clock,
+            onSelect: () => {
+                setSlashScaffold("resume")
+            },
+        },
+        {
+            id: "option-session-id",
+            command: "session",
+            label: "Set session ID",
+            description: "Type /session <uuid> and press Enter to pin the next CLI run.",
+            group: "Options",
+            keywords: ["session", "uuid", "pin"],
+            icon: Terminal,
+            onSelect: () => {
+                setSlashScaffold("session")
+            },
+        },
+        {
+            id: "option-agent",
+            command: "agent",
+            label: "Agent override",
+            description: "Type /agent <name> and press Enter to set or clear the agent.",
+            group: "Options",
+            keywords: ["agent", "reviewer", "planner"],
+            icon: Bot,
+            onSelect: () => {
+                setSlashScaffold("agent")
+            },
+        },
+        {
+            id: "option-tools",
+            command: "tools",
+            label: "Set tools",
+            description: "Type /tools Bash,Read and press Enter to update the tool allowlist.",
+            group: "Options",
+            keywords: ["tools", "allowlist", "bash", "read"],
+            icon: Wrench,
+            onSelect: () => {
+                setSlashScaffold("tools")
+            },
+        },
+        {
+            id: "option-allowed-tools",
+            command: "allow",
+            label: "Allowed tools",
+            description: "Type /allow Bash(git:*),Read and press Enter to set allowed tools.",
+            group: "Options",
+            keywords: ["allow", "allowed", "tools"],
+            icon: Wrench,
+            onSelect: () => {
+                setSlashScaffold("allow")
+            },
+        },
+        {
+            id: "option-add-dir",
+            command: "add-dir",
+            label: "Add directory",
+            description: "Type /add-dir ../shared and press Enter to update extra directories.",
+            group: "Options",
+            keywords: ["dir", "directory", "workspace"],
+            icon: FileCode,
+            onSelect: () => {
+                setSlashScaffold("add-dir")
+            },
+        },
+        {
+            id: "option-mcp",
+            command: "mcp",
+            label: "MCP config",
+            description: "Type /mcp ./mcp.json and press Enter to set the MCP config input.",
+            group: "Options",
+            keywords: ["mcp", "config", "json"],
+            icon: LayoutDashboard,
+            onSelect: () => {
+                setSlashScaffold("mcp")
+            },
+        },
+        {
+            id: "option-settings",
+            command: "settings",
+            label: "Settings override",
+            description: "Type /settings <path-or-json> and press Enter to set --settings.",
+            group: "Options",
+            keywords: ["settings", "config", "json"],
+            icon: Settings2,
+            onSelect: () => {
+                setSlashScaffold("settings")
             },
         },
         ...(["default", "low", "medium", "high", "max"] as const).map((value) => ({
@@ -1352,11 +1477,9 @@ export function ReproductionLog({
 
     const composerHelperText = commandMode
         ? "Command badge turns the composer into a terminal line. Clear it to return to chat."
-        : codexMode
-            ? "Codex badge sends this composer text as a real subagent delegation task."
-            : missingCustomModel
-                ? "Enter a full Claude Code model name before sending."
-                : "Type / for modes, models, quick commands, and monitor navigation."
+        : missingCustomModel
+            ? "Enter a full Claude Code model name before sending."
+            : "Type / for modes, options, quick commands, and monitor jumps. Delegations appear in Monitor automatically."
     const activeModeLabel = mode
     const activeModelLabel =
         modelOption === "custom"
@@ -1394,16 +1517,6 @@ export function ReproductionLog({
                 tone: "accent" as const,
                 icon: Terminal,
                 onRemove: handleClearCliCommand,
-            }
-            : null,
-        codexMode
-            ? {
-                id: "codex",
-                label: "Codex delegation",
-                meta: "subagent",
-                tone: "accent" as const,
-                icon: Bot,
-                onRemove: handleClearCodexMode,
             }
             : null,
         continueLast
@@ -1637,28 +1750,28 @@ export function ReproductionLog({
                     /* Chat Timeline */
                     <ScrollArea className="h-full bg-[#f5f5f2]">
                         <div className="p-4">
-                            {!activeTask || activeTask.actions.length === 0 ? (
+                            {!visibleTask || visibleTask.actions.length === 0 ? (
                                 <div className="flex flex-col items-center justify-center space-y-4 py-20 text-slate-500">
                                     <div className="flex h-16 w-16 items-center justify-center rounded-2xl border border-slate-200 bg-[#eceee8]">
                                         <MessageSquare className="h-8 w-8 opacity-30" />
                                     </div>
                                     <div className="text-center space-y-2">
-                                        <p className="font-medium text-slate-900">Ready to chat</p>
+                                        <p className="font-medium text-slate-900">Talk to Claude Code</p>
                                         <p className="text-xs max-w-[280px]">
                                             {selectedPaper
-                                                ? `Send a message to start working with ${runtimeLabel} on this paper`
+                                                ? `Start a thread for ${selectedPaper.title}. Runtime and delegation activity mirror into Monitor.`
                                                 : "Select or create a paper to get started"}
                                         </p>
                                     </div>
                                 </div>
                             ) : (
                                 <div className="space-y-0">
-                                    {activeTask.actions.map((action, index) => (
+                                    {visibleTask.actions.map((action, index) => (
                                         <ActionItem
                                             key={action.id}
                                             action={action}
                                             onViewDiff={setDiffAction}
-                                            isLast={index === activeTask.actions.length - 1}
+                                            isLast={index === visibleTask.actions.length - 1}
                                         />
                                     ))}
                                 </div>
@@ -1673,32 +1786,17 @@ export function ReproductionLog({
                 <div className="shrink-0 border-t border-slate-200 bg-[#f1f2ed] p-4">
                     <div className="overflow-hidden rounded-[22px] border border-slate-200 bg-[#e8ebe4] shadow-[0_18px_36px_rgba(15,23,42,0.05)]">
                         <div className="border-b border-slate-200 bg-[#edf0e8] px-4 py-3">
-                            <div className="flex flex-wrap items-center gap-2">
-                                <span
-                                    className={cn(
-                                        "inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium",
-                                        runtimeInfo.source === "claude_code"
-                                            ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                                            : runtimeInfo.source === "anthropic_api"
-                                                ? "border-amber-200 bg-amber-50 text-amber-700"
-                                                : "border-slate-200 bg-slate-100 text-slate-600",
-                                    )}
-                                >
-                                    {runtimeLoading ? "Checking runtime" : runtimeInfo.label}
-                                </span>
-                                <span
-                                    className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-slate-200 bg-[#f7f8f4] px-2.5 py-1 text-xs text-slate-600"
-                                    title={runtimeInfo.cwd || runtimeInfo.actualCwd || undefined}
-                                >
-                                    <FileCode className="h-3.5 w-3.5 text-slate-500" />
-                                    <span className="truncate">{runtimeInfo.workspaceLabel}</span>
-                                </span>
+                            <div className="flex items-center justify-between gap-3">
                                 <span className="truncate text-[11px] text-slate-500">
-                                    {runtimeLoading ? "Resolving Claude Code status..." : runtimeInfo.statusLabel}
+                                    {commandMode
+                                        ? "Quick command line"
+                                        : selectedPaper
+                                            ? `Claude Code thread · ${selectedPaper.title}`
+                                            : "Claude Code thread"}
                                 </span>
-                            </div>
-                            <div className="mt-2 truncate font-mono text-[11px] text-slate-500">
-                                {composerPreview}
+                                <div className="truncate font-mono text-[11px] text-slate-500">
+                                    {composerHeaderMeta}
+                                </div>
                             </div>
                         </div>
 
@@ -1711,7 +1809,7 @@ export function ReproductionLog({
                                 </div>
                             ) : null}
 
-                            {modelOption === "custom" && !utilityMode ? (
+                            {modelOption === "custom" && !commandMode ? (
                                 <div className="px-4 pt-3">
                                     <Input
                                         value={customModel}
@@ -1775,12 +1873,6 @@ export function ReproductionLog({
                                             handleClearCliCommand()
                                             return
                                         }
-
-                                        if (codexMode) {
-                                            e.preventDefault()
-                                            handleClearCodexMode()
-                                            return
-                                        }
                                     }
 
                                     if (e.key === "Enter" && !e.shiftKey) {
@@ -1797,7 +1889,7 @@ export function ReproductionLog({
                                             <div>
                                                 <div className="text-[11px] font-medium text-slate-800">Slash commands</div>
                                                 <div className="mt-0.5 text-[11px] text-slate-500">
-                                                    Modes, models, monitor jumps, Codex delegation, and quick CLI presets.
+                                                    Modes, views, models, advanced options, and quick CLI presets.
                                                 </div>
                                             </div>
                                             <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 font-mono text-[11px] text-slate-500">
@@ -1812,7 +1904,7 @@ export function ReproductionLog({
                                                 </div>
                                             ) : (
                                                 <div className="space-y-2 p-2">
-                                                    {(["Modes", "Actions", "Views", "Models", "Options", "Quick Commands"] as const).map((group) => {
+                                                    {(["Modes", "Views", "Models", "Options", "Quick Commands"] as const).map((group) => {
                                                         const groupItems = filteredSlashCommands.filter((item) => item.group === group)
                                                         if (groupItems.length === 0) return null
 
@@ -2050,28 +2142,15 @@ export function ReproductionLog({
                                     </Popover>
 
                                     <CliCommandRunner
-                                        key={viewMode === "commands" && !utilityMode ? "command-popover-open" : "command-popover-closed"}
+                                        key={viewMode === "commands" && !commandMode ? "command-popover-open" : "command-popover-closed"}
                                         runtimeInfo={runtimeInfo}
                                         activeCommand={activeCliCommand}
                                         activeArgs={commandMode ? messageInput : ""}
-                                        defaultOpen={viewMode === "commands" && !utilityMode}
+                                        defaultOpen={viewMode === "commands" && !commandMode}
                                         showActiveBadge={false}
                                         onSelectCommand={handleSelectCliCommand}
                                         onClearCommand={handleClearCliCommand}
                                     />
-
-                                    {!utilityMode ? (
-                                        <Button
-                                            variant="ghost"
-                                            size="icon"
-                                            className="h-8 w-8 rounded-md border border-transparent bg-transparent text-slate-500 hover:bg-[#e7e9e3] hover:text-slate-900"
-                                            onClick={() => activateCodexMode(messageInput, messageInput)}
-                                            disabled={isBusy}
-                                            title="Switch the composer into Codex delegation mode"
-                                        >
-                                            <Bot className="h-3.5 w-3.5" />
-                                        </Button>
-                                    ) : null}
                                 </div>
 
                                 <Button
@@ -2081,9 +2160,7 @@ export function ReproductionLog({
                                     disabled={
                                         commandMode
                                             ? runningCliCommand || commandRuntimeUnavailable
-                                            : codexMode
-                                                ? !messageInput.trim() || isBusy
-                                                : !messageInput.trim() || isBusy || missingCustomModel
+                                            : !messageInput.trim() || isBusy || missingCustomModel
                                     }
                                     title={
                                         commandMode
@@ -2092,9 +2169,7 @@ export function ReproductionLog({
                                                 : runningCliCommand
                                                     ? "Running command"
                                                     : "Run command in composer"
-                                            : codexMode
-                                                ? "Delegate this task to Codex"
-                                                : missingCustomModel
+                                            : missingCustomModel
                                                     ? "Enter a full Claude model name first"
                                                     : "Send to Claude Code"
                                     }
@@ -2105,12 +2180,6 @@ export function ReproductionLog({
                                         ) : (
                                             <Terminal className="h-4 w-4" />
                                         )
-                                    ) : codexMode ? (
-                                        isBusy ? (
-                                            <Loader2 className="h-4 w-4 animate-spin" />
-                                        ) : (
-                                            <Bot className="h-4 w-4" />
-                                        )
                                     ) : (
                                         <Send className="h-4 w-4" />
                                     )}
@@ -2119,7 +2188,7 @@ export function ReproductionLog({
 
                             <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-500">
                                 <span>{composerHelperText}</span>
-                                {!commandMode && !codexMode ? (
+                                {!commandMode ? (
                                     <span className="hidden md:inline">
                                         Claude Code aliases: {knownModelAliases.join(", ")}
                                     </span>

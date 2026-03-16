@@ -150,12 +150,6 @@ function paperStatusClassName(status: StudioPaperStatus): string {
   return "border-zinc-200 bg-zinc-100 text-zinc-600"
 }
 
-function runtimeBadgeClassName(source: StudioRuntimeInfo["source"]): string {
-  if (source === "claude_code") return "border-emerald-200 bg-emerald-50 text-emerald-700"
-  if (source === "anthropic_api") return "border-amber-200 bg-amber-50 text-amber-700"
-  return "border-slate-200 bg-slate-100 text-slate-600"
-}
-
 function formatWorkspaceLabel(outputDir: string | null | undefined): string {
   if (!outputDir) return "Workspace not configured"
   const segments = outputDir.split("/").filter(Boolean)
@@ -189,8 +183,7 @@ function EmptyWorkspace({ onBack }: { onBack: () => void }) {
       <div className="max-w-md px-6 text-center">
         <h2 className="text-lg font-semibold text-slate-900">DeepCode Studio</h2>
         <p className="mt-2 text-sm text-slate-500">
-          Delegation Monitor 已经收进 Studio 主界面。先从论文工作区进入，再打开对应 paper 的
-          monitor 视图。
+          Monitor now lives inside Studio. Open a paper first, then switch to the Monitor view.
         </p>
         <Button className="mt-5" onClick={onBack}>
           Back to Studio
@@ -333,7 +326,7 @@ function LeftRail({
               Context: {contextLabel}
             </span>
             <span className="rounded-md border border-slate-200 bg-[#eef0ea] px-2 py-1 text-[10px] font-medium text-slate-600">
-              Subagents: {activeAgents} / {subagentEvents}
+              Monitor: {activeAgents} active · {subagentEvents} events
             </span>
           </div>
         </div>
@@ -404,15 +397,15 @@ function RightInspector({
     <div className="flex h-full min-h-0 flex-col bg-slate-50 text-slate-900">
       <div className="border-b border-slate-200 bg-white px-4 py-3">
         <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-          Runtime
+          Monitor
         </p>
         <div className="mt-2 flex items-center justify-between gap-3">
           <div className="min-w-0">
-            <h2 className="text-sm font-semibold text-slate-900">Claude Code Runtime</h2>
+            <h2 className="text-sm font-semibold text-slate-900">Claude Code Monitor</h2>
             <p className="mt-1 text-[11px] text-slate-500">
               {runtimeLoading ? "Checking Claude Code..." : runtimeInfo.statusLabel}
               {" · "}
-              {activeAgents} active agents, {subagentEvents} delegation events
+              {activeAgents} active agents · {subagentEvents} delegation events
             </p>
           </div>
         </div>
@@ -555,12 +548,10 @@ function CenterSurface({
             {activeView === "commands"
               ? "Quick Claude Code and OpenCode presets are available from the console composer."
               : visibleView === "board"
-              ? "Delegation graph and latest monitor session snapshot."
+              ? "Delegation graph, runtime details, and the latest monitor session snapshot."
               : visibleView === "context"
                 ? "Paper context pack and monitor preparation actions."
-                : runtimeLoading
-                  ? "Checking Claude Code runtime..."
-                  : `Chat with ${runtimeInfo.label}, inspect file changes, and hand off to the monitor when needed.`}
+                : "Threaded Claude Code chat with slash controls. Monitor mirrors runtime and delegation activity."}
           </p>
         </div>
       </div>
@@ -682,6 +673,7 @@ export function AgentWorkspace({
   const selectedPaperStatus = selectedPaper?.status || "draft"
   const projectDir = selectedPaper?.outputDir || selectedPaper?.lastGenCodeResult?.outputDir || null
   const filesTouchedCount = Object.values(filesTouched).flat().length
+  const showMonitorInspector = centerView === "board"
   const contextLabel = contextPackLoading
     ? "Generating"
     : contextPack?.context_pack_id || selectedPaper?.contextPackId
@@ -805,7 +797,11 @@ export function AgentWorkspace({
           <div className="min-w-0">
             <div className="text-sm font-semibold text-slate-900">DeepCode Studio</div>
             <div className="truncate text-[11px] text-slate-500">
-              {runtimeLoading ? "Checking Claude Code runtime..." : `${runtimeInfo.label} · ${runtimeInfo.statusLabel}`}
+              {showMonitorInspector
+                ? runtimeLoading
+                  ? "Monitor is resolving runtime details..."
+                  : `Monitor · ${runtimeInfo.label} · ${runtimeInfo.statusLabel}`
+                : "Chat focus"}
             </div>
           </div>
 
@@ -817,20 +813,6 @@ export function AgentWorkspace({
             </span>
             <Badge variant="outline" className="max-w-[320px] truncate border-slate-200 bg-slate-100 text-slate-700">
               {selectedPaperTitle}
-            </Badge>
-            <Badge
-              variant="outline"
-              className={`border ${runtimeBadgeClassName(runtimeInfo.source)}`}
-            >
-              {runtimeLoading ? "Checking runtime" : runtimeInfo.label}
-            </Badge>
-            {runtimeInfo.version ? (
-              <Badge variant="outline" className="border-slate-200 text-slate-600">
-                {runtimeInfo.version}
-              </Badge>
-            ) : null}
-            <Badge variant="outline" className="max-w-[200px] truncate border-slate-200 text-slate-600">
-              {runtimeInfo.workspaceLabel}
             </Badge>
             {selectedSessionId ? (
               <Badge variant="outline" className="border-slate-200 font-mono text-[11px] text-slate-600">
@@ -887,7 +869,7 @@ export function AgentWorkspace({
 
           <ResizeDivider isActive={dragState?.side === "left"} onMouseDown={beginResize("left")} />
 
-          <div className="min-w-[380px] flex-1 border-r border-slate-200 bg-slate-100">
+          <div className={`min-w-[380px] flex-1 bg-slate-100 ${showMonitorInspector ? "border-r border-slate-200" : ""}`}>
             <CenterSurface
               selectedPaperId={selectedPaperId}
               activeView={centerView}
@@ -897,23 +879,27 @@ export function AgentWorkspace({
             />
           </div>
 
-          <ResizeDivider isActive={dragState?.side === "right"} onMouseDown={beginResize("right")} />
+          {showMonitorInspector ? (
+            <>
+              <ResizeDivider isActive={dragState?.side === "right"} onMouseDown={beginResize("right")} />
 
-          <div
-            className="shrink-0 bg-slate-50"
-            style={{ width: panelWidths.rightWidth }}
-          >
-            <RightInspector
-              activeAgents={activeAgents}
-              subagentEvents={codexDelegations.length}
-              eventCount={feed.length}
-              fileCount={filesTouchedCount}
-              runtimeInfo={runtimeInfo}
-              runtimeLoading={runtimeLoading}
-              activeView={inspectorView}
-              onViewChange={setInspectorView}
-            />
-          </div>
+              <div
+                className="shrink-0 bg-slate-50"
+                style={{ width: panelWidths.rightWidth }}
+              >
+                <RightInspector
+                  activeAgents={activeAgents}
+                  subagentEvents={codexDelegations.length}
+                  eventCount={feed.length}
+                  fileCount={filesTouchedCount}
+                  runtimeInfo={runtimeInfo}
+                  runtimeLoading={runtimeLoading}
+                  activeView={inspectorView}
+                  onViewChange={setInspectorView}
+                />
+              </div>
+            </>
+          ) : null}
         </div>
       </div>
 

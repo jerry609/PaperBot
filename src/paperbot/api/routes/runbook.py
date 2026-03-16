@@ -167,10 +167,7 @@ def _allowed_workdir(workdir: Path) -> bool:
     return False
 
 
-def _normalize_user_directory(raw_path: str, field_name: str) -> Path:
-    """
-    Normalize a user-supplied directory path and enforce allow-prefix policy.
-    """
+def _normalize_path_input(raw_path: str, field_name: str) -> Path:
     raw = raw_path.strip()
     if not raw:
         raise HTTPException(status_code=400, detail=f"{field_name} cannot be empty")
@@ -188,7 +185,15 @@ def _normalize_user_directory(raw_path: str, field_name: str) -> Path:
 
     if not os.path.isabs(normalized):
         normalized = str((Path.cwd() / normalized).resolve(strict=False))
-    normalized_real = os.path.realpath(normalized)
+    return Path(os.path.realpath(normalized)).resolve(strict=False)
+
+
+def _normalize_user_directory(raw_path: str, field_name: str) -> Path:
+    """
+    Normalize a user-supplied directory path and enforce allow-prefix policy.
+    """
+    resolved_input = _normalize_path_input(raw_path, field_name)
+    normalized_real = os.path.realpath(str(resolved_input))
 
     for prefix in _allowed_workdir_prefixes():
         prefix_str = str(prefix)
@@ -203,6 +208,28 @@ def _normalize_user_directory(raw_path: str, field_name: str) -> Path:
             raise HTTPException(status_code=403, detail=f"{field_name} is not allowed")
 
     raise HTTPException(status_code=403, detail=f"{field_name} is not allowed")
+
+
+def _allowlist_mutation_roots() -> List[Path]:
+    roots: List[Path] = [Path(tempfile.gettempdir()).resolve()]
+    try:
+        roots.append(Path.cwd().resolve())
+    except Exception:
+        pass
+    try:
+        roots.append(Path.home().resolve())
+    except Exception:
+        pass
+
+    unique: List[Path] = []
+    seen = set()
+    for root in roots:
+        key = str(root)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(root)
+    return unique
 
 
 class PrepareProjectDirRequest(BaseModel):
@@ -270,9 +297,12 @@ async def add_allowed_dir(body: AddAllowedDirRequest):
     if not raw or "\x00" in raw:
         raise HTTPException(status_code=400, detail="invalid directory path")
 
-    # Normalize and validate against configured safe prefixes before touching FS.
-    # This prevents path-injection style access to arbitrary locations.
-    resolved = _normalize_user_directory(raw, field_name="directory")
+    resolved = _normalize_path_input(raw, field_name="directory")
+    if not any(_is_under_prefix(resolved, root) for root in _allowlist_mutation_roots()):
+        raise HTTPException(
+            status_code=403,
+            detail="directory is outside the allowed mutation roots",
+        )
 
     denied_roots = {Path(denied).resolve() for denied in _DENIED_PATHS}
     if resolved in denied_roots:
