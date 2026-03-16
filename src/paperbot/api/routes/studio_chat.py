@@ -1,11 +1,9 @@
 """
-Studio Chat API Route - Claude CLI Integration for DeepStudio
+Studio chat transport for the PaperBot Studio shell.
 
-Spawns Claude CLI as a subprocess and streams responses.
-Supports three modes like CodePilot:
-- Code: execution-capable only when explicitly enabled by env
-- Plan: planning only, no execution
-- Ask: text-only conversation, no tools
+Chat turns run Claude CLI in print mode and stream structured NDJSON events.
+Standalone utility commands such as ``claude mcp`` and ``claude doctor`` go
+through a separate management-command path instead of the chat stream.
 """
 
 import asyncio
@@ -47,7 +45,7 @@ _API_FALLBACK_MODEL_ALIASES = {
 }
 _KNOWN_CLAUDE_MODEL_ALIASES = ["sonnet", "opus"]
 _ALLOWED_MANAGEMENT_COMMANDS: Dict[str, set[str]] = {
-    "claude": {"agents", "mcp", "auth"},
+    "claude": {"agents", "mcp", "auth", "doctor"},
     "opencode": {"agent", "mcp", "providers", "models"},
 }
 
@@ -213,6 +211,7 @@ def build_claude_cli_command_args(
     effective_mode: Mode,
     prompt: str,
 ) -> List[str]:
+    # Studio chat uses print mode rather than an interactive Claude TTY.
     model_id = get_model_id(request.model, for_cli=True)
     cmd: List[str] = ["--model", model_id]
 
@@ -251,6 +250,7 @@ def build_claude_cli_command_args(
 def build_management_command(
     request: StudioCommandRequest,
 ) -> List[str]:
+    # Runtime utility commands are intentionally limited to a small allowlist.
     runtime = request.runtime
     command = request.command.strip()
     if command not in _ALLOWED_MANAGEMENT_COMMANDS[runtime]:

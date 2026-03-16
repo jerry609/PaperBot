@@ -47,12 +47,12 @@ interface AgentWorkspaceProps {
 
 const LEFT_RAIL_STORAGE_KEY = "paperbot.studio.agent-workspace.left-width"
 const RIGHT_INSPECTOR_STORAGE_KEY = "paperbot.studio.agent-workspace.right-width"
-const LEFT_RAIL_MIN_WIDTH = 260
-const LEFT_RAIL_MAX_WIDTH = 420
-const RIGHT_INSPECTOR_MIN_WIDTH = 320
-const RIGHT_INSPECTOR_MAX_WIDTH = 460
-const DEFAULT_LEFT_RAIL_WIDTH = 296
-const DEFAULT_RIGHT_INSPECTOR_WIDTH = 356
+const LEFT_RAIL_MIN_WIDTH = 248
+const LEFT_RAIL_MAX_WIDTH = 380
+const RIGHT_INSPECTOR_MIN_WIDTH = 300
+const RIGHT_INSPECTOR_MAX_WIDTH = 420
+const DEFAULT_LEFT_RAIL_WIDTH = 280
+const DEFAULT_RIGHT_INSPECTOR_WIDTH = 320
 
 type PanelWidths = {
   leftWidth: number
@@ -203,12 +203,19 @@ function TaskRail({
   tasks: AgentTask[]
 }) {
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div className="flex h-full min-h-0 flex-col bg-[#f8f9f6]">
       <div className="border-b border-slate-200 px-4 py-3">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-          Agent Queue
-        </p>
-        <h2 className="mt-1 truncate text-sm font-semibold text-slate-900">{selectedPaperTitle}</h2>
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+              Tasks
+            </p>
+            <h2 className="mt-1 truncate text-sm font-semibold text-slate-900">{selectedPaperTitle}</h2>
+          </div>
+          <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-slate-500">
+            {tasks.length}
+          </span>
+        </div>
         {selectedSessionId ? (
           <p className="mt-1 font-mono text-[11px] text-slate-500">{selectedSessionId}</p>
         ) : (
@@ -224,7 +231,7 @@ function TaskRail({
             {tasks.map((task) => {
               const assignee = getAgentPresentation(task.assignee)
               return (
-                <li key={task.id} className="border border-slate-200 bg-white px-3 py-3 shadow-sm">
+                <li key={task.id} className="rounded-2xl border border-slate-200 bg-white px-3 py-3 shadow-sm">
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
                       <p className="truncate text-sm font-medium text-slate-900">{task.title}</p>
@@ -279,56 +286,58 @@ function LeftRail({
   onViewChange: (value: LeftRailView) => void
 }) {
   return (
-    <div className="flex h-full min-h-0 flex-col bg-slate-50">
+    <div className="flex h-full min-h-0 flex-col bg-[#f8f9f6]">
       <div className="border-b border-slate-200 bg-[#f4f5f1] px-3 py-3">
-        <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-              Paper Summary
-            </p>
-            <h2 className="mt-1 truncate text-sm font-semibold text-slate-900">{selectedPaperTitle}</h2>
-            {selectedSessionId ? (
-              <p className="mt-1 font-mono text-[11px] text-slate-500">{selectedSessionId}</p>
-            ) : (
-              <p className="mt-1 text-[11px] text-slate-500">No active session</p>
-            )}
-          </div>
-          <span
-            className={`shrink-0 rounded-full border px-2 py-1 text-[10px] font-medium ${paperStatusClassName(selectedPaperStatus)}`}
-          >
-            {paperStatusLabel(selectedPaperStatus)}
-          </span>
-        </div>
-
-        <div className="mt-3 border-t border-slate-200 pt-3">
-          <div className="flex items-center justify-between gap-3">
+        <div className="rounded-[24px] border border-slate-200 bg-white px-3 py-3 shadow-sm">
+          <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Workspace</p>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+                Workspace
+              </p>
+              <h2 className="mt-1 truncate text-sm font-semibold text-slate-900">{selectedPaperTitle}</h2>
+              <p className="mt-1 text-[11px] text-slate-500">
+                {selectedSessionId ? selectedSessionId : "No active session"}
+              </p>
+            </div>
+            <span
+              className={`shrink-0 rounded-full border px-2 py-1 text-[10px] font-medium ${paperStatusClassName(selectedPaperStatus)}`}
+            >
+              {paperStatusLabel(selectedPaperStatus)}
+            </span>
+          </div>
+
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <div className="rounded-2xl border border-slate-200 bg-[#f7f8f4] px-3 py-2">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">Project</p>
               <p className="mt-1 truncate text-[12px] font-medium text-slate-800">
                 {formatWorkspaceLabel(projectDir)}
               </p>
             </div>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-7 shrink-0 gap-1.5 px-2 text-[11px] text-slate-600 hover:text-slate-900"
-              onClick={onOpenInVSCode}
-              disabled={!projectDir}
-              title={projectDir ? `Open ${projectDir} in VS Code` : "Set up a workspace first"}
-            >
-              <ExternalLink className="h-3.5 w-3.5" />
-              Open
-            </Button>
+            <div className="rounded-2xl border border-slate-200 bg-[#f7f8f4] px-3 py-2">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">Context</p>
+              <p className="mt-1 truncate text-[12px] font-medium text-slate-800">{contextLabel}</p>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-[#f7f8f4] px-3 py-2">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">Agents</p>
+              <p className="mt-1 truncate text-[12px] font-medium text-slate-800">{activeAgents} active</p>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-[#f7f8f4] px-3 py-2">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">Monitor</p>
+              <p className="mt-1 truncate text-[12px] font-medium text-slate-800">{subagentEvents} events</p>
+            </div>
           </div>
 
-          <div className="mt-3 flex flex-wrap gap-1.5">
-            <span className="rounded-md border border-slate-200 bg-[#eef0ea] px-2 py-1 text-[10px] font-medium text-slate-600">
-              Context: {contextLabel}
-            </span>
-            <span className="rounded-md border border-slate-200 bg-[#eef0ea] px-2 py-1 text-[10px] font-medium text-slate-600">
-              Monitor: {activeAgents} active · {subagentEvents} events
-            </span>
-          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="mt-3 h-8 w-full justify-center gap-1.5 rounded-full border border-slate-200 bg-[#f7f8f4] text-[11px] text-slate-600 hover:bg-white hover:text-slate-900"
+            onClick={onOpenInVSCode}
+            disabled={!projectDir}
+            title={projectDir ? `Open ${projectDir} in VS Code` : "Set up a workspace first"}
+          >
+            <ExternalLink className="h-3.5 w-3.5" />
+            Open in VS Code
+          </Button>
         </div>
       </div>
 
@@ -338,14 +347,14 @@ function LeftRail({
         className="flex h-full min-h-0 flex-col"
       >
         <div className="border-b border-slate-200 px-3 py-3">
-          <TabsList className="grid w-full grid-cols-3 rounded-none bg-transparent p-0">
-            <TabsTrigger value="threads" className="rounded-none border-b-2 border-transparent px-1 text-[11px] text-slate-500 shadow-none data-[state=active]:border-slate-900 data-[state=active]:bg-transparent data-[state=active]:text-slate-900">
+          <TabsList className="grid w-full grid-cols-3 rounded-2xl border border-slate-200 bg-white p-1">
+            <TabsTrigger value="threads" className="rounded-xl border border-transparent px-1 text-[11px] text-slate-500 shadow-none data-[state=active]:border-slate-200 data-[state=active]:bg-[#eef1ea] data-[state=active]:text-slate-900">
               Threads
             </TabsTrigger>
-            <TabsTrigger value="tasks" className="rounded-none border-b-2 border-transparent px-1 text-[11px] text-slate-500 shadow-none data-[state=active]:border-slate-900 data-[state=active]:bg-transparent data-[state=active]:text-slate-900">
+            <TabsTrigger value="tasks" className="rounded-xl border border-transparent px-1 text-[11px] text-slate-500 shadow-none data-[state=active]:border-slate-200 data-[state=active]:bg-[#eef1ea] data-[state=active]:text-slate-900">
               Tasks
             </TabsTrigger>
-            <TabsTrigger value="workspace" className="rounded-none border-b-2 border-transparent px-1 text-[11px] text-slate-500 shadow-none data-[state=active]:border-slate-900 data-[state=active]:bg-transparent data-[state=active]:text-slate-900">
+            <TabsTrigger value="workspace" className="rounded-xl border border-transparent px-1 text-[11px] text-slate-500 shadow-none data-[state=active]:border-slate-200 data-[state=active]:bg-[#eef1ea] data-[state=active]:text-slate-900">
               Workspace
             </TabsTrigger>
           </TabsList>
@@ -394,41 +403,44 @@ function RightInspector({
   onViewChange: (value: InspectorView) => void
 }) {
   return (
-    <div className="flex h-full min-h-0 flex-col bg-slate-50 text-slate-900">
-      <div className="border-b border-slate-200 bg-white px-4 py-3">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-          Monitor
-        </p>
-        <div className="mt-2 flex items-center justify-between gap-3">
-          <div className="min-w-0">
-            <h2 className="text-sm font-semibold text-slate-900">Claude Code Monitor</h2>
-            <p className="mt-1 text-[11px] text-slate-500">
-              {runtimeLoading ? "Checking Claude Code..." : runtimeInfo.statusLabel}
-              {" · "}
-              {activeAgents} active agents · {subagentEvents} delegation events
-            </p>
+    <div className="flex h-full min-h-0 flex-col bg-[#f8f9f6] text-slate-900">
+      <div className="border-b border-slate-200 bg-[#f4f5f1] px-4 py-3">
+        <div className="rounded-[24px] border border-slate-200 bg-white px-3 py-3 shadow-sm">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+            Monitor
+          </p>
+          <div className="mt-2 flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <h2 className="text-sm font-semibold text-slate-900">Claude Code Monitor</h2>
+              <p className="mt-1 text-[11px] text-slate-500">
+                {runtimeLoading ? "Checking Claude Code..." : runtimeInfo.statusLabel}
+              </p>
+            </div>
+            <span className="rounded-full border border-slate-200 bg-[#f7f8f4] px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-slate-500">
+              Live
+            </span>
           </div>
-        </div>
 
-        <div className="mt-3 grid grid-cols-2 gap-2">
-          <div className="border border-slate-200 bg-slate-50 px-3 py-2">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-              Runtime
-            </p>
-            <p className="mt-1 text-sm font-semibold text-slate-900">
-              {runtimeLoading ? "Checking..." : runtimeInfo.label}
-            </p>
-            <p className="text-[11px] text-slate-500">{runtimeInfo.version ?? runtimeInfo.detail}</p>
+          <div className="mt-3 grid grid-cols-3 gap-2">
+            <div className="rounded-2xl border border-slate-200 bg-[#f7f8f4] px-3 py-2">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">Runtime</p>
+              <p className="mt-1 truncate text-[12px] font-medium text-slate-800">
+                {runtimeLoading ? "Checking..." : runtimeInfo.label}
+              </p>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-[#f7f8f4] px-3 py-2">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">Agents</p>
+              <p className="mt-1 truncate text-[12px] font-medium text-slate-800">{activeAgents} active</p>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-[#f7f8f4] px-3 py-2">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">Events</p>
+              <p className="mt-1 truncate text-[12px] font-medium text-slate-800">{eventCount} total</p>
+            </div>
           </div>
-          <div className="border border-slate-200 bg-slate-50 px-3 py-2">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-              Workspace
-            </p>
-            <p className="mt-1 text-sm font-semibold text-slate-900">{runtimeInfo.workspaceLabel}</p>
-            <p className="text-[11px] text-slate-500">
-              {eventCount} events · {fileCount} files touched
-            </p>
-          </div>
+
+          <p className="mt-3 text-[11px] text-slate-500">
+            {runtimeInfo.workspaceLabel} · {subagentEvents} delegation events · {fileCount} files touched
+          </p>
         </div>
       </div>
 
@@ -441,25 +453,25 @@ function RightInspector({
         onValueChange={(value) => onViewChange(value as InspectorView)}
         className="flex flex-1 min-h-0 flex-col"
       >
-        <div className="border-b border-slate-200 bg-slate-50 px-3 py-2">
-          <TabsList className="grid w-full grid-cols-5 rounded-none bg-transparent p-0">
-            <TabsTrigger value="live" className="rounded-none border-b-2 border-transparent px-1 text-[11px] text-slate-500 shadow-none data-[state=active]:border-slate-900 data-[state=active]:bg-transparent data-[state=active]:text-slate-900">
+        <div className="border-b border-slate-200 bg-slate-50 px-3 py-3">
+          <TabsList className="grid w-full grid-cols-5 rounded-2xl border border-slate-200 bg-white p-1">
+            <TabsTrigger value="live" className="rounded-xl border border-transparent px-1 text-[11px] text-slate-500 shadow-none data-[state=active]:border-slate-200 data-[state=active]:bg-[#eef1ea] data-[state=active]:text-slate-900">
               <Activity className="mr-1 h-3.5 w-3.5" />
               Live
             </TabsTrigger>
-            <TabsTrigger value="tools" className="rounded-none border-b-2 border-transparent px-1 text-[11px] text-slate-500 shadow-none data-[state=active]:border-slate-900 data-[state=active]:bg-transparent data-[state=active]:text-slate-900">
+            <TabsTrigger value="tools" className="rounded-xl border border-transparent px-1 text-[11px] text-slate-500 shadow-none data-[state=active]:border-slate-200 data-[state=active]:bg-[#eef1ea] data-[state=active]:text-slate-900">
               <Wrench className="mr-1 h-3.5 w-3.5" />
               Tools
             </TabsTrigger>
-            <TabsTrigger value="files" className="rounded-none border-b-2 border-transparent px-1 text-[11px] text-slate-500 shadow-none data-[state=active]:border-slate-900 data-[state=active]:bg-transparent data-[state=active]:text-slate-900">
+            <TabsTrigger value="files" className="rounded-xl border border-transparent px-1 text-[11px] text-slate-500 shadow-none data-[state=active]:border-slate-200 data-[state=active]:bg-[#eef1ea] data-[state=active]:text-slate-900">
               <FileCode2 className="mr-1 h-3.5 w-3.5" />
               Files
             </TabsTrigger>
-            <TabsTrigger value="agents" className="rounded-none border-b-2 border-transparent px-1 text-[11px] text-slate-500 shadow-none data-[state=active]:border-slate-900 data-[state=active]:bg-transparent data-[state=active]:text-slate-900">
+            <TabsTrigger value="agents" className="rounded-xl border border-transparent px-1 text-[11px] text-slate-500 shadow-none data-[state=active]:border-slate-200 data-[state=active]:bg-[#eef1ea] data-[state=active]:text-slate-900">
               <Bot className="mr-1 h-3.5 w-3.5" />
               Agents
             </TabsTrigger>
-            <TabsTrigger value="graph" className="rounded-none border-b-2 border-transparent px-1 text-[11px] text-slate-500 shadow-none data-[state=active]:border-slate-900 data-[state=active]:bg-transparent data-[state=active]:text-slate-900">
+            <TabsTrigger value="graph" className="rounded-xl border border-transparent px-1 text-[11px] text-slate-500 shadow-none data-[state=active]:border-slate-200 data-[state=active]:bg-[#eef1ea] data-[state=active]:text-slate-900">
               <GitBranch className="mr-1 h-3.5 w-3.5" />
               Graph
             </TabsTrigger>
@@ -505,25 +517,25 @@ function CenterSurface({
     <div className="flex h-full min-h-0 flex-col bg-[#f1f2ed]">
       <div className="border-b border-slate-200 bg-[#f4f5f1] px-4 py-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-[#e7e9e3] p-1">
+          <div className="inline-flex items-center gap-1 rounded-2xl border border-slate-200 bg-white p-1 shadow-sm">
             <button
               type="button"
               onClick={() => onViewChange("log")}
-              className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
+              className={`inline-flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-medium transition-colors ${
                 visibleView === "log"
-                  ? "border-slate-300 bg-[#f6f7f3] text-slate-900 shadow-sm"
+                  ? "border-slate-200 bg-[#eef1ea] text-slate-900 shadow-sm"
                   : "border-transparent bg-transparent text-slate-500 hover:text-slate-700"
               }`}
             >
               <MessageSquare className="h-3.5 w-3.5" />
-              Console
+              Chat
             </button>
             <button
               type="button"
               onClick={() => onViewChange("board")}
-              className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
+              className={`inline-flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-medium transition-colors ${
                 visibleView === "board"
-                  ? "border-slate-300 bg-[#f6f7f3] text-slate-900 shadow-sm"
+                  ? "border-slate-200 bg-[#eef1ea] text-slate-900 shadow-sm"
                   : "border-transparent bg-transparent text-slate-500 hover:text-slate-700"
               }`}
             >
@@ -533,9 +545,9 @@ function CenterSurface({
             <button
               type="button"
               onClick={() => onViewChange("context")}
-              className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
+              className={`inline-flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-medium transition-colors ${
                 visibleView === "context"
-                  ? "border-slate-300 bg-[#f6f7f3] text-slate-900 shadow-sm"
+                  ? "border-slate-200 bg-[#eef1ea] text-slate-900 shadow-sm"
                   : "border-transparent bg-transparent text-slate-500 hover:text-slate-700"
               }`}
             >
@@ -544,20 +556,25 @@ function CenterSurface({
             </button>
           </div>
 
-          <p className="text-xs text-slate-500">
-            {activeView === "commands"
-              ? "Quick Claude Code and OpenCode presets are available from the console composer."
-              : visibleView === "board"
-              ? "Delegation graph, runtime details, and the latest monitor session snapshot."
-              : visibleView === "context"
-                ? "Paper context pack and monitor preparation actions."
-                : "Threaded Claude Code chat with slash controls. Monitor mirrors runtime and delegation activity."}
-          </p>
+          <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+            <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5">
+              {runtimeLoading ? "Checking runtime" : runtimeInfo.label}
+            </span>
+            <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5">
+              {activeView === "commands"
+                ? "Claude commands"
+                : visibleView === "board"
+                  ? "Monitor focus"
+                  : visibleView === "context"
+                    ? "Context prep"
+                    : "Chat focus"}
+            </span>
+          </div>
         </div>
       </div>
 
       <div className="min-h-0 flex-1 bg-[#eceee8] p-3">
-        <div className="h-full min-h-0 overflow-hidden border border-slate-200 bg-[#f7f7f4]">
+        <div className="h-full min-h-0 overflow-hidden rounded-[28px] border border-slate-200 bg-[#f7f7f4] shadow-[0_24px_80px_rgba(15,23,42,0.05)]">
           {activeView === "board" ? (
             <AgentBoard paperId={selectedPaperId} showSidebar={false} monitorMode />
           ) : (
@@ -664,9 +681,6 @@ export function AgentWorkspace({
     return studioTasks.filter((task) => task.paperId === selectedPaperId)
   }, [selectedPaperId, studioTasks])
 
-  const completedTasks = boardTasks.filter(
-    (task) => task.status === "done" || task.status === "human_review",
-  ).length
   const activeAgents = Object.values(agentStatuses).filter((entry) => entry.status === "working").length
   const selectedSessionId = selectedPaper?.boardSessionId || boardSessionId || null
   const selectedPaperTitle = selectedPaper?.title || "Untitled paper"
@@ -776,12 +790,12 @@ export function AgentWorkspace({
 
   return (
     <div className="flex h-screen min-h-0 flex-col bg-[#f1f2ed]">
-      <div className="border-b border-slate-200 bg-white">
-        <div className="flex min-h-14 items-center gap-3 px-4 py-3">
+      <div className="border-b border-slate-200 bg-[#f6f7f3]">
+        <div className="flex min-h-12 items-center gap-3 px-4 py-2.5">
           <Button
             variant="ghost"
             size="sm"
-            className="h-8 gap-1.5"
+            className="h-8 gap-1.5 rounded-full border border-transparent px-3 text-slate-600 hover:bg-white hover:text-slate-900"
             onClick={() => {
               if (onBackToStudio) {
                 onBackToStudio()
@@ -795,7 +809,8 @@ export function AgentWorkspace({
           </Button>
 
           <div className="min-w-0">
-            <div className="text-sm font-semibold text-slate-900">DeepCode Studio</div>
+            <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">DeepCode Studio</div>
+            <div className="truncate text-sm font-semibold text-slate-900">{selectedPaperTitle}</div>
             <div className="truncate text-[11px] text-slate-500">
               {showMonitorInspector
                 ? runtimeLoading
@@ -811,32 +826,16 @@ export function AgentWorkspace({
             >
               {paperStatusLabel(selectedPaperStatus)}
             </span>
-            <Badge variant="outline" className="max-w-[320px] truncate border-slate-200 bg-slate-100 text-slate-700">
-              {selectedPaperTitle}
-            </Badge>
             {selectedSessionId ? (
               <Badge variant="outline" className="border-slate-200 font-mono text-[11px] text-slate-600">
                 {selectedSessionId.slice(0, 12)}
               </Badge>
             ) : null}
-            <Badge variant="outline" className="border-slate-200 text-slate-600">
-              {completedTasks}/{boardTasks.length} done
-            </Badge>
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-8 gap-1.5 border-slate-200 text-slate-700"
-              onClick={() => {
-                if (projectDir) {
-                  window.open(`vscode://file${projectDir}`, "_blank")
-                }
-              }}
-              disabled={!projectDir}
-              title={projectDir ? `Open ${projectDir} in VS Code` : "Set up a workspace first"}
-            >
-              <ExternalLink className="h-3.5 w-3.5" />
-              Open in VS Code
-            </Button>
+            {showMonitorInspector ? (
+              <Badge variant="outline" className="border-slate-200 text-slate-600">
+                {activeAgents} active
+              </Badge>
+            ) : null}
           </div>
         </div>
 
@@ -907,7 +906,7 @@ export function AgentWorkspace({
         <Tabs defaultValue="console" className="flex h-full w-full flex-col">
           <TabsList className="grid w-full grid-cols-4 rounded-none border-b bg-white p-0">
             <TabsTrigger value="threads" className="rounded-none">Threads</TabsTrigger>
-            <TabsTrigger value="console" className="rounded-none">Console</TabsTrigger>
+            <TabsTrigger value="console" className="rounded-none">Chat</TabsTrigger>
             <TabsTrigger value="board" className="rounded-none">Graph</TabsTrigger>
             <TabsTrigger value="monitor" className="rounded-none">Monitor</TabsTrigger>
           </TabsList>

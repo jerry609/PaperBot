@@ -3,9 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
-import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Textarea } from "@/components/ui/textarea"
 import { useStudioStore, AgentAction } from "@/lib/store/studio-store"
@@ -18,7 +16,6 @@ import { ContextDialogPanel } from "./ContextDialogPanel"
 import { AgentBoard } from "./AgentBoard"
 import {
     buildCommandPreview,
-    CliCommandRunner,
     type ActiveCommand as CliActiveCommand,
     type CommandResult as CliCommandResult,
     getCommandPresets,
@@ -118,36 +115,12 @@ function shouldReplaceThinkingMessage(current: string | null, next: string): boo
     return true
 }
 
-function effectivePermissionMode(
-    mode: Mode,
-    codeModeEnabled: boolean | null,
-): "acceptEdits" | "plan" | "default" {
-    if (mode === "Code") return codeModeEnabled === false ? "plan" : "acceptEdits"
-    if (mode === "Plan") return "plan"
-    return "default"
-}
-
-type StudioCommandPreviewOptions = {
-    mode: Mode
-    model: string
-    continueLast: boolean
-    resumeSession: string
-    cliSessionId: string
-    agent: string
-    mcpConfig: string[]
-    tools: string[]
-    allowedTools: string[]
-    addDirs: string[]
-    settings: string
-    effort: Exclude<EffortOption, "default"> | null
-}
-
 type SlashCommandItem = {
     id: string
     command: string
     label: string
     description: string
-    group: "Modes" | "Views" | "Models" | "Options" | "Quick Commands"
+    group: "Claude Code" | "Runtime" | "Session"
     keywords: string[]
     icon: React.ElementType
     onSelect: (remainder: string) => void
@@ -176,80 +149,6 @@ function splitLineValues(value: string): string[] {
 
 function resolveRequestedModel(modelOption: string, customModel: string): string {
     return modelOption === "custom" ? customModel.trim() : modelOption.trim()
-}
-
-function formatPreviewToken(token: string): string {
-    if (!token) return '""'
-    if (/\s|,|\{|\}|\[|\]|"/.test(token)) {
-        return JSON.stringify(token)
-    }
-    return token
-}
-
-function slashifyModelAlias(alias: string): string {
-    return `model-${alias.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "")}`
-}
-
-function appendPreviewOption(parts: string[], flag: string, values: string[]) {
-    if (values.length === 0) return
-    parts.push(flag, ...values)
-}
-
-function appendJoinedPreviewOption(parts: string[], flag: string, values: string[]) {
-    if (values.length === 0) return
-    parts.push(flag, values.join(","))
-}
-
-function buildStudioCommandPreview(
-    runtimeInfo: StudioRuntimeInfo,
-    options: StudioCommandPreviewOptions,
-): string {
-    if (runtimeInfo.source === "anthropic_api") {
-        return "Fallback path: direct Anthropic API call, not Claude Code CLI"
-    }
-    if (runtimeInfo.source !== "claude_code") {
-        return "Resolving Claude Code CLI surface..."
-    }
-
-    const normalizedModel = options.model.trim() || "sonnet"
-    const permissionMode = effectivePermissionMode(options.mode, runtimeInfo.codeModeEnabled)
-    const parts = ["claude", "--model", normalizedModel]
-
-    if (options.continueLast) {
-        parts.push("--continue")
-    }
-
-    if (options.resumeSession.trim()) {
-        parts.push("--resume", options.resumeSession.trim())
-    }
-
-    if (options.cliSessionId.trim()) {
-        parts.push("--session-id", options.cliSessionId.trim())
-    }
-
-    if (options.agent.trim()) {
-        parts.push("--agent", options.agent.trim())
-    }
-
-    appendPreviewOption(parts, "--add-dir", options.addDirs)
-    appendPreviewOption(parts, "--mcp-config", options.mcpConfig)
-    appendJoinedPreviewOption(parts, "--tools", options.tools)
-    appendJoinedPreviewOption(parts, "--allowed-tools", options.allowedTools)
-
-    if (options.settings.trim()) {
-        parts.push("--settings", options.settings.trim())
-    }
-
-    if (options.effort) {
-        parts.push("--effort", options.effort)
-    }
-
-    if (permissionMode !== "default") {
-        parts.push("--permission-mode", permissionMode)
-    }
-
-    parts.push("-p", "<prompt>", "--output-format", "stream-json", "--verbose")
-    return parts.map(formatPreviewToken).join(" ")
 }
 
 function formatTime(date: Date): string {
@@ -484,7 +383,6 @@ export function ReproductionLog({
     const [lastCommandOutput, setLastCommandOutput] = useState<CliLastCommandOutput | null>(null)
     const [slashSelectedIndex, setSlashSelectedIndex] = useState(0)
     const [showWorkspaceSetup, setShowWorkspaceSetup] = useState(false)
-    const [showAdvancedOptions, setShowAdvancedOptions] = useState(false)
     const [continueLast, setContinueLast] = useState(false)
     const [resumeSession, setResumeSession] = useState("")
     const [cliSessionId, setCliSessionId] = useState("")
@@ -548,65 +446,6 @@ export function ReproductionLog({
             ? runtimeInfo.source !== "claude_code"
             : !runtimeInfo.opencodeAvailable
         : false
-    const advancedOptionsCount = useMemo(
-        () =>
-            [
-                continueLast,
-                Boolean(resumeSession.trim()),
-                Boolean(cliSessionId.trim()),
-                Boolean(agentOverride.trim()),
-                parsedMcpConfig.length > 0,
-                parsedTools.length > 0,
-                parsedAllowedTools.length > 0,
-                parsedAddDirs.length > 0,
-                Boolean(settingsText.trim()),
-                Boolean(selectedEffort),
-            ].filter(Boolean).length,
-        [
-            agentOverride,
-            cliSessionId,
-            continueLast,
-            parsedAddDirs.length,
-            parsedAllowedTools.length,
-            parsedMcpConfig.length,
-            parsedTools.length,
-            resumeSession,
-            selectedEffort,
-            settingsText,
-        ],
-    )
-    const commandPreview = useMemo(
-        () =>
-            buildStudioCommandPreview(runtimeInfo, {
-                mode,
-                model: requestedModel,
-                continueLast,
-                resumeSession,
-                cliSessionId,
-                agent: agentOverride,
-                mcpConfig: parsedMcpConfig,
-                tools: parsedTools,
-                allowedTools: parsedAllowedTools,
-                addDirs: parsedAddDirs,
-                settings: settingsText,
-                effort: selectedEffort,
-            }),
-        [
-            agentOverride,
-            cliSessionId,
-            continueLast,
-            mode,
-            parsedAddDirs,
-            parsedAllowedTools,
-            parsedMcpConfig,
-            parsedTools,
-            requestedModel,
-            resumeSession,
-            runtimeInfo,
-            selectedEffort,
-            settingsText,
-        ],
-    )
     const messagePlaceholder = runtimeLoading
         ? "Message Studio runtime..."
         : runtimeInfo.source === "anthropic_api"
@@ -615,13 +454,9 @@ export function ReproductionLog({
     const composerPlaceholder = commandMode
         ? `Edit args for ${buildCommandPreview(activeCliCommand!.runtime, activeCliCommand!.preset, "").trim()} and press Enter to run`
         : messagePlaceholder
-    const composerPreview = commandMode
-        ? buildCommandPreview(activeCliCommand!.runtime, activeCliCommand!.preset, messageInput)
-        : commandPreview
-    const composerHeaderMeta =
-        commandMode || showAdvancedOptions || advancedOptionsCount > 0
-            ? composerPreview
-            : `${runtimeLabel} · ${mode} · ${requestedModel || "model pending"}`
+    const composerInteractionHint = commandMode
+        ? "Enter to run · Esc clears command mode"
+        : "Enter to send · Shift+Enter for newline · / for commands"
 
     useEffect(() => {
         if (activeTask && activeTask.kind !== "chat") {
@@ -911,6 +746,30 @@ export function ReproductionLog({
         setChatDraftBeforeUtility("")
     }
 
+    const showSyntheticCommandOutput = (preview: string, stdout: string) => {
+        setLastCommandOutput({
+            preview,
+            error: null,
+            result: {
+                ok: true,
+                command: ["studio-shell"],
+                returncode: 0,
+                stdout,
+                stderr: "",
+                cwd: projectDir,
+            },
+        })
+    }
+
+    const clearActiveConversation = () => {
+        setActiveTask(null)
+        setMessageInput("")
+        setChatDraftBeforeUtility("")
+        setActiveCliCommand(null)
+        setLastError(null)
+        setLastCommandOutput(null)
+    }
+
     const executeCliCommand = async (command = activeCliCommand, args = messageInput) => {
         if (!command || runningCliCommand) return
 
@@ -974,24 +833,54 @@ export function ReproductionLog({
 
         setLastError(null)
 
+        if (parsed.kind === "help") {
+            setMessageInput("")
+            showSyntheticCommandOutput(
+                "Claude Code slash help",
+                [
+                    "Supported Studio slash commands:",
+                    "/help",
+                    "/status",
+                    "/new",
+                    "/clear",
+                    "/plan <request>",
+                    "/model <alias>",
+                    "/agents",
+                    "/mcp [args]",
+                    "/auth [args]",
+                    "/doctor",
+                    "",
+                    "Chat turns stream Claude Code print mode.",
+                    "Runtime entries launch standalone Claude CLI utilities.",
+                    "Studio intentionally exposes a focused command subset instead of old local-only slash toggles.",
+                ].join("\n"),
+            )
+            return true
+        }
+
+        if (parsed.kind === "status") {
+            setMessageInput("")
+            showSyntheticCommandOutput(
+                "Claude Code status",
+                [
+                    `runtime: ${runtimeLoading ? "checking" : runtimeLabel}`,
+                    `mode: ${mode}`,
+                    `model: ${requestedModel || "pending"}`,
+                    `workspace: ${projectDir ?? "not set"}`,
+                    `paper: ${selectedPaper?.title ?? "none"}`,
+                    `session: ${activeChatTask?.name ?? "new thread"}`,
+                ].join("\n"),
+            )
+            return true
+        }
+
+        if (parsed.kind === "clear" || parsed.kind === "new_thread") {
+            clearActiveConversation()
+            return true
+        }
+
         if (parsed.kind === "mode") {
             setMode(parsed.mode)
-            setMessageInput(parsed.remainder)
-            return true
-        }
-
-        if (parsed.kind === "view") {
-            if (parsed.view === "board") {
-                openAgentBoardWorkspace()
-            } else {
-                onViewModeChange(parsed.view)
-            }
-            setMessageInput("")
-            return true
-        }
-
-        if (parsed.kind === "continue") {
-            setContinueLast(parsed.enabled)
             setMessageInput(parsed.remainder)
             return true
         }
@@ -1003,63 +892,9 @@ export function ReproductionLog({
             return true
         }
 
-        if (parsed.kind === "effort") {
-            setEffort(parsed.effort)
-            setMessageInput(parsed.remainder)
-            return true
-        }
-
-        if (parsed.kind === "resume") {
-            setResumeSession(parsed.value)
-            setMessageInput("")
-            return true
-        }
-
-        if (parsed.kind === "session") {
-            setCliSessionId(parsed.value)
-            setMessageInput("")
-            return true
-        }
-
-        if (parsed.kind === "agent") {
-            setAgentOverride(parsed.value)
-            setMessageInput("")
-            return true
-        }
-
-        if (parsed.kind === "tools") {
-            setToolsText(parsed.value)
-            setMessageInput("")
-            return true
-        }
-
-        if (parsed.kind === "allowed_tools") {
-            setAllowedToolsText(parsed.value)
-            setMessageInput("")
-            return true
-        }
-
-        if (parsed.kind === "add_dirs") {
-            setAddDirsText(parsed.value)
-            setMessageInput("")
-            return true
-        }
-
-        if (parsed.kind === "mcp_config") {
-            setMcpConfigText(parsed.value)
-            setMessageInput("")
-            return true
-        }
-
-        if (parsed.kind === "settings") {
-            setSettingsText(parsed.value)
-            setMessageInput("")
-            return true
-        }
-
         const preset = getCommandPresets(parsed.runtime).find((item) => item.id === parsed.presetId)
         if (!preset) {
-            setLastError(`Unknown quick command: ${parsed.presetId}`)
+            setLastError(`Unknown Claude Code command: ${parsed.presetId}`)
             return true
         }
 
@@ -1082,7 +917,12 @@ export function ReproductionLog({
         if (messageInput.trim().startsWith("/")) {
             void handleSlashSubmit().then((handled) => {
                 if (!handled) {
-                    void handleSendMessage()
+                    if (/^\/[a-z][a-z0-9-]*(?:\s|$)/i.test(messageInput.trim())) {
+                        setLastError("Unsupported Studio slash command. Use /help to see the available Claude commands.")
+                        focusComposerToEnd()
+                    } else {
+                        void handleSendMessage()
+                    }
                 } else {
                     focusComposerToEnd()
                 }
@@ -1169,285 +1009,133 @@ export function ReproductionLog({
         router.push("/studio?surface=board")
     }
 
+    const claudeCommandPresets = useMemo(() => {
+        const byId = new Map(getCommandPresets("claude").map((preset) => [preset.id, preset]))
+        return {
+            agents: byId.get("claude-agents") ?? null,
+            mcp: byId.get("claude-mcp") ?? null,
+            auth: byId.get("claude-auth") ?? null,
+            doctor: byId.get("claude-doctor") ?? null,
+        }
+    }, [])
+
     const slashCommands: SlashCommandItem[] = [
         {
-            id: "mode-code",
-            command: "code",
-            label: "Code mode",
-            description: "Switch the composer to edit and implementation mode.",
-            group: "Modes",
-            keywords: ["build", "fix", "edit"],
-            icon: Code,
-            onSelect: (remainder) => {
-                setMode("Code")
-                setMessageInput(remainder)
-            },
+            id: "slash-help",
+            command: "help",
+            label: "Slash help",
+            description: "Show the Claude-style command subset that Studio currently supports.",
+            group: "Claude Code",
+            keywords: ["commands", "palette", "claude"],
+            icon: MessageSquare,
+            onSelect: (remainder) => setSlashScaffold("help", remainder),
         },
         {
-            id: "mode-plan",
+            id: "slash-status",
+            command: "status",
+            label: "Status",
+            description: "Show the current runtime, model, workspace, and active thread.",
+            group: "Claude Code",
+            keywords: ["runtime", "model", "workspace", "session"],
+            icon: Activity,
+            onSelect: (remainder) => setSlashScaffold("status", remainder),
+        },
+        {
+            id: "slash-plan",
             command: "plan",
             label: "Plan mode",
-            description: "Switch the composer to planning mode before execution.",
-            group: "Modes",
+            description: "Switch Studio into Claude Code plan mode for the next message.",
+            group: "Claude Code",
             keywords: ["strategy", "outline", "design"],
             icon: LayoutDashboard,
-            onSelect: (remainder) => {
-                setMode("Plan")
-                setMessageInput(remainder)
-            },
+            onSelect: (remainder) => setSlashScaffold("plan", remainder),
         },
         {
-            id: "mode-ask",
-            command: "ask",
-            label: "Ask mode",
-            description: "Switch the composer to question and discussion mode.",
-            group: "Modes",
-            keywords: ["question", "discuss", "explain"],
-            icon: MessageSquare,
-            onSelect: (remainder) => {
-                setMode("Ask")
-                setMessageInput(remainder)
-            },
-        },
-        {
-            id: "view-chat",
-            command: "chat",
-            label: "Open chat",
-            description: "Stay in the console chat timeline.",
-            group: "Views",
-            keywords: ["console", "log", "messages"],
-            icon: MessageSquare,
-            onSelect: (remainder) => {
-                onViewModeChange("log")
-                setMessageInput(remainder)
-            },
-        },
-        {
-            id: "view-context",
-            command: "context",
-            label: "Open context",
-            description: "Jump to the paper context and workspace preparation view.",
-            group: "Views",
-            keywords: ["pack", "paper", "workspace"],
-            icon: Activity,
-            onSelect: (remainder) => {
-                onViewModeChange("context")
-                setMessageInput(remainder)
-            },
-        },
-        {
-            id: "view-monitor",
-            command: "monitor",
-            label: "Open monitor",
-            description: "Open Monitor for task graph, runtime, and delegation activity.",
-            group: "Views",
-            keywords: ["board", "agents", "subagents"],
-            icon: LayoutDashboard,
-            onSelect: (remainder) => {
-                openAgentBoardWorkspace()
-                setMessageInput(remainder)
-            },
-        },
-        {
-            id: "model-generic",
+            id: "slash-model",
             command: "model",
             label: "Set model",
-            description: "Type /model <alias-or-full-name> and press Enter to apply it.",
-            group: "Models",
-            keywords: ["model", "alias", "custom"],
+            description: "Use /model <alias-or-full-name> to switch the Claude Code model.",
+            group: "Claude Code",
+            keywords: ["model", "alias", "sonnet", "opus", "custom"],
             icon: Bot,
-            onSelect: () => {
-                setSlashScaffold("model")
-            },
-        },
-        ...knownModelAliases.map((alias) => ({
-            id: `model-${alias}`,
-            command: slashifyModelAlias(alias),
-            label: alias,
-            description: `Switch Claude Code model to ${alias}.`,
-            group: "Models" as const,
-            keywords: ["model", "claude", "alias", alias],
-            icon: Bot,
-            onSelect: (remainder: string) => {
-                setModelOption(alias)
-                setCustomModel("")
-                setMessageInput(remainder)
-            },
-        })),
-        {
-            id: "option-continue",
-            command: "continue",
-            label: "Continue last session",
-            description: "Turn on --continue for the next Claude Code print-mode run.",
-            group: "Options",
-            keywords: ["resume", "session", "previous"],
-            icon: ChevronRight,
-            onSelect: (remainder) => {
-                setContinueLast(true)
-                setMessageInput(remainder)
-            },
+            onSelect: (remainder) => setSlashScaffold("model", remainder),
         },
         {
-            id: "option-fresh",
-            command: "fresh",
-            label: "Fresh session",
-            description: "Turn off --continue and start the next Claude Code run fresh.",
-            group: "Options",
+            id: "slash-new",
+            command: "new",
+            label: "New thread",
+            description: "Start a fresh Studio thread and clear the current draft.",
+            group: "Session",
+            keywords: ["clear", "fresh", "reset"],
+            icon: X,
+            onSelect: (remainder) => setSlashScaffold("new", remainder),
+        },
+        {
+            id: "slash-clear",
+            command: "clear",
+            label: "Clear conversation",
+            description: "Reset the current conversation state without opening another panel.",
+            group: "Session",
             keywords: ["new", "reset", "session"],
             icon: X,
+            onSelect: (remainder) => setSlashScaffold("clear", remainder),
+        },
+        {
+            id: "runtime-agents",
+            command: "agents",
+            label: "claude agents",
+            description: "Open Claude Code command mode with `claude agents`.",
+            group: "Runtime",
+            keywords: ["runtime", "cli", "claude", "agents"],
+            icon: Terminal,
             onSelect: (remainder) => {
-                setContinueLast(false)
-                setMessageInput(remainder)
+                const preset = claudeCommandPresets.agents
+                if (!preset) return
+                handleSelectCliCommand({ runtime: "claude", preset }, remainder || preset.defaultArgs, remainder)
             },
         },
         {
-            id: "option-resume-session",
-            command: "resume",
-            label: "Resume session",
-            description: "Type /resume <session-id> and press Enter to set or clear it.",
-            group: "Options",
-            keywords: ["resume", "session", "id"],
-            icon: Clock,
-            onSelect: () => {
-                setSlashScaffold("resume")
-            },
-        },
-        {
-            id: "option-session-id",
-            command: "session",
-            label: "Set session ID",
-            description: "Type /session <uuid> and press Enter to pin the next CLI run.",
-            group: "Options",
-            keywords: ["session", "uuid", "pin"],
-            icon: Terminal,
-            onSelect: () => {
-                setSlashScaffold("session")
-            },
-        },
-        {
-            id: "option-agent",
-            command: "agent",
-            label: "Agent override",
-            description: "Type /agent <name> and press Enter to set or clear the agent.",
-            group: "Options",
-            keywords: ["agent", "reviewer", "planner"],
-            icon: Bot,
-            onSelect: () => {
-                setSlashScaffold("agent")
-            },
-        },
-        {
-            id: "option-tools",
-            command: "tools",
-            label: "Set tools",
-            description: "Type /tools Bash,Read and press Enter to update the tool allowlist.",
-            group: "Options",
-            keywords: ["tools", "allowlist", "bash", "read"],
-            icon: Wrench,
-            onSelect: () => {
-                setSlashScaffold("tools")
-            },
-        },
-        {
-            id: "option-allowed-tools",
-            command: "allow",
-            label: "Allowed tools",
-            description: "Type /allow Bash(git:*),Read and press Enter to set allowed tools.",
-            group: "Options",
-            keywords: ["allow", "allowed", "tools"],
-            icon: Wrench,
-            onSelect: () => {
-                setSlashScaffold("allow")
-            },
-        },
-        {
-            id: "option-add-dir",
-            command: "add-dir",
-            label: "Add directory",
-            description: "Type /add-dir ../shared and press Enter to update extra directories.",
-            group: "Options",
-            keywords: ["dir", "directory", "workspace"],
-            icon: FileCode,
-            onSelect: () => {
-                setSlashScaffold("add-dir")
-            },
-        },
-        {
-            id: "option-mcp",
+            id: "runtime-mcp",
             command: "mcp",
-            label: "MCP config",
-            description: "Type /mcp ./mcp.json and press Enter to set the MCP config input.",
-            group: "Options",
-            keywords: ["mcp", "config", "json"],
-            icon: LayoutDashboard,
-            onSelect: () => {
-                setSlashScaffold("mcp")
+            label: "claude mcp",
+            description: "Open Claude Code command mode with `claude mcp list` by default.",
+            group: "Runtime",
+            keywords: ["runtime", "cli", "claude", "mcp", "servers"],
+            icon: Wrench,
+            onSelect: (remainder) => {
+                const preset = claudeCommandPresets.mcp
+                if (!preset) return
+                handleSelectCliCommand({ runtime: "claude", preset }, remainder || preset.defaultArgs, remainder)
             },
         },
         {
-            id: "option-settings",
-            command: "settings",
-            label: "Settings override",
-            description: "Type /settings <path-or-json> and press Enter to set --settings.",
-            group: "Options",
-            keywords: ["settings", "config", "json"],
-            icon: Settings2,
-            onSelect: () => {
-                setSlashScaffold("settings")
+            id: "runtime-auth",
+            command: "auth",
+            label: "claude auth",
+            description: "Open Claude Code command mode with `claude auth status`.",
+            group: "Runtime",
+            keywords: ["runtime", "cli", "claude", "auth", "status", "login"],
+            icon: Bot,
+            onSelect: (remainder) => {
+                const preset = claudeCommandPresets.auth
+                if (!preset) return
+                handleSelectCliCommand({ runtime: "claude", preset }, remainder || preset.defaultArgs, remainder)
             },
         },
-        ...(["default", "low", "medium", "high", "max"] as const).map((value) => ({
-            id: `option-effort-${value}`,
-            command: `effort-${value}`,
-            label: value === "default" ? "Default effort" : `${value} effort`,
-            description:
-                value === "default"
-                    ? "Reset Claude Code effort to the runtime default."
-                    : `Set Claude Code effort to ${value} for the next run.`,
-            group: "Options" as const,
-            keywords: ["effort", "thinking", "reasoning", value],
-            icon: Activity,
-            onSelect: (remainder: string) => {
-                setEffort(value)
-                setMessageInput(remainder)
+        {
+            id: "runtime-doctor",
+            command: "doctor",
+            label: "claude doctor",
+            description: "Run Claude Code health checks in command mode.",
+            group: "Runtime",
+            keywords: ["runtime", "cli", "claude", "doctor", "health"],
+            icon: Terminal,
+            onSelect: (remainder) => {
+                const preset = claudeCommandPresets.doctor
+                if (!preset) return
+                handleSelectCliCommand({ runtime: "claude", preset }, remainder || preset.defaultArgs, remainder)
             },
-        })),
-        ...getCommandPresets("claude").map((preset) => ({
-            id: `slash-${preset.id}`,
-            command: preset.id,
-            label: preset.label,
-            description: preset.helpText,
-            group: "Quick Commands" as const,
-            keywords: ["claude", "cli", "runtime", ...preset.label.split(/\s+/)],
-            icon: Terminal,
-            onSelect: (remainder: string) =>
-                handleSelectCliCommand(
-                    {
-                        runtime: "claude",
-                        preset,
-                    },
-                    remainder || preset.defaultArgs,
-                    remainder,
-                ),
-        })),
-        ...getCommandPresets("opencode").map((preset) => ({
-            id: `slash-${preset.id}`,
-            command: preset.id,
-            label: preset.label,
-            description: preset.helpText,
-            group: "Quick Commands" as const,
-            keywords: ["opencode", "cli", "runtime", ...preset.label.split(/\s+/)],
-            icon: Terminal,
-            onSelect: (remainder: string) =>
-                handleSelectCliCommand(
-                    {
-                        runtime: "opencode",
-                        preset,
-                    },
-                    remainder || preset.defaultArgs,
-                    remainder,
-                ),
-        })),
+        },
     ]
 
     const filteredSlashCommands = slashCommands.filter((item) => {
@@ -1476,10 +1164,10 @@ export function ReproductionLog({
     }
 
     const composerHelperText = commandMode
-        ? "Command badge turns the composer into a terminal line. Clear it to return to chat."
+        ? "Claude Code command selected. Enter runs it, and clear returns the composer to chat."
         : missingCustomModel
             ? "Enter a full Claude Code model name before sending."
-            : "Type / for modes, options, quick commands, and monitor jumps. Delegations appear in Monitor automatically."
+            : "Type / for Claude-style commands, runtime checks, and thread controls."
     const activeModeLabel = mode
     const activeModelLabel =
         modelOption === "custom"
@@ -1783,20 +1471,25 @@ export function ReproductionLog({
 
             {consoleMode && (
                 /* Rich Input Area - CodePilot Style */
-                <div className="shrink-0 border-t border-slate-200 bg-[#f1f2ed] p-4">
-                    <div className="overflow-hidden rounded-[22px] border border-slate-200 bg-[#e8ebe4] shadow-[0_18px_36px_rgba(15,23,42,0.05)]">
-                        <div className="border-b border-slate-200 bg-[#edf0e8] px-4 py-3">
-                            <div className="flex items-center justify-between gap-3">
-                                <span className="truncate text-[11px] text-slate-500">
-                                    {commandMode
-                                        ? "Quick command line"
-                                        : selectedPaper
-                                            ? `Claude Code thread · ${selectedPaper.title}`
-                                            : "Claude Code thread"}
-                                </span>
-                                <div className="truncate font-mono text-[11px] text-slate-500">
-                                    {composerHeaderMeta}
+                <div className="shrink-0 border-t border-slate-200 bg-[#f1f2ed] p-2.5">
+                    <div className="overflow-hidden rounded-[28px] border border-slate-200 bg-[#e8ebe4] shadow-[0_20px_50px_rgba(15,23,42,0.06)]">
+                        <div className="border-b border-slate-200 bg-[#eef1ea] px-4 py-2.5">
+                            <div className="flex flex-wrap items-center justify-between gap-3">
+                                <div className="flex min-w-0 items-center gap-2">
+                                    <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                                        {commandMode ? "Command" : "Claude Code"}
+                                    </span>
+                                    <span className="truncate text-[12px] font-medium text-slate-800">
+                                        {commandMode
+                                            ? "Claude Code command"
+                                            : selectedPaper
+                                                ? selectedPaper.title
+                                                : "Threaded chat"}
+                                    </span>
                                 </div>
+                                <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] text-slate-500">
+                                    /
+                                </span>
                             </div>
                         </div>
 
@@ -1832,7 +1525,7 @@ export function ReproductionLog({
                                 onSelect={(e) => syncComposerCursor(e.currentTarget)}
                                 onKeyUp={(e) => syncComposerCursor(e.currentTarget)}
                                 placeholder={composerPlaceholder}
-                                className="min-h-[78px] resize-none border-0 bg-transparent px-4 py-3 text-sm text-slate-800 placeholder:text-slate-400 focus-visible:ring-0"
+                                className="min-h-[88px] resize-none border-0 bg-transparent px-4 py-3 text-[14px] leading-7 text-slate-800 placeholder:text-slate-400 focus-visible:ring-0"
                                 onKeyDown={(e) => {
                                     if (slashPaletteActive) {
                                         if (e.key === "ArrowDown" && filteredSlashCommands.length > 0) {
@@ -1887,9 +1580,9 @@ export function ReproductionLog({
                                     <div className="max-w-[620px] overflow-hidden rounded-2xl border border-slate-200 bg-[#f7f8f4] shadow-[0_18px_40px_rgba(15,23,42,0.10)]">
                                         <div className="flex items-center justify-between gap-3 border-b border-slate-200 bg-[#f0f2ec] px-3 py-2.5">
                                             <div>
-                                                <div className="text-[11px] font-medium text-slate-800">Slash commands</div>
+                                                <div className="text-[11px] font-medium text-slate-800">Claude Code commands</div>
                                                 <div className="mt-0.5 text-[11px] text-slate-500">
-                                                    Modes, views, models, advanced options, and quick CLI presets.
+                                                    Slash opens the Studio command surface: Claude-style chat commands plus safe runtime utilities.
                                                 </div>
                                             </div>
                                             <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 font-mono text-[11px] text-slate-500">
@@ -1904,7 +1597,7 @@ export function ReproductionLog({
                                                 </div>
                                             ) : (
                                                 <div className="space-y-2 p-2">
-                                                    {(["Modes", "Views", "Models", "Options", "Quick Commands"] as const).map((group) => {
+                                                    {(["Claude Code", "Session", "Runtime"] as const).map((group) => {
                                                         const groupItems = filteredSlashCommands.filter((item) => item.group === group)
                                                         if (groupItems.length === 0) return null
 
@@ -1966,11 +1659,11 @@ export function ReproductionLog({
                             ) : null}
                         </div>
 
-                        <div className="border-t border-slate-200 bg-[#f1f3ee] px-3 py-3">
+                        <div className="border-t border-slate-200 bg-[#f3f4ef] px-3 py-3">
                             <div className="flex flex-wrap items-center justify-between gap-2">
                                 <div className="flex flex-1 flex-wrap items-center gap-1.5">
                                     <Select value={mode} onValueChange={(value) => setMode(value as Mode)}>
-                                        <SelectTrigger className="h-8 w-[104px] border-slate-200 bg-[#f7f8f4] text-xs text-slate-700">
+                                        <SelectTrigger className="h-8 w-[104px] rounded-full border-slate-200 bg-white text-xs text-slate-700">
                                             <Code className="mr-1 h-3.5 w-3.5" />
                                             <SelectValue />
                                         </SelectTrigger>
@@ -1982,7 +1675,7 @@ export function ReproductionLog({
                                     </Select>
 
                                     <Select value={modelOption} onValueChange={setModelOption}>
-                                        <SelectTrigger className="h-8 w-[148px] border-slate-200 bg-[#f7f8f4] text-xs text-slate-700">
+                                        <SelectTrigger className="h-8 w-[148px] rounded-full border-slate-200 bg-white text-xs text-slate-700">
                                             <Bot className="mr-1 h-3.5 w-3.5" />
                                             <SelectValue />
                                         </SelectTrigger>
@@ -1996,166 +1689,11 @@ export function ReproductionLog({
                                         </SelectContent>
                                     </Select>
 
-                                    <Popover open={showAdvancedOptions} onOpenChange={setShowAdvancedOptions}>
-                                        <PopoverTrigger asChild>
-                                            <Button
-                                                variant="ghost"
-                                                size="icon"
-                                                className={cn(
-                                                    "relative h-8 w-8 shrink-0 rounded-md border border-transparent bg-transparent text-slate-500 hover:bg-[#e7e9e3] hover:text-slate-900",
-                                                    (showAdvancedOptions || advancedOptionsCount > 0) &&
-                                                        "border-slate-200 bg-[#e7e9e3] text-slate-900",
-                                                )}
-                                                title="Claude Code advanced options"
-                                            >
-                                                <Settings2 className="h-3.5 w-3.5" />
-                                                {advancedOptionsCount > 0 ? (
-                                                    <span className="absolute -right-1 -top-1 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-slate-700 px-1 text-[10px] text-white">
-                                                        {advancedOptionsCount}
-                                                    </span>
-                                                ) : null}
-                                            </Button>
-                                        </PopoverTrigger>
-                                        <PopoverContent
-                                            align="start"
-                                            side="top"
-                                            sideOffset={10}
-                                            className="w-[440px] max-w-[92vw] border-slate-200 bg-[#f7f8f4] p-0 text-slate-900 shadow-[0_18px_40px_rgba(15,23,42,0.10)]"
-                                        >
-                                            <div className="border-b border-slate-200 bg-[#f0f2ec] px-3 py-2.5">
-                                                <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
-                                                    Claude Code Options
-                                                </div>
-                                                <div className="mt-1 text-[12px] text-slate-600">
-                                                    Print-mode flags that apply to the next Claude Code run.
-                                                </div>
-                                            </div>
-                                            <ScrollArea className="max-h-[65vh]">
-                                                <div className="grid gap-3 p-3 xl:grid-cols-2">
-                                                    <label className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700">
-                                                        <Checkbox
-                                                            checked={continueLast}
-                                                            onCheckedChange={(value) => setContinueLast(Boolean(value))}
-                                                            className="border-slate-300 data-[state=checked]:border-slate-700 data-[state=checked]:bg-slate-700"
-                                                        />
-                                                        Continue most recent CLI session
-                                                    </label>
-
-                                                    <label className="space-y-1">
-                                                        <span className="text-[11px] font-medium text-slate-600">Resume session</span>
-                                                        <Input
-                                                            value={resumeSession}
-                                                            onChange={(event) => setResumeSession(event.target.value)}
-                                                            placeholder="Existing Claude session ID"
-                                                            className="h-8 border-slate-200 bg-white text-xs text-slate-700"
-                                                        />
-                                                    </label>
-
-                                                    <label className="space-y-1">
-                                                        <span className="text-[11px] font-medium text-slate-600">Session ID</span>
-                                                        <Input
-                                                            value={cliSessionId}
-                                                            onChange={(event) => setCliSessionId(event.target.value)}
-                                                            placeholder="Pin a UUID for this print-mode run"
-                                                            className="h-8 border-slate-200 bg-white text-xs text-slate-700"
-                                                        />
-                                                    </label>
-
-                                                    <label className="space-y-1">
-                                                        <span className="text-[11px] font-medium text-slate-600">Agent override</span>
-                                                        <Input
-                                                            value={agentOverride}
-                                                            onChange={(event) => setAgentOverride(event.target.value)}
-                                                            placeholder="reviewer / planner / custom agent"
-                                                            className="h-8 border-slate-200 bg-white text-xs text-slate-700"
-                                                        />
-                                                    </label>
-
-                                                    <label className="space-y-1">
-                                                        <span className="text-[11px] font-medium text-slate-600">Effort</span>
-                                                        <Select value={effort} onValueChange={(value) => setEffort(value as EffortOption)}>
-                                                            <SelectTrigger className="h-8 border-slate-200 bg-white text-xs text-slate-700">
-                                                                <SelectValue />
-                                                            </SelectTrigger>
-                                                            <SelectContent>
-                                                                <SelectItem value="default">Default</SelectItem>
-                                                                <SelectItem value="low">Low</SelectItem>
-                                                                <SelectItem value="medium">Medium</SelectItem>
-                                                                <SelectItem value="high">High</SelectItem>
-                                                                <SelectItem value="max">Max</SelectItem>
-                                                            </SelectContent>
-                                                        </Select>
-                                                    </label>
-
-                                                    <label className="space-y-1">
-                                                        <span className="text-[11px] font-medium text-slate-600">Tools</span>
-                                                        <Input
-                                                            value={toolsText}
-                                                            onChange={(event) => setToolsText(event.target.value)}
-                                                            placeholder="Comma-separated, e.g. Bash,Edit,Read"
-                                                            className="h-8 border-slate-200 bg-white text-xs text-slate-700"
-                                                        />
-                                                    </label>
-
-                                                    <label className="space-y-1">
-                                                        <span className="text-[11px] font-medium text-slate-600">Allowed tools</span>
-                                                        <Input
-                                                            value={allowedToolsText}
-                                                            onChange={(event) => setAllowedToolsText(event.target.value)}
-                                                            placeholder='Comma-separated, e.g. "Bash(git:*),Read"'
-                                                            className="h-8 border-slate-200 bg-white text-xs text-slate-700"
-                                                        />
-                                                    </label>
-
-                                                    <label className="space-y-1">
-                                                        <span className="text-[11px] font-medium text-slate-600">Add directories</span>
-                                                        <Textarea
-                                                            value={addDirsText}
-                                                            onChange={(event) => setAddDirsText(event.target.value)}
-                                                            placeholder={"One directory per line\n../shared-worktree"}
-                                                            className="min-h-[72px] border-slate-200 bg-white text-xs text-slate-700"
-                                                        />
-                                                    </label>
-
-                                                    <label className="space-y-1">
-                                                        <span className="text-[11px] font-medium text-slate-600">MCP config</span>
-                                                        <Textarea
-                                                            value={mcpConfigText}
-                                                            onChange={(event) => setMcpConfigText(event.target.value)}
-                                                            placeholder={"One file path or JSON object per line\n./mcp.json"}
-                                                            className="min-h-[72px] border-slate-200 bg-white text-xs text-slate-700"
-                                                        />
-                                                    </label>
-
-                                                    <label className="space-y-1 xl:col-span-2">
-                                                        <span className="text-[11px] font-medium text-slate-600">Settings</span>
-                                                        <Textarea
-                                                            value={settingsText}
-                                                            onChange={(event) => setSettingsText(event.target.value)}
-                                                            placeholder='Path or JSON blob for --settings, e.g. {"theme":"slate"}'
-                                                            className="min-h-[84px] border-slate-200 bg-white text-xs text-slate-700"
-                                                        />
-                                                    </label>
-                                                </div>
-                                            </ScrollArea>
-                                        </PopoverContent>
-                                    </Popover>
-
-                                    <CliCommandRunner
-                                        key={viewMode === "commands" && !commandMode ? "command-popover-open" : "command-popover-closed"}
-                                        runtimeInfo={runtimeInfo}
-                                        activeCommand={activeCliCommand}
-                                        activeArgs={commandMode ? messageInput : ""}
-                                        defaultOpen={viewMode === "commands" && !commandMode}
-                                        showActiveBadge={false}
-                                        onSelectCommand={handleSelectCliCommand}
-                                        onClearCommand={handleClearCliCommand}
-                                    />
                                 </div>
 
                                 <Button
                                     size="icon"
-                                    className="h-9 w-9 shrink-0 rounded-full bg-slate-700 text-white hover:bg-slate-600"
+                                    className="h-10 w-10 shrink-0 rounded-full bg-slate-800 text-white shadow-sm hover:bg-slate-700"
                                     onClick={handleComposerSubmit}
                                     disabled={
                                         commandMode
@@ -2168,7 +1706,7 @@ export function ReproductionLog({
                                                 ? "Selected command runtime is unavailable"
                                                 : runningCliCommand
                                                     ? "Running command"
-                                                    : "Run command in composer"
+                                                    : "Run Claude Code command"
                                             : missingCustomModel
                                                     ? "Enter a full Claude model name first"
                                                     : "Send to Claude Code"
@@ -2188,11 +1726,9 @@ export function ReproductionLog({
 
                             <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-500">
                                 <span>{composerHelperText}</span>
-                                {!commandMode ? (
-                                    <span className="hidden md:inline">
-                                        Claude Code aliases: {knownModelAliases.join(", ")}
-                                    </span>
-                                ) : null}
+                                <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-slate-500">
+                                    {composerInteractionHint}
+                                </span>
                             </div>
 
                             {lastCommandOutput ? (
@@ -2277,7 +1813,6 @@ export function ReproductionLog({
                     onConfirm={handleWorkspaceConfirm}
                     onCancel={() => {
                         setShowWorkspaceSetup(false)
-                        setPendingAction(null)
                     }}
                 />
             )}

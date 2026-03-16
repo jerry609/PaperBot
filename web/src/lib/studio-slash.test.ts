@@ -31,43 +31,33 @@ describe("parseStudioSlashCommand", () => {
     })
   })
 
-  it("parses effort aliases", () => {
-    expect(parseStudioSlashCommand("/effort-high fix the flaky test", knownModelAliases)).toEqual({
-      kind: "effort",
-      effort: "high",
-      remainder: "fix the flaky test",
-    })
-  })
-
-  it("parses advanced option setters", () => {
-    expect(parseStudioSlashCommand("/resume session-123", knownModelAliases)).toEqual({
-      kind: "resume",
-      value: "session-123",
-    })
-    expect(parseStudioSlashCommand("/agent reviewer", knownModelAliases)).toEqual({
-      kind: "agent",
-      value: "reviewer",
-    })
-    expect(parseStudioSlashCommand("/tools Bash,Read", knownModelAliases)).toEqual({
-      kind: "tools",
-      value: "Bash,Read",
-    })
-  })
-
-  it("parses quick commands", () => {
-    expect(parseStudioSlashCommand("/claude-mcp list", knownModelAliases)).toEqual({
+  it("parses claude command palette entries", () => {
+    expect(parseStudioSlashCommand("/mcp list", knownModelAliases)).toEqual({
       kind: "quick_command",
       runtime: "claude",
       presetId: "claude-mcp",
       args: "list",
     })
+    expect(parseStudioSlashCommand("/doctor", knownModelAliases)).toEqual({
+      kind: "quick_command",
+      runtime: "claude",
+      presetId: "claude-doctor",
+      args: "",
+    })
   })
 
-  it("parses monitor navigation slash commands", () => {
-    expect(parseStudioSlashCommand("/monitor", knownModelAliases)).toEqual({
-      kind: "view",
-      view: "board",
-    })
+  it("parses local session slash commands", () => {
+    expect(parseStudioSlashCommand("/help", knownModelAliases)).toEqual({ kind: "help" })
+    expect(parseStudioSlashCommand("/status", knownModelAliases)).toEqual({ kind: "status" })
+    expect(parseStudioSlashCommand("/clear", knownModelAliases)).toEqual({ kind: "clear" })
+    expect(parseStudioSlashCommand("/new", knownModelAliases)).toEqual({ kind: "new_thread" })
+  })
+
+  it("rejects legacy studio-only slash commands", () => {
+    expect(parseStudioSlashCommand("/code fix the loader", knownModelAliases)).toBeNull()
+    expect(parseStudioSlashCommand("/monitor", knownModelAliases)).toBeNull()
+    expect(parseStudioSlashCommand("/resume session-123", knownModelAliases)).toBeNull()
+    expect(parseStudioSlashCommand("/effort-high fix the flaky test", knownModelAliases)).toBeNull()
   })
 
   it("no longer treats /codex as a direct delegation shortcut", () => {

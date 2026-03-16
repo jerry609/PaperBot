@@ -59,9 +59,9 @@ function deriveAllowDirCandidate(directory: string, choice: "current" | "custom"
 
 function buildDisallowedDirectoryMessage(directory: string, allowedPrefixes: string[]): string {
     if (allowedPrefixes.length === 0) {
-        return `"${directory}" is outside the allowed workspace roots. Choose a directory under the current Studio workspace or /tmp.`
+        return `This Studio runtime can only write inside the current workspace or /tmp. ${directory} is outside that boundary.`
     }
-    return `"${directory}" is outside the allowed workspace roots. Choose a directory under: ${allowedPrefixes.join(", ")}.`
+    return `This Studio runtime can only write inside: ${allowedPrefixes.join(", ")}. ${directory} is outside that boundary.`
 }
 
 export function WorkspaceSetupDialog({
@@ -129,9 +129,7 @@ export function WorkspaceSetupDialog({
             if (res.status === 403) {
                 if (!allowlistMutationEnabled) {
                     setPendingAllowDir(null)
-                    setError(
-                        `${buildDisallowedDirectoryMessage(directory, allowedPrefixes)} Runtime allowlist changes are disabled in this environment.`
-                    )
+                    setError(buildDisallowedDirectoryMessage(directory, allowedPrefixes))
                     return false
                 }
                 const allowDir = deriveAllowDirCandidate(directory, choice)
@@ -179,9 +177,7 @@ export function WorkspaceSetupDialog({
                 if (res.status === 403 && detail === "runtime allowlist mutation is disabled") {
                     setPendingAllowDir(null)
                     const directory = choice === "current" ? currentDir : customDir.trim()
-                    setError(
-                        `${buildDisallowedDirectoryMessage(directory, allowedPrefixes)} Runtime allowlist changes are disabled in this environment.`
-                    )
+                    setError(buildDisallowedDirectoryMessage(directory, allowedPrefixes))
                 } else {
                     setError(detail)
                 }
@@ -225,7 +221,7 @@ export function WorkspaceSetupDialog({
                                 <div className="flex items-start gap-2">
                                     <ShieldAlert className="h-4 w-4 text-blue-600 dark:text-blue-400 shrink-0 mt-0.5" />
                                     <div className="text-blue-700 dark:text-blue-300">
-                                        This directory is outside the allowed workspace paths.
+                                        This directory is outside the current Studio workspace boundary.
                                         Allow access to <code className="bg-blue-100 dark:bg-blue-900 px-1 rounded text-xs">{pendingAllowDir}</code>?
                                     </div>
                                 </div>

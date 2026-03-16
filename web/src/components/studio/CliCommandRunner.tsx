@@ -62,6 +62,13 @@ const CLAUDE_PRESETS: CommandPreset[] = [
     defaultArgs: "status",
     helpText: "Inspect Claude Code authentication state without entering chat mode.",
   },
+  {
+    id: "claude-doctor",
+    label: "claude doctor",
+    command: "doctor",
+    defaultArgs: "",
+    helpText: "Check Claude Code runtime and updater health.",
+  },
 ]
 
 const OPENCODE_PRESETS: CommandPreset[] = [
@@ -193,7 +200,7 @@ export function CliCommandRunner({
               "h-8 w-8 shrink-0 rounded-md border border-transparent bg-transparent text-slate-500 hover:bg-[#e7e9e3] hover:text-slate-900",
               (popoverOpen || activeCommand) && "border-slate-200 bg-[#e7e9e3] text-slate-900",
             )}
-            title="Quick commands"
+            title="Claude CLI commands"
           >
             <TerminalSquare className="h-3.5 w-3.5" />
           </Button>
@@ -210,7 +217,7 @@ export function CliCommandRunner({
               <TerminalSquare className="mt-0.5 h-3.5 w-3.5 text-slate-500" />
               <div>
                 <div className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
-                  Quick Commands
+                  Claude CLI Commands
                 </div>
                 <div className="mt-1 text-[12px] text-slate-700">
                   Pick a safe Claude Code or OpenCode utility command.
