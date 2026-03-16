@@ -9,10 +9,16 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
   const [collapsed, setCollapsed] = useState(true)
   const pathname = usePathname()
   const isAgentBoardFocusPage = pathname.startsWith("/studio/agent-board/")
+  const isAuthPage =
+    pathname === "/login" ||
+    pathname === "/register" ||
+    pathname === "/forgot-password" ||
+    pathname === "/reset-password"
+  const hideShellChrome = isAgentBoardFocusPage || isAuthPage
 
   return (
     <div className="flex min-h-screen">
-      {!isAgentBoardFocusPage && (
+      {!hideShellChrome && (
         <aside
           className={cn(
             "fixed inset-y-0 z-50 hidden flex-col border-r bg-background transition-all duration-200 md:flex",
@@ -25,7 +31,7 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
       <main
         className={cn(
           "flex-1 transition-all duration-200",
-          !isAgentBoardFocusPage && (collapsed ? "md:pl-14" : "md:pl-56"),
+          !hideShellChrome && (collapsed ? "md:pl-14" : "md:pl-56"),
         )}
       >
         {children}

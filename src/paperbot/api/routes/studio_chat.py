@@ -7,6 +7,8 @@ through a separate management-command path instead of the chat stream.
 """
 
 import asyncio
+import base64
+import importlib.util
 import json
 import logging
 import os
@@ -31,7 +33,9 @@ router = APIRouter()
 
 Mode = Literal["Code", "Plan", "Ask"]
 Effort = Literal["low", "medium", "high", "max"]
+PermissionProfile = Literal["default", "full_access"]
 StudioRuntimeName = Literal["claude", "opencode"]
+StudioChatTransport = Literal["claude_agent_sdk", "claude_cli_print", "anthropic_api"]
 DEFAULT_STUDIO_MODEL = "sonnet"
 _LEGACY_MODEL_ALIASES = {
     "claude-sonnet-4-5": "sonnet",
@@ -61,13 +65,24 @@ class ChatMessage(BaseModel):
     content: str
 
 
+class UploadedFileAttachment(BaseModel):
+    id: str
+    name: str
+    type: str = "application/octet-stream"
+    size: int = 0
+    data: str
+
+
 class StudioChatRequest(BaseModel):
     message: str
     mode: Mode = "Code"
     model: str = DEFAULT_STUDIO_MODEL
+    permission_profile: PermissionProfile = "default"
     paper: Optional[PaperContext] = None
     project_dir: Optional[str] = None
     history: List[ChatMessage] = []
+    attached_files: List[str] = []
+    uploaded_files: List[UploadedFileAttachment] = []
     session_id: Optional[str] = None
     context_pack_id: Optional[str] = None
     continue_last: bool = False
@@ -141,18 +156,117 @@ def is_code_mode_enabled() -> bool:
     return raw in {"1", "true", "yes", "on"}
 
 
+def has_claude_agent_sdk() -> bool:
+    """Return True when the Python Claude Agent SDK is importable."""
+    return importlib.util.find_spec("claude_agent_sdk") is not None
+
+
+def current_studio_chat_transport(*, claude_path: Optional[str]) -> StudioChatTransport:
+    """Return the transport currently used by Studio chat."""
+    if claude_path:
+        return "claude_cli_print"
+    return "anthropic_api"
+
+
+def preferred_studio_chat_transport() -> StudioChatTransport:
+    """Return the long-term transport we align Studio chat with."""
+    return "claude_agent_sdk"
+
+
+def _studio_supported_slash_commands() -> List[str]:
+    return ["help", "status", "new", "clear", "plan", "model", "agents", "mcp", "auth", "doctor"]
+
+
+def _studio_supported_permission_profiles() -> List[str]:
+    return ["default", "full_access"]
+
+
+def _make_studio_session_init_event(
+    state: "_StudioTelemetryState",
+    *,
+    request: "StudioChatRequest",
+    effective_mode: Mode,
+    transport: StudioChatTransport,
+    cwd: Optional[str] = None,
+) -> StreamEvent:
+    data: Dict[str, Any] = {
+        "subtype": "init",
+        "session_id": state.session_id,
+        "chat_surface": "managed_session",
+        "chat_transport": transport,
+        "preferred_chat_transport": preferred_studio_chat_transport(),
+        "claude_agent_sdk_available": has_claude_agent_sdk(),
+        "mode": effective_mode,
+        "requested_mode": request.mode,
+        "permission_profile": request.permission_profile,
+        "permission_mode": resolve_permission_mode(
+            request.mode,
+            request.permission_profile,
+        ),
+        "model": request.model,
+        "known_model_aliases": _KNOWN_CLAUDE_MODEL_ALIASES,
+        "slash_commands": _studio_supported_slash_commands(),
+        "permission_profiles": _studio_supported_permission_profiles(),
+        "runtime_commands": sorted(_ALLOWED_MANAGEMENT_COMMANDS["claude"]),
+    }
+    if cwd:
+        data["cwd"] = cwd
+    return StreamEvent(type="status", event="status", data=data)
+
+
+def _make_studio_mode_changed_event(
+    *,
+    request: "StudioChatRequest",
+    effective_mode: Mode,
+) -> Optional[StreamEvent]:
+    if effective_mode == request.mode:
+        return None
+    return StreamEvent(
+        type="status",
+        event="status",
+        data={
+            "subtype": "mode_changed",
+            "mode": effective_mode,
+            "requested_mode": request.mode,
+            "reason": f"Requested {request.mode} mode is unavailable; using {effective_mode} instead.",
+        },
+    )
+
+
 def resolve_execution_mode(mode: Mode) -> Mode:
     if mode == "Code" and not is_code_mode_enabled():
         return "Plan"
     return mode
 
 
-def get_mode_flags(mode: Mode) -> List[str]:
-    """Map mode to Claude CLI permission flags."""
+def resolve_permission_mode(
+    mode: Mode,
+    permission_profile: PermissionProfile = "default",
+) -> str:
+    """Map Studio mode and permission profile to Claude CLI permission mode."""
     effective_mode = resolve_execution_mode(mode)
     if effective_mode == "Code":
-        return ["--permission-mode", "acceptEdits"]
+        return "bypassPermissions" if permission_profile == "full_access" else "acceptEdits"
     if effective_mode == "Plan":
+        return "plan"
+    return "default"
+
+
+def get_mode_flags(
+    mode: Mode,
+    permission_profile: PermissionProfile = "default",
+) -> List[str]:
+    """Map mode to Claude CLI permission flags."""
+    permission_mode = resolve_permission_mode(mode, permission_profile)
+    if permission_mode == "bypassPermissions":
+        return [
+            "--allow-dangerously-skip-permissions",
+            "--permission-mode",
+            "bypassPermissions",
+        ]
+    if permission_mode == "acceptEdits":
+        return ["--permission-mode", "acceptEdits"]
+    if permission_mode == "plan":
         return ["--permission-mode", "plan"]
     return []
 
@@ -205,11 +319,114 @@ def _append_joined_flag(cmd: List[str], flag: str, values: List[str]) -> None:
         cmd.extend([flag, ",".join(normalized)])
 
 
+def _merge_text_items(*groups: List[str]) -> List[str]:
+    merged: List[str] = []
+    seen: set[str] = set()
+    for group in groups:
+        for value in _normalize_text_items(group):
+            if value in seen:
+                continue
+            seen.add(value)
+            merged.append(value)
+    return merged
+
+
+def _normalize_attached_files(values: List[str]) -> List[str]:
+    normalized: List[str] = []
+    seen: set[str] = set()
+    for value in values:
+        cleaned = _clean_optional_text(value)
+        if not cleaned or "\x00" in cleaned:
+            continue
+        key = cleaned.replace("\\", "/")
+        if key in seen:
+            continue
+        seen.add(key)
+        normalized.append(key)
+    return normalized
+
+
+def build_user_request_content(
+    message: str,
+    attached_files: Optional[List[str]] = None,
+    uploaded_files: Optional[List[str]] = None,
+) -> str:
+    """Build the effective user request text, including selected workspace files."""
+    normalized_message = _clean_optional_text(message) or "Please inspect the attached file(s)."
+    normalized_files = _normalize_attached_files(attached_files or [])
+    normalized_uploaded_files = _normalize_text_items(uploaded_files or [])
+    if not normalized_files and not normalized_uploaded_files:
+        return normalized_message
+
+    sections: List[str] = [normalized_message]
+
+    if normalized_files:
+        attachment_lines = "\n".join(f"- {path}" for path in normalized_files)
+        sections.extend(
+            [
+                "# Attached Workspace Files",
+                attachment_lines,
+                "Treat these paths as user-selected workspace context. Read or edit them directly when needed.",
+            ]
+        )
+
+    if normalized_uploaded_files:
+        uploaded_lines = "\n".join(f"- {path}" for path in normalized_uploaded_files)
+        sections.extend(
+            [
+                "# Uploaded Files",
+                uploaded_lines,
+                "These files were uploaded from the Studio UI for this turn. Open them directly when they are relevant.",
+            ]
+        )
+
+    return "\n\n".join(sections)
+
+
+def _sanitize_uploaded_filename(filename: str) -> str:
+    name = os.path.basename(filename.strip()) or "upload.bin"
+    safe = "".join(ch if ch.isalnum() or ch in {".", "_", "-"} else "_" for ch in name)
+    safe = safe.strip("._") or "upload.bin"
+    return safe[:120]
+
+
+def _persist_uploaded_files(
+    uploads: List[UploadedFileAttachment],
+    *,
+    session_id: str,
+) -> tuple[List[str], List[str]]:
+    if not uploads:
+        return [], []
+
+    upload_dir = Path(tempfile.mkdtemp(prefix=f"paperbot-studio-upload-{session_id[:8]}-")).resolve()
+    prompt_entries: List[str] = []
+
+    for index, upload in enumerate(uploads, start=1):
+        payload = upload.data.strip()
+        if not payload:
+            raise ValueError(f"Uploaded file '{upload.name}' is empty")
+        if "," in payload and "base64" in payload[:64]:
+            payload = payload.split(",", 1)[1]
+
+        try:
+            content = base64.b64decode(payload, validate=False)
+        except Exception as exc:
+            raise ValueError(f"Uploaded file '{upload.name}' could not be decoded") from exc
+
+        safe_name = _sanitize_uploaded_filename(upload.name)
+        file_path = upload_dir / f"{index:02d}-{safe_name}"
+        file_path.write_bytes(content)
+        prompt_entries.append(f"{upload.name} -> {file_path}")
+
+    return prompt_entries, [str(upload_dir)]
+
+
 def build_claude_cli_command_args(
     request: StudioChatRequest,
     *,
     effective_mode: Mode,
     prompt: str,
+    extra_add_dirs: Optional[List[str]] = None,
 ) -> List[str]:
     # Studio chat uses print mode rather than an interactive Claude TTY.
     model_id = get_model_id(request.model, for_cli=True)
@@ -230,7 +447,7 @@ def build_claude_cli_command_args(
     if agent:
         cmd.extend(["--agent", agent])
 
-    _append_multi_value_flag(cmd, "--add-dir", request.add_dirs)
+    _append_multi_value_flag(cmd, "--add-dir", _merge_text_items(request.add_dirs, extra_add_dirs or []))
     _append_multi_value_flag(cmd, "--mcp-config", request.mcp_config)
     _append_joined_flag(cmd, "--tools", request.tools)
     _append_joined_flag(cmd, "--allowed-tools", request.allowed_tools)
@@ -242,7 +459,7 @@ def build_claude_cli_command_args(
     if request.effort:
         cmd.extend(["--effort", request.effort])
 
-    cmd.extend(get_mode_flags(effective_mode))
+    cmd.extend(get_mode_flags(effective_mode, request.permission_profile))
     cmd.extend(["-p", prompt, "--output-format", "stream-json", "--verbose"])
     return cmd
 
@@ -295,6 +512,8 @@ def build_prompt_with_context(
     paper: Optional[PaperContext],
     mode: Mode,
     history: Optional[List[ChatMessage]] = None,
+    attached_files: Optional[List[str]] = None,
+    uploaded_files: Optional[List[str]] = None,
 ) -> str:
     """Build the prompt with paper context if available."""
     parts = []
@@ -317,7 +536,7 @@ def build_prompt_with_context(
     else:
         parts.append("You are answering questions about this research paper. ")
 
-    parts.append(f"\n# User Request\n{message}")
+    parts.append(f"\n# User Request\n{build_user_request_content(message, attached_files, uploaded_files)}")
 
     return "\n".join(parts)
 
@@ -1193,8 +1412,7 @@ async def stream_claude_cli(
         return
 
     effective_mode = resolve_execution_mode(request.mode)
-    prompt = build_prompt_with_context(request.message, request.paper, effective_mode, request.history)
-    cmd = [claude_path, *build_claude_cli_command_args(request, effective_mode=effective_mode, prompt=prompt)]
+    transport = current_studio_chat_transport(claude_path=claude_path)
 
     _append_eventlog(
         event_log,
@@ -1248,6 +1466,60 @@ async def stream_claude_cli(
             telemetry_state.runtime_terminal_emitted = True
             yield StreamEvent(type="error", message=str(exc))
             return
+
+        try:
+            uploaded_file_entries, upload_add_dirs = await asyncio.to_thread(
+                _persist_uploaded_files,
+                request.uploaded_files,
+                session_id=telemetry_state.session_id,
+            )
+        except ValueError as exc:
+            _append_eventlog(
+                event_log,
+                _make_studio_lifecycle_event(
+                    telemetry_state,
+                    status=EventType.AGENT_ERROR,
+                    agent_name="claude",
+                    stage=telemetry_state.stage,
+                    detail=str(exc),
+                    role="orchestrator",
+                ),
+            )
+            telemetry_state.runtime_terminal_emitted = True
+            yield StreamEvent(type="error", message=str(exc))
+            return
+
+        prompt = build_prompt_with_context(
+            request.message,
+            request.paper,
+            effective_mode,
+            request.history,
+            request.attached_files,
+            uploaded_file_entries,
+        )
+        cmd = [
+            claude_path,
+            *build_claude_cli_command_args(
+                request,
+                effective_mode=effective_mode,
+                prompt=prompt,
+                extra_add_dirs=upload_add_dirs,
+            ),
+        ]
+
+        yield _make_studio_session_init_event(
+            telemetry_state,
+            request=request,
+            effective_mode=effective_mode,
+            transport=transport,
+            cwd=cwd,
+        )
+        mode_changed_event = _make_studio_mode_changed_event(
+            request=request,
+            effective_mode=effective_mode,
+        )
+        if mode_changed_event is not None:
+            yield mode_changed_event
 
         # Write context pack to working directory so Claude CLI can read it
         if request.context_pack_id:
@@ -1426,6 +1698,7 @@ async def stream_anthropic_api(
 ) -> AsyncGenerator[StreamEvent, None]:
     """Fallback: Stream response using Anthropic API directly."""
     effective_mode = resolve_execution_mode(request.mode)
+    transport = current_studio_chat_transport(claude_path=None)
 
     _append_eventlog(
         event_log,
@@ -1449,6 +1722,20 @@ async def stream_anthropic_api(
             role="orchestrator",
         ),
     )
+
+    yield _make_studio_session_init_event(
+        telemetry_state,
+        request=request,
+        effective_mode=effective_mode,
+        transport=transport,
+        cwd=request.project_dir,
+    )
+    mode_changed_event = _make_studio_mode_changed_event(
+        request=request,
+        effective_mode=effective_mode,
+    )
+    if mode_changed_event is not None:
+        yield mode_changed_event
 
     yield StreamEvent(
         type="progress",
@@ -1505,7 +1792,16 @@ async def stream_anthropic_api(
         for msg in request.history[-10:]:
             messages.append({"role": msg.role, "content": msg.content})
 
-        messages.append({"role": "user", "content": request.message})
+        messages.append(
+            {
+                "role": "user",
+                "content": build_user_request_content(
+                    request.message,
+                    request.attached_files,
+                    [upload.name for upload in request.uploaded_files],
+                ),
+            }
+        )
 
         full_content = ""
         async for chunk in provider.stream(messages):
@@ -1567,7 +1863,15 @@ async def studio_chat_stream(
     telemetry_state: _StudioTelemetryState,
     event_log=None,
 ) -> AsyncGenerator[StreamEvent, None]:
-    """Stream studio chat response - tries Claude CLI first, falls back to API."""
+    """Stream Studio chat from the current managed-chat transport.
+
+    Current transport order:
+    1. Claude CLI print mode
+    2. Direct Anthropic API fallback
+
+    Preferred long-term route remains the Claude Agent SDK, matching the
+    CodePilot-style managed session architecture.
+    """
 
     # Check if Claude CLI is available
     claude_path = find_claude_cli()
@@ -1694,6 +1998,9 @@ async def studio_command(request: StudioCommandRequest):
 async def studio_status():
     """Check if Claude CLI is available."""
     claude_path = find_claude_cli()
+    agent_sdk_available = has_claude_agent_sdk()
+    chat_transport = current_studio_chat_transport(claude_path=claude_path)
+    preferred_transport = preferred_studio_chat_transport()
     opencode_path = find_opencode_cli()
     opencode_version = None
     opencode_available = False
@@ -1726,8 +2033,15 @@ async def studio_status():
 
         return {
             "claude_cli": True,
+            "claude_agent_sdk": agent_sdk_available,
             "claude_path": claude_path,
             "claude_version": version,
+            "chat_surface": "managed_session",
+            "chat_transport": chat_transport,
+            "preferred_chat_transport": preferred_transport,
+            "slash_commands": _studio_supported_slash_commands(),
+            "permission_profiles": _studio_supported_permission_profiles(),
+            "runtime_commands": sorted(_ALLOWED_MANAGEMENT_COMMANDS["claude"]),
             "code_mode_enabled": is_code_mode_enabled(),
             "known_model_aliases": _KNOWN_CLAUDE_MODEL_ALIASES,
             "opencode_cli": opencode_available,
@@ -1737,8 +2051,15 @@ async def studio_status():
 
     return {
         "claude_cli": False,
+        "claude_agent_sdk": agent_sdk_available,
         "claude_path": None,
         "claude_version": None,
+        "chat_surface": "managed_session",
+        "chat_transport": chat_transport,
+        "preferred_chat_transport": preferred_transport,
+        "slash_commands": _studio_supported_slash_commands(),
+        "permission_profiles": _studio_supported_permission_profiles(),
+        "runtime_commands": sorted(_ALLOWED_MANAGEMENT_COMMANDS["claude"]),
         "fallback": "anthropic_api",
         "code_mode_enabled": is_code_mode_enabled(),
         "known_model_aliases": _KNOWN_CLAUDE_MODEL_ALIASES,

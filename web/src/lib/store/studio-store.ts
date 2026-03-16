@@ -26,6 +26,12 @@ export interface AgentAction {
         functionName?: string
         params?: Record<string, unknown>
         result?: unknown
+        // For uploaded/user-selected files
+        attachments?: Array<{
+            name: string
+            type: string
+            size: number
+        }>
         // For mcp_call
         mcpServer?: string
         mcpTool?: string

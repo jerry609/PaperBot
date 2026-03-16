@@ -1,11 +1,12 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Textarea } from "@/components/ui/textarea"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useStudioStore, AgentAction } from "@/lib/store/studio-store"
 import { useProjectContext } from "@/lib/store/project-context"
 import { readSSE } from "@/lib/sse"
@@ -14,6 +15,10 @@ import { DiffModal } from "./DiffViewer"
 import { WorkspaceSetupDialog } from "./WorkspaceSetupDialog"
 import { ContextDialogPanel } from "./ContextDialogPanel"
 import { AgentBoard } from "./AgentBoard"
+import {
+    StudioPermissionSelector,
+    type StudioPermissionProfile,
+} from "./StudioPermissionSelector"
 import {
     buildCommandPreview,
     type ActiveCommand as CliActiveCommand,
@@ -26,11 +31,9 @@ import { parseStudioSlashCommand } from "@/lib/studio-slash"
 import type { StudioRuntimeInfo } from "@/lib/studio-runtime"
 import { cn } from "@/lib/utils"
 import {
-    CheckCircle2,
     AlertCircle,
     FileText,
     Bot,
-    User,
     FileCode,
     Wrench,
     Terminal,
@@ -46,6 +49,7 @@ import {
     MessageSquare,
     LayoutDashboard,
     Settings2,
+    Paperclip,
 } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import Editor from "@monaco-editor/react"
@@ -65,30 +69,18 @@ interface ReproductionLogProps {
     runtimeLoading: boolean
 }
 
-const actionIcons: Record<string, React.ElementType> = {
-    user: User,
-    thinking: Loader2,
-    file_change: FileCode,
-    function_call: Wrench,
-    error: AlertCircle,
-    complete: CheckCircle2,
-    text: Bot,
-    run_command: Terminal,
-}
-
-const actionColors: Record<string, { bg: string; text: string; border: string }> = {
-    user: { bg: "bg-slate-700", text: "text-white", border: "border-slate-700" },
-    thinking: { bg: "bg-slate-100", text: "text-slate-700", border: "border-slate-200" },
-    file_change: { bg: "bg-slate-100", text: "text-slate-700", border: "border-slate-200" },
-    function_call: { bg: "bg-stone-100", text: "text-stone-700", border: "border-stone-200" },
-    error: { bg: "bg-rose-50", text: "text-rose-700", border: "border-rose-200" },
-    complete: { bg: "bg-emerald-50", text: "text-emerald-700", border: "border-emerald-200" },
-    text: { bg: "bg-[#eef0ea]", text: "text-slate-800", border: "border-slate-200" },
-}
-
-function buildChatThreadTitle(message: string): string {
+function buildChatThreadTitle(message: string, attachmentNames: string[] = []): string {
     const singleLine = message.replace(/\s+/g, " ").trim()
-    if (!singleLine) return "New thread"
+    if (!singleLine) {
+        if (attachmentNames.length === 1) {
+            const label = attachmentNames[0]?.split("/").pop() || attachmentNames[0]
+            return label.length <= 56 ? `File: ${label}` : `File: ${label.slice(0, 53)}...`
+        }
+        if (attachmentNames.length > 1) {
+            return `${attachmentNames.length} attached files`
+        }
+        return "New thread"
+    }
     return singleLine.length <= 56 ? singleLine : `${singleLine.slice(0, 53)}...`
 }
 
@@ -96,6 +88,52 @@ function normalizeThinkingMessage(value: unknown): string | null {
     if (typeof value !== "string") return null
     const normalized = value.replace(/\s+/g, " ").trim()
     return normalized || null
+}
+
+type StudioSessionStatusPayload = {
+    subtype?: string
+    session_id?: string
+    mode?: string
+    requested_mode?: string
+    permission_profile?: string
+    permission_mode?: string
+    chat_transport?: string
+    preferred_chat_transport?: string
+    claude_agent_sdk_available?: boolean
+    cwd?: string
+}
+
+function isStudioMode(value: unknown): value is Mode {
+    return value === "Code" || value === "Plan" || value === "Ask"
+}
+
+function formatStudioChatTransportLabel(transport: unknown): string {
+    if (transport === "claude_agent_sdk") return "Agent SDK"
+    if (transport === "claude_cli_print") return "CLI print"
+    if (transport === "anthropic_api") return "API fallback"
+    return "managed transport"
+}
+
+function buildStudioSessionInitMessage(payload: StudioSessionStatusPayload): string | null {
+    const transport = formatStudioChatTransportLabel(payload.chat_transport)
+    const effectiveMode = isStudioMode(payload.mode) ? payload.mode : null
+    const requestedMode = isStudioMode(payload.requested_mode) ? payload.requested_mode : null
+    const permissionSuffix =
+        payload.permission_profile === "full_access"
+            ? " Full access enabled."
+            : ""
+
+    const prefix = effectiveMode ? `[${effectiveMode}] ` : ""
+    const modeSuffix =
+        effectiveMode && requestedMode && effectiveMode !== requestedMode
+            ? ` ${requestedMode} requested; running in ${effectiveMode}.`
+            : ""
+    const sdkSuffix =
+        payload.chat_transport === "claude_cli_print" && payload.claude_agent_sdk_available !== true
+            ? " Agent SDK route not installed yet."
+            : ""
+
+    return `${prefix}Managed chat connected on ${transport}.${modeSuffix}${permissionSuffix}${sdkSuffix}`.trim()
 }
 
 function isGenericThinkingMessage(message: string): boolean {
@@ -151,8 +189,94 @@ function resolveRequestedModel(modelOption: string, customModel: string): string
     return modelOption === "custom" ? customModel.trim() : modelOption.trim()
 }
 
-function formatTime(date: Date): string {
-    return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+type ComposerUploadedFile = {
+    id: string
+    name: string
+    type: string
+    size: number
+    data: string
+}
+
+function formatFileSize(bytes: number): string {
+    if (bytes < 1024) return `${bytes} B`
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function readFileAsDataUrl(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => {
+            if (typeof reader.result === "string") {
+                resolve(reader.result)
+                return
+            }
+            reject(new Error(`Could not read ${file.name}`))
+        }
+        reader.onerror = () => reject(reader.error ?? new Error(`Could not read ${file.name}`))
+        reader.readAsDataURL(file)
+    })
+}
+
+async function fileToComposerUpload(file: File): Promise<ComposerUploadedFile> {
+    const dataUrl = await readFileAsDataUrl(file)
+    const data = dataUrl.includes(",") ? dataUrl.split(",", 2)[1] : dataUrl
+    return {
+        id: crypto.randomUUID(),
+        name: file.name,
+        type: file.type || "application/octet-stream",
+        size: file.size,
+        data,
+    }
+}
+
+function buildUploadSignature(file: Pick<ComposerUploadedFile, "name" | "size" | "type">): string {
+    return `${file.name}:${file.size}:${file.type}`
+}
+
+function mergeUploadedFiles(
+    current: ComposerUploadedFile[],
+    incoming: ComposerUploadedFile[],
+): ComposerUploadedFile[] {
+    const next = [...current]
+    const seen = new Set(current.map((file) => buildUploadSignature(file)))
+
+    for (const file of incoming) {
+        const signature = buildUploadSignature(file)
+        if (seen.has(signature)) continue
+        seen.add(signature)
+        next.push(file)
+    }
+
+    return next
+}
+
+function buildVisibleActions(actions: AgentAction[]): AgentAction[] {
+    return actions.filter((action, index) => {
+        if (action.type !== "thinking") return true
+        if (!isGenericThinkingMessage(action.content)) return true
+        return index === actions.length - 1
+    })
+}
+
+function summarizeToolPayload(payload: unknown): string | null {
+    if (!payload || typeof payload !== "object") {
+        if (typeof payload === "string" && payload.trim()) {
+            return payload.trim().replace(/\s+/g, " ").slice(0, 120)
+        }
+        return null
+    }
+
+    const record = payload as Record<string, unknown>
+    const priorityKeys = ["path", "file_path", "filename", "target_path", "target_file", "command", "query", "pattern", "task_title", "message"]
+    for (const key of priorityKeys) {
+        const value = record[key]
+        if (typeof value === "string" && value.trim()) {
+            return value.trim().replace(/\s+/g, " ").slice(0, 120)
+        }
+    }
+
+    return null
 }
 
 type ComposerPillTone = "neutral" | "accent" | "success" | "warning"
@@ -182,7 +306,7 @@ function ComposerPill({
     return (
         <div
             className={cn(
-                "inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs shadow-sm",
+                "inline-flex min-w-0 max-w-[min(100%,34rem)] items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs shadow-sm",
                 composerPillToneClassName[tone],
             )}
         >
@@ -205,122 +329,195 @@ function ComposerPill({
     )
 }
 
+function MessageAttachmentPill({
+    name,
+    type,
+    size,
+}: {
+    name: string
+    type: string
+    size: number
+}) {
+    return (
+        <div className="inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2.5 py-0.5 text-[10px] text-slate-600 shadow-[0_1px_0_rgba(255,255,255,0.75)_inset]">
+            {type.startsWith("image/") ? (
+                <Paperclip className="h-3 w-3 shrink-0 text-slate-400" />
+            ) : (
+                <FileText className="h-3 w-3 shrink-0 text-slate-400" />
+            )}
+            <span className="truncate font-medium text-slate-700">{name}</span>
+            <span className="shrink-0 text-[10px] uppercase tracking-[0.12em] text-slate-400">
+                {formatFileSize(size)}
+            </span>
+        </div>
+    )
+}
+
 interface ActionItemProps {
     action: AgentAction
     onViewDiff: (action: AgentAction) => void
-    isLast: boolean
 }
 
-function ActionItem({ action, onViewDiff, isLast }: ActionItemProps) {
+function ActionItem({ action, onViewDiff }: ActionItemProps) {
     const [expanded, setExpanded] = useState(false)
-    const iconKey = action.metadata?.functionName || action.type
-    const Icon = actionIcons[iconKey] || actionIcons[action.type] || Bot
-    const colors = actionColors[iconKey] || actionColors[action.type] || actionColors.text
-
+    const attachments = action.metadata?.attachments ?? []
     const hasExpandableContent = Boolean(action.metadata?.params || action.metadata?.result)
     const hasToolResult = action.metadata?.result !== undefined
+    const toolSummary =
+        summarizeToolPayload(action.metadata?.params) ??
+        summarizeToolPayload(action.metadata?.result)
     const stringifyPayload = (payload: unknown): string =>
         typeof payload === "string" ? payload : JSON.stringify(payload, null, 2) || ""
 
-    return (
-        <div className="group relative flex gap-2.5">
-            {!isLast && (
-                <div className="absolute left-2.5 top-6 bottom-0 w-px bg-slate-200" />
-            )}
+    if (action.type === "user") {
+        const hasTextContent = action.content.trim().length > 0
+        if (!hasTextContent && attachments.length === 0) {
+            return null
+        }
 
-            <div className={cn(
-                "relative z-10 w-5 h-5 flex items-center justify-center shrink-0 rounded-md border",
-                colors.bg, colors.border
-            )}>
-                <Icon className={cn("h-2.5 w-2.5", colors.text)} />
+        return (
+            <div className="flex justify-end pb-3">
+                <div className="flex max-w-[88%] flex-col items-end gap-1.5">
+                    {attachments.length > 0 ? (
+                        <div className="flex flex-wrap justify-end gap-1.5">
+                            {attachments.map((attachment) => (
+                                <MessageAttachmentPill
+                                    key={`${attachment.name}:${attachment.size}:${attachment.type}`}
+                                    {...attachment}
+                                />
+                            ))}
+                        </div>
+                    ) : null}
+                    {hasTextContent ? (
+                        <div className="rounded-[18px] bg-slate-700 px-3 py-2 text-[12px] leading-5 text-white shadow-sm">
+                            <p className="whitespace-pre-wrap">{action.content}</p>
+                        </div>
+                    ) : null}
+                </div>
             </div>
+        )
+    }
 
-            <div className="flex-1 min-w-0 pb-3">
-                <div className="flex items-start justify-between gap-2">
-                    <div className="flex-1 min-w-0">
-                        {action.type === 'file_change' && action.metadata?.filename ? (
-                            <div className="space-y-0.5">
-                                <div className="flex items-center gap-2 flex-wrap">
-                                    <button
-                                        onClick={() => onViewDiff(action)}
-                                        className={cn("font-mono text-xs hover:underline", colors.text)}
-                                    >
-                                        {action.metadata.filename}
-                                    </button>
-                                    <span className="rounded bg-[#e5e8e1] px-1 py-0.5 text-[10px]">
-                                        <span className="text-emerald-700">+{action.metadata.linesAdded || 0}</span>
-                                        <span className="mx-0.5 text-slate-400">/</span>
-                                        <span className="text-rose-700">-{action.metadata.linesDeleted || 0}</span>
-                                    </span>
-                                </div>
-                            </div>
-                        ) : action.type === 'function_call' && action.metadata?.functionName ? (
-                            <div className="space-y-1">
-                                <div className="flex items-center gap-2">
-                                    <code className={cn("rounded-full px-2 py-0.5 text-[10px] font-mono", colors.bg, colors.text)}>
-                                        {action.metadata.functionName}()
-                                    </code>
-                                    <span
-                                        className={cn(
-                                            "rounded-full border px-1.5 py-0.5 text-[10px] uppercase tracking-[0.12em]",
-                                            hasToolResult
-                                                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                                                : "border-slate-200 bg-white text-slate-500",
-                                        )}
-                                    >
-                                        {hasToolResult ? "Done" : "Running"}
-                                    </span>
-                                    {hasExpandableContent && (
-                                        <button
-                                            onClick={() => setExpanded(!expanded)}
-                                            className="text-slate-500 transition-colors hover:text-slate-700"
-                                        >
-                                            {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-                                        </button>
-                                    )}
-                                </div>
-                                {expanded && (
-                                    <div className="mt-1.5 space-y-1.5">
-                                        {Boolean(action.metadata.params) && (
-                                            <CodeBlock title="Args" code={stringifyPayload(action.metadata.params)} />
-                                        )}
-                                        {Boolean(action.metadata.result) && (
-                                            <CodeBlock title="Result" code={stringifyPayload(action.metadata.result)} />
-                                        )}
-                                    </div>
-                                )}
-                            </div>
-                        ) : action.type === 'thinking' ? (
-                            <div className="inline-flex max-w-full items-start gap-2 rounded-full border border-slate-200 bg-white/80 px-2.5 py-1 text-[10px] uppercase tracking-[0.14em] text-slate-500">
-                                <span className="shrink-0 font-medium text-slate-400">Thinking</span>
-                                <span className="min-w-0 whitespace-pre-wrap normal-case tracking-normal text-slate-500">
-                                    {action.content}
-                                </span>
-                            </div>
-                        ) : action.type === 'error' ? (
-                            <div className={cn("text-xs rounded-md border px-2 py-1.5", colors.bg, colors.border)}>
-                                <span className={colors.text}>{action.content}</span>
-                            </div>
-                        ) : action.type === 'user' ? (
-                            <div className="ml-auto max-w-[86%] rounded-[20px] bg-slate-700 px-3.5 py-2.5 text-[12px] leading-6 text-white shadow-sm">
-                                {action.content}
-                            </div>
-                        ) : action.type === 'complete' ? (
-                            <span className={cn("rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1 text-[10px] font-medium uppercase tracking-[0.12em]", colors.text)}>
-                                Run complete
+    if (action.type === "thinking") {
+        return (
+            <div className="pb-1.5">
+                <div className="flex items-start gap-1.5 px-0.5 text-[10px] text-slate-500">
+                    <Loader2 className="mt-0.5 h-3 w-3 shrink-0 animate-spin text-slate-400" />
+                    <span className="shrink-0 uppercase tracking-[0.14em] text-slate-400">thinking</span>
+                    <span className="min-w-0 whitespace-pre-wrap leading-[18px] text-slate-500">
+                        {action.content}
+                    </span>
+                </div>
+            </div>
+        )
+    }
+
+    if (action.type === "function_call" && action.metadata?.functionName) {
+        return (
+            <div className="pb-1.5">
+                <div className="rounded-2xl border border-slate-200 bg-white/90 px-2.5 py-1.5 shadow-[0_1px_0_rgba(255,255,255,0.75)_inset]">
+                    <div className="flex items-center gap-1.5">
+                        <div className="flex h-5.5 w-5.5 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-[#f3f5ef]">
+                            <Wrench className="h-3 w-3 text-slate-500" />
+                        </div>
+                        <code className="shrink-0 rounded-full bg-[#eef1ea] px-1.5 py-0.5 text-[10px] font-mono text-slate-700">
+                            {action.metadata.functionName}()
+                        </code>
+                        {toolSummary ? (
+                            <span className="min-w-0 flex-1 truncate text-[10px] text-slate-500">
+                                {toolSummary}
                             </span>
                         ) : (
-                            <div className="max-w-[88%] rounded-[20px] border border-slate-200 bg-[#f7f8f4] px-3.5 py-2.5 text-[12px] leading-6 text-slate-800 shadow-[0_1px_0_rgba(255,255,255,0.6)_inset]">
-                                <p className="whitespace-pre-wrap">{action.content}</p>
-                            </div>
+                            <span className="min-w-0 flex-1 text-[10px] text-slate-400">
+                                {hasToolResult ? "done" : "running"}
+                            </span>
                         )}
+                        <span
+                            className={cn(
+                                "shrink-0 rounded-full border px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em]",
+                                hasToolResult
+                                    ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                    : "border-slate-200 bg-[#f8faf6] text-slate-500",
+                            )}
+                        >
+                            {hasToolResult ? "done" : "running"}
+                        </span>
+                        {hasExpandableContent ? (
+                            <button
+                                type="button"
+                                onClick={() => setExpanded((current) => !current)}
+                                className="rounded-full p-0.5 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700"
+                                title={expanded ? "Collapse tool output" : "Expand tool output"}
+                            >
+                                {expanded ? (
+                                    <ChevronDown className="h-3.5 w-3.5" />
+                                ) : (
+                                    <ChevronRight className="h-3.5 w-3.5" />
+                                )}
+                            </button>
+                        ) : null}
                     </div>
-
-                    <div className="flex shrink-0 items-center gap-1 text-[9px] text-slate-400 opacity-0 transition-opacity group-hover:opacity-100">
-                        <Clock className="h-2 w-2" />
-                        {formatTime(action.timestamp)}
-                    </div>
+                    {expanded ? (
+                        <div className="mt-1.5 space-y-1.5">
+                            {Boolean(action.metadata.params) ? (
+                                <CodeBlock title="Args" code={stringifyPayload(action.metadata.params)} />
+                            ) : null}
+                            {Boolean(action.metadata.result) ? (
+                                <CodeBlock title="Result" code={stringifyPayload(action.metadata.result)} />
+                            ) : null}
+                        </div>
+                    ) : null}
                 </div>
+            </div>
+        )
+    }
+
+    if (action.type === "file_change" && action.metadata?.filename) {
+        return (
+            <div className="pb-1.5">
+                <button
+                    type="button"
+                    onClick={() => onViewDiff(action)}
+                    className="flex max-w-full items-center gap-1.5 rounded-2xl border border-slate-200 bg-white/90 px-2.5 py-1.5 text-left text-[10px] text-slate-600 shadow-[0_1px_0_rgba(255,255,255,0.75)_inset] transition-colors hover:bg-white"
+                >
+                    <div className="flex h-5.5 w-5.5 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-[#f3f5ef]">
+                        <FileCode className="h-3 w-3 text-slate-500" />
+                    </div>
+                    <span className="truncate font-mono text-slate-700">{action.metadata.filename}</span>
+                    <span className="shrink-0 rounded-full bg-[#eef1ea] px-1.5 py-0.5 text-[9px]">
+                        <span className="text-emerald-700">+{action.metadata.linesAdded || 0}</span>
+                        <span className="mx-0.5 text-slate-400">/</span>
+                        <span className="text-rose-700">-{action.metadata.linesDeleted || 0}</span>
+                    </span>
+                </button>
+            </div>
+        )
+    }
+
+    if (action.type === "error") {
+        return (
+            <div className="pb-2">
+                <div className="rounded-2xl border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-[11px] text-rose-700">
+                    {action.content}
+                </div>
+            </div>
+        )
+    }
+
+    if (action.type === "complete") {
+        return (
+            <div className="pb-2">
+                <span className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[9px] font-medium uppercase tracking-[0.12em] text-emerald-700">
+                    done
+                </span>
+            </div>
+        )
+    }
+
+    return (
+        <div className="pb-2">
+            <div className="max-w-[88%] rounded-[18px] border border-slate-200/90 bg-[#f7f8f4] px-3 py-2 text-[12px] leading-5 text-slate-800 shadow-[0_1px_0_rgba(255,255,255,0.6)_inset]">
+                <p className="whitespace-pre-wrap">{action.content}</p>
             </div>
         </div>
     )
@@ -371,11 +568,15 @@ export function ReproductionLog({
     const [mode, setMode] = useState<Mode>("Code")
     const [modelOption, setModelOption] = useState("sonnet")
     const [customModel, setCustomModel] = useState("")
+    const [permissionProfile, setPermissionProfile] = useState<StudioPermissionProfile>("default")
     const [lastError, setLastError] = useState<string | null>(null)
     const [diffAction, setDiffAction] = useState<AgentAction | null>(null)
     const [saving, setSaving] = useState(false)
     const [messageInput, setMessageInput] = useState("")
+    const [uploadedFiles, setUploadedFiles] = useState<ComposerUploadedFile[]>([])
     const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null)
+    const composerFileInputRef = useRef<HTMLInputElement | null>(null)
+    const slashPaletteListRef = useRef<HTMLDivElement | null>(null)
     const [composerCursor, setComposerCursor] = useState(0)
     const [activeCliCommand, setActiveCliCommand] = useState<CliActiveCommand | null>(null)
     const [chatDraftBeforeUtility, setChatDraftBeforeUtility] = useState("")
@@ -423,13 +624,15 @@ export function ReproductionLog({
     )
     const activeChatTask = activeTask?.kind === "chat" ? activeTask : null
     const visibleTask = activeChatTask
+    const visibleActions = useMemo(
+        () => (visibleTask ? buildVisibleActions(visibleTask.actions) : []),
+        [visibleTask],
+    )
     const projectDir = selectedPaper?.outputDir || lastGenCodeResult?.outputDir || null
     const isBusy = status === "running"
     const runtimeLabel = runtimeLoading
         ? "Studio runtime"
-        : runtimeInfo.source === "anthropic_api"
-            ? "Anthropic API fallback"
-            : "Claude Code"
+        : `${runtimeInfo.label} · ${runtimeInfo.statusLabel}`
     const requestedModel = useMemo(
         () => resolveRequestedModel(modelOption, customModel),
         [customModel, modelOption],
@@ -449,8 +652,8 @@ export function ReproductionLog({
     const messagePlaceholder = runtimeLoading
         ? "Message Studio runtime..."
         : runtimeInfo.source === "anthropic_api"
-            ? "Message fallback runtime..."
-            : "Message Claude Code..."
+            ? "Message managed fallback..."
+            : "Message Claude Code shell..."
     const composerPlaceholder = commandMode
         ? `Edit args for ${buildCommandPreview(activeCliCommand!.runtime, activeCliCommand!.preset, "").trim()} and press Enter to run`
         : messagePlaceholder
@@ -496,17 +699,19 @@ export function ReproductionLog({
     const runChatWithDir = async (targetDir: string) => {
         // Chat with specified directory - called after workspace setup
         const message = messageInput.trim()
-        if (!message) return
+        if (!message && uploadedFiles.length === 0) return
         if (!requestedModel) {
             setLastError("Select a Claude Code model alias or enter a full custom model name.")
             return
         }
+        const pendingUploadedFiles = [...uploadedFiles]
         setMessageInput("")
-        await handleSendMessageWithDir(message, targetDir)
+        setUploadedFiles([])
+        await handleSendMessageWithDir(message, targetDir, pendingUploadedFiles)
     }
 
     const handleSendMessage = async () => {
-        if (!messageInput.trim() || isBusy) return
+        if ((!messageInput.trim() && uploadedFiles.length === 0) || isBusy) return
         if (!requestedModel) {
             setLastError("Select a Claude Code model alias or enter a full custom model name.")
             return
@@ -523,30 +728,57 @@ export function ReproductionLog({
         }
 
         const message = messageInput.trim()
+        const pendingUploadedFiles = [...uploadedFiles]
         setMessageInput("")
-        await handleSendMessageWithDir(message, projectDir || undefined)
+        setUploadedFiles([])
+        await handleSendMessageWithDir(message, projectDir || undefined, pendingUploadedFiles)
     }
 
-    const handleSendMessageWithDir = async (message: string, targetDir?: string) => {
+    const handleSendMessageWithDir = async (
+        message: string,
+        targetDir?: string,
+        selectedUploadedFiles: ComposerUploadedFile[] = [],
+    ) => {
         setStatus("running")
         setLastError(null)
         onViewModeChange("log")
 
-        const threadTitle = buildChatThreadTitle(message)
+        const effectiveMessage = message.trim() || "Please inspect the attached files."
+        const threadTitle = buildChatThreadTitle(
+            message,
+            selectedUploadedFiles.map((file) => file.name),
+        )
         const existingHistory = activeChatTask?.history ?? []
         const taskId =
             activeChatTask?.id ??
             addTask(threadTitle)
         let assistantResponse = ""
         let assistantHistoryCommitted = false
+        let negotiatedMode: Mode = mode
 
         if (activeChatTask && activeChatTask.history.length === 0 && activeChatTask.actions.length === 0) {
             renameTask(taskId, threadTitle)
         }
 
         const initialThinking = `[${mode}] Sending to ${runtimeLabel}...`
-        addAction(taskId, { type: "user", content: message })
-        appendTaskHistory(taskId, { role: "user", content: message })
+        addAction(
+            taskId,
+            {
+                type: "user",
+                content: message.trim(),
+                metadata:
+                    selectedUploadedFiles.length > 0
+                        ? {
+                            attachments: selectedUploadedFiles.map((file) => ({
+                                name: file.name,
+                                type: file.type,
+                                size: file.size,
+                            })),
+                        }
+                        : undefined,
+            },
+        )
+        appendTaskHistory(taskId, { role: "user", content: effectiveMessage })
         upsertThinkingAction(taskId, initialThinking)
         updateTaskStatus(taskId, "running")
 
@@ -555,15 +787,17 @@ export function ReproductionLog({
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                    message,
+                    message: effectiveMessage,
                     mode,
                     model: requestedModel,
+                    permission_profile: permissionProfile,
                     paper: selectedPaper ? {
                         title: selectedPaper.title,
                         abstract: selectedPaper.abstract,
                         method_section: selectedPaper.methodSection,
                     } : undefined,
                     history: existingHistory,
+                    uploaded_files: selectedUploadedFiles,
                     session_id: taskId,
                     project_dir: targetDir,
                     context_pack_id: contextPack?.context_pack_id,
@@ -609,7 +843,42 @@ export function ReproductionLog({
             }
 
             for await (const evt of readSSE(res.body)) {
-                if (evt?.type === "progress") {
+                if (evt?.type === "status") {
+                    const data = (evt.data ?? {}) as StudioSessionStatusPayload
+
+                    if (data.subtype === "init") {
+                        if (isStudioMode(data.mode)) {
+                            negotiatedMode = data.mode
+                            if (data.mode !== mode) {
+                                setMode(data.mode)
+                            }
+                        }
+                        if (data.permission_profile === "default" || data.permission_profile === "full_access") {
+                            setPermissionProfile(data.permission_profile)
+                        }
+                        const initMessage = buildStudioSessionInitMessage(data)
+                        if (initMessage) {
+                            pushThinking(initMessage)
+                        }
+                        continue
+                    }
+
+                    if (data.subtype === "mode_changed") {
+                        if (isStudioMode(data.mode)) {
+                            negotiatedMode = data.mode
+                            if (data.mode !== mode) {
+                                setMode(data.mode)
+                            }
+                        }
+                        const reason =
+                            normalizeThinkingMessage((data as Record<string, unknown>).reason) ??
+                            buildStudioSessionInitMessage(data)
+                        if (reason) {
+                            pushThinking(reason)
+                        }
+                        continue
+                    }
+                } else if (evt?.type === "progress") {
                     const data = (evt.data ?? {}) as Record<string, unknown>
                     const cliEvent = data.cli_event as string | undefined
 
@@ -689,7 +958,7 @@ export function ReproductionLog({
                     }
                     if (!finalContent.trim()) {
                         const summary = data.num_turns
-                            ? `Completed in ${data.num_turns} turns`
+                            ? `[${negotiatedMode}] Completed in ${data.num_turns} turns`
                             : "Completed"
                         addAction(taskId, { type: "complete", content: summary })
                     }
@@ -764,6 +1033,7 @@ export function ReproductionLog({
     const clearActiveConversation = () => {
         setActiveTask(null)
         setMessageInput("")
+        setUploadedFiles([])
         setChatDraftBeforeUtility("")
         setActiveCliCommand(null)
         setLastError(null)
@@ -864,9 +1134,14 @@ export function ReproductionLog({
                 "Claude Code status",
                 [
                     `runtime: ${runtimeLoading ? "checking" : runtimeLabel}`,
+                    `chat transport: ${formatStudioChatTransportLabel(runtimeInfo.chatTransport)}`,
+                    `preferred transport: ${formatStudioChatTransportLabel(runtimeInfo.preferredChatTransport)}`,
+                    `agent sdk: ${runtimeInfo.claudeAgentSdkAvailable ? "available" : "not installed"}`,
                     `mode: ${mode}`,
+                    `permission: ${permissionProfile}`,
                     `model: ${requestedModel || "pending"}`,
                     `workspace: ${projectDir ?? "not set"}`,
+                    `uploaded files: ${uploadedFiles.length}`,
                     `paper: ${selectedPaper?.title ?? "none"}`,
                     `session: ${activeChatTask?.name ?? "new thread"}`,
                 ].join("\n"),
@@ -987,14 +1262,58 @@ export function ReproductionLog({
         setComposerCursor(target.selectionStart ?? target.value.length)
     }
 
-    const focusComposerToEnd = () => {
+    const focusComposerAt = useCallback((nextCursor: number) => {
         requestAnimationFrame(() => {
             if (!composerTextareaRef.current) return
-            const nextCursor = composerTextareaRef.current.value.length
             composerTextareaRef.current.focus()
             composerTextareaRef.current.setSelectionRange(nextCursor, nextCursor)
             setComposerCursor(nextCursor)
         })
+    }, [])
+
+    const focusComposerToEnd = useCallback(() => {
+        const nextCursor = composerTextareaRef.current?.value.length ?? messageInput.length
+        focusComposerAt(nextCursor)
+    }, [focusComposerAt, messageInput.length])
+
+    const handleComposerFileSelection = useCallback(
+        async (event: ChangeEvent<HTMLInputElement>) => {
+            const selectedFiles = Array.from(event.target.files ?? [])
+            event.target.value = ""
+            if (selectedFiles.length === 0) return
+
+            try {
+                const nextUploads = await Promise.all(selectedFiles.map((file) => fileToComposerUpload(file)))
+                setUploadedFiles((current) => mergeUploadedFiles(current, nextUploads))
+                setLastError(null)
+                focusComposerToEnd()
+            } catch (error) {
+                setLastError(error instanceof Error ? error.message : "Failed to upload file")
+            }
+        },
+        [focusComposerToEnd],
+    )
+
+    const handleOpenComposerUpload = useCallback(() => {
+        if (commandMode) return
+        composerFileInputRef.current?.click()
+    }, [commandMode])
+
+    const handleInsertSlashCommand = () => {
+        const baseValue = commandMode ? chatDraftBeforeUtility : messageInput
+        const cursor = commandMode
+            ? (chatDraftBeforeUtility.length || 0)
+            : (composerTextareaRef.current?.selectionStart ?? messageInput.length)
+        const nextValue = `${baseValue.slice(0, cursor)}/${baseValue.slice(cursor)}`
+
+        if (commandMode) {
+            setActiveCliCommand(null)
+            setChatDraftBeforeUtility("")
+        }
+
+        setMessageInput(nextValue)
+        setLastError(null)
+        focusComposerAt(cursor + 1)
     }
 
     function openAgentBoardWorkspace() {
@@ -1018,6 +1337,21 @@ export function ReproductionLog({
             doctor: byId.get("claude-doctor") ?? null,
         }
     }, [])
+    const supportedSlashCommandSet = useMemo(() => {
+        const values = runtimeInfo.supportedSlashCommands.map((item) => item.trim().toLowerCase()).filter(Boolean)
+        return values.length > 0 ? new Set(values) : null
+    }, [runtimeInfo.supportedSlashCommands])
+    const supportedPermissionProfiles = useMemo(
+        () =>
+            runtimeInfo.supportedPermissionProfiles
+                .map((item) => item.trim().toLowerCase())
+                .filter((item) => item === "default" || item === "full_access"),
+        [runtimeInfo.supportedPermissionProfiles],
+    )
+    const supportedRuntimeCommandSet = useMemo(() => {
+        const values = runtimeInfo.runtimeCommands.map((item) => item.trim().toLowerCase()).filter(Boolean)
+        return values.length > 0 ? new Set(values) : null
+    }, [runtimeInfo.runtimeCommands])
 
     const slashCommands: SlashCommandItem[] = [
         {
@@ -1138,7 +1472,14 @@ export function ReproductionLog({
         },
     ]
 
-    const filteredSlashCommands = slashCommands.filter((item) => {
+    const availableSlashCommands = slashCommands.filter((item) => {
+        if (item.group === "Runtime") {
+            return supportedRuntimeCommandSet ? supportedRuntimeCommandSet.has(item.command) : true
+        }
+        return supportedSlashCommandSet ? supportedSlashCommandSet.has(item.command) : true
+    })
+
+    const filteredSlashCommands = availableSlashCommands.filter((item) => {
         if (!slashQuery) return true
         const haystack = [item.command, item.label, item.description, ...item.keywords]
             .join(" ")
@@ -1157,6 +1498,14 @@ export function ReproductionLog({
         )
     }, [filteredSlashCommands.length, slashPaletteActive, slashQuery])
 
+    useEffect(() => {
+        if (!slashPaletteActive) return
+        const list = slashPaletteListRef.current
+        if (!list) return
+        const activeItem = list.querySelector<HTMLElement>(`[data-slash-index="${slashSelectedIndex}"]`)
+        activeItem?.scrollIntoView({ block: "nearest" })
+    }, [slashPaletteActive, slashSelectedIndex])
+
     const handleApplySlashCommand = (command: SlashCommandItem) => {
         command.onSelect(replaceActiveSlashToken())
         setSlashSelectedIndex(0)
@@ -1165,6 +1514,8 @@ export function ReproductionLog({
 
     const composerHelperText = commandMode
         ? "Claude Code command selected. Enter runs it, and clear returns the composer to chat."
+        : uploadedFiles.length > 0
+            ? `${uploadedFiles.length} uploaded file${uploadedFiles.length === 1 ? "" : "s"} ready.`
         : missingCustomModel
             ? "Enter a full Claude Code model name before sending."
             : "Type / for Claude-style commands, runtime checks, and thread controls."
@@ -1197,6 +1548,15 @@ export function ReproductionLog({
             tone: modelOption === "custom" ? "warning" as const : "neutral" as const,
             icon: Bot,
         },
+        ...uploadedFiles.map((file) => ({
+            id: `file:${file.id}`,
+            label: file.name,
+            meta: formatFileSize(file.size),
+            tone: "neutral" as const,
+            icon: Paperclip,
+            onRemove: () =>
+                setUploadedFiles((current) => current.filter((item) => item.id !== file.id)),
+        })),
         commandMode
             ? {
                 id: "command",
@@ -1308,6 +1668,14 @@ export function ReproductionLog({
             }
             : null,
     ].filter(Boolean) as ComposerPillProps[]
+    const canAttachFiles = !commandMode
+    const composerHeaderTitle = commandMode
+        ? buildCommandPreview(activeCliCommand!.runtime, activeCliCommand!.preset, messageInput) || "Claude Code command"
+        : slashPaletteActive
+            ? "Insert slash command"
+            : activeChatTask?.name || "New thread"
+    const composerHeaderBadge = commandMode ? "Command" : slashPaletteActive ? "Slash" : "Chat"
+    const composerHeaderRightLabel = slashPaletteActive ? `/${slashToken || ""}` : "/"
 
     const consoleMode = viewMode === "log" || viewMode === "commands"
     const activeNavigationView = viewMode === "commands" ? "log" : viewMode
@@ -1438,7 +1806,7 @@ export function ReproductionLog({
                     /* Chat Timeline */
                     <ScrollArea className="h-full bg-[#f5f5f2]">
                         <div className="p-4">
-                            {!visibleTask || visibleTask.actions.length === 0 ? (
+                            {!visibleTask || visibleActions.length === 0 ? (
                                 <div className="flex flex-col items-center justify-center space-y-4 py-20 text-slate-500">
                                     <div className="flex h-16 w-16 items-center justify-center rounded-2xl border border-slate-200 bg-[#eceee8]">
                                         <MessageSquare className="h-8 w-8 opacity-30" />
@@ -1454,12 +1822,11 @@ export function ReproductionLog({
                                 </div>
                             ) : (
                                 <div className="space-y-0">
-                                    {visibleTask.actions.map((action, index) => (
+                                    {visibleActions.map((action) => (
                                         <ActionItem
                                             key={action.id}
                                             action={action}
                                             onViewDiff={setDiffAction}
-                                            isLast={index === visibleTask.actions.length - 1}
                                         />
                                     ))}
                                 </div>
@@ -1475,20 +1842,16 @@ export function ReproductionLog({
                     <div className="overflow-hidden rounded-[28px] border border-slate-200 bg-[#e8ebe4] shadow-[0_20px_50px_rgba(15,23,42,0.06)]">
                         <div className="border-b border-slate-200 bg-[#eef1ea] px-4 py-2.5">
                             <div className="flex flex-wrap items-center justify-between gap-3">
-                                <div className="flex min-w-0 items-center gap-2">
+                                <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
                                     <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-                                        {commandMode ? "Command" : "Claude Code"}
+                                        {composerHeaderBadge}
                                     </span>
-                                    <span className="truncate text-[12px] font-medium text-slate-800">
-                                        {commandMode
-                                            ? "Claude Code command"
-                                            : selectedPaper
-                                                ? selectedPaper.title
-                                                : "Threaded chat"}
-                                    </span>
+                                    <div className="min-w-0 flex-1 truncate text-[12px] font-medium text-slate-800">
+                                        {composerHeaderTitle}
+                                    </div>
                                 </div>
-                                <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] text-slate-500">
-                                    /
+                                <span className="shrink-0 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] text-slate-500">
+                                    {composerHeaderRightLabel}
                                 </span>
                             </div>
                         </div>
@@ -1514,154 +1877,224 @@ export function ReproductionLog({
                                 </div>
                             ) : null}
 
-                            <Textarea
-                                ref={composerTextareaRef}
-                                value={messageInput}
-                                onChange={(e) => {
-                                    setMessageInput(e.target.value)
-                                    syncComposerCursor(e.target)
-                                }}
-                                onClick={(e) => syncComposerCursor(e.currentTarget)}
-                                onSelect={(e) => syncComposerCursor(e.currentTarget)}
-                                onKeyUp={(e) => syncComposerCursor(e.currentTarget)}
-                                placeholder={composerPlaceholder}
-                                className="min-h-[88px] resize-none border-0 bg-transparent px-4 py-3 text-[14px] leading-7 text-slate-800 placeholder:text-slate-400 focus-visible:ring-0"
-                                onKeyDown={(e) => {
-                                    if (slashPaletteActive) {
-                                        if (e.key === "ArrowDown" && filteredSlashCommands.length > 0) {
-                                            e.preventDefault()
-                                            setSlashSelectedIndex((current) =>
-                                                Math.min(current + 1, filteredSlashCommands.length - 1),
-                                            )
-                                            return
-                                        }
+                            <div className="relative">
+                                <input
+                                    ref={composerFileInputRef}
+                                    type="file"
+                                    multiple
+                                    className="hidden"
+                                    onChange={(event) => {
+                                        void handleComposerFileSelection(event)
+                                    }}
+                                />
 
-                                        if (e.key === "ArrowUp" && filteredSlashCommands.length > 0) {
-                                            e.preventDefault()
-                                            setSlashSelectedIndex((current) => Math.max(current - 1, 0))
-                                            return
-                                        }
-
-                                        if (e.key === "Escape") {
-                                            e.preventDefault()
-                                            setMessageInput(replaceActiveSlashToken())
-                                            setSlashSelectedIndex(0)
-                                            return
-                                        }
-
-                                        if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
-                                            e.preventDefault()
-                                            const selectedSlashCommand =
-                                                filteredSlashCommands[slashSelectedIndex] ?? filteredSlashCommands[0]
-                                            if (selectedSlashCommand) {
-                                                handleApplySlashCommand(selectedSlashCommand)
+                                <Textarea
+                                    ref={composerTextareaRef}
+                                    value={messageInput}
+                                    onChange={(e) => {
+                                        setMessageInput(e.target.value)
+                                        syncComposerCursor(e.target)
+                                    }}
+                                    onClick={(e) => syncComposerCursor(e.currentTarget)}
+                                    onSelect={(e) => syncComposerCursor(e.currentTarget)}
+                                    onKeyUp={(e) => syncComposerCursor(e.currentTarget)}
+                                    placeholder={composerPlaceholder}
+                                    className={cn(
+                                        "min-h-[88px] resize-none border-0 bg-transparent px-4 py-3 text-[14px] leading-7 text-slate-800 placeholder:text-slate-400 focus-visible:ring-0",
+                                        slashPaletteActive ? "pb-40" : "pb-3",
+                                    )}
+                                    onKeyDown={(e) => {
+                                        if (slashPaletteActive) {
+                                            if (e.key === "ArrowDown" && filteredSlashCommands.length > 0) {
+                                                e.preventDefault()
+                                                setSlashSelectedIndex((current) =>
+                                                    current >= filteredSlashCommands.length - 1 ? 0 : current + 1,
+                                                )
+                                                return
                                             }
-                                            return
-                                        }
-                                    }
 
-                                    if ((e.key === "Backspace" || e.key === "Escape") && !messageInput.trim()) {
-                                        if (commandMode) {
+                                            if (e.key === "ArrowUp" && filteredSlashCommands.length > 0) {
+                                                e.preventDefault()
+                                                setSlashSelectedIndex((current) =>
+                                                    current <= 0 ? filteredSlashCommands.length - 1 : current - 1,
+                                                )
+                                                return
+                                            }
+
+                                            if (e.key === "Escape") {
+                                                e.preventDefault()
+                                                setMessageInput(replaceActiveSlashToken())
+                                                setSlashSelectedIndex(0)
+                                                return
+                                            }
+
+                                            if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
+                                                e.preventDefault()
+                                                const selectedSlashCommand =
+                                                    filteredSlashCommands[slashSelectedIndex] ?? filteredSlashCommands[0]
+                                                if (selectedSlashCommand) {
+                                                    handleApplySlashCommand(selectedSlashCommand)
+                                                }
+                                                return
+                                            }
+                                        }
+
+                                        if ((e.key === "Backspace" || e.key === "Escape") && !messageInput.trim()) {
+                                            if (commandMode) {
+                                                e.preventDefault()
+                                                handleClearCliCommand()
+                                                return
+                                            }
+                                        }
+
+                                        if (e.key === "Enter" && !e.shiftKey) {
                                             e.preventDefault()
-                                            handleClearCliCommand()
-                                            return
+                                            handleComposerSubmit()
                                         }
-                                    }
+                                    }}
+                                />
 
-                                    if (e.key === "Enter" && !e.shiftKey) {
-                                        e.preventDefault()
-                                        handleComposerSubmit()
-                                    }
-                                }}
-                            />
-
-                            {slashPaletteActive ? (
-                                <div className="px-4 pb-3">
-                                    <div className="max-w-[620px] overflow-hidden rounded-2xl border border-slate-200 bg-[#f7f8f4] shadow-[0_18px_40px_rgba(15,23,42,0.10)]">
-                                        <div className="flex items-center justify-between gap-3 border-b border-slate-200 bg-[#f0f2ec] px-3 py-2.5">
-                                            <div>
-                                                <div className="text-[11px] font-medium text-slate-800">Claude Code commands</div>
-                                                <div className="mt-0.5 text-[11px] text-slate-500">
-                                                    Slash opens the Studio command surface: Claude-style chat commands plus safe runtime utilities.
+                                {slashPaletteActive ? (
+                                    <div className="pointer-events-none absolute inset-x-0 bottom-3 z-20 flex px-4">
+                                        <div className="pointer-events-auto max-w-[560px] flex-1 overflow-hidden rounded-2xl border border-slate-200 bg-[#f8faf5] shadow-[0_18px_40px_rgba(15,23,42,0.10)]">
+                                            <div className="flex items-center justify-between gap-3 border-b border-slate-200 bg-[#f0f2ec] px-3 py-2.5">
+                                                <div>
+                                                    <div className="text-[11px] font-medium text-slate-800">Claude Code commands</div>
+                                                    <div className="mt-0.5 text-[10px] text-slate-500">
+                                                        Slash opens Claude-style chat commands plus safe runtime utilities.
+                                                    </div>
                                                 </div>
+                                                <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 font-mono text-[10px] text-slate-500">
+                                                    /{slashToken || ""}
+                                                </span>
                                             </div>
-                                            <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 font-mono text-[11px] text-slate-500">
-                                                /{slashToken || ""}
-                                            </span>
+
+                                            <div
+                                                ref={slashPaletteListRef}
+                                                className="max-h-60 overflow-y-auto overscroll-contain"
+                                            >
+                                                {filteredSlashCommands.length === 0 ? (
+                                                    <div className="px-3 py-4 text-sm text-slate-500">
+                                                        No matching slash command.
+                                                    </div>
+                                                ) : (
+                                                    <div className="space-y-1.5 p-2">
+                                                        {(["Claude Code", "Session", "Runtime"] as const).map((group) => {
+                                                            const groupItems = filteredSlashCommands.filter((item) => item.group === group)
+                                                            if (groupItems.length === 0) return null
+
+                                                            return (
+                                                                <div key={group}>
+                                                                    <div className="px-2 py-1 text-[9px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+                                                                        {group}
+                                                                    </div>
+                                                                    <div className="space-y-1">
+                                                                        {groupItems.map((item) => {
+                                                                            const globalIndex = filteredSlashCommands.findIndex((entry) => entry.id === item.id)
+                                                                            const selected = globalIndex === slashSelectedIndex
+                                                                            const ItemIcon = item.icon
+
+                                                                            return (
+                                                                                <button
+                                                                                    key={item.id}
+                                                                                    type="button"
+                                                                                    data-slash-index={globalIndex}
+                                                                                    data-selected={selected ? "true" : "false"}
+                                                                                    className={cn(
+                                                                                        "flex w-full items-center gap-2.5 rounded-xl border px-2.5 py-2 text-left transition-colors",
+                                                                                        selected
+                                                                                            ? "border-slate-300 bg-[#edf0e7] shadow-[inset_0_0_0_1px_rgba(148,163,184,0.15)]"
+                                                                                            : "border-transparent bg-transparent hover:border-slate-200 hover:bg-[#eef1ea]",
+                                                                                    )}
+                                                                                    onMouseEnter={() => setSlashSelectedIndex(globalIndex)}
+                                                                                    onClick={() => handleApplySlashCommand(item)}
+                                                                                >
+                                                                                    <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white">
+                                                                                        <ItemIcon className="h-3 w-3 text-slate-500" />
+                                                                                    </div>
+                                                                                    <div className="min-w-0 flex-1">
+                                                                                        <div className="flex items-center gap-2">
+                                                                                            <span className="font-mono text-[10px] text-slate-900">
+                                                                                                /{item.command}
+                                                                                            </span>
+                                                                                            <span className="truncate text-[10px] text-slate-500">
+                                                                                                {item.label}
+                                                                                            </span>
+                                                                                        </div>
+                                                                                        <div className="mt-0.5 line-clamp-2 text-[10px] leading-4 text-slate-500">
+                                                                                            {item.description}
+                                                                                        </div>
+                                                                                    </div>
+                                                                                    {selected ? (
+                                                                                        <span className="shrink-0 rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-slate-500">
+                                                                                            enter
+                                                                                        </span>
+                                                                                    ) : null}
+                                                                                </button>
+                                                                            )
+                                                                        })}
+                                                                    </div>
+                                                                </div>
+                                                            )
+                                                        })}
+                                                    </div>
+                                                )}
+                                            </div>
+                                            <div className="flex items-center justify-between gap-3 border-t border-slate-200 bg-[#f2f4ef] px-3 py-2 text-[9px] uppercase tracking-[0.12em] text-slate-400">
+                                                <span>↑↓ navigate</span>
+                                                <span>Enter/Tab select</span>
+                                                <span>Esc close</span>
+                                            </div>
                                         </div>
-
-                                        <ScrollArea className="max-h-64">
-                                            {filteredSlashCommands.length === 0 ? (
-                                                <div className="px-3 py-4 text-sm text-slate-500">
-                                                    No matching slash command.
-                                                </div>
-                                            ) : (
-                                                <div className="space-y-2 p-2">
-                                                    {(["Claude Code", "Session", "Runtime"] as const).map((group) => {
-                                                        const groupItems = filteredSlashCommands.filter((item) => item.group === group)
-                                                        if (groupItems.length === 0) return null
-
-                                                        return (
-                                                            <div key={group}>
-                                                                <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">
-                                                                    {group}
-                                                                </div>
-                                                                <div className="space-y-1">
-                                                                    {groupItems.map((item) => {
-                                                                        const globalIndex = filteredSlashCommands.findIndex((entry) => entry.id === item.id)
-                                                                        const selected = globalIndex === slashSelectedIndex
-                                                                        const ItemIcon = item.icon
-
-                                                                        return (
-                                                                            <button
-                                                                                key={item.id}
-                                                                                type="button"
-                                                                                className={cn(
-                                                                                    "flex w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition-colors",
-                                                                                    selected
-                                                                                        ? "border-slate-300 bg-[#edf0e7]"
-                                                                                        : "border-transparent bg-transparent hover:border-slate-200 hover:bg-[#eef1ea]",
-                                                                                )}
-                                                                                onMouseEnter={() => setSlashSelectedIndex(globalIndex)}
-                                                                                onClick={() => handleApplySlashCommand(item)}
-                                                                            >
-                                                                                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white">
-                                                                                    <ItemIcon className="h-3.5 w-3.5 text-slate-500" />
-                                                                                </div>
-                                                                                <div className="min-w-0 flex-1">
-                                                                                    <div className="flex items-center gap-2">
-                                                                                        <span className="font-mono text-[11px] text-slate-900">
-                                                                                            /{item.command}
-                                                                                        </span>
-                                                                                        <span className="truncate text-[11px] text-slate-500">
-                                                                                            {item.label}
-                                                                                        </span>
-                                                                                    </div>
-                                                                                    <div className="mt-1 line-clamp-2 text-[11px] leading-5 text-slate-500">
-                                                                                        {item.description}
-                                                                                    </div>
-                                                                                </div>
-                                                                                <span className="shrink-0 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-slate-400">
-                                                                                    {item.group}
-                                                                                </span>
-                                                                            </button>
-                                                                        )
-                                                                    })}
-                                                                </div>
-                                                            </div>
-                                                        )
-                                                    })}
-                                                </div>
-                                            )}
-                                        </ScrollArea>
                                     </div>
-                                </div>
-                            ) : null}
+                                ) : null}
+                            </div>
                         </div>
 
                         <div className="border-t border-slate-200 bg-[#f3f4ef] px-3 py-3">
                             <div className="flex flex-wrap items-center justify-between gap-2">
                                 <div className="flex flex-1 flex-wrap items-center gap-1.5">
+                                    <Tooltip>
+                                        <TooltipTrigger asChild>
+                                            <Button
+                                                type="button"
+                                                variant="ghost"
+                                                size="icon"
+                                                className="h-8 w-8 rounded-full border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                                                onClick={handleInsertSlashCommand}
+                                            >
+                                                <span className="font-mono text-[13px] leading-none">/</span>
+                                            </Button>
+                                        </TooltipTrigger>
+                                        <TooltipContent>Insert slash command</TooltipContent>
+                                    </Tooltip>
+
+                                    <Tooltip>
+                                        <TooltipTrigger asChild>
+                                            <Button
+                                                type="button"
+                                                variant="ghost"
+                                                size="icon"
+                                                className="h-8 w-8 rounded-full border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                                                onClick={handleOpenComposerUpload}
+                                                disabled={!canAttachFiles}
+                                            >
+                                                <Paperclip className="h-3.5 w-3.5" />
+                                            </Button>
+                                        </TooltipTrigger>
+                                        <TooltipContent>
+                                            {commandMode
+                                                ? "Return to chat mode before uploading files"
+                                                : "Upload files"}
+                                        </TooltipContent>
+                                    </Tooltip>
+
+                                    <StudioPermissionSelector
+                                        permissionProfile={permissionProfile}
+                                        onPermissionChange={setPermissionProfile}
+                                        supportedProfiles={supportedPermissionProfiles}
+                                    />
+
                                     <Select value={mode} onValueChange={(value) => setMode(value as Mode)}>
                                         <SelectTrigger className="h-8 w-[104px] rounded-full border-slate-200 bg-white text-xs text-slate-700">
                                             <Code className="mr-1 h-3.5 w-3.5" />
@@ -1698,7 +2131,7 @@ export function ReproductionLog({
                                     disabled={
                                         commandMode
                                             ? runningCliCommand || commandRuntimeUnavailable
-                                            : !messageInput.trim() || isBusy || missingCustomModel
+                                            : ((!messageInput.trim() && uploadedFiles.length === 0) || isBusy || missingCustomModel)
                                     }
                                     title={
                                         commandMode

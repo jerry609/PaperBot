@@ -58,10 +58,12 @@ function deriveAllowDirCandidate(directory: string, choice: "current" | "custom"
 }
 
 function buildDisallowedDirectoryMessage(directory: string, allowedPrefixes: string[]): string {
+    const normalized = trimTrailingSlashes(directory)
+    const fallback = "Choose a directory under the current Studio workspace or /tmp."
     if (allowedPrefixes.length === 0) {
-        return `This Studio runtime can only write inside the current workspace or /tmp. ${directory} is outside that boundary.`
+        return `${normalized} is outside the current Studio workspace. ${fallback}`
     }
-    return `This Studio runtime can only write inside: ${allowedPrefixes.join(", ")}. ${directory} is outside that boundary.`
+    return `${normalized} is outside the current Studio workspace. ${fallback}`
 }
 
 export function WorkspaceSetupDialog({

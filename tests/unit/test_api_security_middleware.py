@@ -43,6 +43,16 @@ def test_code_mode_accepts_edits_only_when_explicitly_enabled(monkeypatch):
     assert flags == ["--permission-mode", "acceptEdits"]
 
 
+def test_full_access_profile_enables_bypass_permissions(monkeypatch):
+    monkeypatch.setenv("PAPERBOT_STUDIO_ENABLE_CODE_MODE", "true")
+    flags = get_mode_flags("Code", "full_access")
+    assert flags == [
+        "--allow-dangerously-skip-permissions",
+        "--permission-mode",
+        "bypassPermissions",
+    ]
+
+
 async def _request(app: FastAPI, method: str, path: str, **kwargs) -> httpx.Response:
     client = kwargs.pop("client", ("203.0.113.10", 123))
     transport = httpx.ASGITransport(app=app, client=client)

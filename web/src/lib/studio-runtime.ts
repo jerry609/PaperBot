@@ -1,7 +1,14 @@
 export interface StudioRuntimeStatusResponse {
   claude_cli?: boolean
+  claude_agent_sdk?: boolean
   claude_path?: string | null
   claude_version?: string | null
+  chat_surface?: string | null
+  chat_transport?: string | null
+  preferred_chat_transport?: string | null
+  slash_commands?: string[] | null
+  permission_profiles?: string[] | null
+  runtime_commands?: string[] | null
   code_mode_enabled?: boolean
   known_model_aliases?: string[] | null
   opencode_cli?: boolean
@@ -22,9 +29,18 @@ export interface StudioRuntimeCwdResponse {
 }
 
 export type StudioRuntimeSource = "unknown" | "claude_code" | "anthropic_api"
+export type StudioChatSurface = "managed_session" | "unknown"
+export type StudioChatTransport = "claude_agent_sdk" | "claude_cli_print" | "anthropic_api" | "unknown"
 
 export interface StudioRuntimeInfo {
   source: StudioRuntimeSource
+  chatSurface: StudioChatSurface
+  chatTransport: StudioChatTransport
+  preferredChatTransport: StudioChatTransport
+  claudeAgentSdkAvailable: boolean
+  supportedSlashCommands: string[]
+  supportedPermissionProfiles: string[]
+  runtimeCommands: string[]
   label: string
   statusLabel: string
   detail: string
@@ -47,6 +63,28 @@ function cleanString(value: unknown): string | null {
   return trimmed.length > 0 ? trimmed : null
 }
 
+function normalizeChatSurface(value: unknown): StudioChatSurface {
+  return value === "managed_session" ? "managed_session" : "unknown"
+}
+
+function normalizeChatTransport(value: unknown): StudioChatTransport {
+  if (
+    value === "claude_agent_sdk" ||
+    value === "claude_cli_print" ||
+    value === "anthropic_api"
+  ) {
+    return value
+  }
+  return "unknown"
+}
+
+function formatTransportLabel(transport: StudioChatTransport): string {
+  if (transport === "claude_agent_sdk") return "Agent SDK"
+  if (transport === "claude_cli_print") return "CLI print"
+  if (transport === "anthropic_api") return "API fallback"
+  return "Unknown transport"
+}
+
 export function formatRuntimePath(path: string | null | undefined): string {
   const normalized = cleanString(path)
   if (!normalized) return "Workspace pending"
@@ -65,6 +103,19 @@ export function buildStudioRuntimeInfo(
   const actualCwd = cleanString(cwdPayload?.actual_cwd)
   const version = cleanString(status?.claude_version)
   const claudePath = cleanString(status?.claude_path)
+  const chatSurface = normalizeChatSurface(status?.chat_surface)
+  const chatTransport = normalizeChatTransport(status?.chat_transport)
+  const preferredChatTransport = normalizeChatTransport(status?.preferred_chat_transport)
+  const claudeAgentSdkAvailable = status?.claude_agent_sdk === true
+  const supportedSlashCommands = Array.isArray(status?.slash_commands)
+    ? status.slash_commands.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+    : []
+  const supportedPermissionProfiles = Array.isArray(status?.permission_profiles)
+    ? status.permission_profiles.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+    : []
+  const runtimeCommands = Array.isArray(status?.runtime_commands)
+    ? status.runtime_commands.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+    : []
   const codeModeEnabled = typeof status?.code_mode_enabled === "boolean" ? status.code_mode_enabled : null
   const knownModelAliases = Array.isArray(status?.known_model_aliases)
     ? status!.known_model_aliases.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
@@ -74,13 +125,33 @@ export function buildStudioRuntimeInfo(
   const opencodeVersion = cleanString(status?.opencode_version)
   const error = cleanString(status?.error) ?? cleanString(cwdPayload?.error)
   const workspaceLabel = formatRuntimePath(cwd ?? actualCwd)
+  const currentTransportLabel = formatTransportLabel(chatTransport)
+  const preferredTransportLabel = formatTransportLabel(preferredChatTransport)
 
   if (status?.claude_cli) {
+    const detail =
+      chatTransport === "claude_cli_print"
+        ? claudeAgentSdkAvailable
+          ? "Managed chat is currently running on Claude CLI print transport. Agent SDK is available for the CodePilot route."
+          : "Managed chat is currently running on Claude CLI print transport. Install claude_agent_sdk to match the CodePilot route."
+        : cwd
+          ? `Running in ${workspaceLabel}`
+          : "CLI connected to the current Studio workspace"
+
     return {
       source: "claude_code",
+      chatSurface,
+      chatTransport,
+      preferredChatTransport,
+      claudeAgentSdkAvailable,
+      supportedSlashCommands,
+      supportedPermissionProfiles,
+      runtimeCommands,
       label: "Claude Code",
-      statusLabel: version ? `CLI ${version}` : "CLI connected",
-      detail: cwd ? `Running in ${workspaceLabel}` : "CLI connected to the current Studio workspace",
+      statusLabel: version
+        ? `Managed chat · ${currentTransportLabel} · CLI ${version}`
+        : `Managed chat · ${currentTransportLabel}`,
+      detail,
       version,
       claudePath,
       codeModeEnabled,
@@ -98,9 +169,20 @@ export function buildStudioRuntimeInfo(
   if (status || cwdPayload) {
     return {
       source: "anthropic_api",
-      label: "Anthropic API fallback",
-      statusLabel: "Claude Code unavailable",
-      detail: error ?? "Studio is falling back to the direct Anthropic API path.",
+      chatSurface,
+      chatTransport,
+      preferredChatTransport,
+      claudeAgentSdkAvailable,
+      supportedSlashCommands,
+      supportedPermissionProfiles,
+      runtimeCommands,
+      label: "Managed chat fallback",
+      statusLabel: `Managed chat · ${currentTransportLabel}`,
+      detail:
+        error ??
+        (preferredChatTransport === "claude_agent_sdk"
+          ? `Claude Code is unavailable, so Studio is using direct API fallback. Preferred route remains ${preferredTransportLabel}.`
+          : "Studio is falling back to the direct Anthropic API path."),
       version,
       claudePath,
       codeModeEnabled,
@@ -117,6 +199,13 @@ export function buildStudioRuntimeInfo(
 
   return {
     source: "unknown",
+    chatSurface: "unknown",
+    chatTransport: "unknown",
+    preferredChatTransport: "claude_agent_sdk",
+    claudeAgentSdkAvailable: false,
+    supportedSlashCommands: [],
+    supportedPermissionProfiles: ["default", "full_access"],
+    runtimeCommands: [],
     label: "Checking runtime",
     statusLabel: "Resolving Claude Code status",
     detail: "Fetching Studio runtime metadata...",
