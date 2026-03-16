@@ -24,7 +24,6 @@ import {
     type ActiveCommand as CliActiveCommand,
     type CommandResult as CliCommandResult,
     getCommandPresets,
-    type LastCommandOutput as CliLastCommandOutput,
 } from "./CliCommandRunner"
 import { useContextPackGeneration } from "@/hooks/useContextPackGeneration"
 import { parseStudioSlashCommand } from "@/lib/studio-slash"
@@ -581,7 +580,6 @@ export function ReproductionLog({
     const [activeCliCommand, setActiveCliCommand] = useState<CliActiveCommand | null>(null)
     const [chatDraftBeforeUtility, setChatDraftBeforeUtility] = useState("")
     const [runningCliCommand, setRunningCliCommand] = useState(false)
-    const [lastCommandOutput, setLastCommandOutput] = useState<CliLastCommandOutput | null>(null)
     const [slashSelectedIndex, setSlashSelectedIndex] = useState(0)
     const [showWorkspaceSetup, setShowWorkspaceSetup] = useState(false)
     const [continueLast, setContinueLast] = useState(false)
@@ -1015,18 +1013,83 @@ export function ReproductionLog({
         setChatDraftBeforeUtility("")
     }
 
-    const showSyntheticCommandOutput = (preview: string, stdout: string) => {
-        setLastCommandOutput({
-            preview,
-            error: null,
-            result: {
-                ok: true,
-                command: ["studio-shell"],
-                returncode: 0,
-                stdout,
-                stderr: "",
-                cwd: projectDir,
-            },
+    const beginCommandTimelineRun = useCallback((inputContent: string, title?: string) => {
+        setStatus("running")
+        setLastError(null)
+        onViewModeChange("log")
+
+        const nextTitle = title ?? buildChatThreadTitle(inputContent)
+        const taskId = activeChatTask?.id ?? addTask(nextTitle)
+
+        if (activeChatTask && activeChatTask.history.length === 0 && activeChatTask.actions.length === 0) {
+            renameTask(taskId, nextTitle)
+        }
+
+        addAction(taskId, {
+            type: "user",
+            content: inputContent,
+        })
+        updateTaskStatus(taskId, "running")
+        setActiveTask(taskId)
+        return taskId
+    }, [
+        activeChatTask,
+        addAction,
+        addTask,
+        onViewModeChange,
+        renameTask,
+        setActiveTask,
+        updateTaskStatus,
+    ])
+
+    const finishCommandTimelineRun = useCallback((
+        taskId: string,
+        result: {
+            ok: boolean
+            stdout?: string | null
+            stderr?: string | null
+            error?: string | null
+        },
+    ) => {
+        const stdout = result.stdout?.trimEnd() ?? ""
+        const stderr = result.stderr?.trimEnd() ?? ""
+        const error = result.error?.trim() ?? ""
+
+        if (stdout) {
+            addAction(taskId, { type: "text", content: stdout })
+        }
+
+        if (stderr) {
+            addAction(taskId, {
+                type: result.ok && !error ? "text" : "error",
+                content: stderr,
+            })
+        }
+
+        if (!stdout && !stderr) {
+            if (error) {
+                addAction(taskId, { type: "error", content: error })
+            } else {
+                addAction(taskId, { type: "complete", content: "Completed" })
+            }
+        }
+
+        if (!result.ok || error) {
+            updateTaskStatus(taskId, "error")
+            setLastError(error || stderr || "Command failed")
+            setStatus("error")
+            return
+        }
+
+        updateTaskStatus(taskId, "completed")
+        setStatus("success")
+    }, [addAction, updateTaskStatus])
+
+    const showSyntheticCommandOutput = (inputContent: string, title: string, stdout: string) => {
+        const taskId = beginCommandTimelineRun(inputContent, title)
+        finishCommandTimelineRun(taskId, {
+            ok: true,
+            stdout,
         })
     }
 
@@ -1037,7 +1100,6 @@ export function ReproductionLog({
         setChatDraftBeforeUtility("")
         setActiveCliCommand(null)
         setLastError(null)
-        setLastCommandOutput(null)
     }
 
     const executeCliCommand = async (command = activeCliCommand, args = messageInput) => {
@@ -1060,6 +1122,8 @@ export function ReproductionLog({
             onViewModeChange("log")
         }
 
+        const taskId = beginCommandTimelineRun(preview, buildChatThreadTitle(preview))
+
         try {
             const response = await fetch("/api/studio/command", {
                 method: "POST",
@@ -1074,16 +1138,16 @@ export function ReproductionLog({
 
             const payload = (await response.json()) as CliCommandResult
 
-            setLastCommandOutput({
-                preview,
-                result: payload,
+            finishCommandTimelineRun(taskId, {
+                ok: payload?.ok === true,
+                stdout: payload?.stdout,
+                stderr: payload?.stderr,
                 error: payload?.ok ? null : payload?.stderr || `Command failed (${payload?.returncode ?? 500})`,
             })
         } catch (e) {
             const message = e instanceof Error ? e.message : "Failed to run Studio command"
-            setLastCommandOutput({
-                preview,
-                result: null,
+            finishCommandTimelineRun(taskId, {
+                ok: false,
                 error: message,
             })
         } finally {
@@ -1106,7 +1170,8 @@ export function ReproductionLog({
         if (parsed.kind === "help") {
             setMessageInput("")
             showSyntheticCommandOutput(
-                "Claude Code slash help",
+                "/help",
+                "Slash help",
                 [
                     "Supported Studio slash commands:",
                     "/help",
@@ -1131,7 +1196,8 @@ export function ReproductionLog({
         if (parsed.kind === "status") {
             setMessageInput("")
             showSyntheticCommandOutput(
-                "Claude Code status",
+                "/status",
+                "Slash status",
                 [
                     `runtime: ${runtimeLoading ? "checking" : runtimeLabel}`,
                     `chat transport: ${formatStudioChatTransportLabel(runtimeInfo.chatTransport)}`,
@@ -2163,65 +2229,6 @@ export function ReproductionLog({
                                     {composerInteractionHint}
                                 </span>
                             </div>
-
-                            {lastCommandOutput ? (
-                                <div className="mt-3 rounded-2xl border border-slate-200 bg-[#f7f8f4]">
-                                    <div className="flex items-start justify-between gap-3 border-b border-slate-200 bg-[#eef1ea] px-3 py-2.5">
-                                        <div className="min-w-0">
-                                            <div className="text-[11px] font-medium uppercase tracking-[0.16em] text-slate-500">
-                                                Recent command output
-                                            </div>
-                                            <div className="mt-1 truncate font-mono text-[11px] text-slate-700">
-                                                {lastCommandOutput.preview}
-                                            </div>
-                                        </div>
-                                        <button
-                                            type="button"
-                                            className="rounded-full p-1 text-slate-500 transition-colors hover:bg-white hover:text-slate-900"
-                                            onClick={() => setLastCommandOutput(null)}
-                                            title="Dismiss latest command output"
-                                        >
-                                            <X className="h-3.5 w-3.5" />
-                                        </button>
-                                    </div>
-
-                                    <div className="space-y-3 px-3 py-3">
-                                        {lastCommandOutput.result ? (
-                                            <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-[11px] text-slate-500">
-                                                exit {lastCommandOutput.result.returncode} · cwd {lastCommandOutput.result.cwd ?? "n/a"}
-                                            </div>
-                                        ) : null}
-
-                                        {lastCommandOutput.error ? (
-                                            <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
-                                                {lastCommandOutput.error}
-                                            </div>
-                                        ) : null}
-
-                                        {lastCommandOutput.result?.stdout ? (
-                                            <div className="rounded-xl border border-slate-200 bg-white">
-                                                <div className="border-b border-slate-200 px-3 py-2 text-[11px] font-medium text-slate-500">
-                                                    STDOUT
-                                                </div>
-                                                <pre className="max-h-48 overflow-auto whitespace-pre-wrap px-3 py-3 text-[12px] leading-5 text-slate-800">
-                                                    {lastCommandOutput.result.stdout}
-                                                </pre>
-                                            </div>
-                                        ) : null}
-
-                                        {lastCommandOutput.result?.stderr ? (
-                                            <div className="rounded-xl border border-slate-200 bg-white">
-                                                <div className="border-b border-slate-200 px-3 py-2 text-[11px] font-medium text-slate-500">
-                                                    STDERR
-                                                </div>
-                                                <pre className="max-h-40 overflow-auto whitespace-pre-wrap px-3 py-3 text-[12px] leading-5 text-slate-700">
-                                                    {lastCommandOutput.result.stderr}
-                                                </pre>
-                                            </div>
-                                        ) : null}
-                                    </div>
-                                </div>
-                            ) : null}
                         </div>
                     </div>
                 </div>
