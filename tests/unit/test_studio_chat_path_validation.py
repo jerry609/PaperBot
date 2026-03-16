@@ -69,3 +69,22 @@ def test_studio_cwd_prefers_existing_allowed_prefix_over_repo_root(tmp_path: Pat
     assert payload["actual_cwd"] == str(repo_root.resolve())
     assert payload["allowlist_mutation_enabled"] is True
     assert str(allowed_root.resolve()) in payload["allowed_prefixes"]
+
+
+def test_studio_cwd_prefers_home_documents_by_default_when_running_inside_repo(tmp_path: Path, monkeypatch):
+    repo_root = tmp_path / "PaperBot"
+    repo_root.mkdir(parents=True, exist_ok=True)
+    home_dir = tmp_path / "home"
+    allowed_root = home_dir / "Documents"
+    allowed_root.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.chdir(repo_root)
+    monkeypatch.setenv("HOME", str(home_dir))
+    monkeypatch.delenv("PAPERBOT_RUNBOOK_ALLOW_DIR_PREFIXES", raising=False)
+    monkeypatch.setenv("PAPERBOT_RUNBOOK_ALLOWLIST_MUTATION", "false")
+
+    payload = asyncio.run(studio_cwd())
+    assert payload["cwd"] == str(allowed_root.resolve())
+    assert payload["actual_cwd"] == str(repo_root.resolve())
+    assert payload["allowlist_mutation_enabled"] is False
+    assert str(allowed_root.resolve()) in payload["allowed_prefixes"]

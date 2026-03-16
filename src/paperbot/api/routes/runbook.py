@@ -121,6 +121,11 @@ def _allowed_workdir_prefixes() -> List[Path]:
         prefixes.append(Path.cwd().resolve())
     except Exception:
         pass
+    try:
+        home_dir = Path.home().resolve()
+        prefixes.append((home_dir / "Documents").resolve(strict=False))
+    except Exception:
+        pass
 
     extra = os.getenv("PAPERBOT_RUNBOOK_ALLOW_DIR_PREFIXES", "").strip()
     if extra:

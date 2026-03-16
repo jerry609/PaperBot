@@ -59,11 +59,11 @@ function deriveAllowDirCandidate(directory: string, choice: "current" | "custom"
 
 function buildDisallowedDirectoryMessage(directory: string, allowedPrefixes: string[]): string {
     const normalized = trimTrailingSlashes(directory)
-    const fallback = "Choose a directory under the current Studio workspace or /tmp."
-    if (allowedPrefixes.length === 0) {
-        return `${normalized} is outside the current Studio workspace. ${fallback}`
-    }
-    return `${normalized} is outside the current Studio workspace. ${fallback}`
+    const allowedSummary =
+        allowedPrefixes.length > 0
+            ? `Choose a directory under one of the allowed Studio roots: ${allowedPrefixes.join(", ")}.`
+            : "Choose a directory under an allowed Studio workspace root or /tmp."
+    return `${normalized} is outside the allowed Studio workspace roots. ${allowedSummary}`
 }
 
 export function WorkspaceSetupDialog({
@@ -223,7 +223,7 @@ export function WorkspaceSetupDialog({
                                 <div className="flex items-start gap-2">
                                     <ShieldAlert className="h-4 w-4 text-blue-600 dark:text-blue-400 shrink-0 mt-0.5" />
                                     <div className="text-blue-700 dark:text-blue-300">
-                                        This directory is outside the current Studio workspace boundary.
+                                        This directory is outside the currently allowed Studio workspace roots.
                                         Allow access to <code className="bg-blue-100 dark:bg-blue-900 px-1 rounded text-xs">{pendingAllowDir}</code>?
                                     </div>
                                 </div>
