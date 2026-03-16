@@ -57,6 +57,16 @@ function deriveAllowDirCandidate(directory: string, choice: "current" | "custom"
     return normalized.slice(0, lastSlash)
 }
 
+function isUnderAllowedStudioRoot(directory: string, allowedPrefixes: string[]): boolean {
+    const normalized = trimTrailingSlashes(directory)
+    if (!normalized) return false
+
+    return allowedPrefixes.some((prefix) => {
+        const normalizedPrefix = trimTrailingSlashes(prefix)
+        return normalized === normalizedPrefix || normalized.startsWith(`${normalizedPrefix}/`)
+    })
+}
+
 function buildDisallowedDirectoryMessage(directory: string, allowedPrefixes: string[]): string {
     const normalized = trimTrailingSlashes(directory)
     const allowedSummary =
@@ -129,6 +139,12 @@ export function WorkspaceSetupDialog({
         })
         if (!res.ok) {
             if (res.status === 403) {
+                const detail = await readErrorDetail(res, "Directory is not available")
+                if (isUnderAllowedStudioRoot(directory, allowedPrefixes)) {
+                    setPendingAllowDir(null)
+                    setError(detail)
+                    return false
+                }
                 if (!allowlistMutationEnabled) {
                     setPendingAllowDir(null)
                     setError(buildDisallowedDirectoryMessage(directory, allowedPrefixes))

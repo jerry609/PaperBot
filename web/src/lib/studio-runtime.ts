@@ -82,7 +82,7 @@ function formatTransportLabel(transport: StudioChatTransport): string {
   if (transport === "claude_agent_sdk") return "Agent SDK"
   if (transport === "claude_cli_print") return "CLI print"
   if (transport === "anthropic_api") return "API fallback"
-  return "Unknown transport"
+  return "Managed transport"
 }
 
 export function formatRuntimePath(path: string | null | undefined): string {

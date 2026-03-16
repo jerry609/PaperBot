@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react"
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react"
 import { useRouter } from "next/navigation"
 import Markdown from "react-markdown"
 import remarkGfm from "remark-gfm"
@@ -431,10 +431,31 @@ function MarkdownActionBlock({
                 </Button>
             </div>
             <div className="px-3 py-2.5">
-                <div className="prose prose-sm max-w-none text-[12px] leading-6 text-slate-800 prose-headings:mb-2 prose-headings:mt-0 prose-p:my-0 prose-p:whitespace-pre-wrap prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5 prose-strong:text-slate-900 prose-code:rounded prose-code:bg-white prose-code:px-1 prose-code:py-0.5 prose-code:font-mono prose-code:text-[11px] prose-code:text-slate-800 prose-pre:my-0 prose-pre:overflow-auto prose-pre:rounded-xl prose-pre:border prose-pre:border-slate-200 prose-pre:bg-slate-950 prose-pre:px-3 prose-pre:py-2.5 prose-pre:text-[11px] prose-pre:leading-5 prose-pre:text-slate-100 prose-table:my-2 prose-table:w-full prose-th:border prose-th:border-slate-200 prose-th:bg-white prose-th:px-2 prose-th:py-1 prose-th:text-left prose-th:text-[11px] prose-td:border prose-td:border-slate-200 prose-td:px-2 prose-td:py-1 prose-td:align-top prose-blockquote:my-2 prose-blockquote:border-l-2 prose-blockquote:border-slate-300 prose-blockquote:pl-3 prose-blockquote:text-slate-600">
+                <div className="space-y-2 text-[12px] leading-6 text-slate-800">
                     <Markdown
                         remarkPlugins={[remarkGfm]}
                         components={{
+                            h1: ({ className, ...props }) => (
+                                <h1 className={cn("mb-2 text-[15px] font-semibold text-slate-900", className)} {...props} />
+                            ),
+                            h2: ({ className, ...props }) => (
+                                <h2 className={cn("mb-2 text-[13px] font-semibold text-slate-900", className)} {...props} />
+                            ),
+                            h3: ({ className, ...props }) => (
+                                <h3 className={cn("mb-1 text-[12px] font-semibold text-slate-900", className)} {...props} />
+                            ),
+                            p: ({ className, ...props }) => (
+                                <p className={cn("my-0 whitespace-pre-wrap text-[12px] leading-6 text-slate-800", className)} {...props} />
+                            ),
+                            ul: ({ className, ...props }) => (
+                                <ul className={cn("my-2 list-disc space-y-1 pl-5 text-[12px] text-slate-800", className)} {...props} />
+                            ),
+                            ol: ({ className, ...props }) => (
+                                <ol className={cn("my-2 list-decimal space-y-1 pl-5 text-[12px] text-slate-800", className)} {...props} />
+                            ),
+                            li: ({ className, ...props }) => (
+                                <li className={cn("leading-6", className)} {...props} />
+                            ),
                             a: ({ className, ...props }) => (
                                 <a
                                     {...props}
@@ -442,6 +463,53 @@ function MarkdownActionBlock({
                                     target="_blank"
                                     rel="noreferrer"
                                 />
+                            ),
+                            strong: ({ className, ...props }) => (
+                                <strong className={cn("font-semibold text-slate-900", className)} {...props} />
+                            ),
+                            blockquote: ({ className, ...props }) => (
+                                <blockquote
+                                    className={cn("my-2 border-l-2 border-slate-300 pl-3 text-slate-600", className)}
+                                    {...props}
+                                />
+                            ),
+                            pre: ({ className, ...props }) => (
+                                <pre
+                                    className={cn(
+                                        "my-0 overflow-auto rounded-xl border border-slate-200 bg-slate-950 px-3 py-2.5 text-[11px] leading-5 text-slate-100",
+                                        className,
+                                    )}
+                                    {...props}
+                                />
+                            ),
+                            code: ({ className, ...props }) => {
+                                const blockCode = typeof className === "string" && className.includes("language-")
+                                return (
+                                    <code
+                                        className={cn(
+                                            blockCode
+                                                ? "bg-transparent p-0 font-mono text-inherit"
+                                                : "rounded bg-white px-1 py-0.5 font-mono text-[11px] text-slate-800",
+                                            className,
+                                        )}
+                                        {...props}
+                                    />
+                                )
+                            },
+                            table: ({ className, ...props }) => (
+                                <table className={cn("my-2 w-full border-collapse text-[12px]", className)} {...props} />
+                            ),
+                            th: ({ className, ...props }) => (
+                                <th
+                                    className={cn(
+                                        "border border-slate-200 bg-white px-2 py-1 text-left text-[11px] font-semibold text-slate-700",
+                                        className,
+                                    )}
+                                    {...props}
+                                />
+                            ),
+                            td: ({ className, ...props }) => (
+                                <td className={cn("border border-slate-200 px-2 py-1 align-top text-slate-700", className)} {...props} />
                             ),
                         }}
                     >
@@ -639,6 +707,8 @@ function ActionItem({ action, onViewDiff }: ActionItemProps) {
         </div>
     )
 }
+
+const MemoizedActionItem = memo(ActionItem)
 
 export function ReproductionLog({
     viewMode,
@@ -1446,12 +1516,12 @@ export function ReproductionLog({
         return nextValue
     }
 
-    const replaceActiveSlashToken = (replacement = "") => {
+    const replaceActiveSlashToken = useCallback((replacement = "") => {
         if (!activeSlashMatch) return replacement
         const before = messageInput.slice(0, activeSlashMatch.start)
         const after = messageInput.slice(activeSlashMatch.end)
         return mergeComposerText(before, replacement, after)
-    }
+    }, [activeSlashMatch, messageInput])
 
     const syncComposerCursor = (target: HTMLTextAreaElement) => {
         setComposerCursor(target.selectionStart ?? target.value.length)
@@ -1566,7 +1636,7 @@ export function ReproductionLog({
     }, [supportedSlashCommands])
     const buildStatusMarkdown = useCallback(() => {
         const fields = [
-            { label: "Runtime", value: runtimeLoading ? "Checking runtime" : runtimeInfo.label },
+            { label: "Runtime", value: runtimeLoading ? "Checking runtime" : runtimeLabel },
             { label: "Chat surface", value: formatStudioChatSurfaceLabel(runtimeInfo.chatSurface) },
             { label: "Transport", value: formatStudioChatTransportLabel(runtimeInfo.chatTransport) },
             { label: "Preferred route", value: formatStudioChatTransportLabel(runtimeInfo.preferredChatTransport) },
@@ -1595,9 +1665,9 @@ export function ReproductionLog({
         runtimeInfo.chatSurface,
         runtimeInfo.chatTransport,
         runtimeInfo.claudeAgentSdkAvailable,
-        runtimeInfo.label,
         runtimeInfo.preferredChatTransport,
         runtimeInfo.version,
+        runtimeLabel,
         runtimeLoading,
         selectedPaper?.title,
         uploadedFiles.length,
@@ -1756,11 +1826,11 @@ export function ReproductionLog({
         activeItem?.scrollIntoView({ block: "nearest" })
     }, [slashPaletteActive, slashSelectedIndex])
 
-    const handleApplySlashCommand = (command: SlashCommandItem) => {
+    const handleApplySlashCommand = useCallback((command: SlashCommandItem) => {
         command.onSelect(replaceActiveSlashToken())
         setSlashSelectedIndex(0)
         focusComposerToEnd()
-    }
+    }, [focusComposerToEnd, replaceActiveSlashToken])
 
     const composerHelperText = commandMode
         ? "Claude Code command selected. Enter runs it, and clear returns the composer to chat."
@@ -2073,7 +2143,7 @@ export function ReproductionLog({
                             ) : (
                                 <div className="space-y-0">
                                     {visibleActions.map((action) => (
-                                        <ActionItem
+                                        <MemoizedActionItem
                                             key={action.id}
                                             action={action}
                                             onViewDiff={setDiffAction}
@@ -2257,7 +2327,10 @@ export function ReproductionLog({
                                                                                             : "border-transparent bg-transparent hover:border-slate-200 hover:bg-[#eef1ea]",
                                                                                     )}
                                                                                     onMouseEnter={() => setSlashSelectedIndex(globalIndex)}
-                                                                                    onClick={() => handleApplySlashCommand(item)}
+                                                                                    onMouseDown={(event) => {
+                                                                                        event.preventDefault()
+                                                                                        handleApplySlashCommand(item)
+                                                                                    }}
                                                                                 >
                                                                                     <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white">
                                                                                         <ItemIcon className="h-3 w-3 text-slate-500" />
