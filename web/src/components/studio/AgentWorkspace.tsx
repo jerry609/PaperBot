@@ -11,7 +11,6 @@ import {
   GitBranch,
   MessageSquare,
   Sparkles,
-  TerminalSquare,
   Wrench,
 } from "lucide-react"
 
@@ -507,6 +506,8 @@ function CenterSurface({
   runtimeInfo: StudioRuntimeInfo
   runtimeLoading: boolean
 }) {
+  const visibleView = activeView === "commands" ? "log" : activeView
+
   return (
     <div className="flex h-full min-h-0 flex-col bg-[#f1f2ed]">
       <div className="border-b border-slate-200 bg-[#f4f5f1] px-4 py-3">
@@ -516,7 +517,7 @@ function CenterSurface({
               type="button"
               onClick={() => onViewChange("log")}
               className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
-                activeView === "log"
+                visibleView === "log"
                   ? "border-slate-300 bg-[#f6f7f3] text-slate-900 shadow-sm"
                   : "border-transparent bg-transparent text-slate-500 hover:text-slate-700"
               }`}
@@ -526,21 +527,9 @@ function CenterSurface({
             </button>
             <button
               type="button"
-              onClick={() => onViewChange("commands")}
-              className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
-                activeView === "commands"
-                  ? "border-slate-300 bg-[#f6f7f3] text-slate-900 shadow-sm"
-                  : "border-transparent bg-transparent text-slate-500 hover:text-slate-700"
-              }`}
-            >
-              <TerminalSquare className="h-3.5 w-3.5" />
-              Commands
-            </button>
-            <button
-              type="button"
               onClick={() => onViewChange("board")}
               className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
-                activeView === "board"
+                visibleView === "board"
                   ? "border-slate-300 bg-[#f6f7f3] text-slate-900 shadow-sm"
                   : "border-transparent bg-transparent text-slate-500 hover:text-slate-700"
               }`}
@@ -552,7 +541,7 @@ function CenterSurface({
               type="button"
               onClick={() => onViewChange("context")}
               className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
-                activeView === "context"
+                visibleView === "context"
                   ? "border-slate-300 bg-[#f6f7f3] text-slate-900 shadow-sm"
                   : "border-transparent bg-transparent text-slate-500 hover:text-slate-700"
               }`}
@@ -563,11 +552,11 @@ function CenterSurface({
           </div>
 
           <p className="text-xs text-slate-500">
-            {activeView === "board"
+            {activeView === "commands"
+              ? "Console command tray is open for Claude Code and OpenCode management commands."
+              : visibleView === "board"
               ? "Delegation graph and latest monitor session snapshot."
-              : activeView === "commands"
-                ? "Run non-chat Claude Code and OpenCode management commands without polluting the print-mode console."
-              : activeView === "context"
+              : visibleView === "context"
                 ? "Paper context pack and monitor preparation actions."
                 : runtimeLoading
                   ? "Checking Claude Code runtime..."

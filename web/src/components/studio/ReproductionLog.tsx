@@ -388,6 +388,7 @@ export function ReproductionLog({
     const [showWorkspaceSetup, setShowWorkspaceSetup] = useState(false)
     const [pendingAction, setPendingAction] = useState<"chat" | "delegate_codex" | null>(null)
     const [showAdvancedOptions, setShowAdvancedOptions] = useState(false)
+    const [showCommandTray, setShowCommandTray] = useState(viewMode === "commands")
     const [continueLast, setContinueLast] = useState(false)
     const [resumeSession, setResumeSession] = useState("")
     const [cliSessionId, setCliSessionId] = useState("")
@@ -406,6 +407,11 @@ export function ReproductionLog({
     }, [contextPackLoading, onViewModeChange, viewMode])
 
     // Do not auto-switch away from "context"; keep it open until the user changes tabs.
+    useEffect(() => {
+        if (viewMode === "commands") {
+            setShowCommandTray(true)
+        }
+    }, [viewMode])
 
     const knownModelAliases = useMemo(() => {
         const aliases = runtimeInfo.knownModelAliases.filter((item) => item.trim().length > 0)
@@ -878,6 +884,9 @@ export function ReproductionLog({
         router.push("/studio?surface=board")
     }
 
+    const consoleMode = viewMode === "log" || viewMode === "commands"
+    const activeNavigationView = viewMode === "commands" ? "log" : viewMode
+
     return (
         <div className="flex h-full min-h-0 w-full flex-1 flex-col bg-[#f5f5f2]">
             {/* Tab Navigation */}
@@ -886,7 +895,6 @@ export function ReproductionLog({
                     {([
                         { key: "context" as const, label: "Context", icon: Activity },
                         { key: "log" as const, label: "Chat", icon: MessageSquare },
-                        { key: "commands" as const, label: "Commands", icon: Terminal },
                         { key: "board" as const, label: "Monitor", icon: LayoutDashboard },
                     ]).map(({ key, label, icon: TabIcon }) => (
                         <button
@@ -900,14 +908,14 @@ export function ReproductionLog({
                             }}
                             className={cn(
                                 "relative flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium transition-colors",
-                                viewMode === key
+                                activeNavigationView === key
                                     ? "text-slate-900"
                                     : "text-slate-500 hover:text-slate-700"
                             )}
                         >
                             <TabIcon className="h-3.5 w-3.5" />
                             {label}
-                            {viewMode === key && (
+                            {activeNavigationView === key && (
                                 <span className="absolute bottom-0 left-2 right-2 h-0.5 rounded-full bg-slate-600" />
                             )}
                         </button>
@@ -952,8 +960,6 @@ export function ReproductionLog({
                         onSessionCreated={handleSessionCreated}
                         onDeployToBoard={openAgentBoardWorkspace}
                     />
-                ) : viewMode === "commands" ? (
-                    <CliCommandRunner runtimeInfo={runtimeInfo} projectDir={projectDir} />
                 ) : viewMode === "board" ? (
                     <AgentBoard paperId={selectedPaperId} monitorMode />
                 ) : activeFileData ? (
@@ -1038,7 +1044,7 @@ export function ReproductionLog({
                 )}
             </div>
 
-            {viewMode === "log" && (
+            {consoleMode && (
                 /* Rich Input Area - CodePilot Style */
                 <div className="shrink-0 border-t border-slate-200 bg-[#f1f2ed] p-4">
                     <div className="overflow-hidden rounded-lg border border-slate-200 bg-[#e8ebe4]">
@@ -1140,6 +1146,21 @@ export function ReproductionLog({
                                     )}
                                     Advanced
                                     {advancedOptionsCount > 0 ? ` (${advancedOptionsCount})` : ""}
+                                </Button>
+
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className={cn(
+                                        "h-8 gap-1 px-2 text-xs hover:bg-[#e7e9e3]",
+                                        showCommandTray
+                                            ? "bg-[#e7e9e3] text-slate-900"
+                                            : "text-slate-600 hover:text-slate-900",
+                                    )}
+                                    onClick={() => setShowCommandTray((current) => !current)}
+                                >
+                                    <Terminal className="h-3.5 w-3.5" />
+                                    Commands
                                 </Button>
                             </div>
 
@@ -1252,6 +1273,14 @@ export function ReproductionLog({
                                         </label>
                                     </div>
                                 </div>
+                            ) : null}
+
+                            {showCommandTray ? (
+                                <CliCommandRunner
+                                    runtimeInfo={runtimeInfo}
+                                    projectDir={projectDir}
+                                    variant="embedded"
+                                />
                             ) : null}
 
                             <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
