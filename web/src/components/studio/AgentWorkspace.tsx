@@ -31,7 +31,6 @@ import type { StudioRuntimeInfo } from "@/lib/studio-runtime"
 import { getAgentPresentation } from "@/lib/agent-runtime"
 import { useStudioStore, type AgentTask, type StudioPaperStatus } from "@/lib/store/studio-store"
 
-import { AgentBoard } from "./AgentBoard"
 import { AgentBoardSidebar } from "./AgentBoardSidebar"
 import { ChatHistoryPanel } from "./ChatHistoryPanel"
 import { ReproductionLog } from "./ReproductionLog"
@@ -39,6 +38,7 @@ import { ReproductionLog } from "./ReproductionLog"
 type LeftRailView = "threads" | "tasks" | "workspace"
 type CenterView = "log" | "context" | "board" | "commands"
 type InspectorView = "live" | "tools" | "files" | "agents" | "graph"
+type MobileView = "threads" | "console" | "monitor"
 
 interface AgentWorkspaceProps {
   defaultCenterView?: CenterView
@@ -130,6 +130,10 @@ function clampPanelWidths(
 function normalizeCenterView(value: string | null | undefined, fallback: CenterView = "log"): CenterView {
   if (value === "context" || value === "board" || value === "log" || value === "commands") return value
   return fallback
+}
+
+function centerViewToMobileView(view: CenterView): MobileView {
+  return view === "board" ? "monitor" : "console"
 }
 
 function paperStatusLabel(status: StudioPaperStatus): string {
@@ -499,19 +503,18 @@ function RightInspector({
 }
 
 function CenterSurface({
-  selectedPaperId,
   activeView,
   onViewChange,
   runtimeInfo,
   runtimeLoading,
 }: {
-  selectedPaperId: string
   activeView: CenterView
   onViewChange: (value: CenterView) => void
   runtimeInfo: StudioRuntimeInfo
   runtimeLoading: boolean
 }) {
   const visibleView = activeView === "commands" ? "log" : activeView
+  const contentView: "log" | "context" | "commands" = activeView === "board" ? "log" : activeView
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-[#f1f2ed]">
@@ -575,18 +578,14 @@ function CenterSurface({
 
       <div className="min-h-0 flex-1 bg-[#eceee8] p-3">
         <div className="h-full min-h-0 overflow-hidden rounded-[28px] border border-slate-200 bg-[#f7f7f4] shadow-[0_24px_80px_rgba(15,23,42,0.05)]">
-          {activeView === "board" ? (
-            <AgentBoard paperId={selectedPaperId} showSidebar={false} monitorMode />
-          ) : (
-            <ReproductionLog
-              viewMode={activeView}
-              onViewModeChange={onViewChange}
-              hideNavigation
-              onOpenBoardWorkspace={() => onViewChange("board")}
-              runtimeInfo={runtimeInfo}
-              runtimeLoading={runtimeLoading}
-            />
-          )}
+          <ReproductionLog
+            viewMode={contentView}
+            onViewModeChange={onViewChange}
+            hideNavigation
+            onOpenBoardWorkspace={() => onViewChange("board")}
+            runtimeInfo={runtimeInfo}
+            runtimeLoading={runtimeLoading}
+          />
         </div>
       </div>
     </div>
@@ -657,6 +656,7 @@ export function AgentWorkspace({
   const requestedPaperId = searchParams.get("paperId") || searchParams.get("paper_id")
   const requestedSurface = normalizeCenterView(searchParams.get("surface"), defaultCenterView)
   const [centerView, setCenterView] = useState<CenterView>(requestedSurface)
+  const [mobilePinnedView, setMobilePinnedView] = useState<"threads" | null>(null)
 
   useEffect(() => {
     loadPapers()
@@ -688,6 +688,8 @@ export function AgentWorkspace({
   const projectDir = selectedPaper?.outputDir || selectedPaper?.lastGenCodeResult?.outputDir || null
   const filesTouchedCount = Object.values(filesTouched).flat().length
   const showMonitorInspector = centerView === "board"
+  const mobileView: MobileView =
+    mobilePinnedView === "threads" ? "threads" : centerViewToMobileView(centerView)
   const contextLabel = contextPackLoading
     ? "Generating"
     : contextPack?.context_pack_id || selectedPaper?.contextPackId
@@ -870,7 +872,6 @@ export function AgentWorkspace({
 
           <div className={`min-w-[380px] flex-1 bg-slate-100 ${showMonitorInspector ? "border-r border-slate-200" : ""}`}>
             <CenterSurface
-              selectedPaperId={selectedPaperId}
               activeView={centerView}
               onViewChange={setCenterView}
               runtimeInfo={runtimeInfo}
@@ -903,11 +904,29 @@ export function AgentWorkspace({
       </div>
 
       <div className="flex flex-1 min-h-0 lg:hidden">
-        <Tabs defaultValue="console" className="flex h-full w-full flex-col">
-          <TabsList className="grid w-full grid-cols-4 rounded-none border-b bg-white p-0">
+        <Tabs
+          value={mobileView}
+          onValueChange={(value) => {
+            const nextView = value as MobileView
+            if (nextView === "threads") {
+              setMobilePinnedView("threads")
+              return
+            }
+
+            setMobilePinnedView(null)
+            if (nextView === "monitor") {
+              setCenterView("board")
+              return
+            }
+            if (nextView === "console" && centerView === "board") {
+              setCenterView("log")
+            }
+          }}
+          className="flex h-full w-full flex-col"
+        >
+          <TabsList className="grid w-full grid-cols-3 rounded-none border-b bg-white p-0">
             <TabsTrigger value="threads" className="rounded-none">Threads</TabsTrigger>
             <TabsTrigger value="console" className="rounded-none">Chat</TabsTrigger>
-            <TabsTrigger value="board" className="rounded-none">Graph</TabsTrigger>
             <TabsTrigger value="monitor" className="rounded-none">Monitor</TabsTrigger>
           </TabsList>
 
@@ -933,20 +952,16 @@ export function AgentWorkspace({
 
           <TabsContent value="console" className="m-0 flex-1 min-h-0">
             <ReproductionLog
-              viewMode={centerView}
-              onViewModeChange={setCenterView}
+              viewMode={centerView === "board" ? "log" : centerView}
+              onViewModeChange={(value) => {
+                setCenterView(value)
+                setMobilePinnedView(null)
+              }}
               hideNavigation={false}
-              onOpenBoardWorkspace={() => setCenterView("board")}
-              runtimeInfo={runtimeInfo}
-              runtimeLoading={runtimeLoading}
-            />
-          </TabsContent>
-
-          <TabsContent value="board" className="m-0 flex-1 min-h-0">
-            <CenterSurface
-              selectedPaperId={selectedPaperId}
-              activeView="board"
-              onViewChange={setCenterView}
+              onOpenBoardWorkspace={() => {
+                setCenterView("board")
+                setMobilePinnedView(null)
+              }}
               runtimeInfo={runtimeInfo}
               runtimeLoading={runtimeLoading}
             />
