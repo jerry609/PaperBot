@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react"
 import { useRouter } from "next/navigation"
+import Markdown from "react-markdown"
+import remarkGfm from "remark-gfm"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -49,6 +51,8 @@ import {
     LayoutDashboard,
     Settings2,
     Paperclip,
+    Copy,
+    Check,
 } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import Editor from "@monaco-editor/react"
@@ -111,6 +115,11 @@ function formatStudioChatTransportLabel(transport: unknown): string {
     if (transport === "claude_cli_print") return "CLI print"
     if (transport === "anthropic_api") return "API fallback"
     return "managed transport"
+}
+
+function formatStudioChatSurfaceLabel(surface: unknown): string {
+    if (surface === "managed_session") return "Managed session"
+    return "Managed session"
 }
 
 function buildStudioSessionInitMessage(payload: StudioSessionStatusPayload): string | null {
@@ -357,11 +366,99 @@ interface ActionItemProps {
     onViewDiff: (action: AgentAction) => void
 }
 
+type MarkdownActionBlockTone = "default" | "error"
+
+function MarkdownActionBlock({
+    rawContent,
+    renderContent,
+    label,
+    tone = "default",
+}: {
+    rawContent: string
+    renderContent?: string
+    label?: string
+    tone?: MarkdownActionBlockTone
+}) {
+    const [copied, setCopied] = useState(false)
+
+    const copy = useCallback(async () => {
+        try {
+            await navigator.clipboard.writeText(rawContent)
+            setCopied(true)
+            window.setTimeout(() => setCopied(false), 1200)
+        } catch {
+            setCopied(false)
+        }
+    }, [rawContent])
+
+    return (
+        <div
+            className={cn(
+                "max-w-[88%] overflow-hidden rounded-[18px] border shadow-[0_1px_0_rgba(255,255,255,0.6)_inset]",
+                tone === "error"
+                    ? "border-rose-200 bg-rose-50"
+                    : "border-slate-200/90 bg-[#f7f8f4]",
+            )}
+        >
+            <div
+                className={cn(
+                    "flex items-center justify-between gap-2 border-b px-3 py-1.5",
+                    tone === "error" ? "border-rose-200/80 bg-rose-100/60" : "border-slate-200 bg-[#eef1ea]",
+                )}
+            >
+                <span
+                    className={cn(
+                        "truncate text-[10px] font-medium uppercase tracking-[0.14em]",
+                        tone === "error" ? "text-rose-700" : "text-slate-500",
+                    )}
+                >
+                    {label ?? (tone === "error" ? "Error" : "Claude Code")}
+                </span>
+                <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className={cn(
+                        "h-6 gap-1 rounded-full px-2 text-[10px]",
+                        tone === "error"
+                            ? "text-rose-700 hover:bg-rose-100 hover:text-rose-800"
+                            : "text-slate-500 hover:bg-white hover:text-slate-700",
+                    )}
+                    onClick={copy}
+                >
+                    {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                    {copied ? "Copied" : "Copy"}
+                </Button>
+            </div>
+            <div className="px-3 py-2.5">
+                <div className="prose prose-sm max-w-none text-[12px] leading-6 text-slate-800 prose-headings:mb-2 prose-headings:mt-0 prose-p:my-0 prose-p:whitespace-pre-wrap prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5 prose-strong:text-slate-900 prose-code:rounded prose-code:bg-white prose-code:px-1 prose-code:py-0.5 prose-code:font-mono prose-code:text-[11px] prose-code:text-slate-800 prose-pre:my-0 prose-pre:overflow-auto prose-pre:rounded-xl prose-pre:border prose-pre:border-slate-200 prose-pre:bg-slate-950 prose-pre:px-3 prose-pre:py-2.5 prose-pre:text-[11px] prose-pre:leading-5 prose-pre:text-slate-100 prose-table:my-2 prose-table:w-full prose-th:border prose-th:border-slate-200 prose-th:bg-white prose-th:px-2 prose-th:py-1 prose-th:text-left prose-th:text-[11px] prose-td:border prose-td:border-slate-200 prose-td:px-2 prose-td:py-1 prose-td:align-top prose-blockquote:my-2 prose-blockquote:border-l-2 prose-blockquote:border-slate-300 prose-blockquote:pl-3 prose-blockquote:text-slate-600">
+                    <Markdown
+                        remarkPlugins={[remarkGfm]}
+                        components={{
+                            a: ({ className, ...props }) => (
+                                <a
+                                    {...props}
+                                    className={cn("text-slate-900 underline underline-offset-2", className)}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                />
+                            ),
+                        }}
+                    >
+                        {renderContent ?? rawContent}
+                    </Markdown>
+                </div>
+            </div>
+        </div>
+    )
+}
+
 function ActionItem({ action, onViewDiff }: ActionItemProps) {
     const [expanded, setExpanded] = useState(false)
     const attachments = action.metadata?.attachments ?? []
     const hasExpandableContent = Boolean(action.metadata?.params || action.metadata?.result)
     const hasToolResult = action.metadata?.result !== undefined
+    const commandOutput = action.metadata?.commandOutput
     const toolSummary =
         summarizeToolPayload(action.metadata?.params) ??
         summarizeToolPayload(action.metadata?.result)
@@ -494,11 +591,18 @@ function ActionItem({ action, onViewDiff }: ActionItemProps) {
     }
 
     if (action.type === "error") {
+        const renderContent =
+            commandOutput?.kind === "stdout" || commandOutput?.kind === "stderr"
+                ? `\`\`\`\n${action.content}\n\`\`\``
+                : action.content
         return (
             <div className="pb-2">
-                <div className="rounded-2xl border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-[11px] text-rose-700">
-                    {action.content}
-                </div>
+                <MarkdownActionBlock
+                    rawContent={action.content}
+                    renderContent={renderContent}
+                    label={commandOutput?.title ?? "Error"}
+                    tone="error"
+                />
             </div>
         )
     }
@@ -513,11 +617,25 @@ function ActionItem({ action, onViewDiff }: ActionItemProps) {
         )
     }
 
+    if (action.type === "text") {
+        const renderContent =
+            commandOutput?.kind === "stdout" || commandOutput?.kind === "stderr"
+                ? `\`\`\`\n${action.content}\n\`\`\``
+                : action.content
+        return (
+            <div className="pb-2">
+                <MarkdownActionBlock
+                    rawContent={action.content}
+                    renderContent={renderContent}
+                    label={commandOutput?.title ?? "Claude Code"}
+                />
+            </div>
+        )
+    }
+
     return (
         <div className="pb-2">
-            <div className="max-w-[88%] rounded-[18px] border border-slate-200/90 bg-[#f7f8f4] px-3 py-2 text-[12px] leading-5 text-slate-800 shadow-[0_1px_0_rgba(255,255,255,0.6)_inset]">
-                <p className="whitespace-pre-wrap">{action.content}</p>
-            </div>
+            <MarkdownActionBlock rawContent={action.content} label="Claude Code" />
         </div>
     )
 }
@@ -1046,27 +1164,17 @@ export function ReproductionLog({
         taskId: string,
         result: {
             ok: boolean
-            stdout?: string | null
-            stderr?: string | null
+            outputs?: Array<Omit<AgentAction, "id" | "timestamp">>
             error?: string | null
         },
     ) => {
-        const stdout = result.stdout?.trimEnd() ?? ""
-        const stderr = result.stderr?.trimEnd() ?? ""
         const error = result.error?.trim() ?? ""
+        const outputs =
+            result.outputs?.filter((output) => output.type === "complete" || output.content.trim().length > 0) ?? []
 
-        if (stdout) {
-            addAction(taskId, { type: "text", content: stdout })
-        }
-
-        if (stderr) {
-            addAction(taskId, {
-                type: result.ok && !error ? "text" : "error",
-                content: stderr,
-            })
-        }
-
-        if (!stdout && !stderr) {
+        if (outputs.length > 0) {
+            outputs.forEach((output) => addAction(taskId, output))
+        } else {
             if (error) {
                 addAction(taskId, { type: "error", content: error })
             } else {
@@ -1076,7 +1184,7 @@ export function ReproductionLog({
 
         if (!result.ok || error) {
             updateTaskStatus(taskId, "error")
-            setLastError(error || stderr || "Command failed")
+            setLastError(error || "Command failed")
             setStatus("error")
             return
         }
@@ -1085,11 +1193,22 @@ export function ReproductionLog({
         setStatus("success")
     }, [addAction, updateTaskStatus])
 
-    const showSyntheticCommandOutput = (inputContent: string, title: string, stdout: string) => {
+    const showSyntheticCommandOutput = (
+        inputContent: string,
+        title: string,
+        content: string,
+        metadata?: AgentAction["metadata"],
+    ) => {
         const taskId = beginCommandTimelineRun(inputContent, title)
         finishCommandTimelineRun(taskId, {
             ok: true,
-            stdout,
+            outputs: [
+                {
+                    type: "text",
+                    content,
+                    metadata,
+                },
+            ],
         })
     }
 
@@ -1137,11 +1256,37 @@ export function ReproductionLog({
             })
 
             const payload = (await response.json()) as CliCommandResult
+            const outputs: Array<Omit<AgentAction, "id" | "timestamp">> = []
+
+            if (payload?.stdout?.trim()) {
+                outputs.push({
+                    type: "text",
+                    content: payload.stdout,
+                    metadata: {
+                        commandOutput: {
+                            kind: "stdout",
+                            title: "STDOUT",
+                        },
+                    },
+                })
+            }
+
+            if (payload?.stderr?.trim()) {
+                outputs.push({
+                    type: payload?.ok ? "text" : "error",
+                    content: payload.stderr,
+                    metadata: {
+                        commandOutput: {
+                            kind: "stderr",
+                            title: "STDERR",
+                        },
+                    },
+                })
+            }
 
             finishCommandTimelineRun(taskId, {
                 ok: payload?.ok === true,
-                stdout: payload?.stdout,
-                stderr: payload?.stderr,
+                outputs,
                 error: payload?.ok ? null : payload?.stderr || `Command failed (${payload?.returncode ?? 500})`,
             })
         } catch (e) {
@@ -1172,23 +1317,13 @@ export function ReproductionLog({
             showSyntheticCommandOutput(
                 "/help",
                 "Slash help",
-                [
-                    "Supported Studio slash commands:",
-                    "/help",
-                    "/status",
-                    "/new",
-                    "/clear",
-                    "/plan <request>",
-                    "/model <alias>",
-                    "/agents",
-                    "/mcp [args]",
-                    "/auth [args]",
-                    "/doctor",
-                    "",
-                    "Chat turns stream Claude Code print mode.",
-                    "Runtime entries launch standalone Claude CLI utilities.",
-                    "Studio intentionally exposes a focused command subset instead of old local-only slash toggles.",
-                ].join("\n"),
+                buildSlashHelpMarkdown(),
+                {
+                    commandOutput: {
+                        kind: "help",
+                        title: "Slash help",
+                    },
+                },
             )
             return true
         }
@@ -1198,19 +1333,13 @@ export function ReproductionLog({
             showSyntheticCommandOutput(
                 "/status",
                 "Slash status",
-                [
-                    `runtime: ${runtimeLoading ? "checking" : runtimeLabel}`,
-                    `chat transport: ${formatStudioChatTransportLabel(runtimeInfo.chatTransport)}`,
-                    `preferred transport: ${formatStudioChatTransportLabel(runtimeInfo.preferredChatTransport)}`,
-                    `agent sdk: ${runtimeInfo.claudeAgentSdkAvailable ? "available" : "not installed"}`,
-                    `mode: ${mode}`,
-                    `permission: ${permissionProfile}`,
-                    `model: ${requestedModel || "pending"}`,
-                    `workspace: ${projectDir ?? "not set"}`,
-                    `uploaded files: ${uploadedFiles.length}`,
-                    `paper: ${selectedPaper?.title ?? "none"}`,
-                    `session: ${activeChatTask?.name ?? "new thread"}`,
-                ].join("\n"),
+                buildStatusMarkdown(),
+                {
+                    commandOutput: {
+                        kind: "status",
+                        title: "Slash status",
+                    },
+                },
             )
             return true
         }
@@ -1418,6 +1547,61 @@ export function ReproductionLog({
         const values = runtimeInfo.runtimeCommands.map((item) => item.trim().toLowerCase()).filter(Boolean)
         return values.length > 0 ? new Set(values) : null
     }, [runtimeInfo.runtimeCommands])
+    const supportedSlashCommands = useMemo(() => {
+        const commands = runtimeInfo.supportedSlashCommands.filter((item) => item.trim().length > 0)
+        return commands.length > 0
+            ? commands
+            : ["help", "status", "new", "clear", "plan", "model", "agents", "mcp", "auth", "doctor"]
+    }, [runtimeInfo.supportedSlashCommands])
+    const buildSlashHelpMarkdown = useCallback(() => {
+        const commandLines = supportedSlashCommands.map((command) => `- \`/${command}\``)
+        return [
+            "## Supported Studio slash commands",
+            "",
+            ...commandLines,
+            "",
+            "Claude Code chat turns stream directly into this thread.",
+            "Runtime utilities still run through the Claude CLI path and mirror into Monitor.",
+        ].join("\n")
+    }, [supportedSlashCommands])
+    const buildStatusMarkdown = useCallback(() => {
+        const fields = [
+            { label: "Runtime", value: runtimeLoading ? "Checking runtime" : runtimeInfo.label },
+            { label: "Chat surface", value: formatStudioChatSurfaceLabel(runtimeInfo.chatSurface) },
+            { label: "Transport", value: formatStudioChatTransportLabel(runtimeInfo.chatTransport) },
+            { label: "Preferred route", value: formatStudioChatTransportLabel(runtimeInfo.preferredChatTransport) },
+            { label: "CLI version", value: runtimeInfo.version || "Unavailable" },
+            { label: "Agent SDK", value: runtimeInfo.claudeAgentSdkAvailable ? "Installed" : "Not installed" },
+            { label: "Mode", value: mode },
+            { label: "Permission", value: permissionProfile },
+            { label: "Model", value: requestedModel || "Pending" },
+            { label: "Workspace", value: projectDir ?? "Not set" },
+            { label: "Uploaded files", value: String(uploadedFiles.length) },
+            { label: "Paper", value: selectedPaper?.title ?? "None" },
+            { label: "Session", value: activeChatTask?.name ?? "New thread" },
+        ]
+
+        return [
+            "## Studio status",
+            "",
+            ...fields.map(({ label, value }) => `- **${label}:** ${value}`),
+        ].join("\n")
+    }, [
+        activeChatTask?.name,
+        mode,
+        permissionProfile,
+        projectDir,
+        requestedModel,
+        runtimeInfo.chatSurface,
+        runtimeInfo.chatTransport,
+        runtimeInfo.claudeAgentSdkAvailable,
+        runtimeInfo.label,
+        runtimeInfo.preferredChatTransport,
+        runtimeInfo.version,
+        runtimeLoading,
+        selectedPaper?.title,
+        uploadedFiles.length,
+    ])
 
     const slashCommands: SlashCommandItem[] = [
         {
@@ -2023,14 +2207,14 @@ export function ReproductionLog({
                                 {slashPaletteActive ? (
                                     <div className="pointer-events-none absolute inset-x-0 bottom-3 z-20 flex px-4">
                                         <div className="pointer-events-auto max-w-[560px] flex-1 overflow-hidden rounded-2xl border border-slate-200 bg-[#f8faf5] shadow-[0_18px_40px_rgba(15,23,42,0.10)]">
-                                            <div className="flex items-center justify-between gap-3 border-b border-slate-200 bg-[#f0f2ec] px-3 py-2.5">
-                                                <div>
+                                            <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 border-b border-slate-200 bg-[#f0f2ec] px-3 py-2.5">
+                                                <div className="min-w-0">
                                                     <div className="text-[11px] font-medium text-slate-800">Claude Code commands</div>
-                                                    <div className="mt-0.5 text-[10px] text-slate-500">
+                                                    <div className="mt-0.5 truncate text-[10px] text-slate-500">
                                                         Slash opens Claude-style chat commands plus safe runtime utilities.
                                                     </div>
                                                 </div>
-                                                <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 font-mono text-[10px] text-slate-500">
+                                                <span className="max-w-[10rem] shrink-0 truncate rounded-full border border-slate-200 bg-white px-2 py-0.5 font-mono text-[10px] text-slate-500">
                                                     /{slashToken || ""}
                                                 </span>
                                             </div>

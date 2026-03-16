@@ -36,6 +36,18 @@ export interface AgentAction {
         mcpServer?: string
         mcpTool?: string
         mcpResult?: unknown
+        // For slash/runtime command output cards rendered in chat
+        commandOutput?: {
+            kind?: 'help' | 'status' | 'stdout' | 'stderr'
+            title?: string
+            description?: string
+            fields?: Array<{
+                label: string
+                value: string
+            }>
+            commands?: string[]
+            notes?: string[]
+        }
     }
 }
 
