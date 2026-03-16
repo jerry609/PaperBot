@@ -5,6 +5,10 @@ import { buildSubagentActivityGroups } from "./subagent-groups"
 
 function makeDelegation(partial: Partial<CodexDelegationEntry> & Pick<CodexDelegationEntry, "id" | "event_type" | "task_id" | "task_title" | "assignee" | "session_id" | "ts">): CodexDelegationEntry {
   return {
+    worker_run_id: partial.worker_run_id ?? `worker-${partial.task_id}`,
+    runtime: partial.runtime ?? "codex",
+    control_mode: partial.control_mode ?? "mirrored",
+    interruptible: partial.interruptible ?? false,
     ...partial,
   }
 }
@@ -66,6 +70,9 @@ describe("buildSubagentActivityGroups", () => {
 
     expect(groups).toHaveLength(1)
     expect(groups[0].status).toBe("completed")
+    expect(groups[0].workerRunId).toBe("worker-task-1")
+    expect(groups[0].runtime).toBe("codex")
+    expect(groups[0].interruptible).toBe(false)
     expect(groups[0].toolCount).toBe(1)
     expect(groups[0].filesGenerated).toEqual(["src/app.ts"])
     expect(groups[0].recentTools[0]?.tool).toBe("Bash")

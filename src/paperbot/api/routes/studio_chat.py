@@ -650,6 +650,10 @@ class _PendingDelegation:
     assignee: str
     task_id: str
     task_title: str
+    runtime: str
+    worker_run_id: str
+    control_mode: str = "mirrored"
+    interruptible: bool = False
 
 
 @dataclass
@@ -761,6 +765,10 @@ def _make_delegation_event(
         "task_title": delegation.task_title,
         "session_id": state.session_id,
         "assignee": delegation.assignee,
+        "runtime": delegation.runtime,
+        "worker_run_id": delegation.worker_run_id,
+        "control_mode": delegation.control_mode,
+        "interruptible": delegation.interruptible,
     }
     if error is not None:
         payload["error"] = error
@@ -885,9 +893,9 @@ def _extract_task_title(tool_input: Dict[str, Any], fallback: str) -> str:
     return fallback
 
 
-def _infer_subagent_runtime(tool_name: str, tool_input: Dict[str, Any]) -> Optional[str]:
+def _is_delegation_tool(tool_name: str, tool_input: Dict[str, Any]) -> bool:
     normalized_name = tool_name.strip().lower()
-    delegation_tool_names = {
+    if normalized_name in {
         "agent",
         "task",
         "spawn_agent",
@@ -896,7 +904,27 @@ def _infer_subagent_runtime(tool_name: str, tool_input: Dict[str, Any]) -> Optio
         "dispatch_agent",
         "subagent",
         "teamcreate",
-    }
+    }:
+        return True
+
+    for key in (
+        "subagent_type",
+        "delegate_to",
+        "delegate_to_runtime",
+        "teammate_name",
+        "team_name",
+    ):
+        value = tool_input.get(key)
+        if isinstance(value, str) and value.strip():
+            return True
+
+    return False
+
+
+def _infer_subagent_runtime(tool_name: str, tool_input: Dict[str, Any]) -> Optional[str]:
+    normalized_name = tool_name.strip().lower()
+    if not _is_delegation_tool(tool_name, tool_input):
+        return None
 
     candidate_values: List[str] = [normalized_name]
     for key in (
@@ -908,10 +936,10 @@ def _infer_subagent_runtime(tool_name: str, tool_input: Dict[str, Any]) -> Optio
         "runner",
         "subagent",
         "subagent_type",
-        "model",
         "backend",
-        "provider",
         "target",
+        "teammate_name",
+        "team_name",
     ):
         value = tool_input.get(key)
         if isinstance(value, str) and value.strip():
@@ -922,12 +950,14 @@ def _infer_subagent_runtime(tool_name: str, tool_input: Dict[str, Any]) -> Optio
             return "opencode"
         if "codex" in value:
             return "codex"
+        if "team" in value or "teammate" in value:
+            return "claude"
         if value in {"claude", "cc"} or value.startswith("claude-") or value.startswith("cc-"):
             return "claude"
 
-    if normalized_name in delegation_tool_names:
-        return "subagent"
-    return None
+    if normalized_name in {"agent", "teamcreate"}:
+        return "claude"
+    return "worker"
 
 
 def _register_delegation(
@@ -942,8 +972,15 @@ def _register_delegation(
         return None
 
     suffix = (tool_id or f"{len(state.pending_delegations) + 1}").replace(":", "-")
-    assignee = f"{runtime}-{suffix[:6]}"
+    assignee_prefix = {
+        "claude": "claude-worker",
+        "codex": "codex",
+        "opencode": "opencode",
+        "worker": "worker",
+    }.get(runtime, runtime)
+    assignee = f"{assignee_prefix}-{suffix[:6]}"
     task_id = tool_id or f"studio-delegation-{len(state.pending_delegations) + 1}"
+    worker_run_id = f"worker-run-{suffix[:12]}"
     fallback_title = f"{tool_name} delegation"
     task_title = _extract_task_title(tool_input, fallback_title)
 
@@ -953,6 +990,8 @@ def _register_delegation(
         assignee=assignee,
         task_id=task_id,
         task_title=task_title,
+        runtime=runtime,
+        worker_run_id=worker_run_id,
     )
     state.pending_delegations.append(delegation)
     return delegation

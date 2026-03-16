@@ -806,11 +806,11 @@ export function AgentBoard({
             upsertTaskFromEvent(taskId, taskData)
           } else if (taskId && eventName === "task_codex_done") {
             updateAgentTask(taskId, { status: "in_progress", progress: 70 })
-            appendInlineTaskLog(
+              appendInlineTaskLog(
               taskId,
               "task_codex_done",
               "codex_running",
-              "Subagent output received.",
+              "Worker output received.",
               "success",
             )
           }

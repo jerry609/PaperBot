@@ -322,8 +322,8 @@ function LeftRail({
               <p className="mt-1 truncate text-[12px] font-medium text-slate-800">{activeAgents} active</p>
             </div>
             <div className="rounded-2xl border border-slate-200 bg-[#f7f8f4] px-3 py-2">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">Monitor</p>
-              <p className="mt-1 truncate text-[12px] font-medium text-slate-800">{subagentEvents} events</p>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">Workers</p>
+              <p className="mt-1 truncate text-[12px] font-medium text-slate-800">{subagentEvents} runs</p>
             </div>
           </div>
 
@@ -439,13 +439,13 @@ function RightInspector({
           </div>
 
           <p className="mt-3 text-[11px] text-slate-500">
-            {runtimeInfo.workspaceLabel} · {subagentEvents} delegation events · {fileCount} files touched
+            {runtimeInfo.workspaceLabel} · {subagentEvents} worker runs · {fileCount} files touched
           </p>
         </div>
       </div>
 
       <div className="border-b border-slate-200 bg-slate-100/70">
-        <AgentStatusPanel compact />
+              <AgentStatusPanel compact />
       </div>
 
       <Tabs
@@ -469,7 +469,7 @@ function RightInspector({
             </TabsTrigger>
             <TabsTrigger value="agents" className="rounded-xl border border-transparent px-1 text-[11px] text-slate-500 shadow-none data-[state=active]:border-slate-200 data-[state=active]:bg-[#eef1ea] data-[state=active]:text-slate-900">
               <Bot className="mr-1 h-3.5 w-3.5" />
-              Agents
+              Workers
             </TabsTrigger>
             <TabsTrigger value="graph" className="rounded-xl border border-transparent px-1 text-[11px] text-slate-500 shadow-none data-[state=active]:border-slate-200 data-[state=active]:bg-[#eef1ea] data-[state=active]:text-slate-900">
               <GitBranch className="mr-1 h-3.5 w-3.5" />

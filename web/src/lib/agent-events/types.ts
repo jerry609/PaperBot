@@ -84,6 +84,7 @@ export type FileChangeStatus = "created" | "modified"
 
 export type FileTouchedEntry = {
   run_id: string
+  agent_name: string
   path: string
   status: FileChangeStatus
   ts: string
@@ -98,9 +99,13 @@ export type CodexDelegationEntry = {
   id: string
   event_type: "codex_dispatched" | "codex_accepted" | "codex_completed" | "codex_failed"
   task_id: string
+  worker_run_id: string
   task_title: string
   assignee: string
   session_id: string
+  runtime: string
+  control_mode: "mirrored" | "managed"
+  interruptible: boolean
   ts: string
   files_generated?: string[]
   reason_code?: string

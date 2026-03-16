@@ -45,6 +45,36 @@ def test_build_cli_telemetry_events_tool_use_emits_working_and_tool_call():
     assert events[1].payload["arguments"] == {"path": "src/demo.py"}
 
 
+def test_build_cli_telemetry_events_non_delegation_tool_does_not_emit_worker_run():
+    state = _make_state()
+
+    events = _build_cli_telemetry_events(
+        {
+            "type": "assistant",
+            "message": {
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": "toolu_non_delegate",
+                        "name": "Bash",
+                        "input": {
+                            "command": "echo ok",
+                            "runtime": "codex",
+                        },
+                    }
+                ]
+            },
+        },
+        state,
+        now_monotonic=12.0,
+    )
+
+    assert [event.type for event in events] == [
+        EventType.AGENT_WORKING,
+        EventType.TOOL_CALL,
+    ]
+
+
 def test_build_cli_telemetry_events_write_result_emits_file_change():
     state = _make_state()
 
@@ -117,6 +147,8 @@ def test_build_cli_telemetry_events_codex_delegation_emits_dispatch_and_completi
     ]
     assert dispatched[2].payload["assignee"].startswith("codex-")
     assert dispatched[2].payload["task_title"] == "Implement telemetry bridge"
+    assert dispatched[2].payload["runtime"] == "codex"
+    assert dispatched[2].payload["interruptible"] is False
     assert dispatched[3].agent_name.startswith("codex-")
 
     completed = _build_cli_telemetry_events(
@@ -387,3 +419,31 @@ def test_build_cli_telemetry_events_claude_agent_flow_tracks_worker_activity():
     ]
     assert completed[1].payload["assignee"] == codex_assignee
     assert completed[2].agent_name == codex_assignee
+
+
+def test_build_cli_telemetry_events_claude_worker_uses_worker_assignee_prefix():
+    state = _make_state()
+
+    dispatched = _build_cli_telemetry_events(
+        {
+            "type": "assistant",
+            "message": {
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": "toolu_claude_worker",
+                        "name": "Agent",
+                        "input": {
+                            "description": "Review the proposed plan",
+                        },
+                    }
+                ]
+            },
+        },
+        state,
+        now_monotonic=70.0,
+    )
+
+    assert dispatched[2].type == EventType.CODEX_DISPATCHED
+    assert dispatched[2].payload["runtime"] == "claude"
+    assert dispatched[2].payload["assignee"].startswith("claude-worker-")

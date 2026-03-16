@@ -1,12 +1,26 @@
 "use client"
 
-import { useMemo } from "react"
-import { Cpu, FileCheck2, Loader2, Terminal, TriangleAlert } from "lucide-react"
+import { useMemo, useState } from "react"
+import {
+  ArrowLeft,
+  Cpu,
+  FileCheck2,
+  FileCode2,
+  Loader2,
+  MessageSquareText,
+  Terminal,
+  TriangleAlert,
+} from "lucide-react"
 
+import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { getAgentPresentation } from "@/lib/agent-runtime"
 import { useAgentEventStore } from "@/lib/agent-events/store"
-import { buildSubagentActivityGroups, type SubagentActivityGroup } from "@/lib/agent-events/subagent-groups"
+import {
+  buildSubagentActivityGroups,
+  type SubagentActivityGroup,
+} from "@/lib/agent-events/subagent-groups"
+import type { ActivityFeedItem, FileTouchedEntry, ToolCallEntry } from "@/lib/agent-events/types"
 
 function formatTimestamp(ts: string): string {
   try {
@@ -32,17 +46,16 @@ function formatDuration(startedAt: string, finishedAt: string | null): string | 
 
 function truncate(text: string, max = 84): string {
   if (text.length <= max) return text
-  return `${text.slice(0, max - 1)}…`
+  return `${text.slice(0, max - 1)}...`
 }
 
-function summarizeToolDetail(group: SubagentActivityGroup, toolIndex: number): string {
-  const entry = group.recentTools[toolIndex]
-  if (!entry) return ""
-  if (entry.error) return entry.error
-  if (entry.result_summary.trim()) return entry.result_summary.trim()
-  const argKeys = Object.keys(entry.arguments)
-  if (argKeys.length > 0) return `args: ${argKeys.join(", ")}`
-  return "No summary"
+function humanizeRuntime(runtime: string): string {
+  const normalized = runtime.trim().toLowerCase()
+  if (normalized === "codex") return "Codex"
+  if (normalized === "opencode") return "OpenCode"
+  if (normalized === "claude") return "Claude"
+  if (normalized === "worker") return "Worker"
+  return runtime || "Worker"
 }
 
 function statusAppearance(status: SubagentActivityGroup["status"]) {
@@ -82,7 +95,82 @@ function statusAppearance(status: SubagentActivityGroup["status"]) {
   }
 }
 
-function SubagentCard({ group }: { group: SubagentActivityGroup }) {
+function summarizeToolDetail(entry: ToolCallEntry): string {
+  if (entry.error) return entry.error
+  if (entry.result_summary.trim()) return entry.result_summary.trim()
+  const argKeys = Object.keys(entry.arguments)
+  if (argKeys.length > 0) return `args: ${argKeys.join(", ")}`
+  return "No summary"
+}
+
+function WorkerChip({ label }: { label: string }) {
+  return (
+    <span className="rounded-full border border-slate-200 bg-[#f7f8f4] px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-slate-500">
+      {label}
+    </span>
+  )
+}
+
+function WorkerFileRow({ entry }: { entry: FileTouchedEntry }) {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white px-2.5 py-2">
+      <div className="flex items-center justify-between gap-2">
+        <span className="truncate font-mono text-[11px] text-slate-700" title={entry.path}>
+          {entry.path}
+        </span>
+        <span className="shrink-0 text-[10px] text-slate-400">{formatTimestamp(entry.ts)}</span>
+      </div>
+      <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px] uppercase tracking-[0.12em] text-slate-500">
+        <span className="rounded-full border border-slate-200 bg-[#f7f8f4] px-1.5 py-0.5">
+          {entry.status}
+        </span>
+        {typeof entry.linesAdded === "number" ? (
+          <span className="rounded-full border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-emerald-700">
+            +{entry.linesAdded}
+          </span>
+        ) : null}
+        {typeof entry.linesDeleted === "number" ? (
+          <span className="rounded-full border border-rose-200 bg-rose-50 px-1.5 py-0.5 text-rose-700">
+            -{entry.linesDeleted}
+          </span>
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
+function WorkerToolRow({ entry, dotClass }: { entry: ToolCallEntry; dotClass: string }) {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white px-2.5 py-2">
+      <div className="flex items-center gap-2">
+        <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${entry.status === "error" ? "bg-rose-500" : dotClass}`} />
+        <span className="text-[11px] font-medium text-slate-800">{entry.tool}</span>
+        <span className="ml-auto text-[10px] text-slate-400">{formatTimestamp(entry.ts)}</span>
+      </div>
+      <p className="mt-1 text-[11px] leading-4 text-slate-500">{truncate(summarizeToolDetail(entry), 180)}</p>
+    </div>
+  )
+}
+
+function WorkerTranscriptRow({ item }: { item: ActivityFeedItem }) {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white px-2.5 py-2">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[11px] font-medium text-slate-800">{item.type}</span>
+        <span className="text-[10px] text-slate-400">{formatTimestamp(item.ts)}</span>
+      </div>
+      <p className="mt-1 text-[11px] leading-4 text-slate-500">{truncate(item.summary, 220)}</p>
+    </div>
+  )
+}
+
+function WorkerListCard({
+  group,
+  onOpen,
+}: {
+  group: SubagentActivityGroup
+  onOpen: () => void
+}) {
   const presentation = getAgentPresentation(group.assignee)
   const appearance = statusAppearance(group.status)
   const StatusIcon = appearance.icon
@@ -110,24 +198,11 @@ function SubagentCard({ group }: { group: SubagentActivityGroup }) {
           </p>
 
           <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[10px] uppercase tracking-[0.12em] text-slate-500">
-            <span className="rounded-full border border-slate-200 bg-[#f7f8f4] px-2 py-0.5">
-              {group.toolCount} tools
-            </span>
-            {group.toolErrorCount > 0 ? (
-              <span className="rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 text-rose-700">
-                {group.toolErrorCount} errors
-              </span>
-            ) : null}
-            {fileCount > 0 ? (
-              <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-emerald-700">
-                {fileCount} files
-              </span>
-            ) : null}
-            {duration ? (
-              <span className="rounded-full border border-slate-200 bg-[#f7f8f4] px-2 py-0.5">
-                {duration}
-              </span>
-            ) : null}
+            <WorkerChip label={humanizeRuntime(group.runtime)} />
+            <WorkerChip label={group.controlMode === "managed" ? "interruptible" : "view only"} />
+            <WorkerChip label={`${group.toolCount} tools`} />
+            {fileCount > 0 ? <WorkerChip label={`${fileCount} files`} /> : null}
+            {duration ? <WorkerChip label={duration} /> : null}
           </div>
 
           {group.recentTools.length > 0 ? (
@@ -137,17 +212,8 @@ function SubagentCard({ group }: { group: SubagentActivityGroup }) {
                 Recent tools
               </div>
               <div className="space-y-1.5">
-                {group.recentTools.map((tool, index) => (
-                  <div key={tool.id} className="rounded-xl border border-slate-200 bg-white px-2 py-1.5">
-                    <div className="flex items-center gap-2">
-                      <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${tool.status === "error" ? "bg-rose-500" : appearance.dotClass}`} />
-                      <span className="text-[11px] font-medium text-slate-800">{tool.tool}</span>
-                      <span className="ml-auto text-[10px] text-slate-400">{formatTimestamp(tool.ts)}</span>
-                    </div>
-                    <p className="mt-1 text-[11px] leading-4 text-slate-500">
-                      {truncate(summarizeToolDetail(group, index))}
-                    </p>
-                  </div>
+                {group.recentTools.map((tool) => (
+                  <WorkerToolRow key={tool.id} entry={tool} dotClass={appearance.dotClass} />
                 ))}
               </div>
             </div>
@@ -165,41 +231,225 @@ function SubagentCard({ group }: { group: SubagentActivityGroup }) {
               {group.reasonCode ? ` (${group.reasonCode})` : ""}
             </div>
           ) : null}
+
+          <div className="mt-3 flex items-center justify-between gap-2">
+            <div className="min-w-0 text-[11px] text-slate-400">
+              <span className="font-mono">{group.workerRunId}</span>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-8 rounded-full border-slate-200 px-3 text-[11px] text-slate-700"
+              onClick={onOpen}
+            >
+              Open
+            </Button>
+          </div>
         </div>
       </div>
     </li>
   )
 }
 
-export function SubagentActivityPanel() {
-  const codexDelegations = useAgentEventStore((state) => state.codexDelegations)
-  const toolCalls = useAgentEventStore((state) => state.toolCalls)
-  const groups = useMemo(
-    () => buildSubagentActivityGroups(codexDelegations, toolCalls),
-    [codexDelegations, toolCalls],
-  )
+function WorkerDetail({
+  group,
+  transcript,
+  tools,
+  files,
+  onBack,
+}: {
+  group: SubagentActivityGroup
+  transcript: ActivityFeedItem[]
+  tools: ToolCallEntry[]
+  files: FileTouchedEntry[]
+  onBack: () => void
+}) {
+  const presentation = getAgentPresentation(group.assignee)
+  const appearance = statusAppearance(group.status)
+  const duration = formatDuration(group.startedAt, group.finishedAt)
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-[#f5f5f3]">
       <div className="border-b border-zinc-200 px-3 py-2.5">
         <div className="flex items-center justify-between gap-2">
-          <h3 className="text-sm font-semibold text-zinc-900">Delegations</h3>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-8 rounded-full px-2 text-zinc-600"
+            onClick={onBack}
+          >
+            <ArrowLeft className="mr-1 h-3.5 w-3.5" />
+            Workers
+          </Button>
+          <span className={`rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.12em] ${appearance.chipClass}`}>
+            {appearance.label}
+          </span>
+        </div>
+
+        <div className="mt-2">
+          <h3 className="text-sm font-semibold text-zinc-900">{presentation.label}</h3>
+          <p className="mt-1 text-[12px] text-zinc-600">{group.taskTitle || "Untitled task"}</p>
+        </div>
+
+        <div className="mt-3 flex flex-wrap items-center gap-1.5">
+          <WorkerChip label={humanizeRuntime(group.runtime)} />
+          <WorkerChip label={group.controlMode === "managed" ? "interruptible" : "view only"} />
+          {duration ? <WorkerChip label={duration} /> : null}
+          <WorkerChip label={formatTimestamp(group.startedAt)} />
+        </div>
+
+        <div className="mt-3 grid grid-cols-2 gap-2 text-[11px] text-zinc-500">
+          <div className="rounded-2xl border border-slate-200 bg-white px-2.5 py-2">
+            <div className="text-[10px] uppercase tracking-[0.12em] text-slate-400">Worker run</div>
+            <div className="mt-1 font-mono text-[11px] text-slate-700">{group.workerRunId}</div>
+          </div>
+          <div className="rounded-2xl border border-slate-200 bg-white px-2.5 py-2">
+            <div className="text-[10px] uppercase tracking-[0.12em] text-slate-400">Session</div>
+            <div className="mt-1 font-mono text-[11px] text-slate-700">{group.sessionId}</div>
+          </div>
+        </div>
+
+        <div className="mt-3 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-[11px] text-zinc-500">
+          {group.interruptible
+            ? "This worker run is managed by Studio and can be interrupted."
+            : "This worker run is mirrored from Claude Code. You can inspect it, but Studio cannot interrupt it yet."}
+        </div>
+      </div>
+
+      <ScrollArea className="flex-1 min-h-0">
+        <div className="space-y-3 px-3 py-3">
+          <section className="rounded-[22px] border border-slate-200 bg-white px-3 py-3">
+            <div className="mb-2 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+              <MessageSquareText className="h-3.5 w-3.5" />
+              Transcript
+            </div>
+            {transcript.length === 0 ? (
+              <div className="text-[11px] text-slate-500">No worker lifecycle transcript captured yet.</div>
+            ) : (
+              <div className="space-y-1.5">
+                {transcript.map((item) => (
+                  <WorkerTranscriptRow key={item.id} item={item} />
+                ))}
+              </div>
+            )}
+          </section>
+
+          <section className="rounded-[22px] border border-slate-200 bg-white px-3 py-3">
+            <div className="mb-2 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+              <Terminal className="h-3.5 w-3.5" />
+              Tool activity
+            </div>
+            {tools.length === 0 ? (
+              <div className="text-[11px] text-slate-500">No nested worker tools were captured.</div>
+            ) : (
+              <div className="space-y-1.5">
+                {tools.map((tool) => (
+                  <WorkerToolRow key={tool.id} entry={tool} dotClass={appearance.dotClass} />
+                ))}
+              </div>
+            )}
+          </section>
+
+          <section className="rounded-[22px] border border-slate-200 bg-white px-3 py-3">
+            <div className="mb-2 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+              <FileCode2 className="h-3.5 w-3.5" />
+              File changes
+            </div>
+            {files.length === 0 ? (
+              <div className="text-[11px] text-slate-500">No file changes were attributed to this worker run.</div>
+            ) : (
+              <div className="space-y-1.5">
+                {files.map((file) => (
+                  <WorkerFileRow key={`${file.run_id}-${file.agent_name}-${file.path}`} entry={file} />
+                ))}
+              </div>
+            )}
+          </section>
+        </div>
+      </ScrollArea>
+    </div>
+  )
+}
+
+export function SubagentActivityPanel() {
+  const codexDelegations = useAgentEventStore((state) => state.codexDelegations)
+  const toolCalls = useAgentEventStore((state) => state.toolCalls)
+  const feed = useAgentEventStore((state) => state.feed)
+  const filesTouched = useAgentEventStore((state) => state.filesTouched)
+  const groups = useMemo(
+    () => buildSubagentActivityGroups(codexDelegations, toolCalls),
+    [codexDelegations, toolCalls],
+  )
+  const [selectedWorkerRunId, setSelectedWorkerRunId] = useState<string | null>(null)
+
+  const selectedGroup = useMemo(
+    () =>
+      selectedWorkerRunId
+        ? groups.find((group) => group.workerRunId === selectedWorkerRunId) ?? null
+        : null,
+    [groups, selectedWorkerRunId],
+  )
+
+  const selectedTranscript = useMemo(() => {
+    if (!selectedGroup) return []
+    return [...feed]
+      .filter((item) => item.agent_name === selectedGroup.assignee)
+      .filter((item) => item.type !== "tool_call" && item.type !== "tool_result" && item.type !== "tool_error" && item.type !== "file_change")
+      .reverse()
+  }, [feed, selectedGroup])
+
+  const selectedTools = useMemo(() => {
+    if (!selectedGroup) return []
+    return toolCalls.filter((entry) => entry.agent_name === selectedGroup.assignee)
+  }, [selectedGroup, toolCalls])
+
+  const selectedFiles = useMemo(() => {
+    if (!selectedGroup) return []
+    return Object.values(filesTouched)
+      .flat()
+      .filter((entry) => entry.agent_name === selectedGroup.assignee)
+      .sort((left, right) => right.ts.localeCompare(left.ts))
+  }, [filesTouched, selectedGroup])
+
+  if (selectedGroup) {
+    return (
+      <WorkerDetail
+        group={selectedGroup}
+        transcript={selectedTranscript}
+        tools={selectedTools}
+        files={selectedFiles}
+        onBack={() => setSelectedWorkerRunId(null)}
+      />
+    )
+  }
+
+  return (
+    <div className="flex h-full min-h-0 flex-col bg-[#f5f5f3]">
+      <div className="border-b border-zinc-200 px-3 py-2.5">
+        <div className="flex items-center justify-between gap-2">
+          <h3 className="text-sm font-semibold text-zinc-900">Workers</h3>
           <span className="text-xs text-zinc-500">{groups.length} runs</span>
         </div>
         <p className="mt-1 text-[11px] text-zinc-500">
-          One card per Claude-dispatched subagent. Nested worker tools stay attached to the run.
+          One card per Claude-dispatched worker run. Open a run to inspect its own transcript, tools, and files.
         </p>
       </div>
 
       <ScrollArea className="flex-1 min-h-0">
         {groups.length === 0 ? (
           <div className="flex h-24 items-center justify-center text-sm text-zinc-500">
-            No delegation activity yet
+            No worker activity yet
           </div>
         ) : (
           <ul className="space-y-2 px-3 py-3">
             {groups.map((group) => (
-              <SubagentCard key={group.id} group={group} />
+              <WorkerListCard
+                key={group.id}
+                group={group}
+                onOpen={() => setSelectedWorkerRunId(group.workerRunId)}
+              />
             ))}
           </ul>
         )}

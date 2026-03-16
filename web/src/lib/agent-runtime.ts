@@ -37,7 +37,7 @@ export function getAgentPresentation(assignee?: string | null): AgentPresentatio
   if (normalized.startsWith("codex")) {
     return {
       kind: "subagent",
-      label: "Codex Subagent",
+      label: "Codex Worker",
       shortLabel: "Codex",
     }
   }
@@ -45,8 +45,24 @@ export function getAgentPresentation(assignee?: string | null): AgentPresentatio
   if (normalized.startsWith("opencode")) {
     return {
       kind: "subagent",
-      label: "OpenCode Subagent",
+      label: "OpenCode Worker",
       shortLabel: "OpenCode",
+    }
+  }
+
+  if (normalized.startsWith("claude-worker")) {
+    return {
+      kind: "subagent",
+      label: "Claude Worker",
+      shortLabel: "Claude",
+    }
+  }
+
+  if (normalized.startsWith("worker")) {
+    return {
+      kind: "subagent",
+      label: "Worker",
+      shortLabel: "Worker",
     }
   }
 

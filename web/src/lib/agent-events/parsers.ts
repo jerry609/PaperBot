@@ -43,24 +43,24 @@ function deriveHumanSummary(raw: AgentEventEnvelopeRaw): string {
   if (t === "codex_dispatched") {
     const assignee = String(payload.assignee ?? raw.agent_name ?? "Codex")
     const title = String(payload.task_title ?? "")
-    return `Task dispatched to ${getAgentPresentation(assignee).shortLabel}: ${title}`
+    return `Worker dispatched to ${getAgentPresentation(assignee).shortLabel}: ${title}`
   }
   if (t === "codex_accepted") {
     const assignee = String(payload.assignee ?? raw.agent_name ?? "Codex")
     const title = String(payload.task_title ?? "")
-    return `${getAgentPresentation(assignee).shortLabel} accepted task: ${title}`
+    return `${getAgentPresentation(assignee).shortLabel} accepted worker run: ${title}`
   }
   if (t === "codex_completed") {
     const assignee = String(payload.assignee ?? raw.agent_name ?? "Codex")
     const title = String(payload.task_title ?? "")
     const files = Array.isArray(payload.files_generated) ? payload.files_generated.length : 0
-    return `${getAgentPresentation(assignee).shortLabel} completed: ${title} (${files} files)`
+    return `${getAgentPresentation(assignee).shortLabel} completed worker run: ${title} (${files} files)`
   }
   if (t === "codex_failed") {
     const assignee = String(payload.assignee ?? raw.agent_name ?? "Codex")
     const title = String(payload.task_title ?? "")
     const reason = String(payload.reason_code ?? "unknown")
-    return `${getAgentPresentation(assignee).shortLabel} failed: ${title} (${reason})`
+    return `${getAgentPresentation(assignee).shortLabel} failed worker run: ${title} (${reason})`
   }
   if (t === "job_start") return `Job started: ${raw.stage}`
   if (t === "job_result") return `Job finished: ${raw.stage}`
@@ -140,6 +140,7 @@ export function parseFileTouched(raw: AgentEventEnvelopeRaw): FileTouchedEntry |
 
   return {
     run_id: String(raw.run_id),
+    agent_name: String(raw.agent_name ?? "unknown"),
     path,
     status: (payload.status as "created" | "modified") ?? "modified",
     ts: String(raw.ts),
@@ -166,9 +167,13 @@ export function parseCodexDelegation(raw: AgentEventEnvelopeRaw): CodexDelegatio
     id: `${t}-${task_id}-${ts}`,
     event_type: t as CodexDelegationEntry["event_type"],
     task_id,
+    worker_run_id: String(payload.worker_run_id ?? task_id),
     task_title,
     assignee,
     session_id,
+    runtime: String(payload.runtime ?? "worker"),
+    control_mode: payload.control_mode === "managed" ? "managed" : "mirrored",
+    interruptible: payload.interruptible === true,
     ts,
   }
 

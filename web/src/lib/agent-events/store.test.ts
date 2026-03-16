@@ -32,6 +32,7 @@ function makeToolCall(i: number): ToolCallEntry {
 function makeFileTouched(runId: string, path: string, i: number = 0): FileTouchedEntry {
   return {
     run_id: runId,
+    agent_name: "codex-a1b2",
     path,
     status: "modified",
     ts: `2026-03-15T00:00:${String(i).padStart(2, "0")}Z`,
@@ -219,9 +220,13 @@ function makeCodexDelegation(i: number): CodexDelegationEntry {
     id: `codex_dispatched-task-${i}-2026-03-15T00:00:00Z`,
     event_type: "codex_dispatched",
     task_id: `task-${i}`,
+    worker_run_id: `worker-run-${i}`,
     task_title: `Task ${i}`,
     assignee: "codex-a1b2",
     session_id: "sess-001",
+    runtime: "codex",
+    control_mode: "mirrored",
+    interruptible: false,
     ts: "2026-03-15T00:00:00Z",
   }
 }

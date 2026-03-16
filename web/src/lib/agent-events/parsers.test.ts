@@ -166,6 +166,7 @@ describe("parseFileTouched", () => {
     const result = parseFileTouched(FILE_CHANGE_ENVELOPE)
     expect(result).not.toBeNull()
     expect(result?.run_id).toBe("run-fc-1")
+    expect(result?.agent_name).toBe("CodingAgent")
     expect(result?.path).toBe("src/main.py")
     expect(result?.status).toBe("modified")
     expect(result?.ts).toBe("2026-03-15T02:00:00Z")
@@ -212,7 +213,8 @@ describe("parseFileTouched", () => {
   })
 
   it("returns null when run_id is missing", () => {
-    const { run_id: _rid, ...raw } = FILE_CHANGE_ENVELOPE
+    const raw = { ...FILE_CHANGE_ENVELOPE } as AgentEventEnvelopeRaw
+    delete raw.run_id
     expect(parseFileTouched(raw as AgentEventEnvelopeRaw)).toBeNull()
   })
 
@@ -236,9 +238,13 @@ describe("parseCodexDelegation", () => {
     ts: "2026-03-15T03:00:00Z",
     payload: {
       task_id: "task-abc",
+      worker_run_id: "worker-run-abc",
       task_title: "Implement auth module",
       assignee: "codex-a1b2",
       session_id: "sess-001",
+      runtime: "codex",
+      control_mode: "mirrored",
+      interruptible: false,
     },
   }
 
@@ -247,9 +253,13 @@ describe("parseCodexDelegation", () => {
     expect(result).not.toBeNull()
     expect(result?.event_type).toBe("codex_dispatched")
     expect(result?.task_id).toBe("task-abc")
+    expect(result?.worker_run_id).toBe("worker-run-abc")
     expect(result?.task_title).toBe("Implement auth module")
     expect(result?.assignee).toBe("codex-a1b2")
     expect(result?.session_id).toBe("sess-001")
+    expect(result?.runtime).toBe("codex")
+    expect(result?.control_mode).toBe("mirrored")
+    expect(result?.interruptible).toBe(false)
     expect(result?.ts).toBe("2026-03-15T03:00:00Z")
   })
 
@@ -429,13 +439,13 @@ describe("deriveHumanSummary for codex events (via parseActivityItem)", () => {
   it("returns 'Task dispatched to Codex: {title}' for codex_dispatched", () => {
     const raw: AgentEventEnvelopeRaw = { ...BASE, type: "codex_dispatched" }
     const result = parseActivityItem(raw)
-    expect(result?.summary).toBe("Task dispatched to Codex: Build ML pipeline")
+    expect(result?.summary).toBe("Worker dispatched to Codex: Build ML pipeline")
   })
 
   it("returns 'Codex accepted task: {title}' for codex_accepted", () => {
     const raw: AgentEventEnvelopeRaw = { ...BASE, type: "codex_accepted" }
     const result = parseActivityItem(raw)
-    expect(result?.summary).toBe("Codex accepted task: Build ML pipeline")
+    expect(result?.summary).toBe("Codex accepted worker run: Build ML pipeline")
   })
 
   it("returns 'Codex completed: {title} (N files)' for codex_completed", () => {
@@ -445,7 +455,7 @@ describe("deriveHumanSummary for codex events (via parseActivityItem)", () => {
       payload: { ...BASE.payload, files_generated: ["a.ts", "b.ts", "c.ts"] },
     }
     const result = parseActivityItem(raw)
-    expect(result?.summary).toBe("Codex completed: Build ML pipeline (3 files)")
+    expect(result?.summary).toBe("Codex completed worker run: Build ML pipeline (3 files)")
   })
 
   it("returns 'Codex failed: {title} (reason_code)' for codex_failed", () => {
@@ -455,7 +465,7 @@ describe("deriveHumanSummary for codex events (via parseActivityItem)", () => {
       payload: { ...BASE.payload, reason_code: "stagnation_detected" },
     }
     const result = parseActivityItem(raw)
-    expect(result?.summary).toBe("Codex failed: Build ML pipeline (stagnation_detected)")
+    expect(result?.summary).toBe("Codex failed worker run: Build ML pipeline (stagnation_detected)")
   })
 
   it("renders OpenCode label when assignee is opencode-*", () => {
@@ -470,6 +480,6 @@ describe("deriveHumanSummary for codex events (via parseActivityItem)", () => {
       },
     }
     const result = parseActivityItem(raw)
-    expect(result?.summary).toBe("OpenCode completed: Build ML pipeline (1 files)")
+    expect(result?.summary).toBe("OpenCode completed worker run: Build ML pipeline (1 files)")
   })
 })

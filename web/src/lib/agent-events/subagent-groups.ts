@@ -7,8 +7,13 @@ export type SubagentActivityStatus = "queued" | "running" | "completed" | "faile
 export type SubagentActivityGroup = {
   id: string
   taskId: string
+  workerRunId: string
   taskTitle: string
   assignee: string
+  sessionId: string
+  runtime: string
+  controlMode: "mirrored" | "managed"
+  interruptible: boolean
   status: SubagentActivityStatus
   startedAt: string
   updatedAt: string
@@ -76,8 +81,13 @@ export function buildSubagentActivityGroups(
       return {
         id: latest.task_id || latest.id,
         taskId: latest.task_id,
+        workerRunId: latest.worker_run_id,
         taskTitle: latest.task_title,
         assignee: latest.assignee,
+        sessionId: latest.session_id,
+        runtime: latest.runtime,
+        controlMode: latest.control_mode,
+        interruptible: latest.interruptible,
         status: resolveStatus(latest.event_type, relatedTools.length),
         startedAt: first.ts,
         updatedAt: latest.ts,
