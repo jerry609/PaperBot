@@ -259,6 +259,16 @@ function mergeUploadedFiles(
     return next
 }
 
+async function readResponseDetail(res: Response, fallback: string): Promise<string> {
+    const text = await res.text()
+    try {
+        const payload = JSON.parse(text) as { detail?: string }
+        return payload.detail || fallback
+    } catch {
+        return text || fallback
+    }
+}
+
 function buildVisibleActions(actions: AgentAction[]): AgentAction[] {
     return actions.filter((action, index) => {
         if (action.type !== "thinking") return true
@@ -799,6 +809,13 @@ export function ReproductionLog({
         }
     }, [knownModelAliases, modelOption])
 
+    useEffect(() => {
+        if (runtimeLoading) return
+        if (runtimeInfo.codeModeEnabled === false && mode === "Code") {
+            setMode("Plan")
+        }
+    }, [mode, runtimeInfo.codeModeEnabled, runtimeLoading])
+
     const activeTask = useMemo(
         () =>
             tasks.find(
@@ -882,6 +899,24 @@ export function ReproductionLog({
         runChatWithDir(directory)
     }
 
+    const prepareProjectDirForChat = useCallback(async (directory: string) => {
+        const res = await fetch("/api/runbook/project-dir/prepare", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                project_dir: directory,
+                create_if_missing: true,
+            }),
+        })
+
+        if (!res.ok) {
+            throw new Error(await readResponseDetail(res, `Directory is not available (${res.status})`))
+        }
+
+        const data = await res.json() as { project_dir?: string }
+        return data.project_dir || directory
+    }, [])
+
     const runChatWithDir = async (targetDir: string) => {
         // Chat with specified directory - called after workspace setup
         const message = messageInput.trim()
@@ -891,8 +926,6 @@ export function ReproductionLog({
             return
         }
         const pendingUploadedFiles = [...uploadedFiles]
-        setMessageInput("")
-        setUploadedFiles([])
         await handleSendMessageWithDir(message, targetDir, pendingUploadedFiles)
     }
 
@@ -915,8 +948,6 @@ export function ReproductionLog({
 
         const message = messageInput.trim()
         const pendingUploadedFiles = [...uploadedFiles]
-        setMessageInput("")
-        setUploadedFiles([])
         await handleSendMessageWithDir(message, projectDir || undefined, pendingUploadedFiles)
     }
 
@@ -925,9 +956,32 @@ export function ReproductionLog({
         targetDir?: string,
         selectedUploadedFiles: ComposerUploadedFile[] = [],
     ) => {
+        const outgoingMode = mode
+
+        if (outgoingMode === "Code" && runtimeInfo.codeModeEnabled === false) {
+            setMode("Plan")
+            setLastError("Code mode is disabled in this Studio runtime. Studio switched back to Plan.")
+            return
+        }
+
+        let preparedProjectDir = targetDir
+        if (outgoingMode === "Code" && targetDir) {
+            try {
+                preparedProjectDir = await prepareProjectDirForChat(targetDir)
+                if (selectedPaperId) {
+                    updatePaper(selectedPaperId, { outputDir: preparedProjectDir })
+                }
+            } catch (error) {
+                setLastError(error instanceof Error ? error.message : "Failed to prepare project directory")
+                return
+            }
+        }
+
         setStatus("running")
         setLastError(null)
         onViewModeChange("log")
+        setMessageInput("")
+        setUploadedFiles([])
 
         const effectiveMessage = message.trim() || "Please inspect the attached files."
         const threadTitle = buildChatThreadTitle(
@@ -940,13 +994,14 @@ export function ReproductionLog({
             addTask(threadTitle)
         let assistantResponse = ""
         let assistantHistoryCommitted = false
-        let negotiatedMode: Mode = mode
+        let negotiatedMode: Mode = outgoingMode
+        const chatProjectDir = outgoingMode === "Code" ? preparedProjectDir : undefined
 
         if (activeChatTask && activeChatTask.history.length === 0 && activeChatTask.actions.length === 0) {
             renameTask(taskId, threadTitle)
         }
 
-        const initialThinking = `[${mode}] Sending to ${runtimeLabel}...`
+        const initialThinking = `[${outgoingMode}] Sending to ${runtimeLabel}...`
         addAction(
             taskId,
             {
@@ -974,7 +1029,7 @@ export function ReproductionLog({
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     message: effectiveMessage,
-                    mode,
+                    mode: outgoingMode,
                     model: requestedModel,
                     permission_profile: permissionProfile,
                     paper: selectedPaper ? {
@@ -985,7 +1040,7 @@ export function ReproductionLog({
                     history: existingHistory,
                     uploaded_files: selectedUploadedFiles,
                     session_id: taskId,
-                    project_dir: targetDir,
+                    project_dir: chatProjectDir,
                     context_pack_id: contextPack?.context_pack_id,
                     continue_last: continueLast,
                     resume_session: resumeSession.trim() || undefined,
@@ -1642,6 +1697,15 @@ export function ReproductionLog({
             { label: "Preferred route", value: formatStudioChatTransportLabel(runtimeInfo.preferredChatTransport) },
             { label: "CLI version", value: runtimeInfo.version || "Unavailable" },
             { label: "Agent SDK", value: runtimeInfo.claudeAgentSdkAvailable ? "Installed" : "Not installed" },
+            {
+                label: "Code mode",
+                value:
+                    runtimeInfo.codeModeEnabled === true
+                        ? "Enabled"
+                        : runtimeInfo.codeModeEnabled === false
+                            ? "Disabled"
+                            : "Unknown",
+            },
             { label: "Mode", value: mode },
             { label: "Permission", value: permissionProfile },
             { label: "Model", value: requestedModel || "Pending" },
@@ -1665,6 +1729,7 @@ export function ReproductionLog({
         runtimeInfo.chatSurface,
         runtimeInfo.chatTransport,
         runtimeInfo.claudeAgentSdkAvailable,
+        runtimeInfo.codeModeEnabled,
         runtimeInfo.preferredChatTransport,
         runtimeInfo.version,
         runtimeLabel,
@@ -1834,11 +1899,13 @@ export function ReproductionLog({
 
     const composerHelperText = commandMode
         ? "Claude Code command selected. Enter runs it, and clear returns the composer to chat."
+        : runtimeInfo.codeModeEnabled === false && mode === "Plan"
+            ? "Code mode is disabled in this runtime. Studio will keep chat turns in Plan mode."
         : uploadedFiles.length > 0
             ? `${uploadedFiles.length} uploaded file${uploadedFiles.length === 1 ? "" : "s"} ready.`
         : missingCustomModel
             ? "Enter a full Claude Code model name before sending."
-            : "Type / for Claude-style commands, runtime checks, and thread controls."
+        : "Type / for Claude-style commands, runtime checks, and thread controls."
     const activeModeLabel = mode
     const activeModelLabel =
         modelOption === "custom"
@@ -2424,7 +2491,9 @@ export function ReproductionLog({
                                             <SelectValue />
                                         </SelectTrigger>
                                         <SelectContent>
-                                            <SelectItem value="Code">Code</SelectItem>
+                                            <SelectItem value="Code" disabled={runtimeInfo.codeModeEnabled === false}>
+                                                {runtimeInfo.codeModeEnabled === false ? "Code (disabled)" : "Code"}
+                                            </SelectItem>
                                             <SelectItem value="Plan">Plan</SelectItem>
                                             <SelectItem value="Ask">Ask</SelectItem>
                                         </SelectContent>
