@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -167,6 +167,13 @@ type SlashCommandItem = {
     keywords: string[]
     icon: React.ElementType
     onSelect: (remainder: string) => void
+}
+
+type SlashTriggerMatch = {
+    query: string
+    token: string
+    start: number
+    end: number
 }
 
 function splitCommaSeparatedValues(value: string): string[] {
@@ -459,6 +466,8 @@ export function ReproductionLog({
     const [diffAction, setDiffAction] = useState<AgentAction | null>(null)
     const [saving, setSaving] = useState(false)
     const [messageInput, setMessageInput] = useState("")
+    const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null)
+    const [composerCursor, setComposerCursor] = useState(0)
     const [activeCliCommand, setActiveCliCommand] = useState<CliActiveCommand | null>(null)
     const [chatDraftBeforeUtility, setChatDraftBeforeUtility] = useState("")
     const [codexMode, setCodexMode] = useState(false)
@@ -1055,15 +1064,69 @@ export function ReproductionLog({
         void handleSendMessage()
     }
 
-    const normalizedComposerInput = messageInput.trimStart()
-    const slashPaletteActive = !utilityMode && normalizedComposerInput.startsWith("/")
-    const slashPayload = slashPaletteActive ? normalizedComposerInput.slice(1) : ""
-    const slashFirstSpace = slashPayload.search(/\s/)
-    const slashToken =
-        slashFirstSpace === -1 ? slashPayload : slashPayload.slice(0, slashFirstSpace)
-    const slashRemainder =
-        slashFirstSpace === -1 ? "" : slashPayload.slice(slashFirstSpace + 1).trimStart()
-    const slashQuery = slashToken.toLowerCase()
+    const normalizedComposerCursor = Math.min(composerCursor, messageInput.length)
+    const activeSlashMatch = useMemo<SlashTriggerMatch | null>(() => {
+        if (utilityMode) return null
+        const beforeCursor = messageInput.slice(0, normalizedComposerCursor)
+        const match = beforeCursor.match(/(^|\s)\/([^\s/]*)$/)
+        if (!match) return null
+
+        const token = match[2] ?? ""
+        return {
+            query: token.toLowerCase(),
+            token,
+            start: normalizedComposerCursor - token.length - 1,
+            end: normalizedComposerCursor,
+        }
+    }, [messageInput, normalizedComposerCursor, utilityMode])
+    const slashPaletteActive = Boolean(activeSlashMatch)
+    const slashQuery = activeSlashMatch?.query ?? ""
+    const slashToken = activeSlashMatch?.token ?? ""
+
+    const mergeComposerText = (before: string, inserted: string, after: string) => {
+        let nextValue = before
+        const normalizedInserted = inserted.trim()
+
+        if (normalizedInserted) {
+            if (nextValue && !/\s$/.test(nextValue)) {
+                nextValue += " "
+            }
+            nextValue += normalizedInserted
+        }
+
+        if (after) {
+            if (nextValue && !/\s$/.test(nextValue) && !/^\s/.test(after)) {
+                nextValue += " "
+            } else if (!nextValue && /^\s+/.test(after)) {
+                nextValue += after.trimStart()
+                return nextValue
+            }
+            nextValue += after
+        }
+
+        return nextValue
+    }
+
+    const replaceActiveSlashToken = (replacement = "") => {
+        if (!activeSlashMatch) return replacement
+        const before = messageInput.slice(0, activeSlashMatch.start)
+        const after = messageInput.slice(activeSlashMatch.end)
+        return mergeComposerText(before, replacement, after)
+    }
+
+    const syncComposerCursor = (target: HTMLTextAreaElement) => {
+        setComposerCursor(target.selectionStart ?? target.value.length)
+    }
+
+    const focusComposerToEnd = () => {
+        requestAnimationFrame(() => {
+            if (!composerTextareaRef.current) return
+            const nextCursor = composerTextareaRef.current.value.length
+            composerTextareaRef.current.focus()
+            composerTextareaRef.current.setSelectionRange(nextCursor, nextCursor)
+            setComposerCursor(nextCursor)
+        })
+    }
 
     function openAgentBoardWorkspace() {
         if (onOpenBoardWorkspace) {
@@ -1282,8 +1345,9 @@ export function ReproductionLog({
     }, [filteredSlashCommands.length, slashPaletteActive, slashQuery])
 
     const handleApplySlashCommand = (command: SlashCommandItem) => {
-        command.onSelect(slashRemainder)
+        command.onSelect(replaceActiveSlashToken())
         setSlashSelectedIndex(0)
+        focusComposerToEnd()
     }
 
     const composerHelperText = commandMode
@@ -1660,8 +1724,15 @@ export function ReproductionLog({
                             ) : null}
 
                             <Textarea
+                                ref={composerTextareaRef}
                                 value={messageInput}
-                                onChange={(e) => setMessageInput(e.target.value)}
+                                onChange={(e) => {
+                                    setMessageInput(e.target.value)
+                                    syncComposerCursor(e.target)
+                                }}
+                                onClick={(e) => syncComposerCursor(e.currentTarget)}
+                                onSelect={(e) => syncComposerCursor(e.currentTarget)}
+                                onKeyUp={(e) => syncComposerCursor(e.currentTarget)}
                                 placeholder={composerPlaceholder}
                                 className="min-h-[78px] resize-none border-0 bg-transparent px-4 py-3 text-sm text-slate-800 placeholder:text-slate-400 focus-visible:ring-0"
                                 onKeyDown={(e) => {
@@ -1682,7 +1753,7 @@ export function ReproductionLog({
 
                                         if (e.key === "Escape") {
                                             e.preventDefault()
-                                            setMessageInput(slashRemainder)
+                                            setMessageInput(replaceActiveSlashToken())
                                             setSlashSelectedIndex(0)
                                             return
                                         }
