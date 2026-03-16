@@ -3,6 +3,7 @@ from __future__ import annotations
 from paperbot.api.routes.studio_chat import (
     _StudioTelemetryState,
     _build_cli_telemetry_events,
+    _parse_cli_event,
 )
 from paperbot.application.collaboration.message_schema import EventType
 
@@ -447,3 +448,84 @@ def test_build_cli_telemetry_events_claude_worker_uses_worker_assignee_prefix():
     assert dispatched[2].type == EventType.CODEX_DISPATCHED
     assert dispatched[2].payload["runtime"] == "claude"
     assert dispatched[2].payload["assignee"].startswith("claude-worker-")
+
+
+def test_parse_cli_event_system_init_emits_session_metadata():
+    state = _make_state()
+
+    events = _parse_cli_event(
+        {
+            "type": "system",
+            "subtype": "init",
+            "session_id": "5807135f-411e-4365-9b27-9e39ca13c3d5",
+            "permissionMode": "default",
+            "model": "claude-sonnet-4-6",
+        },
+        state,
+    )
+
+    assert len(events) == 1
+    assert events[0].type == "progress"
+    assert events[0].data["cli_event"] == "session_init"
+    assert events[0].data["cli_session_id"] == "5807135f-411e-4365-9b27-9e39ca13c3d5"
+    assert state.cli_session_id == "5807135f-411e-4365-9b27-9e39ca13c3d5"
+
+
+def test_parse_cli_event_emits_approval_required_for_worker_result():
+    state = _make_state()
+    state.cli_session_id = "5807135f-411e-4365-9b27-9e39ca13c3d5"
+
+    _build_cli_telemetry_events(
+        {
+            "type": "assistant",
+            "message": {
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": "tooluse_agent",
+                        "name": "Agent",
+                        "input": {
+                            "description": "Get current git branch",
+                            "prompt": "Run `git -C /home/master1/PaperBot branch --show-current`.",
+                            "subagent_type": "codex-worker",
+                        },
+                    }
+                ]
+            },
+        },
+        state,
+        now_monotonic=60.0,
+    )
+
+    events = _parse_cli_event(
+        {
+            "type": "user",
+            "message": {
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "tooluse_agent",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "The command requires approval from you to run. Could you approve the `git -C /home/master1/PaperBot branch --show-current` command, or run it yourself and share the output?",
+                            },
+                            {
+                                "type": "text",
+                                "text": "agentId: afec8e10340629da4 (for resuming to continue this agent's work if needed)",
+                            },
+                        ],
+                        "is_error": False,
+                    }
+                ]
+            },
+        },
+        state,
+    )
+
+    assert len(events) == 2
+    assert events[0].data["cli_event"] == "tool_result"
+    assert events[1].data["cli_event"] == "approval_required"
+    assert events[1].data["command"] == "git -C /home/master1/PaperBot branch --show-current"
+    assert events[1].data["worker_agent_id"] == "afec8e10340629da4"
+    assert events[1].data["cli_session_id"] == "5807135f-411e-4365-9b27-9e39ca13c3d5"

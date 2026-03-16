@@ -29,6 +29,10 @@ import {
 } from "./CliCommandRunner"
 import { useContextPackGeneration } from "@/hooks/useContextPackGeneration"
 import { parseStudioSlashCommand } from "@/lib/studio-slash"
+import {
+    buildStudioApprovalContinuePrompt,
+    parseStudioApprovalRequest,
+} from "@/lib/studio-approval"
 import { collapseToolActivityActions } from "@/lib/studio-chat-activity"
 import {
     resolveDetectedModelSelection,
@@ -423,6 +427,8 @@ interface ActionItemProps {
     action: AgentAction
     onViewDiff: (action: AgentAction) => void
     onOpenMonitor?: (delegationTaskId?: string) => void
+    onApproveApprovalRequest?: (action: AgentAction) => void
+    approvalPending?: boolean
 }
 
 type MarkdownActionBlockTone = "default" | "error"
@@ -580,7 +586,13 @@ function MarkdownActionBlock({
     )
 }
 
-function ActionItem({ action, onViewDiff, onOpenMonitor }: ActionItemProps) {
+function ActionItem({
+    action,
+    onViewDiff,
+    onOpenMonitor,
+    onApproveApprovalRequest,
+    approvalPending = false,
+}: ActionItemProps) {
     const [expanded, setExpanded] = useState(false)
     const attachments = action.metadata?.attachments ?? []
     const hasExpandableContent = Boolean(action.metadata?.params || action.metadata?.result)
@@ -711,6 +723,60 @@ function ActionItem({ action, onViewDiff, onOpenMonitor }: ActionItemProps) {
                 ) : (
                     <div className={sharedClassName}>{content}</div>
                 )}
+            </div>
+        )
+    }
+
+    if (action.type === "approval_request" && action.metadata?.approvalRequest) {
+        const approval = action.metadata.approvalRequest
+        const canApprove = Boolean(approval.cliSessionId) && !approvalPending
+
+        return (
+            <div className="pb-2">
+                <div className="max-w-[88%] rounded-2xl border border-amber-200 bg-amber-50/90 px-3 py-2.5 shadow-[0_1px_0_rgba(255,255,255,0.75)_inset]">
+                    <div className="flex items-start gap-2">
+                        <div className="mt-0.5 flex h-5.5 w-5.5 shrink-0 items-center justify-center rounded-full border border-amber-200 bg-white">
+                            <AlertCircle className="h-3.5 w-3.5 text-amber-700" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                            <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-amber-800">
+                                Approval required
+                            </div>
+                            <p className="mt-1 whitespace-pre-wrap text-[12px] leading-5 text-amber-950">
+                                {approval.message}
+                            </p>
+                            {approval.command ? (
+                                <div className="mt-2 rounded-xl border border-amber-200 bg-white px-2.5 py-2">
+                                    <code className="break-all text-[11px] text-slate-800">
+                                        {approval.command}
+                                    </code>
+                                </div>
+                            ) : null}
+                            <div className="mt-2 flex flex-wrap items-center gap-2">
+                                <Button
+                                    type="button"
+                                    size="sm"
+                                    className="h-7 rounded-full bg-amber-700 px-3 text-[11px] text-white hover:bg-amber-800"
+                                    onClick={() => onApproveApprovalRequest?.(action)}
+                                    disabled={!canApprove}
+                                >
+                                    {approvalPending ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : null}
+                                    Approve & Continue
+                                </Button>
+                                <span className="text-[10px] text-amber-800/80">
+                                    {approval.cliSessionId
+                                        ? "Resumes the parent Claude session in full access mode."
+                                        : "Missing Claude session id for resume."}
+                                </span>
+                                {approval.workerAgentId ? (
+                                    <span className="rounded-full border border-amber-200 bg-white px-2 py-0.5 text-[9px] uppercase tracking-[0.12em] text-amber-800">
+                                        worker {approval.workerAgentId}
+                                    </span>
+                                ) : null}
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
         )
     }
@@ -910,6 +976,7 @@ export function ReproductionLog({
     const [activeCliCommand, setActiveCliCommand] = useState<CliActiveCommand | null>(null)
     const [chatDraftBeforeUtility, setChatDraftBeforeUtility] = useState("")
     const [runningCliCommand, setRunningCliCommand] = useState(false)
+    const [runningApprovalActionId, setRunningApprovalActionId] = useState<string | null>(null)
     const [slashSelectedIndex, setSlashSelectedIndex] = useState(0)
     const [showWorkspaceSetup, setShowWorkspaceSetup] = useState(false)
     const [continueLast, setContinueLast] = useState(false)
@@ -1135,62 +1202,41 @@ export function ReproductionLog({
         await handleSendMessageWithDir(message, projectDir || undefined, pendingUploadedFiles)
     }
 
-    const handleSendMessageWithDir = async (
-        message: string,
-        targetDir?: string,
-        selectedUploadedFiles: ComposerUploadedFile[] = [],
-    ) => {
-        const outgoingMode = mode
-
-        if (outgoingMode === "Code" && runtimeInfo.codeModeEnabled === false) {
-            setMode("Plan")
-            setLastError("Code mode is disabled in this Studio runtime. Studio switched back to Plan.")
-            return
-        }
-
-        let preparedProjectDir = targetDir
-        if (outgoingMode === "Code" && targetDir) {
-            try {
-                preparedProjectDir = await prepareProjectDirForChat(targetDir)
-                if (selectedPaperId) {
-                    updatePaper(selectedPaperId, { outputDir: preparedProjectDir })
-                }
-            } catch (error) {
-                setLastError(error instanceof Error ? error.message : "Failed to prepare project directory")
-                return
-            }
-        }
-
-        setStatus("running")
-        setLastError(null)
-        onViewModeChange("log")
-        setMessageInput("")
-        setUploadedFiles([])
-
-        const effectiveMessage = message.trim() || "Please inspect the attached files."
-        const threadTitle = buildChatThreadTitle(
-            message,
-            selectedUploadedFiles.map((file) => file.name),
-        )
-        const existingHistory = activeChatTask?.history ?? []
-        const taskId =
-            activeChatTask?.id ??
-            addTask(threadTitle)
+    const streamChatTurn = async ({
+        taskId,
+        userMessageContent,
+        effectiveMessage,
+        outgoingMode,
+        preparedProjectDir,
+        selectedUploadedFiles = [],
+        existingHistory = [],
+        permissionProfileOverride = permissionProfile,
+        resumeSessionOverride,
+        cliSessionIdOverride,
+    }: {
+        taskId: string
+        userMessageContent: string
+        effectiveMessage: string
+        outgoingMode: Mode
+        preparedProjectDir?: string
+        selectedUploadedFiles?: ComposerUploadedFile[]
+        existingHistory?: Array<{ role: "user" | "assistant"; content: string }>
+        permissionProfileOverride?: StudioPermissionProfile
+        resumeSessionOverride?: string
+        cliSessionIdOverride?: string
+    }) => {
         let assistantResponse = ""
         let assistantHistoryCommitted = false
         let negotiatedMode: Mode = outgoingMode
+        let currentCliSessionId = cliSessionIdOverride?.trim() || resumeSessionOverride?.trim() || ""
         const chatProjectDir = outgoingMode === "Code" ? preparedProjectDir : undefined
-
-        if (activeChatTask && activeChatTask.history.length === 0 && activeChatTask.actions.length === 0) {
-            renameTask(taskId, threadTitle)
-        }
-
         const initialThinking = `[${outgoingMode}] Sending to ${runtimeLabel}...`
+
         addAction(
             taskId,
             {
                 type: "user",
-                content: message.trim(),
+                content: userMessageContent.trim(),
                 metadata:
                     selectedUploadedFiles.length > 0
                         ? {
@@ -1215,7 +1261,7 @@ export function ReproductionLog({
                     message: effectiveMessage,
                     mode: outgoingMode,
                     model: requestedModel,
-                    permission_profile: permissionProfile,
+                    permission_profile: permissionProfileOverride,
                     paper: selectedPaper ? {
                         title: selectedPaper.title,
                         abstract: selectedPaper.abstract,
@@ -1227,8 +1273,8 @@ export function ReproductionLog({
                     project_dir: chatProjectDir,
                     context_pack_id: contextPack?.context_pack_id,
                     continue_last: continueLast,
-                    resume_session: resumeSession.trim() || undefined,
-                    cli_session_id: cliSessionId.trim() || undefined,
+                    resume_session: resumeSessionOverride?.trim() || undefined,
+                    cli_session_id: cliSessionIdOverride?.trim() || undefined,
                     agent: agentOverride.trim() || undefined,
                     mcp_config: parsedMcpConfig,
                     tools: parsedTools,
@@ -1242,9 +1288,7 @@ export function ReproductionLog({
             if (!res.ok || !res.body) {
                 throw new Error(`Failed to send message (${res.status})`)
             }
-            // Track whether the last action is a text block so we can
-            // append to it (producing one continuous bubble) instead of
-            // creating a new action per chunk.
+
             let lastActionIsText = false
             let lastStreamActionType: "thinking" | "text" | "tool" | "other" = "thinking"
             let lastThinkingContent: string | null = initialThinking
@@ -1307,8 +1351,13 @@ export function ReproductionLog({
                     const data = (evt.data ?? {}) as Record<string, unknown>
                     const cliEvent = data.cli_event as string | undefined
 
-                    if (cliEvent === "text") {
-                        // Streaming text — append to current text bubble
+                    if (cliEvent === "session_init") {
+                        const nextCliSessionId =
+                            typeof data.cli_session_id === "string" ? data.cli_session_id.trim() : ""
+                        if (nextCliSessionId) {
+                            currentCliSessionId = nextCliSessionId
+                        }
+                    } else if (cliEvent === "text") {
                         const text = (data.text as string) || ""
                         if (text) {
                             assistantResponse += text
@@ -1356,15 +1405,51 @@ export function ReproductionLog({
                                 },
                             })
                         }
+                    } else if (cliEvent === "approval_required") {
+                        lastActionIsText = false
+                        lastStreamActionType = "other"
+                        lastThinkingContent = null
+
+                        const rawMessage = typeof data.message === "string" ? data.message : ""
+                        const parsedApproval = parseStudioApprovalRequest(rawMessage)
+                        const approvalMessage =
+                            parsedApproval?.message ||
+                            rawMessage.trim() ||
+                            "This action requires approval before Claude can continue."
+                        const explicitCommand =
+                            typeof data.command === "string" && data.command.trim().length > 0
+                                ? data.command.trim()
+                                : parsedApproval?.command ?? undefined
+                        const explicitWorkerAgentId =
+                            typeof data.worker_agent_id === "string" && data.worker_agent_id.trim().length > 0
+                                ? data.worker_agent_id.trim()
+                                : parsedApproval?.workerAgentId ?? undefined
+                        const resumeCliSessionId =
+                            typeof data.cli_session_id === "string" && data.cli_session_id.trim().length > 0
+                                ? data.cli_session_id.trim()
+                                : currentCliSessionId || undefined
+
+                        addAction(taskId, {
+                            type: "approval_request",
+                            content: approvalMessage,
+                            metadata: {
+                                approvalRequest: {
+                                    message: approvalMessage,
+                                    command: explicitCommand,
+                                    cliSessionId: resumeCliSessionId,
+                                    workerAgentId: explicitWorkerAgentId,
+                                    toolId: typeof data.tool_id === "string" ? data.tool_id : undefined,
+                                    toolName: typeof data.tool_name === "string" ? data.tool_name : undefined,
+                                },
+                            },
+                        })
                     } else if (cliEvent === "thinking") {
                         pushThinking((data.text as string) || "Thinking...")
                     } else if (data.keepalive) {
-                        // Keepalive heartbeat — ignore
+                        continue
                     } else if (data.message) {
-                        // Legacy status messages (e.g. "Connecting to Claude CLI...")
                         pushThinking(data.message as string)
                     } else if (data.delta) {
-                        // Fallback: legacy plain-text streaming (API fallback path)
                         const text = data.delta as string
                         assistantResponse += text
                         if (lastActionIsText) {
@@ -1413,6 +1498,108 @@ export function ReproductionLog({
             updateTaskStatus(taskId, "error")
             setLastError(msg)
             setStatus("error")
+        }
+    }
+
+    const handleSendMessageWithDir = async (
+        message: string,
+        targetDir?: string,
+        selectedUploadedFiles: ComposerUploadedFile[] = [],
+    ) => {
+        const outgoingMode = mode
+
+        if (outgoingMode === "Code" && runtimeInfo.codeModeEnabled === false) {
+            setMode("Plan")
+            setLastError("Code mode is disabled in this Studio runtime. Studio switched back to Plan.")
+            return
+        }
+
+        let preparedProjectDir = targetDir
+        if (outgoingMode === "Code" && targetDir) {
+            try {
+                preparedProjectDir = await prepareProjectDirForChat(targetDir)
+                if (selectedPaperId) {
+                    updatePaper(selectedPaperId, { outputDir: preparedProjectDir })
+                }
+            } catch (error) {
+                setLastError(error instanceof Error ? error.message : "Failed to prepare project directory")
+                return
+            }
+        }
+
+        setStatus("running")
+        setLastError(null)
+        onViewModeChange("log")
+        setMessageInput("")
+        setUploadedFiles([])
+
+        const effectiveMessage = message.trim() || "Please inspect the attached files."
+        const threadTitle = buildChatThreadTitle(
+            message,
+            selectedUploadedFiles.map((file) => file.name),
+        )
+        const existingHistory = activeChatTask?.history ?? []
+        const taskId =
+            activeChatTask?.id ??
+            addTask(threadTitle)
+
+        if (activeChatTask && activeChatTask.history.length === 0 && activeChatTask.actions.length === 0) {
+            renameTask(taskId, threadTitle)
+        }
+
+        await streamChatTurn({
+            taskId,
+            userMessageContent: message.trim(),
+            effectiveMessage,
+            outgoingMode,
+            preparedProjectDir,
+            selectedUploadedFiles,
+            existingHistory,
+            permissionProfileOverride: permissionProfile,
+            resumeSessionOverride: resumeSession.trim() || undefined,
+            cliSessionIdOverride: cliSessionId.trim() || undefined,
+        })
+    }
+
+    const handleApproveApprovalRequest = async (action: AgentAction) => {
+        const approval = action.metadata?.approvalRequest
+        if (!activeChatTask || !approval?.cliSessionId) {
+            setLastError("Missing Claude session id for approval resume.")
+            return
+        }
+        if (status === "running") return
+
+        const approvalMode: Mode =
+            mode === "Code" && runtimeInfo.codeModeEnabled === false ? "Plan" : mode
+        if (approvalMode !== mode) {
+            setMode("Plan")
+        }
+
+        setRunningApprovalActionId(action.id)
+        setStatus("running")
+        setLastError(null)
+        setPermissionProfile("full_access")
+        onViewModeChange("log")
+
+        try {
+            await streamChatTurn({
+                taskId: activeChatTask.id,
+                userMessageContent: approval.command
+                    ? `Approved and continued: ${approval.command}`
+                    : "Approved and continued the pending task.",
+                effectiveMessage: buildStudioApprovalContinuePrompt({
+                    command: approval.command,
+                    workerAgentId: approval.workerAgentId,
+                }),
+                outgoingMode: approvalMode,
+                preparedProjectDir: projectDir ?? undefined,
+                selectedUploadedFiles: [],
+                existingHistory: [],
+                permissionProfileOverride: "full_access",
+                resumeSessionOverride: approval.cliSessionId,
+            })
+        } finally {
+            setRunningApprovalActionId(null)
         }
     }
 
@@ -2503,6 +2690,8 @@ export function ReproductionLog({
                                             action={action}
                                             onViewDiff={setDiffAction}
                                             onOpenMonitor={onOpenBoardWorkspace}
+                                            onApproveApprovalRequest={handleApproveApprovalRequest}
+                                            approvalPending={runningApprovalActionId === action.id}
                                         />
                                     ))}
                                 </div>

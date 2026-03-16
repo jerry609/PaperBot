@@ -12,6 +12,7 @@ import importlib.util
 import json
 import logging
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -771,6 +772,7 @@ class _StudioTelemetryState:
     trace_id: str
     session_id: str
     stage: str
+    cli_session_id: Optional[str] = None
     tool_invocations: List[_ToolInvocation] = field(default_factory=list)
     pending_delegations: List[_PendingDelegation] = field(default_factory=list)
     runtime_terminal_emitted: bool = False
@@ -1156,6 +1158,67 @@ def _stringify_tool_result_content(value: Any) -> str:
             return text
         return json.dumps(value, ensure_ascii=False)
     return str(value or "")
+
+
+_APPROVAL_COMMAND_PATTERNS = (
+    re.compile(r"approve(?: the)? `([^`]+)` command", re.IGNORECASE),
+    re.compile(r"run `([^`]+)`", re.IGNORECASE),
+)
+_APPROVAL_AGENT_ID_PATTERN = re.compile(r"\bagentId:\s*([A-Za-z0-9_-]+)")
+
+
+def _extract_approval_command(result_content: str) -> Optional[str]:
+    for pattern in _APPROVAL_COMMAND_PATTERNS:
+        match = pattern.search(result_content)
+        if match:
+            command = match.group(1).strip()
+            if command:
+                return command
+
+    for match in re.finditer(r"`([^`\n]+)`", result_content):
+        candidate = match.group(1).strip()
+        if not candidate:
+            continue
+        if " " in candidate or "/" in candidate or "-" in candidate:
+            return candidate
+
+    return None
+
+
+def _build_studio_approval_progress_event(
+    content: Any,
+    *,
+    tool_id: str,
+    telemetry_state: Optional[_StudioTelemetryState] = None,
+) -> Optional[StreamEvent]:
+    if telemetry_state is None:
+        return None
+
+    result_content = _stringify_tool_result_content(content).strip()
+    normalized = result_content.lower()
+    if "approval" not in normalized or "require" not in normalized:
+        return None
+
+    command = _extract_approval_command(result_content)
+    worker_agent_id_match = _APPROVAL_AGENT_ID_PATTERN.search(result_content)
+    worker_agent_id = worker_agent_id_match.group(1).strip() if worker_agent_id_match else None
+    if not command and not worker_agent_id:
+        return None
+
+    invocation = _find_tool_invocation(telemetry_state, tool_id=tool_id) if tool_id else None
+
+    return StreamEvent(
+        type="progress",
+        data={
+            "cli_event": "approval_required",
+            "tool_name": invocation.tool_name if invocation is not None else "tool",
+            "tool_id": tool_id,
+            "message": _truncate(result_content, 2000),
+            "command": command,
+            "worker_agent_id": worker_agent_id,
+            "cli_session_id": telemetry_state.cli_session_id,
+        },
+    )
 
 
 def _emit_tool_result_events(
@@ -1744,6 +1807,13 @@ def _parse_user_tool_result_blocks(
                 "content": _truncate(_stringify_tool_result_content(block.get("content", "")), 2000),
             },
         ))
+        approval_event = _build_studio_approval_progress_event(
+            block.get("content", ""),
+            tool_id=tool_id,
+            telemetry_state=telemetry_state,
+        )
+        if approval_event is not None:
+            events.append(approval_event)
 
     return events
 
@@ -1779,9 +1849,32 @@ def _parse_cli_event(
                 "content": _truncate(_stringify_tool_result_content(line_data.get("content", "")), 2000),
             },
         ))
+        approval_event = _build_studio_approval_progress_event(
+            line_data.get("content", ""),
+            tool_id=str(line_data.get("tool_use_id") or line_data.get("tool_id") or "").strip(),
+            telemetry_state=telemetry_state,
+        )
+        if approval_event is not None:
+            events.append(approval_event)
 
     elif etype == "user":
         events.extend(_parse_user_tool_result_blocks(line_data, telemetry_state))
+
+    elif etype == "system":
+        subtype = str(line_data.get("subtype", "")).strip()
+        if subtype == "init":
+            cli_session_id = str(line_data.get("session_id") or "").strip()
+            if telemetry_state is not None and cli_session_id:
+                telemetry_state.cli_session_id = cli_session_id
+            events.append(StreamEvent(
+                type="progress",
+                data={
+                    "cli_event": "session_init",
+                    "cli_session_id": cli_session_id,
+                    "permission_mode": line_data.get("permissionMode"),
+                    "model": line_data.get("model"),
+                },
+            ))
 
     elif etype == "result":
         events.append(StreamEvent(

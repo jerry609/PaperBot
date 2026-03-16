@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import type { ReproContextPack, StageObservationsEvent, StageProgressEvent } from '@/lib/types/p2c'
 
 // Agent Action Types
-export type ActionType = 'thinking' | 'file_change' | 'function_call' | 'mcp_call' | 'activity_summary' | 'error' | 'complete' | 'text' | 'user'
+export type ActionType = 'thinking' | 'file_change' | 'function_call' | 'mcp_call' | 'activity_summary' | 'approval_request' | 'error' | 'complete' | 'text' | 'user'
 
 export interface TaskMessage {
     role: 'user' | 'assistant'
@@ -56,6 +56,14 @@ export interface AgentAction {
             counts: Partial<Record<'read' | 'search' | 'write' | 'command' | 'delegation' | 'web' | 'other', number>>
             recent: string[]
             delegationTaskId?: string
+        }
+        approvalRequest?: {
+            message: string
+            command?: string
+            cliSessionId?: string
+            workerAgentId?: string
+            toolId?: string
+            toolName?: string
         }
     }
 }
@@ -320,6 +328,7 @@ function _normalizeTaskActions(value: unknown): AgentAction[] {
             action.type === 'function_call' ||
             action.type === 'mcp_call' ||
             action.type === 'activity_summary' ||
+            action.type === 'approval_request' ||
             action.type === 'error' ||
             action.type === 'complete' ||
             action.type === 'text' ||
