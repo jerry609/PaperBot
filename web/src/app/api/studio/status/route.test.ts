@@ -48,7 +48,14 @@ describe("studio status route", () => {
       slash_commands: ["help", "status", "new", "clear", "plan", "model", "agents", "mcp", "auth", "doctor"],
       permission_profiles: ["default", "full_access"],
       runtime_commands: ["agents", "auth", "doctor", "mcp"],
-      error: "Failed to check Claude CLI status",
+      project_agents: [],
+      project_agent_count: 0,
+      claude_agents_error: null,
+      codex_worker_available: false,
+      codex_worker_name: null,
+      opencode_worker_available: false,
+      opencode_worker_name: null,
+      error: "Studio backend is unreachable (http://backend.example.com/api/studio/status): offline",
       fallback: "anthropic_api",
     })
   })

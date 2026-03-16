@@ -34,6 +34,13 @@ describe("buildStudioRuntimeInfo", () => {
         known_model_aliases: ["sonnet", "opus"],
         detected_default_model: "opus",
         detected_default_model_source: "user",
+        project_agents: ["codex-worker", "reviewer"],
+        project_agent_count: 2,
+        claude_agents_error: null,
+        codex_worker_available: true,
+        codex_worker_name: "codex-worker",
+        opencode_worker_available: false,
+        opencode_worker_name: null,
         opencode_cli: true,
         opencode_path: "/usr/local/bin/opencode",
         opencode_version: "1.2.26",
@@ -57,6 +64,11 @@ describe("buildStudioRuntimeInfo", () => {
     expect(info.knownModelAliases).toEqual(["sonnet", "opus"])
     expect(info.detectedDefaultModel).toBe("opus")
     expect(info.detectedDefaultModelSource).toBe("user")
+    expect(info.projectAgents).toEqual(["codex-worker", "reviewer"])
+    expect(info.projectAgentCount).toBe(2)
+    expect(info.codexWorkerAvailable).toBe(true)
+    expect(info.codexWorkerName).toBe("codex-worker")
+    expect(info.opencodeWorkerAvailable).toBe(false)
     expect(info.opencodeAvailable).toBe(true)
     expect(info.opencodeVersion).toBe("1.2.26")
     expect(info.workspaceLabel).toBe(".../Projects/PaperBot")
@@ -80,6 +92,13 @@ describe("buildStudioRuntimeInfo", () => {
         known_model_aliases: ["sonnet", "opus"],
         detected_default_model: "claude-opus-4-6",
         detected_default_model_source: "workspace",
+        project_agents: [],
+        project_agent_count: 0,
+        claude_agents_error: null,
+        codex_worker_available: false,
+        codex_worker_name: null,
+        opencode_worker_available: false,
+        opencode_worker_name: null,
       },
       {
         cwd: "/tmp",
@@ -96,6 +115,9 @@ describe("buildStudioRuntimeInfo", () => {
     expect(info.knownModelAliases).toEqual(["sonnet", "opus"])
     expect(info.detectedDefaultModel).toBe("claude-opus-4-6")
     expect(info.detectedDefaultModelSource).toBe("workspace")
+    expect(info.projectAgentCount).toBe(0)
+    expect(info.codexWorkerAvailable).toBe(false)
+    expect(info.opencodeWorkerAvailable).toBe(false)
     expect(info.detail).toBe("Failed to check Claude CLI status")
     expect(info.workspaceLabel).toBe("/tmp")
   })

@@ -13,6 +13,13 @@ export interface StudioRuntimeStatusResponse {
   known_model_aliases?: string[] | null
   detected_default_model?: string | null
   detected_default_model_source?: string | null
+  project_agents?: string[] | null
+  project_agent_count?: number | null
+  claude_agents_error?: string | null
+  codex_worker_available?: boolean
+  codex_worker_name?: string | null
+  opencode_worker_available?: boolean
+  opencode_worker_name?: string | null
   opencode_cli?: boolean
   opencode_path?: string | null
   opencode_version?: string | null
@@ -52,6 +59,13 @@ export interface StudioRuntimeInfo {
   knownModelAliases: string[]
   detectedDefaultModel: string | null
   detectedDefaultModelSource: string | null
+  projectAgents: string[]
+  projectAgentCount: number
+  claudeAgentsError: string | null
+  codexWorkerAvailable: boolean
+  codexWorkerName: string | null
+  opencodeWorkerAvailable: boolean
+  opencodeWorkerName: string | null
   opencodeAvailable: boolean
   opencodePath: string | null
   opencodeVersion: string | null
@@ -137,6 +151,18 @@ export function buildStudioRuntimeInfo(
     : []
   const detectedDefaultModel = cleanString(status?.detected_default_model)
   const detectedDefaultModelSource = cleanString(status?.detected_default_model_source)
+  const projectAgents = Array.isArray(status?.project_agents)
+    ? status.project_agents.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+    : []
+  const projectAgentCount =
+    typeof status?.project_agent_count === "number" && Number.isFinite(status.project_agent_count)
+      ? status.project_agent_count
+      : projectAgents.length
+  const claudeAgentsError = cleanString(status?.claude_agents_error)
+  const codexWorkerAvailable = status?.codex_worker_available === true
+  const codexWorkerName = cleanString(status?.codex_worker_name)
+  const opencodeWorkerAvailable = status?.opencode_worker_available === true
+  const opencodeWorkerName = cleanString(status?.opencode_worker_name)
   const opencodeAvailable = status?.opencode_cli === true
   const opencodePath = cleanString(status?.opencode_path)
   const opencodeVersion = cleanString(status?.opencode_version)
@@ -175,6 +201,13 @@ export function buildStudioRuntimeInfo(
       knownModelAliases,
       detectedDefaultModel,
       detectedDefaultModelSource,
+      projectAgents,
+      projectAgentCount,
+      claudeAgentsError,
+      codexWorkerAvailable,
+      codexWorkerName,
+      opencodeWorkerAvailable,
+      opencodeWorkerName,
       opencodeAvailable,
       opencodePath,
       opencodeVersion,
@@ -208,6 +241,13 @@ export function buildStudioRuntimeInfo(
       knownModelAliases,
       detectedDefaultModel,
       detectedDefaultModelSource,
+      projectAgents,
+      projectAgentCount,
+      claudeAgentsError,
+      codexWorkerAvailable,
+      codexWorkerName,
+      opencodeWorkerAvailable,
+      opencodeWorkerName,
       opencodeAvailable,
       opencodePath,
       opencodeVersion,
@@ -236,6 +276,13 @@ export function buildStudioRuntimeInfo(
     knownModelAliases: [],
     detectedDefaultModel: null,
     detectedDefaultModelSource: null,
+    projectAgents: [],
+    projectAgentCount: 0,
+    claudeAgentsError: null,
+    codexWorkerAvailable: false,
+    codexWorkerName: null,
+    opencodeWorkerAvailable: false,
+    opencodeWorkerName: null,
     opencodeAvailable: false,
     opencodePath: null,
     opencodeVersion: null,

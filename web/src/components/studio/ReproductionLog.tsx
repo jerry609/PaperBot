@@ -173,6 +173,7 @@ type SlashCommandItem = {
     label: string
     description: string
     group: "Claude Code" | "Runtime" | "Session"
+    requiresRuntimeSupport?: boolean
     keywords: string[]
     icon: React.ElementType
     onSelect: (remainder: string) => void
@@ -201,6 +202,30 @@ function splitLineValues(value: string): string[] {
 
 function resolveRequestedModel(modelOption: string, customModel: string): string {
     return modelOption === "custom" ? customModel.trim() : modelOption.trim()
+}
+
+function buildCodexWorkerSmokePrompt(): string {
+    return [
+        "Verify whether you can delegate a tiny read-only task to the `codex-worker` project agent in this repository.",
+        "",
+        "Requirements:",
+        "1. Check the available Claude project agents first.",
+        "2. If `codex-worker` exists, delegate a minimal read-only task such as reporting the current git branch.",
+        "3. Tell me whether delegation succeeded, which agent name you used, and what result came back.",
+        "4. If delegation is unavailable, explain exactly what is missing instead of guessing.",
+    ].join("\n")
+}
+
+function buildOpenCodeWorkerSmokePrompt(): string {
+    return [
+        "Verify whether this repository is configured so Claude Code can delegate to an OpenCode-backed worker.",
+        "",
+        "Requirements:",
+        "1. Inspect the available Claude project agents first.",
+        "2. If there is an OpenCode bridge agent, delegate a tiny read-only task and report the result.",
+        "3. If there is no OpenCode bridge agent, stop and state that it is not configured for Claude Code delegation yet.",
+        "4. Tell me the exact agent name you checked.",
+    ].join("\n")
 }
 
 type ComposerUploadedFile = {
@@ -1857,13 +1882,53 @@ export function ReproductionLog({
         ].join("\n")
     }, [supportedSlashCommands])
     const buildStatusMarkdown = useCallback(() => {
+        const claudeCliStatus = runtimeLoading
+            ? "Checking"
+            : runtimeInfo.source === "claude_code"
+                ? "Available"
+                : "Unavailable"
+        const projectAgentStatus = runtimeInfo.source !== "claude_code"
+            ? "Unknown"
+            : runtimeInfo.claudeAgentsError
+                ? "Probe failed"
+                : runtimeInfo.projectAgentCount > 0
+                    ? `${runtimeInfo.projectAgentCount} configured`
+                    : "None detected"
+        const codexBridgeStatus = runtimeInfo.source !== "claude_code"
+            ? "Unknown"
+            : runtimeInfo.claudeAgentsError
+                ? "Unknown (agent probe failed)"
+                : runtimeInfo.codexWorkerAvailable
+                    ? `Ready (${runtimeInfo.codexWorkerName ?? "configured"})`
+                    : runtimeInfo.projectAgentCount > 0
+                        ? "Not configured"
+                        : "No bridge agent found"
+        const opencodeCliStatus = runtimeInfo.opencodeAvailable
+            ? runtimeInfo.opencodeVersion
+                ? `Available (${runtimeInfo.opencodeVersion})`
+                : "Available"
+            : "Unavailable"
+        const opencodeBridgeStatus = runtimeInfo.source !== "claude_code"
+            ? "Unknown"
+            : runtimeInfo.claudeAgentsError
+                ? "Unknown (agent probe failed)"
+                : runtimeInfo.opencodeWorkerAvailable
+                    ? `Ready (${runtimeInfo.opencodeWorkerName ?? "configured"})`
+                    : runtimeInfo.projectAgentCount > 0
+                        ? "Not configured"
+                        : "No bridge agent found"
         const fields = [
             { label: "Runtime", value: runtimeLoading ? "Checking runtime" : runtimeLabel },
+            { label: "Claude CLI", value: claudeCliStatus },
             { label: "Chat surface", value: formatStudioChatSurfaceLabel(runtimeInfo.chatSurface) },
             { label: "Transport", value: formatStudioChatTransportLabel(runtimeInfo.chatTransport) },
             { label: "Preferred route", value: formatStudioChatTransportLabel(runtimeInfo.preferredChatTransport) },
             { label: "CLI version", value: runtimeInfo.version || "Unavailable" },
             { label: "Agent SDK", value: runtimeInfo.claudeAgentSdkAvailable ? "Installed" : "Not installed" },
+            { label: "Project agents", value: projectAgentStatus },
+            { label: "Codex bridge", value: codexBridgeStatus },
+            { label: "OpenCode CLI", value: opencodeCliStatus },
+            { label: "OpenCode bridge", value: opencodeBridgeStatus },
             {
                 label: "Code mode",
                 value:
@@ -1889,6 +1954,10 @@ export function ReproductionLog({
             { label: "Uploaded files", value: String(uploadedFiles.length) },
             { label: "Paper", value: selectedPaper?.title ?? "None" },
             { label: "Session", value: activeChatTask?.name ?? "New thread" },
+            ...(runtimeInfo.claudeAgentsError
+                ? [{ label: "Agent probe", value: runtimeInfo.claudeAgentsError }]
+                : []),
+            ...(runtimeInfo.error ? [{ label: "Runtime error", value: runtimeInfo.error }] : []),
         ]
 
         return [
@@ -1906,9 +1975,19 @@ export function ReproductionLog({
         runtimeInfo.detectedDefaultModelSource,
         runtimeInfo.chatSurface,
         runtimeInfo.chatTransport,
+        runtimeInfo.claudeAgentsError,
         runtimeInfo.claudeAgentSdkAvailable,
         runtimeInfo.codeModeEnabled,
+        runtimeInfo.codexWorkerAvailable,
+        runtimeInfo.codexWorkerName,
+        runtimeInfo.error,
+        runtimeInfo.opencodeAvailable,
+        runtimeInfo.opencodeVersion,
+        runtimeInfo.opencodeWorkerAvailable,
+        runtimeInfo.opencodeWorkerName,
         runtimeInfo.preferredChatTransport,
+        runtimeInfo.projectAgentCount,
+        runtimeInfo.source,
         runtimeInfo.version,
         runtimeLabel,
         runtimeLoading,
@@ -1936,6 +2015,34 @@ export function ReproductionLog({
             keywords: ["runtime", "model", "workspace", "session"],
             icon: Activity,
             onSelect: (remainder) => setSlashScaffold("status", remainder),
+        },
+        {
+            id: "slash-probe-codex",
+            command: "probe-codex",
+            label: "Insert Codex smoke prompt",
+            description: "Insert a normal chat prompt that asks Claude Code to verify delegation through `codex-worker`.",
+            group: "Claude Code",
+            requiresRuntimeSupport: false,
+            keywords: ["codex", "worker", "subagent", "delegate", "smoke", "test"],
+            icon: Code,
+            onSelect: () => {
+                setMessageInput(replaceActiveSlashToken(buildCodexWorkerSmokePrompt()))
+                setLastError(null)
+            },
+        },
+        {
+            id: "slash-probe-opencode",
+            command: "probe-opencode",
+            label: "Insert OpenCode smoke prompt",
+            description: "Insert a normal chat prompt that asks Claude Code whether an OpenCode bridge agent is configured.",
+            group: "Claude Code",
+            requiresRuntimeSupport: false,
+            keywords: ["opencode", "worker", "bridge", "delegate", "smoke", "test"],
+            icon: Terminal,
+            onSelect: () => {
+                setMessageInput(replaceActiveSlashToken(buildOpenCodeWorkerSmokePrompt()))
+                setLastError(null)
+            },
         },
         {
             id: "slash-plan",
@@ -2036,6 +2143,9 @@ export function ReproductionLog({
     ]
 
     const availableSlashCommands = slashCommands.filter((item) => {
+        if (item.requiresRuntimeSupport === false) {
+            return true
+        }
         if (item.group === "Runtime") {
             return supportedRuntimeCommandSet ? supportedRuntimeCommandSet.has(item.command) : true
         }

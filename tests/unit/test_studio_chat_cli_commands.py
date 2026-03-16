@@ -357,6 +357,21 @@ def test_studio_status_reports_detected_default_model(monkeypatch):
         class Result:
             returncode = 0
             stdout = "2.1.76"
+            stderr = ""
+
+        if cmd == ["/usr/local/bin/claude", "agents"]:
+            Result.stdout = "\n".join(
+                [
+                    "17 active agents",
+                    "",
+                    "Project agents:",
+                    "  codex-worker · inherit",
+                    "  reviewer · inherit",
+                    "",
+                    "Built-in agents:",
+                    "  Plan · inherit",
+                ]
+            )
 
         return Result()
 
@@ -367,3 +382,26 @@ def test_studio_status_reports_detected_default_model(monkeypatch):
     assert payload["claude_cli"] is True
     assert payload["detected_default_model"] == "opus"
     assert payload["detected_default_model_source"] == "user"
+    assert payload["project_agents"] == ["codex-worker", "reviewer"]
+    assert payload["project_agent_count"] == 2
+    assert payload["codex_worker_available"] is True
+    assert payload["codex_worker_name"] == "codex-worker"
+    assert payload["opencode_worker_available"] is False
+    assert payload["opencode_worker_name"] is None
+
+
+def test_parse_claude_project_agents_extracts_project_section_only():
+    output = "\n".join(
+        [
+            "17 active agents",
+            "",
+            "Project agents:",
+            "  codex-worker · inherit",
+            "  reviewer · inherit",
+            "",
+            "Built-in agents:",
+            "  Plan · inherit",
+        ]
+    )
+
+    assert studio_chat._parse_claude_project_agents(output) == ["codex-worker", "reviewer"]

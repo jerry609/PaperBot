@@ -52,6 +52,8 @@ _ALLOWED_MANAGEMENT_COMMANDS: Dict[str, set[str]] = {
     "claude": {"agents", "mcp", "auth", "doctor"},
     "opencode": {"agent", "mcp", "providers", "models"},
 }
+_CODEX_WORKER_AGENT_HINTS = ("codex-worker", "codex")
+_OPENCODE_WORKER_AGENT_HINTS = ("opencode-worker", "opencode", "open-code-worker", "open-code")
 _CLAUDE_MODEL_SETTING_ENV_KEYS = (
     "PAPERBOT_STUDIO_DEFAULT_MODEL",
     "CLAUDE_CODE_MODEL",
@@ -190,6 +192,113 @@ def _studio_supported_slash_commands() -> List[str]:
 
 def _studio_supported_permission_profiles() -> List[str]:
     return ["default", "full_access"]
+
+
+def _run_cli_text_command(command: List[str], *, timeout: int = 5) -> Optional[subprocess.CompletedProcess]:
+    try:
+        return subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except Exception:
+        return None
+
+
+def _probe_cli_version(binary_path: Optional[str]) -> tuple[bool, Optional[str]]:
+    if not binary_path:
+        return False, None
+
+    result = _run_cli_text_command([binary_path, "--version"], timeout=5)
+    if result is None or result.returncode != 0:
+        return False, None
+
+    version = (result.stdout or result.stderr).strip() or None
+    return True, version
+
+
+def _parse_claude_project_agents(raw_output: str) -> List[str]:
+    agents: List[str] = []
+    in_project_agents = False
+
+    for raw_line in raw_output.splitlines():
+        stripped = raw_line.strip()
+        normalized = stripped.lower()
+        if not stripped:
+            continue
+
+        if normalized == "project agents:":
+            in_project_agents = True
+            continue
+
+        if normalized.endswith("agents:"):
+            if in_project_agents and normalized != "project agents:":
+                break
+            continue
+
+        if not in_project_agents:
+            continue
+
+        name = stripped.split("·", 1)[0].strip()
+        if name:
+            agents.append(name)
+
+    return agents
+
+
+def _match_project_agent_name(project_agents: List[str], hints: tuple[str, ...]) -> Optional[str]:
+    normalized_map = {agent.strip().lower(): agent for agent in project_agents if agent.strip()}
+    for hint in hints:
+        match = normalized_map.get(hint)
+        if match:
+            return match
+
+    for agent in project_agents:
+        lowered = agent.lower()
+        if any(hint in lowered for hint in hints):
+            return agent
+
+    return None
+
+
+def _inspect_claude_project_agents(claude_path: Optional[str]) -> Dict[str, Any]:
+    if not claude_path:
+        return {
+            "project_agents": [],
+            "claude_agents_error": None,
+            "codex_worker_name": None,
+            "opencode_worker_name": None,
+        }
+
+    result = _run_cli_text_command([claude_path, "agents"], timeout=8)
+    if result is None:
+        return {
+            "project_agents": [],
+            "claude_agents_error": "Failed to inspect Claude project agents",
+            "codex_worker_name": None,
+            "opencode_worker_name": None,
+        }
+
+    if result.returncode != 0:
+        detail = result.stderr.strip() or result.stdout.strip() or "Failed to inspect Claude project agents"
+        return {
+            "project_agents": [],
+            "claude_agents_error": detail,
+            "codex_worker_name": None,
+            "opencode_worker_name": None,
+        }
+
+    project_agents = _parse_claude_project_agents(result.stdout)
+    codex_worker_name = _match_project_agent_name(project_agents, _CODEX_WORKER_AGENT_HINTS)
+    opencode_worker_name = _match_project_agent_name(project_agents, _OPENCODE_WORKER_AGENT_HINTS)
+
+    return {
+        "project_agents": project_agents,
+        "claude_agents_error": None,
+        "codex_worker_name": codex_worker_name,
+        "opencode_worker_name": opencode_worker_name,
+    }
 
 
 def _make_studio_session_init_event(
@@ -2321,47 +2430,29 @@ async def studio_command(request: StudioCommandRequest):
 
 @router.get("/studio/status")
 async def studio_status():
-    """Check if Claude CLI is available."""
+    """Check Studio runtime availability and project-agent readiness."""
     claude_path = find_claude_cli()
     agent_sdk_available = has_claude_agent_sdk()
     chat_transport = current_studio_chat_transport(claude_path=claude_path)
     preferred_transport = preferred_studio_chat_transport()
     detected_model = detect_claude_default_model_details()
     opencode_path = find_opencode_cli()
-    opencode_version = None
-    opencode_available = False
+    opencode_available, opencode_version = _probe_cli_version(opencode_path)
+    claude_available, version = _probe_cli_version(claude_path)
+    project_agent_probe = _inspect_claude_project_agents(claude_path if claude_available else None)
+    project_agents = project_agent_probe["project_agents"]
+    claude_agents_error = project_agent_probe["claude_agents_error"]
+    codex_worker_name = project_agent_probe["codex_worker_name"]
+    opencode_worker_name = project_agent_probe["opencode_worker_name"]
 
-    if opencode_path:
-        try:
-            result = subprocess.run(
-                [opencode_path, "--version"],
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-            opencode_version = result.stdout.strip() if result.returncode == 0 else None
-            opencode_available = result.returncode == 0
-        except Exception:
-            opencode_version = None
-
-    if claude_path:
-        # Try to get version
-        try:
-            result = subprocess.run(
-                [claude_path, "--version"],
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-            version = result.stdout.strip() if result.returncode == 0 else "unknown"
-        except Exception:
-            version = "unknown"
+    if claude_available:
+        version_label = version or "unknown"
 
         return {
             "claude_cli": True,
             "claude_agent_sdk": agent_sdk_available,
             "claude_path": claude_path,
-            "claude_version": version,
+            "claude_version": version_label,
             "chat_surface": "managed_session",
             "chat_transport": chat_transport,
             "preferred_chat_transport": preferred_transport,
@@ -2372,6 +2463,13 @@ async def studio_status():
             "known_model_aliases": _KNOWN_CLAUDE_MODEL_ALIASES,
             "detected_default_model": detected_model.model,
             "detected_default_model_source": detected_model.source,
+            "project_agents": project_agents,
+            "project_agent_count": len(project_agents),
+            "claude_agents_error": claude_agents_error,
+            "codex_worker_available": codex_worker_name is not None,
+            "codex_worker_name": codex_worker_name,
+            "opencode_worker_available": opencode_worker_name is not None,
+            "opencode_worker_name": opencode_worker_name,
             "opencode_cli": opencode_available,
             "opencode_path": opencode_path,
             "opencode_version": opencode_version,
@@ -2393,6 +2491,13 @@ async def studio_status():
         "known_model_aliases": _KNOWN_CLAUDE_MODEL_ALIASES,
         "detected_default_model": detected_model.model,
         "detected_default_model_source": detected_model.source,
+        "project_agents": [],
+        "project_agent_count": 0,
+        "claude_agents_error": None,
+        "codex_worker_available": False,
+        "codex_worker_name": None,
+        "opencode_worker_available": False,
+        "opencode_worker_name": None,
         "opencode_cli": opencode_available,
         "opencode_path": opencode_path,
         "opencode_version": opencode_version,
