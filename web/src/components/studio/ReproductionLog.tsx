@@ -34,6 +34,8 @@ import {
     resolveDetectedModelSelection,
     type StudioRuntimeInfo,
 } from "@/lib/studio-runtime"
+import { useAgentEventStore } from "@/lib/agent-events/store"
+import { buildSubagentActivityGroups } from "@/lib/agent-events/subagent-groups"
 import { cn } from "@/lib/utils"
 import {
     AlertCircle,
@@ -395,7 +397,7 @@ function MessageAttachmentPill({
 interface ActionItemProps {
     action: AgentAction
     onViewDiff: (action: AgentAction) => void
-    onOpenMonitor?: () => void
+    onOpenMonitor?: (delegationTaskId?: string) => void
 }
 
 type MarkdownActionBlockTone = "default" | "error"
@@ -676,7 +678,7 @@ function ActionItem({ action, onViewDiff, onOpenMonitor }: ActionItemProps) {
                 {onOpenMonitor ? (
                     <button
                         type="button"
-                        onClick={onOpenMonitor}
+                        onClick={() => onOpenMonitor(summary.delegationTaskId)}
                         className={`${sharedClassName} transition-colors hover:bg-white`}
                     >
                         {content}
@@ -856,6 +858,9 @@ export function ReproductionLog({
 
     const { generate: generateContextPack, status: genStatus } = useContextPackGeneration()
     const { files, activeFile, updateFile, setActiveFile } = useProjectContext()
+    const codexDelegations = useAgentEventStore((state) => state.codexDelegations)
+    const toolCalls = useAgentEventStore((state) => state.toolCalls)
+    const openWorkerRun = useAgentEventStore((state) => state.openWorkerRun)
     const activeFileData = activeFile ? files[activeFile] : null
 
     const selectedPaper = useMemo(() =>
@@ -977,6 +982,14 @@ export function ReproductionLog({
         () => (visibleTask ? buildVisibleActions(visibleTask.actions) : []),
         [visibleTask],
     )
+    const workerRunIdByDelegationTaskId = useMemo(() => {
+        const groups = buildSubagentActivityGroups(codexDelegations, toolCalls)
+        return new Map(
+            groups
+                .filter((group) => group.taskId.trim().length > 0)
+                .map((group) => [group.taskId, group.workerRunId]),
+        )
+    }, [codexDelegations, toolCalls])
     const projectDir = selectedPaper?.outputDir || lastGenCodeResult?.outputDir || null
     const isBusy = status === "running"
     const runtimeLabel = runtimeLoading
@@ -1784,7 +1797,13 @@ export function ReproductionLog({
         focusComposerAt(cursor + 1)
     }
 
-    function openAgentBoardWorkspace() {
+    function openAgentBoardWorkspace(delegationTaskId?: string) {
+        const workerRunId = delegationTaskId
+            ? workerRunIdByDelegationTaskId.get(delegationTaskId) ?? null
+            : null
+        if (workerRunId) {
+            openWorkerRun(workerRunId)
+        }
         if (onOpenBoardWorkspace) {
             onOpenBoardWorkspace()
             return

@@ -72,7 +72,11 @@ describe("collapseToolActivityActions", () => {
         id: "d1",
         type: "function_call",
         content: "task()",
-        metadata: { functionName: "task", params: { assignee: "codex-worker", task_title: "Inspect branch" } },
+        metadata: {
+          toolId: "toolu_delegate_1",
+          functionName: "task",
+          params: { assignee: "codex-worker", task_title: "Inspect branch" },
+        },
       }),
       makeAction({
         id: "d2",
@@ -86,6 +90,7 @@ describe("collapseToolActivityActions", () => {
     expect(actions[0].type).toBe("activity_summary")
     expect(actions[0].content).toBe("Coordinating subagents")
     expect(actions[0].metadata?.activitySummary?.counts.delegation).toBe(2)
+    expect(actions[0].metadata?.activitySummary?.delegationTaskId).toBe("toolu_delegate_1")
   })
 
   it("treats Claude Agent plus nested worker tools as delegated activity", () => {

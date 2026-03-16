@@ -55,6 +55,7 @@ export interface AgentAction {
             totalTools: number
             counts: Partial<Record<'read' | 'search' | 'write' | 'command' | 'delegation' | 'web' | 'other', number>>
             recent: string[]
+            delegationTaskId?: string
         }
     }
 }

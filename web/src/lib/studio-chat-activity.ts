@@ -192,6 +192,9 @@ function buildActivitySummaryAction(actions: AgentAction[]): AgentAction {
 
   const recent = actions.slice(-3).map(formatRecentTool)
   const latest = actions[actions.length - 1]
+  const latestDelegationAction = [...actions]
+    .reverse()
+    .find((action) => classifyTool(action) === "delegation" && typeof action.metadata?.toolId === "string" && action.metadata.toolId.trim().length > 0)
 
   return {
     id: `activity-summary-${actions[0]?.id ?? "tool"}`,
@@ -205,6 +208,7 @@ function buildActivitySummaryAction(actions: AgentAction[]): AgentAction {
         totalTools: actions.length,
         counts,
         recent,
+        delegationTaskId: latestDelegationAction?.metadata?.toolId?.trim() || undefined,
       },
     },
   }
