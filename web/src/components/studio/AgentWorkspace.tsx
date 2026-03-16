@@ -553,7 +553,7 @@ function CenterSurface({
 
           <p className="text-xs text-slate-500">
             {activeView === "commands"
-              ? "Console command tray is open for Claude Code and OpenCode management commands."
+              ? "Quick Claude Code and OpenCode presets are available from the console composer."
               : visibleView === "board"
               ? "Delegation graph and latest monitor session snapshot."
               : visibleView === "context"

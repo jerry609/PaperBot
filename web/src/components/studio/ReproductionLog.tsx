@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Textarea } from "@/components/ui/textarea"
 import { useStudioStore, AgentAction, type AgentTask as StudioAgentTask } from "@/lib/store/studio-store"
@@ -16,7 +17,14 @@ import { DiffModal } from "./DiffViewer"
 import { WorkspaceSetupDialog } from "./WorkspaceSetupDialog"
 import { ContextDialogPanel } from "./ContextDialogPanel"
 import { AgentBoard } from "./AgentBoard"
-import { CliCommandRunner } from "./CliCommandRunner"
+import {
+    buildCommandPreview,
+    CliCommandRunner,
+    type ActiveCommand as CliActiveCommand,
+    type CommandResult as CliCommandResult,
+    getCommandPresets,
+    type LastCommandOutput as CliLastCommandOutput,
+} from "./CliCommandRunner"
 import { useContextPackGeneration } from "@/hooks/useContextPackGeneration"
 import type { StudioRuntimeInfo } from "@/lib/studio-runtime"
 import { cn } from "@/lib/utils"
@@ -39,6 +47,7 @@ import {
     Activity,
     MessageSquare,
     LayoutDashboard,
+    Settings2,
 } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import Editor from "@monaco-editor/react"
@@ -149,6 +158,17 @@ type StudioCommandPreviewOptions = {
     effort: Exclude<EffortOption, "default"> | null
 }
 
+type SlashCommandItem = {
+    id: string
+    command: string
+    label: string
+    description: string
+    group: "Modes" | "Actions" | "Views" | "Models" | "Options" | "Quick Commands"
+    keywords: string[]
+    icon: React.ElementType
+    onSelect: (remainder: string) => void
+}
+
 function splitCommaSeparatedValues(value: string): string[] {
     return value
         .split(",")
@@ -173,6 +193,10 @@ function formatPreviewToken(token: string): string {
         return JSON.stringify(token)
     }
     return token
+}
+
+function slashifyModelAlias(alias: string): string {
+    return `model-${alias.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "")}`
 }
 
 function appendPreviewOption(parts: string[], flag: string, values: string[]) {
@@ -239,6 +263,56 @@ function buildStudioCommandPreview(
 
 function formatTime(date: Date): string {
     return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+}
+
+type ComposerPillTone = "neutral" | "accent" | "success" | "warning"
+
+const composerPillToneClassName: Record<ComposerPillTone, string> = {
+    neutral: "border-slate-200 bg-[#f7f8f4] text-slate-700",
+    accent: "border-slate-300 bg-[#edf0e7] text-slate-800",
+    success: "border-emerald-200 bg-emerald-50 text-emerald-700",
+    warning: "border-amber-200 bg-amber-50 text-amber-700",
+}
+
+interface ComposerPillProps {
+    label: string
+    meta?: string
+    tone?: ComposerPillTone
+    icon?: React.ElementType
+    onRemove?: () => void
+}
+
+function ComposerPill({
+    label,
+    meta,
+    tone = "neutral",
+    icon: Icon,
+    onRemove,
+}: ComposerPillProps) {
+    return (
+        <div
+            className={cn(
+                "inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs shadow-sm",
+                composerPillToneClassName[tone],
+            )}
+        >
+            {Icon ? <Icon className="h-3.5 w-3.5 shrink-0 opacity-80" /> : null}
+            {meta ? (
+                <span className="shrink-0 text-[10px] uppercase tracking-[0.12em] opacity-60">{meta}</span>
+            ) : null}
+            <span className="truncate font-medium">{label}</span>
+            {onRemove ? (
+                <button
+                    type="button"
+                    className="rounded-full p-0.5 transition-colors hover:bg-white/80"
+                    onClick={onRemove}
+                    title={`Remove ${label}`}
+                >
+                    <X className="h-3 w-3" />
+                </button>
+            ) : null}
+        </div>
+    )
 }
 
 interface ActionItemProps {
@@ -385,10 +459,15 @@ export function ReproductionLog({
     const [diffAction, setDiffAction] = useState<AgentAction | null>(null)
     const [saving, setSaving] = useState(false)
     const [messageInput, setMessageInput] = useState("")
+    const [activeCliCommand, setActiveCliCommand] = useState<CliActiveCommand | null>(null)
+    const [chatDraftBeforeUtility, setChatDraftBeforeUtility] = useState("")
+    const [codexMode, setCodexMode] = useState(false)
+    const [runningCliCommand, setRunningCliCommand] = useState(false)
+    const [lastCommandOutput, setLastCommandOutput] = useState<CliLastCommandOutput | null>(null)
+    const [slashSelectedIndex, setSlashSelectedIndex] = useState(0)
     const [showWorkspaceSetup, setShowWorkspaceSetup] = useState(false)
     const [pendingAction, setPendingAction] = useState<"chat" | "delegate_codex" | null>(null)
     const [showAdvancedOptions, setShowAdvancedOptions] = useState(false)
-    const [showCommandTray, setShowCommandTray] = useState(viewMode === "commands")
     const [continueLast, setContinueLast] = useState(false)
     const [resumeSession, setResumeSession] = useState("")
     const [cliSessionId, setCliSessionId] = useState("")
@@ -405,13 +484,6 @@ export function ReproductionLog({
             onViewModeChange("context")
         }
     }, [contextPackLoading, onViewModeChange, viewMode])
-
-    // Do not auto-switch away from "context"; keep it open until the user changes tabs.
-    useEffect(() => {
-        if (viewMode === "commands") {
-            setShowCommandTray(true)
-        }
-    }, [viewMode])
 
     const knownModelAliases = useMemo(() => {
         const aliases = runtimeInfo.knownModelAliases.filter((item) => item.trim().length > 0)
@@ -443,6 +515,13 @@ export function ReproductionLog({
     const parsedAddDirs = useMemo(() => splitLineValues(addDirsText), [addDirsText])
     const selectedEffort = effort === "default" ? null : effort
     const missingCustomModel = modelOption === "custom" && requestedModel.length === 0
+    const commandMode = Boolean(activeCliCommand)
+    const utilityMode = commandMode || codexMode
+    const commandRuntimeUnavailable = activeCliCommand
+        ? activeCliCommand.runtime === "claude"
+            ? runtimeInfo.source !== "claude_code"
+            : !runtimeInfo.opencodeAvailable
+        : false
     const advancedOptionsCount = useMemo(
         () =>
             [
@@ -507,6 +586,16 @@ export function ReproductionLog({
         : runtimeInfo.source === "anthropic_api"
             ? "Message fallback runtime..."
             : "Message Claude Code..."
+    const composerPlaceholder = commandMode
+        ? `Edit args for ${buildCommandPreview(activeCliCommand!.runtime, activeCliCommand!.preset, "").trim()} and press Enter to run`
+        : codexMode
+            ? "Describe the Codex subagent task and press Enter to delegate"
+        : messagePlaceholder
+    const composerPreview = commandMode
+        ? buildCommandPreview(activeCliCommand!.runtime, activeCliCommand!.preset, messageInput)
+        : codexMode
+            ? `codex ${messageInput.trim() || "<task>"}`.trim()
+        : commandPreview
 
     const saveActiveFile = async () => {
         if (!projectDir || !activeFile || !activeFileData) return
@@ -872,7 +961,111 @@ export function ReproductionLog({
         }
     }
 
-    const openAgentBoardWorkspace = () => {
+    const handleSelectCliCommand = (command: CliActiveCommand, nextArgs?: string, restoreDraft?: string) => {
+        if (!utilityMode) {
+            setChatDraftBeforeUtility(restoreDraft ?? messageInput)
+        }
+
+        setCodexMode(false)
+        setActiveCliCommand(command)
+        setMessageInput(nextArgs ?? command.preset.defaultArgs)
+        setLastError(null)
+
+        if (viewMode === "commands") {
+            onViewModeChange("log")
+        }
+    }
+
+    const handleClearCliCommand = () => {
+        setActiveCliCommand(null)
+        setMessageInput(chatDraftBeforeUtility)
+        setChatDraftBeforeUtility("")
+    }
+
+    const activateCodexMode = (nextMessage = "", restoreDraft?: string) => {
+        if (!utilityMode) {
+            setChatDraftBeforeUtility(restoreDraft ?? messageInput)
+        }
+
+        setActiveCliCommand(null)
+        setCodexMode(true)
+        setMessageInput(nextMessage)
+        setLastError(null)
+    }
+
+    const handleClearCodexMode = () => {
+        setCodexMode(false)
+        setMessageInput(chatDraftBeforeUtility)
+        setChatDraftBeforeUtility("")
+    }
+
+    const executeCliCommand = async () => {
+        if (!activeCliCommand || runningCliCommand || commandRuntimeUnavailable) return
+
+        const preview = buildCommandPreview(activeCliCommand.runtime, activeCliCommand.preset, messageInput)
+        setRunningCliCommand(true)
+        setLastError(null)
+
+        if (viewMode === "commands") {
+            onViewModeChange("log")
+        }
+
+        try {
+            const response = await fetch("/api/studio/command", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    runtime: activeCliCommand.runtime,
+                    command: activeCliCommand.preset.command,
+                    args: messageInput.trim(),
+                    project_dir: projectDir ?? undefined,
+                }),
+            })
+
+            const payload = (await response.json()) as CliCommandResult
+
+            setLastCommandOutput({
+                preview,
+                result: payload,
+                error: payload?.ok ? null : payload?.stderr || `Command failed (${payload?.returncode ?? 500})`,
+            })
+        } catch (e) {
+            const message = e instanceof Error ? e.message : "Failed to run Studio command"
+            setLastCommandOutput({
+                preview,
+                result: null,
+                error: message,
+            })
+        } finally {
+            setRunningCliCommand(false)
+        }
+    }
+
+    const handleComposerSubmit = () => {
+        if (commandMode) {
+            void executeCliCommand()
+            return
+        }
+
+        if (codexMode) {
+            void handleDelegateToCodex()
+            return
+        }
+
+        void handleSendMessage()
+    }
+
+    const normalizedComposerInput = messageInput.trimStart()
+    const slashPaletteActive = !utilityMode && normalizedComposerInput.startsWith("/")
+    const slashPayload = slashPaletteActive ? normalizedComposerInput.slice(1) : ""
+    const slashFirstSpace = slashPayload.search(/\s/)
+    const slashToken =
+        slashFirstSpace === -1 ? slashPayload : slashPayload.slice(0, slashFirstSpace)
+    const slashRemainder =
+        slashFirstSpace === -1 ? "" : slashPayload.slice(slashFirstSpace + 1).trimStart()
+    const slashQuery = slashToken.toLowerCase()
+
+    function openAgentBoardWorkspace() {
         if (onOpenBoardWorkspace) {
             onOpenBoardWorkspace()
             return
@@ -883,6 +1076,373 @@ export function ReproductionLog({
         }
         router.push("/studio?surface=board")
     }
+
+    const slashCommands: SlashCommandItem[] = [
+        {
+            id: "mode-code",
+            command: "code",
+            label: "Code mode",
+            description: "Switch the composer to edit and implementation mode.",
+            group: "Modes",
+            keywords: ["build", "fix", "edit"],
+            icon: Code,
+            onSelect: (remainder) => {
+                setMode("Code")
+                setMessageInput(remainder)
+            },
+        },
+        {
+            id: "mode-plan",
+            command: "plan",
+            label: "Plan mode",
+            description: "Switch the composer to planning mode before execution.",
+            group: "Modes",
+            keywords: ["strategy", "outline", "design"],
+            icon: LayoutDashboard,
+            onSelect: (remainder) => {
+                setMode("Plan")
+                setMessageInput(remainder)
+            },
+        },
+        {
+            id: "mode-ask",
+            command: "ask",
+            label: "Ask mode",
+            description: "Switch the composer to question and discussion mode.",
+            group: "Modes",
+            keywords: ["question", "discuss", "explain"],
+            icon: MessageSquare,
+            onSelect: (remainder) => {
+                setMode("Ask")
+                setMessageInput(remainder)
+            },
+        },
+        {
+            id: "action-codex",
+            command: "codex",
+            label: "Codex delegation",
+            description: "Turn the composer into a Codex subagent delegation prompt.",
+            group: "Actions",
+            keywords: ["delegate", "subagent", "agent", "task"],
+            icon: Bot,
+            onSelect: (remainder) => {
+                activateCodexMode(remainder, remainder)
+            },
+        },
+        {
+            id: "view-chat",
+            command: "chat",
+            label: "Open chat",
+            description: "Stay in the console chat timeline.",
+            group: "Views",
+            keywords: ["console", "log", "messages"],
+            icon: MessageSquare,
+            onSelect: (remainder) => {
+                onViewModeChange("log")
+                setMessageInput(remainder)
+            },
+        },
+        {
+            id: "view-context",
+            command: "context",
+            label: "Open context",
+            description: "Jump to the paper context and workspace preparation view.",
+            group: "Views",
+            keywords: ["pack", "paper", "workspace"],
+            icon: Activity,
+            onSelect: (remainder) => {
+                onViewModeChange("context")
+                setMessageInput(remainder)
+            },
+        },
+        {
+            id: "view-monitor",
+            command: "monitor",
+            label: "Open monitor",
+            description: "Jump to the agent board and delegation monitor.",
+            group: "Views",
+            keywords: ["board", "agents", "subagents"],
+            icon: LayoutDashboard,
+            onSelect: (remainder) => {
+                openAgentBoardWorkspace()
+                setMessageInput(remainder)
+            },
+        },
+        ...knownModelAliases.map((alias) => ({
+            id: `model-${alias}`,
+            command: slashifyModelAlias(alias),
+            label: alias,
+            description: `Switch Claude Code model to ${alias}.`,
+            group: "Models" as const,
+            keywords: ["model", "claude", "alias", alias],
+            icon: Bot,
+            onSelect: (remainder: string) => {
+                setModelOption(alias)
+                setCustomModel("")
+                setMessageInput(remainder)
+            },
+        })),
+        {
+            id: "option-continue",
+            command: "continue",
+            label: "Continue last session",
+            description: "Turn on --continue for the next Claude Code print-mode run.",
+            group: "Options",
+            keywords: ["resume", "session", "previous"],
+            icon: ChevronRight,
+            onSelect: (remainder) => {
+                setContinueLast(true)
+                setMessageInput(remainder)
+            },
+        },
+        {
+            id: "option-fresh",
+            command: "fresh",
+            label: "Fresh session",
+            description: "Turn off --continue and start the next Claude Code run fresh.",
+            group: "Options",
+            keywords: ["new", "reset", "session"],
+            icon: X,
+            onSelect: (remainder) => {
+                setContinueLast(false)
+                setMessageInput(remainder)
+            },
+        },
+        ...(["default", "low", "medium", "high", "max"] as const).map((value) => ({
+            id: `option-effort-${value}`,
+            command: `effort-${value}`,
+            label: value === "default" ? "Default effort" : `${value} effort`,
+            description:
+                value === "default"
+                    ? "Reset Claude Code effort to the runtime default."
+                    : `Set Claude Code effort to ${value} for the next run.`,
+            group: "Options" as const,
+            keywords: ["effort", "thinking", "reasoning", value],
+            icon: Activity,
+            onSelect: (remainder: string) => {
+                setEffort(value)
+                setMessageInput(remainder)
+            },
+        })),
+        ...getCommandPresets("claude").map((preset) => ({
+            id: `slash-${preset.id}`,
+            command: preset.id,
+            label: preset.label,
+            description: preset.helpText,
+            group: "Quick Commands" as const,
+            keywords: ["claude", "cli", "runtime", ...preset.label.split(/\s+/)],
+            icon: Terminal,
+            onSelect: (remainder: string) =>
+                handleSelectCliCommand(
+                    {
+                        runtime: "claude",
+                        preset,
+                    },
+                    remainder || preset.defaultArgs,
+                    remainder,
+                ),
+        })),
+        ...getCommandPresets("opencode").map((preset) => ({
+            id: `slash-${preset.id}`,
+            command: preset.id,
+            label: preset.label,
+            description: preset.helpText,
+            group: "Quick Commands" as const,
+            keywords: ["opencode", "cli", "runtime", ...preset.label.split(/\s+/)],
+            icon: Terminal,
+            onSelect: (remainder: string) =>
+                handleSelectCliCommand(
+                    {
+                        runtime: "opencode",
+                        preset,
+                    },
+                    remainder || preset.defaultArgs,
+                    remainder,
+                ),
+        })),
+    ]
+
+    const filteredSlashCommands = slashCommands.filter((item) => {
+        if (!slashQuery) return true
+        const haystack = [item.command, item.label, item.description, ...item.keywords]
+            .join(" ")
+            .toLowerCase()
+        return haystack.includes(slashQuery)
+    })
+
+    useEffect(() => {
+        if (!slashPaletteActive) {
+            setSlashSelectedIndex(0)
+            return
+        }
+
+        setSlashSelectedIndex((current) =>
+            Math.min(current, Math.max(filteredSlashCommands.length - 1, 0)),
+        )
+    }, [filteredSlashCommands.length, slashPaletteActive, slashQuery])
+
+    const handleApplySlashCommand = (command: SlashCommandItem) => {
+        command.onSelect(slashRemainder)
+        setSlashSelectedIndex(0)
+    }
+
+    const composerHelperText = commandMode
+        ? "Command badge turns the composer into a terminal line. Clear it to return to chat."
+        : codexMode
+            ? "Codex badge sends this composer text as a real subagent delegation task."
+            : missingCustomModel
+                ? "Enter a full Claude Code model name before sending."
+                : "Type / for modes, models, quick commands, and monitor navigation."
+    const activeModeLabel = mode
+    const activeModelLabel =
+        modelOption === "custom"
+            ? requestedModel || "Custom model"
+            : requestedModel
+    const composerBadges = [
+        selectedPaper
+            ? {
+                id: "paper",
+                label: selectedPaper.title,
+                meta: "paper",
+                tone: "neutral" as const,
+                icon: FileText,
+            }
+            : null,
+        {
+            id: "mode",
+            label: activeModeLabel,
+            meta: "mode",
+            tone: "accent" as const,
+            icon: Code,
+        },
+        {
+            id: "model",
+            label: activeModelLabel,
+            meta: "model",
+            tone: modelOption === "custom" ? "warning" as const : "neutral" as const,
+            icon: Bot,
+        },
+        commandMode
+            ? {
+                id: "command",
+                label: buildCommandPreview(activeCliCommand!.runtime, activeCliCommand!.preset, messageInput),
+                meta: activeCliCommand!.runtime,
+                tone: "accent" as const,
+                icon: Terminal,
+                onRemove: handleClearCliCommand,
+            }
+            : null,
+        codexMode
+            ? {
+                id: "codex",
+                label: "Codex delegation",
+                meta: "subagent",
+                tone: "accent" as const,
+                icon: Bot,
+                onRemove: handleClearCodexMode,
+            }
+            : null,
+        continueLast
+            ? {
+                id: "continue",
+                label: "Continue session",
+                meta: "flow",
+                tone: "warning" as const,
+                icon: ChevronRight,
+                onRemove: () => setContinueLast(false),
+            }
+            : null,
+        resumeSession.trim()
+            ? {
+                id: "resume",
+                label: resumeSession.trim(),
+                meta: "resume",
+                tone: "neutral" as const,
+                icon: Clock,
+                onRemove: () => setResumeSession(""),
+            }
+            : null,
+        cliSessionId.trim()
+            ? {
+                id: "session-id",
+                label: cliSessionId.trim(),
+                meta: "session-id",
+                tone: "neutral" as const,
+                icon: Terminal,
+                onRemove: () => setCliSessionId(""),
+            }
+            : null,
+        agentOverride.trim()
+            ? {
+                id: "agent",
+                label: agentOverride.trim(),
+                meta: "agent",
+                tone: "neutral" as const,
+                icon: Bot,
+                onRemove: () => setAgentOverride(""),
+            }
+            : null,
+        selectedEffort
+            ? {
+                id: "effort",
+                label: selectedEffort,
+                meta: "effort",
+                tone: "success" as const,
+                icon: Activity,
+                onRemove: () => setEffort("default"),
+            }
+            : null,
+        parsedTools.length > 0
+            ? {
+                id: "tools",
+                label: `${parsedTools.length} tool${parsedTools.length === 1 ? "" : "s"}`,
+                meta: "tools",
+                tone: "neutral" as const,
+                icon: Wrench,
+                onRemove: () => setToolsText(""),
+            }
+            : null,
+        parsedAllowedTools.length > 0
+            ? {
+                id: "allowed-tools",
+                label: `${parsedAllowedTools.length} allow${parsedAllowedTools.length === 1 ? "ed tool" : "ed tools"}`,
+                meta: "allow",
+                tone: "neutral" as const,
+                icon: Wrench,
+                onRemove: () => setAllowedToolsText(""),
+            }
+            : null,
+        parsedAddDirs.length > 0
+            ? {
+                id: "add-dirs",
+                label: `${parsedAddDirs.length} extra dir${parsedAddDirs.length === 1 ? "" : "s"}`,
+                meta: "dirs",
+                tone: "neutral" as const,
+                icon: FileCode,
+                onRemove: () => setAddDirsText(""),
+            }
+            : null,
+        parsedMcpConfig.length > 0
+            ? {
+                id: "mcp",
+                label: `${parsedMcpConfig.length} config${parsedMcpConfig.length === 1 ? "" : "s"}`,
+                meta: "mcp",
+                tone: "neutral" as const,
+                icon: LayoutDashboard,
+                onRemove: () => setMcpConfigText(""),
+            }
+            : null,
+        settingsText.trim()
+            ? {
+                id: "settings",
+                label: "Settings override",
+                meta: "config",
+                tone: "neutral" as const,
+                icon: Settings2,
+                onRemove: () => setSettingsText(""),
+            }
+            : null,
+    ].filter(Boolean) as ComposerPillProps[]
 
     const consoleMode = viewMode === "log" || viewMode === "commands"
     const activeNavigationView = viewMode === "commands" ? "log" : viewMode
@@ -1047,276 +1607,512 @@ export function ReproductionLog({
             {consoleMode && (
                 /* Rich Input Area - CodePilot Style */
                 <div className="shrink-0 border-t border-slate-200 bg-[#f1f2ed] p-4">
-                    <div className="overflow-hidden rounded-lg border border-slate-200 bg-[#e8ebe4]">
-                        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-[#eef0ea] px-4 py-2 text-xs">
-                            <div className="min-w-0">
-                                <div className="flex min-w-0 items-center gap-2">
-                                    <span
-                                        className={cn(
-                                            "inline-flex items-center rounded-full border px-2 py-0.5 font-medium",
-                                            runtimeInfo.source === "claude_code"
-                                                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                                                : runtimeInfo.source === "anthropic_api"
-                                                    ? "border-amber-200 bg-amber-50 text-amber-700"
-                                                    : "border-slate-200 bg-slate-100 text-slate-600",
-                                        )}
-                                    >
-                                        {runtimeLoading ? "Checking runtime" : runtimeInfo.label}
-                                    </span>
-                                    <span className="truncate text-slate-600">
-                                        {runtimeLoading ? "Resolving Claude Code status..." : runtimeInfo.statusLabel}
-                                    </span>
-                                </div>
-                                <div className="mt-1 truncate font-mono text-[10px] text-slate-500">
-                                    {commandPreview}
-                                </div>
+                    <div className="overflow-hidden rounded-[22px] border border-slate-200 bg-[#e8ebe4] shadow-[0_18px_36px_rgba(15,23,42,0.05)]">
+                        <div className="border-b border-slate-200 bg-[#edf0e8] px-4 py-3">
+                            <div className="flex flex-wrap items-center gap-2">
+                                <span
+                                    className={cn(
+                                        "inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium",
+                                        runtimeInfo.source === "claude_code"
+                                            ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                            : runtimeInfo.source === "anthropic_api"
+                                                ? "border-amber-200 bg-amber-50 text-amber-700"
+                                                : "border-slate-200 bg-slate-100 text-slate-600",
+                                    )}
+                                >
+                                    {runtimeLoading ? "Checking runtime" : runtimeInfo.label}
+                                </span>
+                                <span
+                                    className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-slate-200 bg-[#f7f8f4] px-2.5 py-1 text-xs text-slate-600"
+                                    title={runtimeInfo.cwd || runtimeInfo.actualCwd || undefined}
+                                >
+                                    <FileCode className="h-3.5 w-3.5 text-slate-500" />
+                                    <span className="truncate">{runtimeInfo.workspaceLabel}</span>
+                                </span>
+                                <span className="truncate text-[11px] text-slate-500">
+                                    {runtimeLoading ? "Resolving Claude Code status..." : runtimeInfo.statusLabel}
+                                </span>
                             </div>
-                            <div className="truncate text-[11px] text-slate-500" title={runtimeInfo.cwd || runtimeInfo.actualCwd || undefined}>
-                                {runtimeInfo.workspaceLabel}
+                            <div className="mt-2 truncate font-mono text-[11px] text-slate-500">
+                                {composerPreview}
                             </div>
                         </div>
-                        <Textarea
-                            value={messageInput}
-                            onChange={(e) => setMessageInput(e.target.value)}
-                            placeholder={messagePlaceholder}
-                            className="min-h-[60px] resize-none border-0 bg-transparent px-4 py-3 text-sm text-slate-800 placeholder:text-slate-400 focus-visible:ring-0"
-                            onKeyDown={(e) => {
-                                if (e.key === 'Enter' && !e.shiftKey) {
-                                    e.preventDefault()
-                                    handleSendMessage()
-                                }
-                            }}
-                        />
-                        <div className="border-t border-slate-200 bg-[#f3f4f0] px-3 py-3">
-                            <div className="flex flex-wrap items-center gap-2">
-                                {selectedPaper && (
-                                    <div className="flex items-center gap-1.5 rounded-md border border-slate-200 bg-[#f7f7f4] px-2 py-1 text-xs text-slate-600">
-                                        <FileText className="h-3.5 w-3.5" />
-                                        <span className="max-w-[150px] truncate">{selectedPaper.title}</span>
-                                    </div>
-                                )}
 
-                                <Select value={mode} onValueChange={(v) => setMode(v as Mode)}>
-                                    <SelectTrigger className="h-8 w-[108px] border-slate-200 bg-[#f7f7f4] text-xs text-slate-700">
-                                        <Code className="mr-1 h-3.5 w-3.5" />
-                                        <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="Code">Code</SelectItem>
-                                        <SelectItem value="Plan">Plan</SelectItem>
-                                        <SelectItem value="Ask">Ask</SelectItem>
-                                    </SelectContent>
-                                </Select>
+                        <div className="relative bg-[#eef0ea]">
+                            {composerBadges.length > 0 ? (
+                                <div className="flex flex-wrap gap-2 px-4 pt-3">
+                                    {composerBadges.map((badge) => (
+                                        <ComposerPill key={badge.label + badge.meta} {...badge} />
+                                    ))}
+                                </div>
+                            ) : null}
 
-                                <Select value={modelOption} onValueChange={setModelOption}>
-                                    <SelectTrigger className="h-8 w-[158px] border-slate-200 bg-[#f7f7f4] text-xs text-slate-700">
-                                        <Bot className="mr-1 h-3.5 w-3.5" />
-                                        <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {knownModelAliases.map((alias) => (
-                                            <SelectItem key={alias} value={alias}>
-                                                {alias}
-                                            </SelectItem>
-                                        ))}
-                                        <SelectItem value="custom">Custom model…</SelectItem>
-                                    </SelectContent>
-                                </Select>
-
-                                {modelOption === "custom" ? (
+                            {modelOption === "custom" && !utilityMode ? (
+                                <div className="px-4 pt-3">
                                     <Input
                                         value={customModel}
                                         onChange={(event) => setCustomModel(event.target.value)}
                                         placeholder="claude-sonnet-4-6"
-                                        className="h-8 w-[220px] border-slate-200 bg-[#f7f7f4] text-xs text-slate-700"
+                                        className="h-9 border-slate-200 bg-[#f7f8f4] text-xs text-slate-700"
                                         title="Full Claude Code model name"
                                     />
-                                ) : null}
+                                </div>
+                            ) : null}
 
-                                <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    className="h-8 gap-1 px-2 text-xs text-slate-600 hover:bg-[#e7e9e3] hover:text-slate-900"
-                                    onClick={() => setShowAdvancedOptions((current) => !current)}
-                                >
-                                    {showAdvancedOptions ? (
-                                        <ChevronDown className="h-3.5 w-3.5" />
-                                    ) : (
-                                        <ChevronRight className="h-3.5 w-3.5" />
-                                    )}
-                                    Advanced
-                                    {advancedOptionsCount > 0 ? ` (${advancedOptionsCount})` : ""}
-                                </Button>
+                            <Textarea
+                                value={messageInput}
+                                onChange={(e) => setMessageInput(e.target.value)}
+                                placeholder={composerPlaceholder}
+                                className="min-h-[78px] resize-none border-0 bg-transparent px-4 py-3 text-sm text-slate-800 placeholder:text-slate-400 focus-visible:ring-0"
+                                onKeyDown={(e) => {
+                                    if (slashPaletteActive) {
+                                        if (e.key === "ArrowDown" && filteredSlashCommands.length > 0) {
+                                            e.preventDefault()
+                                            setSlashSelectedIndex((current) =>
+                                                Math.min(current + 1, filteredSlashCommands.length - 1),
+                                            )
+                                            return
+                                        }
 
-                                <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    className={cn(
-                                        "h-8 gap-1 px-2 text-xs hover:bg-[#e7e9e3]",
-                                        showCommandTray
-                                            ? "bg-[#e7e9e3] text-slate-900"
-                                            : "text-slate-600 hover:text-slate-900",
-                                    )}
-                                    onClick={() => setShowCommandTray((current) => !current)}
-                                >
-                                    <Terminal className="h-3.5 w-3.5" />
-                                    Commands
-                                </Button>
-                            </div>
+                                        if (e.key === "ArrowUp" && filteredSlashCommands.length > 0) {
+                                            e.preventDefault()
+                                            setSlashSelectedIndex((current) => Math.max(current - 1, 0))
+                                            return
+                                        }
 
-                            {showAdvancedOptions ? (
-                                <div className="mt-3 rounded-lg border border-slate-200 bg-[#f7f7f4] p-3">
-                                    <div className="grid gap-3 xl:grid-cols-2">
-                                        <label className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700">
-                                            <Checkbox
-                                                checked={continueLast}
-                                                onCheckedChange={(value) => setContinueLast(Boolean(value))}
-                                                className="border-slate-300 data-[state=checked]:border-slate-700 data-[state=checked]:bg-slate-700"
-                                            />
-                                            Continue most recent CLI session
-                                        </label>
+                                        if (e.key === "Escape") {
+                                            e.preventDefault()
+                                            setMessageInput(slashRemainder)
+                                            setSlashSelectedIndex(0)
+                                            return
+                                        }
 
-                                        <label className="space-y-1">
-                                            <span className="text-[11px] font-medium text-slate-600">Resume session</span>
-                                            <Input
-                                                value={resumeSession}
-                                                onChange={(event) => setResumeSession(event.target.value)}
-                                                placeholder="Existing Claude session ID"
-                                                className="h-8 border-slate-200 bg-white text-xs text-slate-700"
-                                            />
-                                        </label>
+                                        if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
+                                            e.preventDefault()
+                                            const selectedSlashCommand =
+                                                filteredSlashCommands[slashSelectedIndex] ?? filteredSlashCommands[0]
+                                            if (selectedSlashCommand) {
+                                                handleApplySlashCommand(selectedSlashCommand)
+                                            }
+                                            return
+                                        }
+                                    }
 
-                                        <label className="space-y-1">
-                                            <span className="text-[11px] font-medium text-slate-600">Session ID</span>
-                                            <Input
-                                                value={cliSessionId}
-                                                onChange={(event) => setCliSessionId(event.target.value)}
-                                                placeholder="Pin a UUID for this print-mode run"
-                                                className="h-8 border-slate-200 bg-white text-xs text-slate-700"
-                                            />
-                                        </label>
+                                    if ((e.key === "Backspace" || e.key === "Escape") && !messageInput.trim()) {
+                                        if (commandMode) {
+                                            e.preventDefault()
+                                            handleClearCliCommand()
+                                            return
+                                        }
 
-                                        <label className="space-y-1">
-                                            <span className="text-[11px] font-medium text-slate-600">Agent override</span>
-                                            <Input
-                                                value={agentOverride}
-                                                onChange={(event) => setAgentOverride(event.target.value)}
-                                                placeholder="reviewer / planner / custom agent"
-                                                className="h-8 border-slate-200 bg-white text-xs text-slate-700"
-                                            />
-                                        </label>
+                                        if (codexMode) {
+                                            e.preventDefault()
+                                            handleClearCodexMode()
+                                            return
+                                        }
+                                    }
 
-                                        <label className="space-y-1">
-                                            <span className="text-[11px] font-medium text-slate-600">Effort</span>
-                                            <Select value={effort} onValueChange={(value) => setEffort(value as EffortOption)}>
-                                                <SelectTrigger className="h-8 border-slate-200 bg-white text-xs text-slate-700">
-                                                    <SelectValue />
-                                                </SelectTrigger>
-                                                <SelectContent>
-                                                    <SelectItem value="default">Default</SelectItem>
-                                                    <SelectItem value="low">Low</SelectItem>
-                                                    <SelectItem value="medium">Medium</SelectItem>
-                                                    <SelectItem value="high">High</SelectItem>
-                                                    <SelectItem value="max">Max</SelectItem>
-                                                </SelectContent>
-                                            </Select>
-                                        </label>
+                                    if (e.key === "Enter" && !e.shiftKey) {
+                                        e.preventDefault()
+                                        handleComposerSubmit()
+                                    }
+                                }}
+                            />
 
-                                        <label className="space-y-1">
-                                            <span className="text-[11px] font-medium text-slate-600">Tools</span>
-                                            <Input
-                                                value={toolsText}
-                                                onChange={(event) => setToolsText(event.target.value)}
-                                                placeholder="Comma-separated, e.g. Bash,Edit,Read"
-                                                className="h-8 border-slate-200 bg-white text-xs text-slate-700"
-                                            />
-                                        </label>
+                            {slashPaletteActive ? (
+                                <div className="px-4 pb-3">
+                                    <div className="max-w-[620px] overflow-hidden rounded-2xl border border-slate-200 bg-[#f7f8f4] shadow-[0_18px_40px_rgba(15,23,42,0.10)]">
+                                        <div className="flex items-center justify-between gap-3 border-b border-slate-200 bg-[#f0f2ec] px-3 py-2.5">
+                                            <div>
+                                                <div className="text-[11px] font-medium text-slate-800">Slash commands</div>
+                                                <div className="mt-0.5 text-[11px] text-slate-500">
+                                                    Modes, models, monitor jumps, Codex delegation, and quick CLI presets.
+                                                </div>
+                                            </div>
+                                            <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 font-mono text-[11px] text-slate-500">
+                                                /{slashToken || ""}
+                                            </span>
+                                        </div>
 
-                                        <label className="space-y-1">
-                                            <span className="text-[11px] font-medium text-slate-600">Allowed tools</span>
-                                            <Input
-                                                value={allowedToolsText}
-                                                onChange={(event) => setAllowedToolsText(event.target.value)}
-                                                placeholder='Comma-separated, e.g. "Bash(git:*),Read"'
-                                                className="h-8 border-slate-200 bg-white text-xs text-slate-700"
-                                            />
-                                        </label>
+                                        <ScrollArea className="max-h-64">
+                                            {filteredSlashCommands.length === 0 ? (
+                                                <div className="px-3 py-4 text-sm text-slate-500">
+                                                    No matching slash command.
+                                                </div>
+                                            ) : (
+                                                <div className="space-y-2 p-2">
+                                                    {(["Modes", "Actions", "Views", "Models", "Options", "Quick Commands"] as const).map((group) => {
+                                                        const groupItems = filteredSlashCommands.filter((item) => item.group === group)
+                                                        if (groupItems.length === 0) return null
 
-                                        <label className="space-y-1">
-                                            <span className="text-[11px] font-medium text-slate-600">Add directories</span>
-                                            <Textarea
-                                                value={addDirsText}
-                                                onChange={(event) => setAddDirsText(event.target.value)}
-                                                placeholder={"One directory per line\n../shared-worktree"}
-                                                className="min-h-[72px] border-slate-200 bg-white text-xs text-slate-700"
-                                            />
-                                        </label>
+                                                        return (
+                                                            <div key={group}>
+                                                                <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+                                                                    {group}
+                                                                </div>
+                                                                <div className="space-y-1">
+                                                                    {groupItems.map((item) => {
+                                                                        const globalIndex = filteredSlashCommands.findIndex((entry) => entry.id === item.id)
+                                                                        const selected = globalIndex === slashSelectedIndex
+                                                                        const ItemIcon = item.icon
 
-                                        <label className="space-y-1">
-                                            <span className="text-[11px] font-medium text-slate-600">MCP config</span>
-                                            <Textarea
-                                                value={mcpConfigText}
-                                                onChange={(event) => setMcpConfigText(event.target.value)}
-                                                placeholder={"One file path or JSON object per line\n./mcp.json"}
-                                                className="min-h-[72px] border-slate-200 bg-white text-xs text-slate-700"
-                                            />
-                                        </label>
-
-                                        <label className="space-y-1 xl:col-span-2">
-                                            <span className="text-[11px] font-medium text-slate-600">Settings</span>
-                                            <Textarea
-                                                value={settingsText}
-                                                onChange={(event) => setSettingsText(event.target.value)}
-                                                placeholder='Path or JSON blob for --settings, e.g. {"theme":"slate"}'
-                                                className="min-h-[84px] border-slate-200 bg-white text-xs text-slate-700"
-                                            />
-                                        </label>
+                                                                        return (
+                                                                            <button
+                                                                                key={item.id}
+                                                                                type="button"
+                                                                                className={cn(
+                                                                                    "flex w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition-colors",
+                                                                                    selected
+                                                                                        ? "border-slate-300 bg-[#edf0e7]"
+                                                                                        : "border-transparent bg-transparent hover:border-slate-200 hover:bg-[#eef1ea]",
+                                                                                )}
+                                                                                onMouseEnter={() => setSlashSelectedIndex(globalIndex)}
+                                                                                onClick={() => handleApplySlashCommand(item)}
+                                                                            >
+                                                                                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white">
+                                                                                    <ItemIcon className="h-3.5 w-3.5 text-slate-500" />
+                                                                                </div>
+                                                                                <div className="min-w-0 flex-1">
+                                                                                    <div className="flex items-center gap-2">
+                                                                                        <span className="font-mono text-[11px] text-slate-900">
+                                                                                            /{item.command}
+                                                                                        </span>
+                                                                                        <span className="truncate text-[11px] text-slate-500">
+                                                                                            {item.label}
+                                                                                        </span>
+                                                                                    </div>
+                                                                                    <div className="mt-1 line-clamp-2 text-[11px] leading-5 text-slate-500">
+                                                                                        {item.description}
+                                                                                    </div>
+                                                                                </div>
+                                                                                <span className="shrink-0 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-slate-400">
+                                                                                    {item.group}
+                                                                                </span>
+                                                                            </button>
+                                                                        )
+                                                                    })}
+                                                                </div>
+                                                            </div>
+                                                        )
+                                                    })}
+                                                </div>
+                                            )}
+                                        </ScrollArea>
                                     </div>
                                 </div>
                             ) : null}
+                        </div>
 
-                            {showCommandTray ? (
-                                <CliCommandRunner
-                                    runtimeInfo={runtimeInfo}
-                                    projectDir={projectDir}
-                                    variant="embedded"
-                                />
-                            ) : null}
+                        <div className="border-t border-slate-200 bg-[#f1f3ee] px-3 py-3">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                                <div className="flex flex-1 flex-wrap items-center gap-1.5">
+                                    <Select value={mode} onValueChange={(value) => setMode(value as Mode)}>
+                                        <SelectTrigger className="h-8 w-[104px] border-slate-200 bg-[#f7f8f4] text-xs text-slate-700">
+                                            <Code className="mr-1 h-3.5 w-3.5" />
+                                            <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="Code">Code</SelectItem>
+                                            <SelectItem value="Plan">Plan</SelectItem>
+                                            <SelectItem value="Ask">Ask</SelectItem>
+                                        </SelectContent>
+                                    </Select>
 
-                            <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-                                <div className="min-w-0 text-[11px] text-slate-500">
-                                    {missingCustomModel
-                                        ? "Enter a full Claude Code model name to use the custom model option."
-                                        : `Claude Code aliases from local help: ${knownModelAliases.join(", ")}`}
+                                    <Select value={modelOption} onValueChange={setModelOption}>
+                                        <SelectTrigger className="h-8 w-[148px] border-slate-200 bg-[#f7f8f4] text-xs text-slate-700">
+                                            <Bot className="mr-1 h-3.5 w-3.5" />
+                                            <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {knownModelAliases.map((alias) => (
+                                                <SelectItem key={alias} value={alias}>
+                                                    {alias}
+                                                </SelectItem>
+                                            ))}
+                                            <SelectItem value="custom">Custom model…</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+
+                                    <Popover open={showAdvancedOptions} onOpenChange={setShowAdvancedOptions}>
+                                        <PopoverTrigger asChild>
+                                            <Button
+                                                variant="ghost"
+                                                size="icon"
+                                                className={cn(
+                                                    "relative h-8 w-8 shrink-0 rounded-md border border-transparent bg-transparent text-slate-500 hover:bg-[#e7e9e3] hover:text-slate-900",
+                                                    (showAdvancedOptions || advancedOptionsCount > 0) &&
+                                                        "border-slate-200 bg-[#e7e9e3] text-slate-900",
+                                                )}
+                                                title="Claude Code advanced options"
+                                            >
+                                                <Settings2 className="h-3.5 w-3.5" />
+                                                {advancedOptionsCount > 0 ? (
+                                                    <span className="absolute -right-1 -top-1 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-slate-700 px-1 text-[10px] text-white">
+                                                        {advancedOptionsCount}
+                                                    </span>
+                                                ) : null}
+                                            </Button>
+                                        </PopoverTrigger>
+                                        <PopoverContent
+                                            align="start"
+                                            side="top"
+                                            sideOffset={10}
+                                            className="w-[440px] max-w-[92vw] border-slate-200 bg-[#f7f8f4] p-0 text-slate-900 shadow-[0_18px_40px_rgba(15,23,42,0.10)]"
+                                        >
+                                            <div className="border-b border-slate-200 bg-[#f0f2ec] px-3 py-2.5">
+                                                <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+                                                    Claude Code Options
+                                                </div>
+                                                <div className="mt-1 text-[12px] text-slate-600">
+                                                    Print-mode flags that apply to the next Claude Code run.
+                                                </div>
+                                            </div>
+                                            <ScrollArea className="max-h-[65vh]">
+                                                <div className="grid gap-3 p-3 xl:grid-cols-2">
+                                                    <label className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700">
+                                                        <Checkbox
+                                                            checked={continueLast}
+                                                            onCheckedChange={(value) => setContinueLast(Boolean(value))}
+                                                            className="border-slate-300 data-[state=checked]:border-slate-700 data-[state=checked]:bg-slate-700"
+                                                        />
+                                                        Continue most recent CLI session
+                                                    </label>
+
+                                                    <label className="space-y-1">
+                                                        <span className="text-[11px] font-medium text-slate-600">Resume session</span>
+                                                        <Input
+                                                            value={resumeSession}
+                                                            onChange={(event) => setResumeSession(event.target.value)}
+                                                            placeholder="Existing Claude session ID"
+                                                            className="h-8 border-slate-200 bg-white text-xs text-slate-700"
+                                                        />
+                                                    </label>
+
+                                                    <label className="space-y-1">
+                                                        <span className="text-[11px] font-medium text-slate-600">Session ID</span>
+                                                        <Input
+                                                            value={cliSessionId}
+                                                            onChange={(event) => setCliSessionId(event.target.value)}
+                                                            placeholder="Pin a UUID for this print-mode run"
+                                                            className="h-8 border-slate-200 bg-white text-xs text-slate-700"
+                                                        />
+                                                    </label>
+
+                                                    <label className="space-y-1">
+                                                        <span className="text-[11px] font-medium text-slate-600">Agent override</span>
+                                                        <Input
+                                                            value={agentOverride}
+                                                            onChange={(event) => setAgentOverride(event.target.value)}
+                                                            placeholder="reviewer / planner / custom agent"
+                                                            className="h-8 border-slate-200 bg-white text-xs text-slate-700"
+                                                        />
+                                                    </label>
+
+                                                    <label className="space-y-1">
+                                                        <span className="text-[11px] font-medium text-slate-600">Effort</span>
+                                                        <Select value={effort} onValueChange={(value) => setEffort(value as EffortOption)}>
+                                                            <SelectTrigger className="h-8 border-slate-200 bg-white text-xs text-slate-700">
+                                                                <SelectValue />
+                                                            </SelectTrigger>
+                                                            <SelectContent>
+                                                                <SelectItem value="default">Default</SelectItem>
+                                                                <SelectItem value="low">Low</SelectItem>
+                                                                <SelectItem value="medium">Medium</SelectItem>
+                                                                <SelectItem value="high">High</SelectItem>
+                                                                <SelectItem value="max">Max</SelectItem>
+                                                            </SelectContent>
+                                                        </Select>
+                                                    </label>
+
+                                                    <label className="space-y-1">
+                                                        <span className="text-[11px] font-medium text-slate-600">Tools</span>
+                                                        <Input
+                                                            value={toolsText}
+                                                            onChange={(event) => setToolsText(event.target.value)}
+                                                            placeholder="Comma-separated, e.g. Bash,Edit,Read"
+                                                            className="h-8 border-slate-200 bg-white text-xs text-slate-700"
+                                                        />
+                                                    </label>
+
+                                                    <label className="space-y-1">
+                                                        <span className="text-[11px] font-medium text-slate-600">Allowed tools</span>
+                                                        <Input
+                                                            value={allowedToolsText}
+                                                            onChange={(event) => setAllowedToolsText(event.target.value)}
+                                                            placeholder='Comma-separated, e.g. "Bash(git:*),Read"'
+                                                            className="h-8 border-slate-200 bg-white text-xs text-slate-700"
+                                                        />
+                                                    </label>
+
+                                                    <label className="space-y-1">
+                                                        <span className="text-[11px] font-medium text-slate-600">Add directories</span>
+                                                        <Textarea
+                                                            value={addDirsText}
+                                                            onChange={(event) => setAddDirsText(event.target.value)}
+                                                            placeholder={"One directory per line\n../shared-worktree"}
+                                                            className="min-h-[72px] border-slate-200 bg-white text-xs text-slate-700"
+                                                        />
+                                                    </label>
+
+                                                    <label className="space-y-1">
+                                                        <span className="text-[11px] font-medium text-slate-600">MCP config</span>
+                                                        <Textarea
+                                                            value={mcpConfigText}
+                                                            onChange={(event) => setMcpConfigText(event.target.value)}
+                                                            placeholder={"One file path or JSON object per line\n./mcp.json"}
+                                                            className="min-h-[72px] border-slate-200 bg-white text-xs text-slate-700"
+                                                        />
+                                                    </label>
+
+                                                    <label className="space-y-1 xl:col-span-2">
+                                                        <span className="text-[11px] font-medium text-slate-600">Settings</span>
+                                                        <Textarea
+                                                            value={settingsText}
+                                                            onChange={(event) => setSettingsText(event.target.value)}
+                                                            placeholder='Path or JSON blob for --settings, e.g. {"theme":"slate"}'
+                                                            className="min-h-[84px] border-slate-200 bg-white text-xs text-slate-700"
+                                                        />
+                                                    </label>
+                                                </div>
+                                            </ScrollArea>
+                                        </PopoverContent>
+                                    </Popover>
+
+                                    <CliCommandRunner
+                                        key={viewMode === "commands" && !utilityMode ? "command-popover-open" : "command-popover-closed"}
+                                        runtimeInfo={runtimeInfo}
+                                        activeCommand={activeCliCommand}
+                                        activeArgs={commandMode ? messageInput : ""}
+                                        defaultOpen={viewMode === "commands" && !utilityMode}
+                                        showActiveBadge={false}
+                                        onSelectCommand={handleSelectCliCommand}
+                                        onClearCommand={handleClearCliCommand}
+                                    />
+
+                                    {!utilityMode ? (
+                                        <Button
+                                            variant="ghost"
+                                            size="icon"
+                                            className="h-8 w-8 rounded-md border border-transparent bg-transparent text-slate-500 hover:bg-[#e7e9e3] hover:text-slate-900"
+                                            onClick={() => activateCodexMode(messageInput, messageInput)}
+                                            disabled={isBusy}
+                                            title="Switch the composer into Codex delegation mode"
+                                        >
+                                            <Bot className="h-3.5 w-3.5" />
+                                        </Button>
+                                    ) : null}
                                 </div>
 
-                                <div className="flex items-center gap-2">
-                                    <Button
-                                        variant="outline"
-                                        size="sm"
-                                        className="h-8 gap-1.5 border-slate-200 bg-[#f7f7f4] text-xs text-slate-700 hover:bg-white"
-                                        onClick={handleDelegateToCodex}
-                                        disabled={!messageInput.trim() || isBusy}
-                                        title="Create a real Codex subagent task from this prompt"
-                                    >
-                                        <Bot className="h-3.5 w-3.5" />
-                                        Codex
-                                    </Button>
-                                    <Button
-                                        size="icon"
-                                        className="h-8 w-8 rounded-md bg-slate-700 text-white hover:bg-slate-600"
-                                        onClick={handleSendMessage}
-                                        disabled={!messageInput.trim() || isBusy || missingCustomModel}
-                                        title={
-                                            missingCustomModel
-                                                ? "Enter a full Claude model name first"
-                                                : "Send to Claude Code"
-                                        }
-                                    >
+                                <Button
+                                    size="icon"
+                                    className="h-9 w-9 shrink-0 rounded-full bg-slate-700 text-white hover:bg-slate-600"
+                                    onClick={handleComposerSubmit}
+                                    disabled={
+                                        commandMode
+                                            ? runningCliCommand || commandRuntimeUnavailable
+                                            : codexMode
+                                                ? !messageInput.trim() || isBusy
+                                                : !messageInput.trim() || isBusy || missingCustomModel
+                                    }
+                                    title={
+                                        commandMode
+                                            ? commandRuntimeUnavailable
+                                                ? "Selected command runtime is unavailable"
+                                                : runningCliCommand
+                                                    ? "Running command"
+                                                    : "Run command in composer"
+                                            : codexMode
+                                                ? "Delegate this task to Codex"
+                                                : missingCustomModel
+                                                    ? "Enter a full Claude model name first"
+                                                    : "Send to Claude Code"
+                                    }
+                                >
+                                    {commandMode ? (
+                                        runningCliCommand ? (
+                                            <Loader2 className="h-4 w-4 animate-spin" />
+                                        ) : (
+                                            <Terminal className="h-4 w-4" />
+                                        )
+                                    ) : codexMode ? (
+                                        isBusy ? (
+                                            <Loader2 className="h-4 w-4 animate-spin" />
+                                        ) : (
+                                            <Bot className="h-4 w-4" />
+                                        )
+                                    ) : (
                                         <Send className="h-4 w-4" />
-                                    </Button>
-                                </div>
+                                    )}
+                                </Button>
                             </div>
+
+                            <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-500">
+                                <span>{composerHelperText}</span>
+                                {!commandMode && !codexMode ? (
+                                    <span className="hidden md:inline">
+                                        Claude Code aliases: {knownModelAliases.join(", ")}
+                                    </span>
+                                ) : null}
+                            </div>
+
+                            {lastCommandOutput ? (
+                                <div className="mt-3 rounded-2xl border border-slate-200 bg-[#f7f8f4]">
+                                    <div className="flex items-start justify-between gap-3 border-b border-slate-200 bg-[#eef1ea] px-3 py-2.5">
+                                        <div className="min-w-0">
+                                            <div className="text-[11px] font-medium uppercase tracking-[0.16em] text-slate-500">
+                                                Recent command output
+                                            </div>
+                                            <div className="mt-1 truncate font-mono text-[11px] text-slate-700">
+                                                {lastCommandOutput.preview}
+                                            </div>
+                                        </div>
+                                        <button
+                                            type="button"
+                                            className="rounded-full p-1 text-slate-500 transition-colors hover:bg-white hover:text-slate-900"
+                                            onClick={() => setLastCommandOutput(null)}
+                                            title="Dismiss latest command output"
+                                        >
+                                            <X className="h-3.5 w-3.5" />
+                                        </button>
+                                    </div>
+
+                                    <div className="space-y-3 px-3 py-3">
+                                        {lastCommandOutput.result ? (
+                                            <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-[11px] text-slate-500">
+                                                exit {lastCommandOutput.result.returncode} · cwd {lastCommandOutput.result.cwd ?? "n/a"}
+                                            </div>
+                                        ) : null}
+
+                                        {lastCommandOutput.error ? (
+                                            <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
+                                                {lastCommandOutput.error}
+                                            </div>
+                                        ) : null}
+
+                                        {lastCommandOutput.result?.stdout ? (
+                                            <div className="rounded-xl border border-slate-200 bg-white">
+                                                <div className="border-b border-slate-200 px-3 py-2 text-[11px] font-medium text-slate-500">
+                                                    STDOUT
+                                                </div>
+                                                <pre className="max-h-48 overflow-auto whitespace-pre-wrap px-3 py-3 text-[12px] leading-5 text-slate-800">
+                                                    {lastCommandOutput.result.stdout}
+                                                </pre>
+                                            </div>
+                                        ) : null}
+
+                                        {lastCommandOutput.result?.stderr ? (
+                                            <div className="rounded-xl border border-slate-200 bg-white">
+                                                <div className="border-b border-slate-200 px-3 py-2 text-[11px] font-medium text-slate-500">
+                                                    STDERR
+                                                </div>
+                                                <pre className="max-h-40 overflow-auto whitespace-pre-wrap px-3 py-3 text-[12px] leading-5 text-slate-700">
+                                                    {lastCommandOutput.result.stderr}
+                                                </pre>
+                                            </div>
+                                        ) : null}
+                                    </div>
+                                </div>
+                            ) : null}
                         </div>
                     </div>
                 </div>
