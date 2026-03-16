@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import type { ReproContextPack, StageObservationsEvent, StageProgressEvent } from '@/lib/types/p2c'
 
 // Agent Action Types
-export type ActionType = 'thinking' | 'file_change' | 'function_call' | 'mcp_call' | 'error' | 'complete' | 'text' | 'user'
+export type ActionType = 'thinking' | 'file_change' | 'function_call' | 'mcp_call' | 'activity_summary' | 'error' | 'complete' | 'text' | 'user'
 
 export interface TaskMessage {
     role: 'user' | 'assistant'
@@ -15,6 +15,7 @@ export interface AgentAction {
     timestamp: Date
     content: string
     metadata?: {
+        toolId?: string
         // For file_change
         filename?: string
         linesAdded?: number
@@ -47,6 +48,13 @@ export interface AgentAction {
             }>
             commands?: string[]
             notes?: string[]
+        }
+        activitySummary?: {
+            label: string
+            status: 'running' | 'done'
+            totalTools: number
+            counts: Partial<Record<'read' | 'search' | 'write' | 'command' | 'delegation' | 'web' | 'other', number>>
+            recent: string[]
         }
     }
 }
@@ -310,6 +318,7 @@ function _normalizeTaskActions(value: unknown): AgentAction[] {
             action.type === 'file_change' ||
             action.type === 'function_call' ||
             action.type === 'mcp_call' ||
+            action.type === 'activity_summary' ||
             action.type === 'error' ||
             action.type === 'complete' ||
             action.type === 'text' ||
@@ -482,7 +491,7 @@ interface StudioState {
     updateTaskStatus: (taskId: string, status: Task['status']) => void
     addAction: (taskId: string, action: Omit<AgentAction, 'id' | 'timestamp'>) => void
     upsertThinkingAction: (taskId: string, content: string) => void
-    attachResultToLatestFunctionCall: (taskId: string, functionName: string, result: unknown) => boolean
+    attachResultToLatestFunctionCall: (taskId: string, functionName: string, result: unknown, toolId?: string) => boolean
     appendToLastAction: (taskId: string, text: string) => void
     appendTaskHistory: (taskId: string, message: TaskMessage) => void
     setActiveTask: (taskId: string | null) => void
@@ -977,10 +986,47 @@ export const useStudioStore = create<StudioState>((set, get) => ({
         }))
     },
 
-    attachResultToLatestFunctionCall: (taskId, functionName, result) => {
+    attachResultToLatestFunctionCall: (taskId, functionName, result, toolId) => {
         const state = get()
         const targetTask = state.tasks.find(task => task.id === taskId)
         if (!targetTask) return false
+
+        const attachAtIndex = (index: number) => {
+            const action = targetTask.actions[index]
+            const updatedAction: AgentAction = {
+                ...action,
+                metadata: {
+                    ...action.metadata,
+                    result,
+                },
+            }
+            set(currentState => ({
+                tasks: currentState.tasks.map(task => {
+                    if (task.id !== taskId) return task
+                    const nextActions = [...task.actions]
+                    nextActions[index] = updatedAction
+                    return {
+                        ...task,
+                        actions: nextActions,
+                        updatedAt: new Date(),
+                    }
+                }),
+            }))
+            return true
+        }
+
+        if (toolId) {
+            for (let index = targetTask.actions.length - 1; index >= 0; index -= 1) {
+                const action = targetTask.actions[index]
+                if (
+                    action.type === 'function_call' &&
+                    action.metadata?.toolId === toolId &&
+                    action.metadata?.result === undefined
+                ) {
+                    return attachAtIndex(index)
+                }
+            }
+        }
 
         for (let index = targetTask.actions.length - 1; index >= 0; index -= 1) {
             const action = targetTask.actions[index]
@@ -989,26 +1035,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
                 action.metadata?.functionName === functionName &&
                 action.metadata?.result === undefined
             ) {
-                const updatedAction: AgentAction = {
-                    ...action,
-                    metadata: {
-                        ...action.metadata,
-                        result,
-                    },
-                }
-                set(currentState => ({
-                    tasks: currentState.tasks.map(task => {
-                        if (task.id !== taskId) return task
-                        const nextActions = [...task.actions]
-                        nextActions[index] = updatedAction
-                        return {
-                            ...task,
-                            actions: nextActions,
-                            updatedAt: new Date(),
-                        }
-                    }),
-                }))
-                return true
+                return attachAtIndex(index)
             }
         }
 

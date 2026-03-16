@@ -29,7 +29,11 @@ import {
 } from "./CliCommandRunner"
 import { useContextPackGeneration } from "@/hooks/useContextPackGeneration"
 import { parseStudioSlashCommand } from "@/lib/studio-slash"
-import type { StudioRuntimeInfo } from "@/lib/studio-runtime"
+import { collapseToolActivityActions } from "@/lib/studio-chat-activity"
+import {
+    resolveDetectedModelSelection,
+    type StudioRuntimeInfo,
+} from "@/lib/studio-runtime"
 import { cn } from "@/lib/utils"
 import {
     AlertCircle,
@@ -270,10 +274,11 @@ async function readResponseDetail(res: Response, fallback: string): Promise<stri
 }
 
 function buildVisibleActions(actions: AgentAction[]): AgentAction[] {
-    return actions.filter((action, index) => {
+    const collapsedActions = collapseToolActivityActions(actions)
+    return collapsedActions.filter((action, index) => {
         if (action.type !== "thinking") return true
         if (!isGenericThinkingMessage(action.content)) return true
-        return index === actions.length - 1
+        return index === collapsedActions.length - 1
     })
 }
 
@@ -286,7 +291,23 @@ function summarizeToolPayload(payload: unknown): string | null {
     }
 
     const record = payload as Record<string, unknown>
-    const priorityKeys = ["path", "file_path", "filename", "target_path", "target_file", "command", "query", "pattern", "task_title", "message"]
+    const priorityKeys = [
+        "path",
+        "file_path",
+        "filename",
+        "target_path",
+        "target_file",
+        "command",
+        "query",
+        "pattern",
+        "description",
+        "prompt",
+        "task_title",
+        "message",
+        "instructions",
+        "assignee",
+        "subagent_type",
+    ]
     for (const key of priorityKeys) {
         const value = record[key]
         if (typeof value === "string" && value.trim()) {
@@ -374,6 +395,7 @@ function MessageAttachmentPill({
 interface ActionItemProps {
     action: AgentAction
     onViewDiff: (action: AgentAction) => void
+    onOpenMonitor?: () => void
 }
 
 type MarkdownActionBlockTone = "default" | "error"
@@ -531,7 +553,7 @@ function MarkdownActionBlock({
     )
 }
 
-function ActionItem({ action, onViewDiff }: ActionItemProps) {
+function ActionItem({ action, onViewDiff, onOpenMonitor }: ActionItemProps) {
     const [expanded, setExpanded] = useState(false)
     const attachments = action.metadata?.attachments ?? []
     const hasExpandableContent = Boolean(action.metadata?.params || action.metadata?.result)
@@ -582,6 +604,86 @@ function ActionItem({ action, onViewDiff }: ActionItemProps) {
                         {action.content}
                     </span>
                 </div>
+            </div>
+        )
+    }
+
+    if (action.type === "activity_summary" && action.metadata?.activitySummary) {
+        const summary = action.metadata.activitySummary
+        const countBadges = [
+            summary.counts.read ? `${summary.counts.read} reads` : null,
+            summary.counts.search ? `${summary.counts.search} searches` : null,
+            summary.counts.command ? `${summary.counts.command} commands` : null,
+            summary.counts.write ? `${summary.counts.write} edits` : null,
+            summary.counts.delegation ? `${summary.counts.delegation} delegations` : null,
+            summary.counts.web ? `${summary.counts.web} web` : null,
+        ].filter(Boolean) as string[]
+
+        const sharedClassName =
+            "block w-full max-w-[88%] rounded-2xl border border-slate-200 bg-white/90 px-2.5 py-2 text-left shadow-[0_1px_0_rgba(255,255,255,0.75)_inset]"
+
+        const content = (
+            <>
+                <div className="flex items-center gap-1.5">
+                    <div className="flex h-5.5 w-5.5 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-[#f3f5ef]">
+                        <Activity className="h-3 w-3 text-slate-500" />
+                    </div>
+                    <span className="min-w-0 flex-1 truncate text-[11px] font-medium text-slate-800">
+                        {summary.label}
+                    </span>
+                    <span className="shrink-0 rounded-full border border-slate-200 bg-[#eef1ea] px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-slate-500">
+                        {summary.totalTools} action{summary.totalTools === 1 ? "" : "s"}
+                    </span>
+                    <span
+                        className={cn(
+                            "shrink-0 rounded-full border px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em]",
+                            summary.status === "done"
+                                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                : "border-slate-200 bg-[#f8faf6] text-slate-500",
+                        )}
+                    >
+                        {summary.status}
+                    </span>
+                </div>
+
+                {countBadges.length > 0 ? (
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                        {countBadges.map((badge) => (
+                            <span
+                                key={badge}
+                                className="rounded-full border border-slate-200 bg-[#f7f8f4] px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-slate-500"
+                            >
+                                {badge}
+                            </span>
+                        ))}
+                    </div>
+                ) : null}
+
+                {summary.recent.length > 0 ? (
+                    <div className="mt-2 text-[10px] leading-4 text-slate-500">
+                        Recent: {summary.recent.join(" · ")}
+                    </div>
+                ) : null}
+
+                <div className="mt-1.5 text-[10px] text-slate-400">
+                    Full tool activity stays in Monitor.
+                </div>
+            </>
+        )
+
+        return (
+            <div className="pb-1.5">
+                {onOpenMonitor ? (
+                    <button
+                        type="button"
+                        onClick={onOpenMonitor}
+                        className={`${sharedClassName} transition-colors hover:bg-white`}
+                    >
+                        {content}
+                    </button>
+                ) : (
+                    <div className={sharedClassName}>{content}</div>
+                )}
             </div>
         )
     }
@@ -790,6 +892,8 @@ export function ReproductionLog({
     const [addDirsText, setAddDirsText] = useState("")
     const [settingsText, setSettingsText] = useState("")
     const [effort, setEffort] = useState<EffortOption>("default")
+    const modelSelectionInitializedRef = useRef(false)
+    const modelSelectionDirtyRef = useRef(false)
     // Switch to context dialog when generation starts.
     useEffect(() => {
         if (contextPackLoading && viewMode !== "context") {
@@ -801,6 +905,48 @@ export function ReproductionLog({
         const aliases = runtimeInfo.knownModelAliases.filter((item) => item.trim().length > 0)
         return aliases.length > 0 ? aliases : ["sonnet", "opus"]
     }, [runtimeInfo.knownModelAliases])
+
+    const applyModelSelection = useCallback(
+        (
+            nextModelOption: string,
+            nextCustomModel = "",
+            { markDirty = true }: { markDirty?: boolean } = {},
+        ) => {
+            if (markDirty) {
+                modelSelectionDirtyRef.current = true
+            }
+            setModelOption(nextModelOption)
+            setCustomModel(nextCustomModel)
+        },
+        [],
+    )
+
+    useEffect(() => {
+        if (runtimeLoading || modelSelectionInitializedRef.current || modelSelectionDirtyRef.current) return
+
+        const detectedSelection = resolveDetectedModelSelection(
+            runtimeInfo.detectedDefaultModel,
+            knownModelAliases,
+        )
+
+        if (detectedSelection) {
+            applyModelSelection(detectedSelection.modelOption, detectedSelection.customModel, {
+                markDirty: false,
+            })
+        } else if (!knownModelAliases.includes(modelOption)) {
+            applyModelSelection(knownModelAliases[0] ?? "sonnet", "", {
+                markDirty: false,
+            })
+        }
+
+        modelSelectionInitializedRef.current = true
+    }, [
+        applyModelSelection,
+        knownModelAliases,
+        modelOption,
+        runtimeInfo.detectedDefaultModel,
+        runtimeLoading,
+    ])
 
     useEffect(() => {
         if (modelOption === "custom") return
@@ -1145,6 +1291,7 @@ export function ReproductionLog({
                             type: "function_call",
                             content: `${data.tool_name}()`,
                             metadata: {
+                                toolId: data.tool_id as string | undefined,
                                 functionName: data.tool_name as string,
                                 params: data.tool_input as Record<string, unknown>,
                             },
@@ -1158,12 +1305,14 @@ export function ReproductionLog({
                             taskId,
                             functionName,
                             data.content as string,
+                            data.tool_id as string | undefined,
                         )
                         if (!attached) {
                             addAction(taskId, {
                                 type: "function_call",
                                 content: `${functionName}()`,
                                 metadata: {
+                                    toolId: data.tool_id as string | undefined,
                                     functionName,
                                     result: data.content as string,
                                 },
@@ -1481,8 +1630,7 @@ export function ReproductionLog({
         }
 
         if (parsed.kind === "model") {
-            setModelOption(parsed.modelOption)
-            setCustomModel(parsed.customModel)
+            applyModelSelection(parsed.modelOption, parsed.customModel)
             setMessageInput(parsed.remainder)
             return true
         }
@@ -1709,6 +1857,15 @@ export function ReproductionLog({
             { label: "Mode", value: mode },
             { label: "Permission", value: permissionProfile },
             { label: "Model", value: requestedModel || "Pending" },
+            {
+                label: "Detected default",
+                value:
+                    runtimeInfo.detectedDefaultModel
+                        ? runtimeInfo.detectedDefaultModelSource
+                            ? `${runtimeInfo.detectedDefaultModel} (${runtimeInfo.detectedDefaultModelSource})`
+                            : runtimeInfo.detectedDefaultModel
+                        : "Unavailable",
+            },
             { label: "Workspace", value: projectDir ?? "Not set" },
             { label: "Uploaded files", value: String(uploadedFiles.length) },
             { label: "Paper", value: selectedPaper?.title ?? "None" },
@@ -1726,6 +1883,8 @@ export function ReproductionLog({
         permissionProfile,
         projectDir,
         requestedModel,
+        runtimeInfo.detectedDefaultModel,
+        runtimeInfo.detectedDefaultModelSource,
         runtimeInfo.chatSurface,
         runtimeInfo.chatTransport,
         runtimeInfo.claudeAgentSdkAvailable,
@@ -2214,6 +2373,7 @@ export function ReproductionLog({
                                             key={action.id}
                                             action={action}
                                             onViewDiff={setDiffAction}
+                                            onOpenMonitor={onOpenBoardWorkspace}
                                         />
                                     ))}
                                 </div>
@@ -2256,7 +2416,9 @@ export function ReproductionLog({
                                 <div className="px-4 pt-3">
                                     <Input
                                         value={customModel}
-                                        onChange={(event) => setCustomModel(event.target.value)}
+                                        onChange={(event) =>
+                                            applyModelSelection("custom", event.target.value)
+                                        }
                                         placeholder="claude-sonnet-4-6"
                                         className="h-9 border-slate-200 bg-[#f7f8f4] text-xs text-slate-700"
                                         title="Full Claude Code model name"
@@ -2499,7 +2661,15 @@ export function ReproductionLog({
                                         </SelectContent>
                                     </Select>
 
-                                    <Select value={modelOption} onValueChange={setModelOption}>
+                                    <Select
+                                        value={modelOption}
+                                        onValueChange={(value) =>
+                                            applyModelSelection(
+                                                value,
+                                                value === "custom" ? customModel : "",
+                                            )
+                                        }
+                                    >
                                         <SelectTrigger className="h-8 w-[148px] rounded-full border-slate-200 bg-white text-xs text-slate-700">
                                             <Bot className="mr-1 h-3.5 w-3.5" />
                                             <SelectValue />

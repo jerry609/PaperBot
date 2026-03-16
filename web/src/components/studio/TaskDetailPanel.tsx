@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   Dialog,
   DialogContent,
@@ -13,53 +13,36 @@ import { Button } from "@/components/ui/button"
 import {
   ArrowDown,
   ArrowUp,
+  Brain,
   Bot,
   CheckCircle2,
+  ChevronDown,
   ChevronRight,
   Clock,
   Cpu,
   FolderOpen,
+  Info,
   Loader2,
   Pin,
   PinOff,
+  Wrench,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { getAgentPresentation, isCommanderAssignee } from "@/lib/agent-runtime"
-import type { AgentTask, AgentTaskLog, BlockType } from "@/lib/store/studio-store"
+import type { AgentTask, AgentTaskLog } from "@/lib/store/studio-store"
+import {
+  buildTaskTimelineEntries,
+  filterTaskLogs,
+  inferTaskLogBlockType,
+  type TaskTimelineDisplayMode,
+  type TaskTimelineEntry,
+  type TaskTimelineFilterMode,
+} from "@/lib/studio-task-log-groups"
 import { InfoBlock, ThinkBlock, ToolBlock, DiffBlock, ResultBlock } from "./blocks"
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function inferBlockType(log: AgentTaskLog): BlockType {
-  // Handle both camelCase (frontend) and snake_case (backend) field names
-  const bt = log.blockType ?? (log as unknown as Record<string, unknown>)["block_type"] as BlockType | undefined
-  if (bt) return bt
-  if (log.event === "thinking" || log.event === "reasoning") return "think"
-  if (log.event === "file_write" || log.event === "file_edit") return "diff"
-  if (
-    log.event === "verify_result" ||
-    log.event === "review_result" ||
-    log.event === "executor_finished" ||
-    log.event === "task_done" ||
-    log.event === "human_approved" ||
-    log.event === "human_rejected" ||
-    log.event === "human_requested_changes"
-  )
-    return "result"
-  if (
-    log.event === "tool_call" ||
-    log.event === "shell_exec" ||
-    log.event === "run_command"
-  ) {
-    // Check if it's actually a file write disguised as tool_call
-    const tool = log.details?.tool as string | undefined
-    if (tool === "write_file") return "diff"
-    return "tool"
-  }
-  return "info"
-}
 
 function statusBadge(status: AgentTask["status"]) {
   const config = {
@@ -95,7 +78,7 @@ function computeWorkspaceStats(logs: AgentTaskLog[]) {
   const seenFiles = new Set<string>()
 
   for (const log of logs) {
-    const bt = inferBlockType(log)
+    const bt = inferTaskLogBlockType(log)
     if (bt === "diff") {
       const fp = log.details?.file_path as string | undefined
       if (fp && !seenFiles.has(fp)) {
@@ -106,6 +89,121 @@ function computeWorkspaceStats(logs: AgentTaskLog[]) {
     }
   }
   return { filesChanged, linesAdded, fileNames: Array.from(seenFiles) }
+}
+
+function renderTimelineLog(log: AgentTaskLog, onFileClick?: (path: string) => void) {
+  const bt = inferTaskLogBlockType(log)
+  switch (bt) {
+    case "think":
+      return <ThinkBlock key={log.id} log={log} />
+    case "tool":
+      return <ToolBlock key={log.id} log={log} />
+    case "diff":
+      return <DiffBlock key={log.id} log={log} onFileClick={onFileClick} />
+    case "result":
+      return <ResultBlock key={log.id} log={log} />
+    default:
+      return <InfoBlock key={log.id} log={log} />
+  }
+}
+
+function groupAppearance(entry: Extract<TaskTimelineEntry, { kind: "group" }>) {
+  if (entry.blockType === "think") {
+    return {
+      icon: Brain,
+      panelClass: "border-indigo-200 bg-indigo-50/70",
+      iconClass: "text-indigo-600",
+      titleClass: "text-indigo-900",
+      metaClass: "text-indigo-600",
+    }
+  }
+  if (entry.blockType === "tool") {
+    return {
+      icon: Wrench,
+      panelClass:
+        entry.status === "error"
+          ? "border-rose-200 bg-rose-50/70"
+          : "border-slate-200 bg-[#f8faf6]",
+      iconClass: entry.status === "error" ? "text-rose-600" : "text-slate-600",
+      titleClass: entry.status === "error" ? "text-rose-900" : "text-slate-900",
+      metaClass: entry.status === "error" ? "text-rose-600" : "text-slate-500",
+    }
+  }
+  return {
+    icon: Info,
+    panelClass: "border-slate-200 bg-white",
+    iconClass: "text-slate-500",
+    titleClass: "text-slate-900",
+    metaClass: "text-slate-500",
+  }
+}
+
+function GroupedTimelineEntry({
+  entry,
+  onFileClick,
+}: {
+  entry: Extract<TaskTimelineEntry, { kind: "group" }>
+  onFileClick?: (path: string) => void
+}) {
+  const [expanded, setExpanded] = useState(false)
+  const appearance = groupAppearance(entry)
+  const Icon = appearance.icon
+
+  return (
+    <div className="px-3 py-2">
+      <div className={cn("overflow-hidden rounded-2xl border shadow-[0_1px_0_rgba(255,255,255,0.75)_inset]", appearance.panelClass)}>
+        <button
+          type="button"
+          className="flex w-full items-start gap-3 px-3 py-3 text-left"
+          onClick={() => setExpanded((current) => !current)}
+        >
+          <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-2xl border border-white/70 bg-white/80">
+            <Icon className={cn("h-4 w-4", appearance.iconClass)} />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <span className={cn("text-[12px] font-semibold", appearance.titleClass)}>{entry.title}</span>
+              <span className={cn("rounded-full border border-current/15 px-1.5 py-0.5 text-[10px] uppercase tracking-[0.12em]", appearance.metaClass)}>
+                {entry.logs.length}
+              </span>
+            </div>
+            {entry.preview.length > 0 ? (
+              <div className="mt-1 space-y-1">
+                {entry.preview.map((line) => (
+                  <p key={line} className="text-[11px] leading-4 text-slate-600">
+                    {line}
+                  </p>
+                ))}
+              </div>
+            ) : null}
+            {entry.toolNames.length > 0 ? (
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {entry.toolNames.slice(0, 4).map((toolName) => (
+                  <span
+                    key={toolName}
+                    className="rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] font-medium text-slate-600"
+                  >
+                    {toolName}
+                  </span>
+                ))}
+              </div>
+            ) : null}
+          </div>
+          <div className="shrink-0 rounded-full border border-slate-200 bg-white/80 p-1 text-slate-500">
+            {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+          </div>
+        </button>
+
+        {expanded ? (
+          <div className="border-t border-slate-200/70 bg-white/75">
+            <div className="divide-y divide-slate-100">
+              {entry.logs.map((log) => renderTimelineLog(log, onFileClick))}
+            </div>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -194,7 +292,7 @@ function TaskOverview({
                 </div>
                 <p className="text-[11px] text-zinc-400 mt-0.5">
                   {logs.length > 0
-                    ? `${logs.length} execution steps · Click to view thinking process`
+                    ? `${logs.length} execution steps · Click to review the summary timeline`
                     : "No execution steps yet"}
                 </p>
               </div>
@@ -238,68 +336,40 @@ function TaskOverview({
 // Layer 2: Workspace / Thinking Process View
 // ---------------------------------------------------------------------------
 
-type FilterMode = "all" | "diffs" | "thinking"
-
 function ThinkingTimeline({
   logs,
   filter,
+  displayMode,
   onFileClick,
 }: {
   logs: AgentTaskLog[]
-  filter: FilterMode
+  filter: TaskTimelineFilterMode
+  displayMode: TaskTimelineDisplayMode
   onFileClick?: (path: string) => void
 }) {
-  const scrollRef = useRef<HTMLDivElement>(null)
-  const [autoScroll, setAutoScroll] = useState(true)
-  const prevLengthRef = useRef(logs.length)
-
-  // Auto-scroll when new logs arrive
-  useEffect(() => {
-    if (autoScroll && logs.length > prevLengthRef.current && scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight
-    }
-    prevLengthRef.current = logs.length
-  }, [logs.length, autoScroll])
-
-  const filtered = logs.filter((log) => {
-    if (filter === "all") return true
-    const bt = inferBlockType(log)
-    if (filter === "diffs") return bt === "diff"
-    if (filter === "thinking") return bt === "think"
-    return true
-  })
+  const filtered = useMemo(() => filterTaskLogs(logs, filter), [logs, filter])
+  const entries = useMemo(
+    () => (displayMode === "summary" ? buildTaskTimelineEntries(filtered) : []),
+    [displayMode, filtered],
+  )
 
   return (
-    <div
-      ref={scrollRef}
-      className="flex-1 overflow-y-auto"
-      onScroll={(e) => {
-        const el = e.currentTarget
-        const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40
-        setAutoScroll(atBottom)
-      }}
-    >
+    <div>
       <div className="divide-y divide-zinc-100">
         {filtered.length === 0 && (
           <div className="py-12 text-center text-sm text-zinc-400">
             {logs.length === 0 ? "No execution steps yet." : "No matching blocks."}
           </div>
         )}
-        {filtered.map((log) => {
-          const bt = inferBlockType(log)
-          switch (bt) {
-            case "think":
-              return <ThinkBlock key={log.id} log={log} />
-            case "tool":
-              return <ToolBlock key={log.id} log={log} />
-            case "diff":
-              return <DiffBlock key={log.id} log={log} onFileClick={onFileClick} />
-            case "result":
-              return <ResultBlock key={log.id} log={log} />
-            default:
-              return <InfoBlock key={log.id} log={log} />
-          }
-        })}
+        {displayMode === "summary"
+          ? entries.map((entry) =>
+              entry.kind === "group" ? (
+                <GroupedTimelineEntry key={entry.id} entry={entry} onFileClick={onFileClick} />
+              ) : (
+                renderTimelineLog(entry.log, onFileClick)
+              ),
+            )
+          : filtered.map((log) => renderTimelineLog(log, onFileClick))}
       </div>
     </div>
   )
@@ -314,11 +384,14 @@ function WorkspaceView({
   onBack: () => void
   onFileClick?: (path: string) => void
 }) {
-  const [filter, setFilter] = useState<FilterMode>("all")
+  const [filter, setFilter] = useState<TaskTimelineFilterMode>("all")
+  const [displayMode, setDisplayMode] = useState<TaskTimelineDisplayMode>("summary")
   const [autoScroll, setAutoScroll] = useState(true)
-  const logs = task.executionLog ?? []
+  const logs = useMemo(() => task.executionLog ?? [], [task.executionLog])
   const scrollRef = useRef<HTMLDivElement>(null)
   const prevLogCount = useRef(logs.length)
+  const filteredLogs = useMemo(() => filterTaskLogs(logs, filter), [logs, filter])
+  const summaryEntries = useMemo(() => buildTaskTimelineEntries(filteredLogs), [filteredLogs])
 
   const scrollToTop = useCallback(() => {
     scrollRef.current?.scrollTo({ top: 0, behavior: "smooth" })
@@ -339,7 +412,7 @@ function WorkspaceView({
   // Block counts for status bar
   const blockCounts = logs.reduce(
     (acc, log) => {
-      const bt = inferBlockType(log)
+      const bt = inferTaskLogBlockType(log)
       acc[bt] = (acc[bt] || 0) + 1
       return acc
     },
@@ -361,6 +434,22 @@ function WorkspaceView({
         <span className="text-xs font-medium text-zinc-600 truncate">Workspace</span>
 
         <div className="ml-auto flex items-center gap-1.5">
+          <div className="inline-flex items-center rounded-md border border-zinc-200 bg-white p-0.5">
+            {(["summary", "raw"] as const).map((mode) => (
+              <button
+                key={mode}
+                onClick={() => setDisplayMode(mode)}
+                className={cn(
+                  "rounded px-2 py-1 text-[10px] font-medium uppercase tracking-[0.12em] transition-colors",
+                  displayMode === mode
+                    ? "bg-zinc-900 text-white"
+                    : "text-zinc-500 hover:bg-zinc-100 hover:text-zinc-700",
+                )}
+              >
+                {mode}
+              </button>
+            ))}
+          </div>
           {(["all", "diffs", "thinking"] as const).map((f) => (
             <button
               key={f}
@@ -388,7 +477,7 @@ function WorkspaceView({
           if (atBottom !== autoScroll) setAutoScroll(atBottom)
         }}
       >
-        <ThinkingTimeline logs={logs} filter={filter} onFileClick={onFileClick} />
+        <ThinkingTimeline logs={logs} filter={filter} displayMode={displayMode} onFileClick={onFileClick} />
       </div>
 
       {/* Bottom action bar */}
@@ -425,6 +514,11 @@ function WorkspaceView({
 
         {/* Block type counts */}
         <div className="flex items-center gap-3 text-[10px] text-zinc-400">
+          {displayMode === "summary" ? (
+            <span title="Summary entries">{summaryEntries.length} entries</span>
+          ) : (
+            <span title="Raw blocks">{filteredLogs.length} blocks</span>
+          )}
           {blockCounts.think ? (
             <span title="Thinking blocks">{blockCounts.think} think</span>
           ) : null}

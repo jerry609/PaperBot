@@ -19,6 +19,50 @@ from paperbot.api.routes.studio_chat import (
 )
 
 
+def test_detect_claude_default_model_prefers_workspace_local_then_workspace_then_user(
+    monkeypatch,
+    tmp_path: Path,
+):
+    home_dir = tmp_path / "home"
+    workspace_dir = tmp_path / "workspace" / "nested"
+    (home_dir / ".claude").mkdir(parents=True)
+    (workspace_dir / ".claude").mkdir(parents=True)
+
+    (home_dir / ".claude" / "settings.json").write_text('{"model":"sonnet"}', encoding="utf-8")
+    (workspace_dir / ".claude" / "settings.json").write_text('{"model":"opus"}', encoding="utf-8")
+    (workspace_dir / ".claude" / "settings.local.json").write_text(
+        '{"model":"claude-sonnet-4-5"}',
+        encoding="utf-8",
+    )
+
+    monkeypatch.setenv("HOME", str(home_dir))
+
+    detection = studio_chat.detect_claude_default_model_details(str(workspace_dir))
+    assert detection.model == "sonnet"
+    assert detection.source == "workspace-local"
+
+    (workspace_dir / ".claude" / "settings.local.json").unlink()
+    detection = studio_chat.detect_claude_default_model_details(str(workspace_dir))
+    assert detection.model == "opus"
+    assert detection.source == "workspace"
+
+    (workspace_dir / ".claude" / "settings.json").unlink()
+    detection = studio_chat.detect_claude_default_model_details(str(workspace_dir))
+    assert detection.model == "sonnet"
+    assert detection.source == "user"
+
+
+def test_studio_chat_request_defaults_model_from_detected_claude_settings(monkeypatch, tmp_path: Path):
+    home_dir = tmp_path / "home"
+    (home_dir / ".claude").mkdir(parents=True)
+    (home_dir / ".claude" / "settings.json").write_text('{"model":"opus"}', encoding="utf-8")
+    monkeypatch.setenv("HOME", str(home_dir))
+
+    request = StudioChatRequest(message="Ship it", mode="Code")
+
+    assert request.model == "opus"
+
+
 def test_build_claude_cli_command_args_includes_print_mode_flags_and_effective_mode():
     request = StudioChatRequest(
         message="Implement the telemetry bridge",
@@ -294,3 +338,32 @@ def test_studio_command_route_executes_safe_management_command(monkeypatch, tmp_
     assert payload["cwd"] == str(tmp_path)
     assert captured["cmd"] == ["/usr/local/bin/claude", "mcp", "list"]
     assert captured["cwd"] == str(tmp_path)
+
+
+def test_studio_status_reports_detected_default_model(monkeypatch):
+    monkeypatch.setattr(studio_chat, "find_claude_cli", lambda: "/usr/local/bin/claude")
+    monkeypatch.setattr(studio_chat, "find_opencode_cli", lambda: None)
+    monkeypatch.setattr(studio_chat, "has_claude_agent_sdk", lambda: False)
+    monkeypatch.setattr(
+        studio_chat,
+        "detect_claude_default_model_details",
+        lambda project_dir=None: studio_chat.StudioDefaultModelDetection(
+            model="opus",
+            source="user",
+        ),
+    )
+
+    def fake_run(cmd, capture_output, text, timeout):
+        class Result:
+            returncode = 0
+            stdout = "2.1.76"
+
+        return Result()
+
+    monkeypatch.setattr(studio_chat.subprocess, "run", fake_run)
+
+    payload = asyncio.run(studio_chat.studio_status())
+
+    assert payload["claude_cli"] is True
+    assert payload["detected_default_model"] == "opus"
+    assert payload["detected_default_model_source"] == "user"

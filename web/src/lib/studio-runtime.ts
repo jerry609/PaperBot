@@ -11,6 +11,8 @@ export interface StudioRuntimeStatusResponse {
   runtime_commands?: string[] | null
   code_mode_enabled?: boolean
   known_model_aliases?: string[] | null
+  detected_default_model?: string | null
+  detected_default_model_source?: string | null
   opencode_cli?: boolean
   opencode_path?: string | null
   opencode_version?: string | null
@@ -48,6 +50,8 @@ export interface StudioRuntimeInfo {
   claudePath: string | null
   codeModeEnabled: boolean | null
   knownModelAliases: string[]
+  detectedDefaultModel: string | null
+  detectedDefaultModelSource: string | null
   opencodeAvailable: boolean
   opencodePath: string | null
   opencodeVersion: string | null
@@ -95,6 +99,17 @@ export function formatRuntimePath(path: string | null | undefined): string {
   return `.../${segments.slice(-2).join("/")}`
 }
 
+export function resolveDetectedModelSelection(
+  detectedModel: string | null | undefined,
+  knownModelAliases: string[],
+): { modelOption: string; customModel: string } | null {
+  const normalized = cleanString(detectedModel)
+  if (!normalized) return null
+  return knownModelAliases.includes(normalized)
+    ? { modelOption: normalized, customModel: "" }
+    : { modelOption: "custom", customModel: normalized }
+}
+
 export function buildStudioRuntimeInfo(
   status?: StudioRuntimeStatusResponse | null,
   cwdPayload?: StudioRuntimeCwdResponse | null,
@@ -120,6 +135,8 @@ export function buildStudioRuntimeInfo(
   const knownModelAliases = Array.isArray(status?.known_model_aliases)
     ? status!.known_model_aliases.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
     : []
+  const detectedDefaultModel = cleanString(status?.detected_default_model)
+  const detectedDefaultModelSource = cleanString(status?.detected_default_model_source)
   const opencodeAvailable = status?.opencode_cli === true
   const opencodePath = cleanString(status?.opencode_path)
   const opencodeVersion = cleanString(status?.opencode_version)
@@ -156,6 +173,8 @@ export function buildStudioRuntimeInfo(
       claudePath,
       codeModeEnabled,
       knownModelAliases,
+      detectedDefaultModel,
+      detectedDefaultModelSource,
       opencodeAvailable,
       opencodePath,
       opencodeVersion,
@@ -187,6 +206,8 @@ export function buildStudioRuntimeInfo(
       claudePath,
       codeModeEnabled,
       knownModelAliases,
+      detectedDefaultModel,
+      detectedDefaultModelSource,
       opencodeAvailable,
       opencodePath,
       opencodeVersion,
@@ -213,6 +234,8 @@ export function buildStudioRuntimeInfo(
     claudePath: null,
     codeModeEnabled: null,
     knownModelAliases: [],
+    detectedDefaultModel: null,
+    detectedDefaultModelSource: null,
     opencodeAvailable: false,
     opencodePath: null,
     opencodeVersion: null,

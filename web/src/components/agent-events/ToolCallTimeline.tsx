@@ -1,5 +1,6 @@
 "use client"
 
+import { getAgentPresentation } from "@/lib/agent-runtime"
 import { useAgentEventStore } from "@/lib/agent-events/store"
 import type { ToolCallEntry } from "@/lib/agent-events/types"
 
@@ -31,15 +32,26 @@ function formatTimestamp(ts: string): string {
 
 function ToolCallRow({ entry }: { entry: ToolCallEntry }) {
   const isError = entry.status === "error"
+  const presentation = getAgentPresentation(entry.agent_name)
 
   return (
-    <li className="flex items-start gap-3 border-b border-zinc-200 py-2 last:border-0">
+    <li className="flex items-start gap-3 border-b border-zinc-200 py-2.5 last:border-0">
       <div
         className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${isError ? "bg-rose-500" : "bg-emerald-500"}`}
       />
       <div className="flex-1 min-w-0">
         <div className="flex items-center justify-between gap-2">
-          <span className="truncate text-sm font-semibold text-zinc-900">{entry.tool}</span>
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <span className="truncate text-sm font-semibold text-zinc-900">{entry.tool}</span>
+              <span
+                className="shrink-0 rounded-full border border-zinc-200 bg-zinc-100 px-1.5 py-0.5 text-[10px] font-medium text-zinc-600"
+                title={entry.agent_name}
+              >
+                {presentation.shortLabel}
+              </span>
+            </div>
+          </div>
           <div className="flex items-center gap-2 shrink-0">
             {isError && (
               <span className="rounded border border-rose-200 bg-rose-50 px-1.5 py-0.5 text-xs text-rose-700">
@@ -72,9 +84,14 @@ export function ToolCallTimeline() {
 
   return (
     <div className="flex h-full flex-col bg-[#f5f5f3]">
-      <div className="flex items-center justify-between border-b border-zinc-200 px-3 py-2">
-        <h3 className="text-sm font-semibold text-zinc-900">Tool Calls</h3>
-        <span className="text-xs text-zinc-500">{toolCalls.length} calls</span>
+      <div className="border-b border-zinc-200 px-3 py-2.5">
+        <div className="flex items-center justify-between gap-2">
+          <h3 className="text-sm font-semibold text-zinc-900">Tool Calls</h3>
+          <span className="text-xs text-zinc-500">{toolCalls.length} calls</span>
+        </div>
+        <p className="mt-1 text-[11px] text-zinc-500">
+          Full tool detail stays here, including worker-side Bash, Read, and file operations.
+        </p>
       </div>
       {toolCalls.length === 0 ? (
         <div className="flex h-20 items-center justify-center text-sm text-zinc-500">

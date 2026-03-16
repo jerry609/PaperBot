@@ -255,3 +255,135 @@ def test_build_cli_telemetry_events_opencode_delegation_completion_emits_termina
     ]
     assert completed[1].payload["assignee"].startswith("opencode-")
     assert completed[2].agent_name.startswith("opencode-")
+
+
+def test_build_cli_telemetry_events_claude_agent_flow_tracks_worker_activity():
+    state = _make_state()
+
+    dispatched = _build_cli_telemetry_events(
+        {
+            "type": "assistant",
+            "message": {
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": "tooluse_agent",
+                        "name": "Agent",
+                        "input": {
+                            "description": "Get current git branch",
+                            "prompt": "Run `git -C /home/master1/PaperBot branch --show-current`.",
+                            "subagent_type": "codex-worker",
+                        },
+                    }
+                ]
+            },
+        },
+        state,
+        now_monotonic=60.0,
+    )
+
+    assert [event.type for event in dispatched] == [
+        EventType.AGENT_WORKING,
+        EventType.TOOL_CALL,
+        EventType.CODEX_DISPATCHED,
+        EventType.AGENT_STARTED,
+    ]
+    codex_assignee = dispatched[2].payload["assignee"]
+    assert codex_assignee.startswith("codex-")
+
+    progress = _build_cli_telemetry_events(
+        {
+            "type": "system",
+            "subtype": "task_progress",
+            "tool_use_id": "tooluse_agent",
+            "description": "Running Show current git branch",
+            "last_tool_name": "Bash",
+        },
+        state,
+        now_monotonic=60.5,
+    )
+
+    assert [event.type for event in progress] == [EventType.AGENT_WORKING]
+    assert progress[0].agent_name == codex_assignee
+
+    nested_tool = _build_cli_telemetry_events(
+        {
+            "type": "assistant",
+            "parent_tool_use_id": "tooluse_agent",
+            "message": {
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": "tooluse_bash",
+                        "name": "Bash",
+                        "input": {
+                            "command": "git -C /home/master1/PaperBot branch --show-current",
+                            "description": "Show current git branch",
+                        },
+                    }
+                ]
+            },
+        },
+        state,
+        now_monotonic=61.0,
+    )
+
+    assert [event.type for event in nested_tool] == [
+        EventType.AGENT_WORKING,
+        EventType.TOOL_CALL,
+    ]
+    assert nested_tool[0].agent_name == codex_assignee
+    assert nested_tool[1].agent_name == codex_assignee
+
+    nested_result = _build_cli_telemetry_events(
+        {
+            "type": "user",
+            "parent_tool_use_id": "tooluse_agent",
+            "message": {
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "tooluse_bash",
+                        "content": "test/milestone-v1.2",
+                        "is_error": False,
+                    }
+                ]
+            },
+        },
+        state,
+        now_monotonic=61.5,
+    )
+
+    assert [event.type for event in nested_result] == [EventType.TOOL_RESULT]
+    assert nested_result[0].agent_name == codex_assignee
+
+    completed = _build_cli_telemetry_events(
+        {
+            "type": "user",
+            "message": {
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "tooluse_agent",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "The current branch is `test/milestone-v1.2`.",
+                            }
+                        ],
+                        "is_error": False,
+                    }
+                ]
+            },
+        },
+        state,
+        now_monotonic=62.0,
+    )
+
+    assert [event.type for event in completed] == [
+        EventType.TOOL_RESULT,
+        EventType.CODEX_COMPLETED,
+        EventType.AGENT_COMPLETED,
+    ]
+    assert completed[1].payload["assignee"] == codex_assignee
+    assert completed[2].agent_name == codex_assignee

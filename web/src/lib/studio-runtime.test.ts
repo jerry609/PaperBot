@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest"
 
-import { buildStudioRuntimeInfo, formatRuntimePath } from "./studio-runtime"
+import {
+  buildStudioRuntimeInfo,
+  formatRuntimePath,
+  resolveDetectedModelSelection,
+} from "./studio-runtime"
 
 describe("formatRuntimePath", () => {
   it("keeps short paths readable", () => {
@@ -28,6 +32,8 @@ describe("buildStudioRuntimeInfo", () => {
         runtime_commands: ["agents", "auth", "doctor", "mcp"],
         code_mode_enabled: true,
         known_model_aliases: ["sonnet", "opus"],
+        detected_default_model: "opus",
+        detected_default_model_source: "user",
         opencode_cli: true,
         opencode_path: "/usr/local/bin/opencode",
         opencode_version: "1.2.26",
@@ -49,6 +55,8 @@ describe("buildStudioRuntimeInfo", () => {
     expect(info.statusLabel).toBe("Managed chat · CLI print · CLI 2.1.76")
     expect(info.codeModeEnabled).toBe(true)
     expect(info.knownModelAliases).toEqual(["sonnet", "opus"])
+    expect(info.detectedDefaultModel).toBe("opus")
+    expect(info.detectedDefaultModelSource).toBe("user")
     expect(info.opencodeAvailable).toBe(true)
     expect(info.opencodeVersion).toBe("1.2.26")
     expect(info.workspaceLabel).toBe(".../Projects/PaperBot")
@@ -70,6 +78,8 @@ describe("buildStudioRuntimeInfo", () => {
         error: "Failed to check Claude CLI status",
         code_mode_enabled: false,
         known_model_aliases: ["sonnet", "opus"],
+        detected_default_model: "claude-opus-4-6",
+        detected_default_model_source: "workspace",
       },
       {
         cwd: "/tmp",
@@ -84,7 +94,25 @@ describe("buildStudioRuntimeInfo", () => {
     expect(info.statusLabel).toBe("Managed chat · API fallback")
     expect(info.codeModeEnabled).toBe(false)
     expect(info.knownModelAliases).toEqual(["sonnet", "opus"])
+    expect(info.detectedDefaultModel).toBe("claude-opus-4-6")
+    expect(info.detectedDefaultModelSource).toBe("workspace")
     expect(info.detail).toBe("Failed to check Claude CLI status")
     expect(info.workspaceLabel).toBe("/tmp")
+  })
+})
+
+describe("resolveDetectedModelSelection", () => {
+  it("maps known aliases back into the preset picker", () => {
+    expect(resolveDetectedModelSelection("opus", ["sonnet", "opus"])).toEqual({
+      modelOption: "opus",
+      customModel: "",
+    })
+  })
+
+  it("preserves pinned full model ids as custom models", () => {
+    expect(resolveDetectedModelSelection("claude-opus-4-6", ["sonnet", "opus"])).toEqual({
+      modelOption: "custom",
+      customModel: "claude-opus-4-6",
+    })
   })
 })

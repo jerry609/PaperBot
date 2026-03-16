@@ -181,6 +181,38 @@ describe("studio-store", () => {
     expect(task?.actions[0].metadata?.result).toBe("file contents")
   })
 
+  it("prefers tool ids when multiple tool calls share the same function name", () => {
+    const { addPaper, addTask, addAction, attachResultToLatestFunctionCall } = useStudioStore.getState()
+
+    addPaper({ title: "Paper Tool IDs", abstract: "A" })
+    const taskId = addTask("Tool id thread")
+    addAction(taskId, {
+      type: "function_call",
+      content: "Bash()",
+      metadata: {
+        toolId: "tooluse_old",
+        functionName: "Bash",
+        params: { command: "pwd" },
+      },
+    })
+    addAction(taskId, {
+      type: "function_call",
+      content: "Bash()",
+      metadata: {
+        toolId: "tooluse_new",
+        functionName: "Bash",
+        params: { command: "git branch --show-current" },
+      },
+    })
+
+    const attached = attachResultToLatestFunctionCall(taskId, "Bash", "test/milestone-v1.2", "tooluse_old")
+    const task = useStudioStore.getState().tasks.find((item) => item.id === taskId)
+
+    expect(attached).toBe(true)
+    expect(task?.actions[0].metadata?.result).toBe("test/milestone-v1.2")
+    expect(task?.actions[1].metadata?.result).toBeUndefined()
+  })
+
   it("preserves the previous paper's active thread when adding a new paper", () => {
     const { addPaper, addTask, selectPaper } = useStudioStore.getState()
 
