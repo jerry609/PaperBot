@@ -523,10 +523,10 @@ function MarkdownActionBlock({
     return (
         <div
             className={cn(
-                "max-w-[86%] overflow-hidden rounded-[16px] border shadow-[0_1px_0_rgba(255,255,255,0.6)_inset]",
+                "group/markdown max-w-[86%] overflow-hidden rounded-[16px] border shadow-[0_1px_0_rgba(255,255,255,0.6)_inset] transition-colors",
                 tone === "error"
-                    ? "border-rose-200 bg-rose-50"
-                    : "border-slate-200/90 bg-[#f7f8f4]",
+                    ? "border-rose-200 bg-rose-50 hover:border-rose-300 focus-within:border-rose-300"
+                    : "border-slate-200/90 bg-[#f7f8f4] hover:border-slate-300 focus-within:border-slate-300",
             )}
         >
             <div
@@ -548,7 +548,7 @@ function MarkdownActionBlock({
                     variant="ghost"
                     size="sm"
                     className={cn(
-                        "h-5.5 gap-1 rounded-full px-1.5 text-[9px]",
+                        "h-5.5 gap-1 rounded-full px-1.5 text-[9px] opacity-50 transition-opacity hover:opacity-100 focus-visible:opacity-100 group-hover/markdown:opacity-100 group-focus-within/markdown:opacity-100",
                         tone === "error"
                             ? "text-rose-700 hover:bg-rose-100 hover:text-rose-800"
                             : "text-slate-500 hover:bg-white hover:text-slate-700",
@@ -2548,6 +2548,18 @@ export function ReproductionLog({
             .toLowerCase()
         return haystack.includes(slashQuery)
     })
+    const slashCommandGroups = useMemo(
+        () =>
+            (["Claude Code", "Session", "Runtime"] as const)
+                .map((group) => ({
+                    group,
+                    items: filteredSlashCommands
+                        .map((item, index) => ({ item, index }))
+                        .filter(({ item }) => item.group === group),
+                }))
+                .filter((entry) => entry.items.length > 0),
+        [filteredSlashCommands],
+    )
 
     useEffect(() => {
         if (!slashPaletteActive) {
@@ -2968,10 +2980,7 @@ export function ReproductionLog({
                                     onSelect={(e) => syncComposerCursor(e.currentTarget)}
                                     onKeyUp={(e) => syncComposerCursor(e.currentTarget)}
                                     placeholder={composerPlaceholder}
-                                    className={cn(
-                                        "min-h-[88px] resize-none border-0 bg-transparent px-4 py-3 text-[14px] leading-7 text-slate-800 placeholder:text-slate-400 focus-visible:ring-0",
-                                        slashPaletteActive ? "pb-40" : "pb-3",
-                                    )}
+                                    className="min-h-[88px] resize-none border-0 bg-transparent px-4 py-3 text-[14px] leading-7 text-slate-800 placeholder:text-slate-400 focus-visible:ring-0"
                                     onKeyDown={(e) => {
                                         if (slashPaletteActive) {
                                             if (e.key === "ArrowDown" && filteredSlashCommands.length > 0) {
@@ -3024,42 +3033,56 @@ export function ReproductionLog({
                                 />
 
                                 {slashPaletteActive ? (
-                                    <div className="pointer-events-none absolute inset-x-0 bottom-3 z-20 flex px-4">
-                                        <div className="pointer-events-auto max-w-[560px] flex-1 overflow-hidden rounded-2xl border border-slate-200 bg-[#f8faf5] shadow-[0_18px_40px_rgba(15,23,42,0.10)]">
-                                            <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 border-b border-slate-200 bg-[#f0f2ec] px-3 py-2.5">
-                                                <div className="min-w-0">
-                                                    <div className="text-[11px] font-medium text-slate-800">Claude Code commands</div>
-                                                    <div className="mt-0.5 truncate text-[10px] text-slate-500">
-                                                        Slash opens Claude-style chat commands plus safe runtime utilities.
+                                    <div className="px-4 pb-3">
+                                        <div className="max-w-[560px] overflow-hidden rounded-[22px] border border-slate-200 bg-[#f8faf5] shadow-[0_18px_40px_rgba(15,23,42,0.10)]">
+                                            <div className="flex items-start justify-between gap-3 border-b border-slate-200 bg-[#f0f2ec] px-3 py-2.5">
+                                                <div className="min-w-0 flex-1">
+                                                    <div className="flex flex-wrap items-center gap-1.5">
+                                                        <span className="rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                            Slash
+                                                        </span>
+                                                        <span className="text-[9px] uppercase tracking-[0.12em] text-slate-400">
+                                                            {filteredSlashCommands.length} match{filteredSlashCommands.length === 1 ? "" : "es"}
+                                                        </span>
+                                                    </div>
+                                                    <div className="mt-1 text-[11px] font-medium text-slate-800">
+                                                        Claude Code commands
+                                                    </div>
+                                                    <div className="mt-0.5 max-w-[28rem] text-[10px] leading-4 text-slate-500">
+                                                        Insert Claude-style chat commands or managed runtime utilities without leaving the composer.
                                                     </div>
                                                 </div>
-                                                <span className="max-w-[10rem] shrink-0 truncate rounded-full border border-slate-200 bg-white px-2 py-0.5 font-mono text-[10px] text-slate-500">
-                                                    /{slashToken || ""}
-                                                </span>
+                                                <div className="flex shrink-0 flex-col items-end gap-1">
+                                                    <span className="max-w-[10rem] truncate rounded-full border border-slate-200 bg-white px-2 py-0.5 font-mono text-[10px] text-slate-500">
+                                                        /{slashToken || ""}
+                                                    </span>
+                                                    <span className="rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-slate-400">
+                                                        Return
+                                                    </span>
+                                                </div>
                                             </div>
 
                                             <div
                                                 ref={slashPaletteListRef}
-                                                className="max-h-60 overflow-y-auto overscroll-contain"
+                                                role="listbox"
+                                                aria-label="Slash commands"
+                                                className="max-h-56 overflow-y-auto overscroll-y-contain px-1.5 py-1.5 [scrollbar-gutter:stable]"
+                                                onWheelCapture={(event) => event.stopPropagation()}
                                             >
                                                 {filteredSlashCommands.length === 0 ? (
-                                                    <div className="px-3 py-4 text-sm text-slate-500">
+                                                    <div className="px-3 py-4 text-[11px] text-slate-500">
                                                         No matching slash command.
                                                     </div>
                                                 ) : (
-                                                    <div className="space-y-1.5 p-2">
-                                                        {(["Claude Code", "Session", "Runtime"] as const).map((group) => {
-                                                            const groupItems = filteredSlashCommands.filter((item) => item.group === group)
-                                                            if (groupItems.length === 0) return null
-
+                                                    <div className="space-y-2 px-1 py-1">
+                                                        {slashCommandGroups.map(({ group, items }) => {
                                                             return (
                                                                 <div key={group}>
                                                                     <div className="px-2 py-1 text-[9px] font-semibold uppercase tracking-[0.14em] text-slate-400">
                                                                         {group}
                                                                     </div>
                                                                     <div className="space-y-1">
-                                                                        {groupItems.map((item) => {
-                                                                            const globalIndex = filteredSlashCommands.findIndex((entry) => entry.id === item.id)
+                                                                        {items.map(({ item, index: globalIndex }) => {
                                                                             const selected = globalIndex === slashSelectedIndex
                                                                             const ItemIcon = item.icon
 
@@ -3067,10 +3090,12 @@ export function ReproductionLog({
                                                                                 <button
                                                                                     key={item.id}
                                                                                     type="button"
+                                                                                    role="option"
+                                                                                    aria-selected={selected}
                                                                                     data-slash-index={globalIndex}
                                                                                     data-selected={selected ? "true" : "false"}
                                                                                     className={cn(
-                                                                                        "flex w-full items-center gap-2.5 rounded-xl border px-2.5 py-2 text-left transition-colors",
+                                                                                        "flex w-full items-start gap-2.5 rounded-[16px] border px-2.5 py-2 text-left transition-[border-color,background-color,box-shadow]",
                                                                                         selected
                                                                                             ? "border-slate-300 bg-[#edf0e7] shadow-[inset_0_0_0_1px_rgba(148,163,184,0.15)]"
                                                                                             : "border-transparent bg-transparent hover:border-slate-200 hover:bg-[#eef1ea]",
@@ -3078,15 +3103,15 @@ export function ReproductionLog({
                                                                                     onMouseEnter={() => setSlashSelectedIndex(globalIndex)}
                                                                                     onMouseDown={(event) => {
                                                                                         event.preventDefault()
-                                                                                        handleApplySlashCommand(item)
                                                                                     }}
+                                                                                    onClick={() => handleApplySlashCommand(item)}
                                                                                 >
-                                                                                    <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white">
+                                                                                    <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white">
                                                                                         <ItemIcon className="h-3 w-3 text-slate-500" />
                                                                                     </div>
                                                                                     <div className="min-w-0 flex-1">
-                                                                                        <div className="flex items-center gap-2">
-                                                                                            <span className="font-mono text-[10px] text-slate-900">
+                                                                                        <div className="flex flex-wrap items-center gap-1.5">
+                                                                                            <span className="font-mono text-[10px] font-medium text-slate-900">
                                                                                                 /{item.command}
                                                                                             </span>
                                                                                             <span className="truncate text-[10px] text-slate-500">
@@ -3098,8 +3123,8 @@ export function ReproductionLog({
                                                                                         </div>
                                                                                     </div>
                                                                                     {selected ? (
-                                                                                        <span className="shrink-0 rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-slate-500">
-                                                                                            enter
+                                                                                        <span className="mt-0.5 shrink-0 rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-slate-500">
+                                                                                            return
                                                                                         </span>
                                                                                     ) : null}
                                                                                 </button>
@@ -3112,10 +3137,16 @@ export function ReproductionLog({
                                                     </div>
                                                 )}
                                             </div>
-                                            <div className="flex items-center justify-between gap-3 border-t border-slate-200 bg-[#f2f4ef] px-3 py-2 text-[9px] uppercase tracking-[0.12em] text-slate-400">
-                                                <span>↑↓ navigate</span>
-                                                <span>Enter/Tab select</span>
-                                                <span>Esc close</span>
+                                            <div className="flex flex-wrap items-center gap-1.5 border-t border-slate-200 bg-[#f2f4ef] px-3 py-2">
+                                                <span className="rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-slate-400">
+                                                    ↑↓ move
+                                                </span>
+                                                <span className="rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-slate-400">
+                                                    Enter or Tab select
+                                                </span>
+                                                <span className="rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-slate-400">
+                                                    Esc close
+                                                </span>
                                             </div>
                                         </div>
                                     </div>
@@ -3132,7 +3163,12 @@ export function ReproductionLog({
                                                 type="button"
                                                 variant="ghost"
                                                 size="icon"
-                                                className="h-8 w-8 rounded-full border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                                                className={cn(
+                                                    "h-8 w-8 rounded-full border text-slate-600",
+                                                    slashPaletteActive
+                                                        ? "border-slate-300 bg-[#eef1ea] text-slate-900"
+                                                        : "border-slate-200 bg-white hover:bg-slate-50",
+                                                )}
                                                 onClick={handleInsertSlashCommand}
                                             >
                                                 <span className="font-mono text-[13px] leading-none">/</span>
