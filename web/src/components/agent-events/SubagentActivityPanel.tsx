@@ -3,8 +3,9 @@
 import { useMemo, useState } from "react"
 import {
   ArrowLeft,
+  ArrowUpRight,
   Ban,
-  Copy,
+  Command,
   Cpu,
   FileCheck2,
   FileCode2,
@@ -12,6 +13,7 @@ import {
   MessageSquareText,
   PauseCircle,
   PlayCircle,
+  ShieldCheck,
   Terminal,
   TriangleAlert,
 } from "lucide-react"
@@ -170,6 +172,29 @@ function workerControlStateLabel(
   if (displayStatus === "failed") return "Failed in parent session"
   if (displayStatus === "queued") return "Queued in parent session"
   return "Running in parent session"
+}
+
+function controlCardClassName(controlMode: SubagentActivityGroup["controlMode"]): string {
+  return controlMode === "managed"
+    ? "border-emerald-200 bg-[linear-gradient(180deg,#fcfdf9_0%,#f3f7ef_100%)]"
+    : "border-slate-200 bg-[linear-gradient(180deg,#ffffff_0%,#f2f5f8_100%)]"
+}
+
+function controlStateClassName(
+  controlMode: SubagentActivityGroup["controlMode"],
+  displayStatus: WorkerDisplayStatus,
+  relatedThread: RelatedWorkerThread | null,
+): string {
+  if (controlMode === "mirrored" && relatedThread?.pendingApproval) {
+    return "border-amber-200 bg-amber-50 text-amber-800"
+  }
+  if (displayStatus === "failed") return "border-rose-200 bg-rose-50 text-rose-700"
+  if (displayStatus === "completed") return "border-emerald-200 bg-emerald-50 text-emerald-700"
+  if (displayStatus === "paused") return "border-amber-200 bg-amber-50 text-amber-700"
+  if (displayStatus === "cancelled") return "border-slate-200 bg-slate-100 text-slate-600"
+  return controlMode === "managed"
+    ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+    : "border-sky-200 bg-sky-50 text-sky-700"
 }
 
 function statusAppearance(status: WorkerDisplayStatus) {
@@ -431,6 +456,8 @@ function WorkerDetail({
   const controlState = workerControlStateLabel(group.controlMode, displayStatus, relatedThread)
   const controlSummary = workerControlSummary(group.controlMode, displayStatus, relatedThread)
   const relatedThreadButtonLabel = relatedThread?.pendingApproval ? "Open Approval" : "Open Parent Thread"
+  const controlCardTone = controlCardClassName(group.controlMode)
+  const controlStateTone = controlStateClassName(group.controlMode, displayStatus, relatedThread)
 
   async function performControl(action: "pause" | "resume" | "cancel") {
     if (!isManaged || !group.sessionId) return
@@ -530,42 +557,61 @@ function WorkerDetail({
           </div>
         </div>
 
-        <div className="mt-3 rounded-[22px] border border-slate-200 bg-white px-3 py-3">
+        <div className={`mt-3 rounded-[24px] border px-3 py-3 shadow-[0_1px_0_rgba(255,255,255,0.7)_inset] ${controlCardTone}`}>
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">
-                Control
+                Session Control
               </div>
-              <div className="mt-1 text-[12px] font-semibold text-slate-900">{controlOwner}</div>
+              <div className="mt-1 flex items-center gap-2">
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-2xl border border-slate-200 bg-white/80">
+                  <ShieldCheck className={`h-4 w-4 ${group.controlMode === "managed" ? "text-emerald-700" : "text-slate-700"}`} />
+                </div>
+                <div className="min-w-0">
+                  <div className="text-[12px] font-semibold text-slate-900">{controlOwner}</div>
+                  <div className="text-[11px] text-slate-500">
+                    {group.controlMode === "managed" ? "Controls execute directly from Studio." : "Actions route back to the parent Claude session."}
+                  </div>
+                </div>
+              </div>
               <p className="mt-1 text-[11px] leading-4 text-slate-500">{controlSummary}</p>
             </div>
-            <WorkerChip label={controlModeChipLabel(group.controlMode)} />
+            <div className="flex flex-col items-end gap-1.5">
+              <span className={`rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.12em] ${controlStateTone}`}>
+                {controlState}
+              </span>
+              <WorkerChip label={controlModeChipLabel(group.controlMode)} />
+            </div>
           </div>
 
           <div className="mt-3 grid grid-cols-2 gap-2 text-[11px] text-zinc-500">
-            <div className="rounded-2xl border border-slate-200 bg-[#f7f8f4] px-2.5 py-2">
-              <div className="text-[10px] uppercase tracking-[0.12em] text-slate-400">Current state</div>
-              <div className="mt-1 text-[11px] font-medium text-slate-700">{controlState}</div>
-            </div>
-            <div className="rounded-2xl border border-slate-200 bg-[#f7f8f4] px-2.5 py-2">
+            <div className="rounded-2xl border border-white/80 bg-white/80 px-2.5 py-2">
               <div className="text-[10px] uppercase tracking-[0.12em] text-slate-400">Control owner</div>
               <div className="mt-1 text-[11px] font-medium text-slate-700">{controlOwner}</div>
             </div>
+            <div className="rounded-2xl border border-white/80 bg-white/80 px-2.5 py-2">
+              <div className="text-[10px] uppercase tracking-[0.12em] text-slate-400">{controlSessionLabel(group.controlMode)}</div>
+              <div className="mt-1 font-mono text-[11px] text-slate-700">{group.sessionId || "Unavailable"}</div>
+            </div>
             {approvalRequest?.workerAgentId ? (
-              <div className="rounded-2xl border border-slate-200 bg-[#f7f8f4] px-2.5 py-2">
+              <div className="rounded-2xl border border-white/80 bg-white/80 px-2.5 py-2">
                 <div className="text-[10px] uppercase tracking-[0.12em] text-slate-400">Worker agent</div>
                 <div className="mt-1 font-mono text-[11px] text-slate-700">{approvalRequest.workerAgentId}</div>
               </div>
             ) : null}
             {controlResumeCommand ? (
-              <div className="rounded-2xl border border-slate-200 bg-[#f7f8f4] px-2.5 py-2">
+              <div className="rounded-2xl border border-white/80 bg-white/80 px-2.5 py-2">
                 <div className="text-[10px] uppercase tracking-[0.12em] text-slate-400">Resume command</div>
                 <div className="mt-1 font-mono text-[11px] text-slate-700">{controlResumeCommand}</div>
               </div>
             ) : null}
           </div>
 
-          <div className="mt-3 flex flex-wrap items-center gap-2">
+          <div className="mt-3 rounded-2xl border border-white/80 bg-white/80 px-2.5 py-2.5">
+            <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+              Available actions
+            </div>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
             {isManaged ? (
               <>
                 {displayStatus === "paused" ? (
@@ -616,6 +662,7 @@ function WorkerDetail({
                     className="h-8 rounded-full bg-slate-900 px-3 text-[11px] text-white hover:bg-slate-800"
                     onClick={onOpenRelatedThread}
                   >
+                    <ArrowUpRight className="mr-1.5 h-3.5 w-3.5" />
                     {relatedThreadButtonLabel}
                   </Button>
                 ) : null}
@@ -627,12 +674,18 @@ function WorkerDetail({
                     className="h-8 rounded-full border-slate-200 px-3 text-[11px] text-slate-700"
                     onClick={() => void copyResumeCommand()}
                   >
-                    <Copy className="mr-1.5 h-3.5 w-3.5" />
+                    <Command className="mr-1.5 h-3.5 w-3.5" />
                     {resumeCopied ? "Copied" : "Copy Resume Command"}
                   </Button>
                 ) : null}
+                {!relatedThread && controlResumeCommand ? (
+                  <span className="text-[11px] text-slate-500">
+                    Resume this worker from Claude CLI if the parent thread is not linked here.
+                  </span>
+                ) : null}
               </>
             )}
+            </div>
           </div>
 
           {group.controlMode === "mirrored" && !relatedThread && !controlResumeCommand ? (
@@ -651,7 +704,7 @@ function WorkerDetail({
 
         <div className="mt-3 rounded-[22px] border border-slate-200 bg-white px-3 py-3">
           <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">
-            Enter Worker Monitor
+            Inspect in Monitor
           </div>
           <div className="mt-2 flex flex-wrap gap-2">
             <Button
