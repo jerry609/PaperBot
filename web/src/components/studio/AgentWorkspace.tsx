@@ -452,15 +452,18 @@ function RightInspector({
             {runtimeInfo.workspaceLabel} · {subagentEvents} worker runs · {fileCount} files touched
           </p>
 
-          {activeView === "agents" && selectedWorkerTitle ? (
+          {selectedWorkerTitle ? (
             <div className="mt-3 flex items-center justify-between gap-2 rounded-2xl border border-slate-200 bg-[#f7f8f4] px-3 py-2">
               <div className="min-w-0">
                 <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">
-                  Inspecting Worker
+                  Focused Worker
                 </div>
                 <div className="truncate text-[12px] font-medium text-slate-800">
                   {selectedWorkerLabel ? `${selectedWorkerLabel} · ` : ""}
                   {selectedWorkerTitle}
+                </div>
+                <div className="mt-1 text-[11px] text-slate-500">
+                  Live, tools, files, and graph stay scoped to this worker until you clear focus.
                 </div>
               </div>
               <Button

@@ -19,7 +19,7 @@ import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { backendUrl } from "@/lib/backend-url"
 import { getAgentPresentation } from "@/lib/agent-runtime"
-import { useAgentEventStore } from "@/lib/agent-events/store"
+import { useAgentEventStore, type AgentInspectorView } from "@/lib/agent-events/store"
 import {
   buildSubagentActivityGroups,
   type SubagentActivityGroup,
@@ -31,6 +31,11 @@ import {
   findRelatedWorkerThread,
   type RelatedWorkerThread,
 } from "@/lib/studio-worker-links"
+import {
+  activityFeedItemMatchesWorker,
+  fileTouchedMatchesWorker,
+  toolCallMatchesWorker,
+} from "@/lib/agent-events/worker-focus"
 
 type WorkerDisplayStatus = SubagentActivityGroup["status"] | "paused" | "cancelled"
 
@@ -330,6 +335,7 @@ function WorkerDetail({
   boardSessionId,
   relatedThread,
   onOpenRelatedThread,
+  onOpenInspectorView,
   transcript,
   tools,
   files,
@@ -342,6 +348,7 @@ function WorkerDetail({
   boardSessionId: string | null
   relatedThread: RelatedWorkerThread | null
   onOpenRelatedThread: () => void
+  onOpenInspectorView: (view: AgentInspectorView) => void
   transcript: ActivityFeedItem[]
   tools: ToolCallEntry[]
   files: FileTouchedEntry[]
@@ -443,6 +450,50 @@ function WorkerDetail({
           {isManaged
             ? "This worker run belongs to a managed PaperBot session. Controls below act on the whole managed session."
             : "This worker run is mirrored from Claude Code. You can inspect it, but Studio cannot interrupt it yet."}
+        </div>
+
+        <div className="mt-3 rounded-[22px] border border-slate-200 bg-white px-3 py-3">
+          <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+            Enter Worker Monitor
+          </div>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-8 rounded-full border-slate-200 px-3 text-[11px] text-slate-700"
+              onClick={() => onOpenInspectorView("live")}
+            >
+              Live Feed
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-8 rounded-full border-slate-200 px-3 text-[11px] text-slate-700"
+              onClick={() => onOpenInspectorView("tools")}
+            >
+              Tools
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-8 rounded-full border-slate-200 px-3 text-[11px] text-slate-700"
+              onClick={() => onOpenInspectorView("files")}
+            >
+              Files
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-8 rounded-full border-slate-200 px-3 text-[11px] text-slate-700"
+              onClick={() => onOpenInspectorView("graph")}
+            >
+              Graph
+            </Button>
+          </div>
         </div>
 
         {isManaged ? (
@@ -652,6 +703,7 @@ export function SubagentActivityPanel() {
   const filesTouched = useAgentEventStore((state) => state.filesTouched)
   const selectedWorkerRunId = useAgentEventStore((state) => state.selectedWorkerRunId)
   const setSelectedWorkerRunId = useAgentEventStore((state) => state.setSelectedWorkerRunId)
+  const setInspectorView = useAgentEventStore((state) => state.setInspectorView)
   const requestWorkspaceSurface = useAgentEventStore((state) => state.requestWorkspaceSurface)
   const chatTasks = useStudioStore((state) => state.tasks)
   const selectedPaperId = useStudioStore((state) => state.selectedPaperId)
@@ -704,21 +756,21 @@ export function SubagentActivityPanel() {
   const selectedTranscript = useMemo(() => {
     if (!selectedGroup) return []
     return [...feed]
-      .filter((item) => item.agent_name === selectedGroup.assignee)
+      .filter((item) => activityFeedItemMatchesWorker(item, selectedGroup))
       .filter((item) => item.type !== "tool_call" && item.type !== "tool_result" && item.type !== "tool_error" && item.type !== "file_change")
       .reverse()
   }, [feed, selectedGroup])
 
   const selectedTools = useMemo(() => {
     if (!selectedGroup) return []
-    return toolCalls.filter((entry) => entry.agent_name === selectedGroup.assignee)
+    return toolCalls.filter((entry) => toolCallMatchesWorker(entry, selectedGroup))
   }, [selectedGroup, toolCalls])
 
   const selectedFiles = useMemo(() => {
     if (!selectedGroup) return []
     return Object.values(filesTouched)
       .flat()
-      .filter((entry) => entry.agent_name === selectedGroup.assignee)
+      .filter((entry) => fileTouchedMatchesWorker(entry, selectedGroup))
       .sort((left, right) => right.ts.localeCompare(left.ts))
   }, [filesTouched, selectedGroup])
 
@@ -749,6 +801,7 @@ export function SubagentActivityPanel() {
         boardSessionId={boardSessionId}
         relatedThread={relatedThread}
         onOpenRelatedThread={openRelatedThread}
+        onOpenInspectorView={setInspectorView}
         transcript={selectedTranscript}
         tools={selectedTools}
         files={selectedFiles}

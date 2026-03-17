@@ -1,8 +1,11 @@
 "use client"
 
+import { useMemo } from "react"
+
 import { getAgentPresentation } from "@/lib/agent-runtime"
 import { useAgentEventStore } from "@/lib/agent-events/store"
 import type { ToolCallEntry } from "@/lib/agent-events/types"
+import { resolveSelectedWorkerGroup, toolCallMatchesWorker } from "@/lib/agent-events/worker-focus"
 
 function formatDuration(ms: number): string {
   if (ms === 0) return "—"
@@ -81,26 +84,44 @@ function ToolCallRow({ entry }: { entry: ToolCallEntry }) {
 
 export function ToolCallTimeline() {
   const toolCalls = useAgentEventStore((s) => s.toolCalls)
+  const selectedWorkerRunId = useAgentEventStore((s) => s.selectedWorkerRunId)
+  const codexDelegations = useAgentEventStore((s) => s.codexDelegations)
+  const selectedWorkerGroup = useMemo(
+    () => resolveSelectedWorkerGroup(selectedWorkerRunId, codexDelegations, toolCalls),
+    [codexDelegations, selectedWorkerRunId, toolCalls],
+  )
+  const visibleToolCalls = useMemo(
+    () =>
+      selectedWorkerGroup
+        ? toolCalls.filter((entry) => toolCallMatchesWorker(entry, selectedWorkerGroup))
+        : toolCalls,
+    [selectedWorkerGroup, toolCalls],
+  )
+  const focusedPresentation = selectedWorkerGroup
+    ? getAgentPresentation(selectedWorkerGroup.assignee)
+    : null
 
   return (
     <div className="flex h-full flex-col bg-[#f5f5f3]">
       <div className="border-b border-zinc-200 px-3 py-2.5">
         <div className="flex items-center justify-between gap-2">
           <h3 className="text-sm font-semibold text-zinc-900">Tool Calls</h3>
-          <span className="text-xs text-zinc-500">{toolCalls.length} calls</span>
+          <span className="text-xs text-zinc-500">{visibleToolCalls.length} calls</span>
         </div>
         <p className="mt-1 text-[11px] text-zinc-500">
-          Full tool detail stays here, including worker-side Bash, Read, and file operations.
+          {selectedWorkerGroup
+            ? `Focused on ${focusedPresentation?.label ?? "worker"} · showing tool calls for ${selectedWorkerGroup.taskTitle || "this run"}.`
+            : "Full tool detail stays here, including worker-side Bash, Read, and file operations."}
         </p>
       </div>
-      {toolCalls.length === 0 ? (
+      {visibleToolCalls.length === 0 ? (
         <div className="flex h-20 items-center justify-center text-sm text-zinc-500">
-          No tool calls yet
+          {selectedWorkerGroup ? "No tool calls were captured for this worker" : "No tool calls yet"}
         </div>
       ) : (
         <div className="flex-1 overflow-y-auto">
           <ul className="px-3 py-1">
-            {toolCalls.map((entry) => (
+            {visibleToolCalls.map((entry) => (
               <ToolCallRow key={entry.id} entry={entry} />
             ))}
           </ul>

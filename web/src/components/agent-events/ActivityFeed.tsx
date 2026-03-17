@@ -1,9 +1,12 @@
 "use client"
 
+import { useMemo } from "react"
+
 import * as ScrollArea from "@radix-ui/react-scroll-area"
 import { useAgentEventStore } from "@/lib/agent-events/store"
 import type { ActivityFeedItem } from "@/lib/agent-events/types"
 import { getAgentPresentation } from "@/lib/agent-runtime"
+import { resolveSelectedWorkerGroup, activityFeedItemMatchesWorker } from "@/lib/agent-events/worker-focus"
 
 const HIDDEN_LIVE_EVENT_TYPES = new Set(["tool_call", "tool_result", "tool_error", "file_change"])
 
@@ -83,7 +86,22 @@ function ActivityFeedRow({
 export function ActivityFeed() {
   const feed = useAgentEventStore((s) => s.feed)
   const openWorkerRun = useAgentEventStore((s) => s.openWorkerRun)
-  const visibleFeed = feed.filter((item) => !HIDDEN_LIVE_EVENT_TYPES.has(item.type))
+  const selectedWorkerRunId = useAgentEventStore((s) => s.selectedWorkerRunId)
+  const codexDelegations = useAgentEventStore((s) => s.codexDelegations)
+  const toolCalls = useAgentEventStore((s) => s.toolCalls)
+  const selectedWorkerGroup = useMemo(
+    () => resolveSelectedWorkerGroup(selectedWorkerRunId, codexDelegations, toolCalls),
+    [codexDelegations, selectedWorkerRunId, toolCalls],
+  )
+  const visibleFeed = useMemo(() => {
+    const baseFeed = feed.filter((item) => !HIDDEN_LIVE_EVENT_TYPES.has(item.type))
+    return selectedWorkerGroup
+      ? baseFeed.filter((item) => activityFeedItemMatchesWorker(item, selectedWorkerGroup))
+      : baseFeed
+  }, [feed, selectedWorkerGroup])
+  const focusedPresentation = selectedWorkerGroup
+    ? getAgentPresentation(selectedWorkerGroup.assignee)
+    : null
 
   return (
     <div className="flex h-full flex-col bg-[#f5f5f3]">
@@ -93,14 +111,16 @@ export function ActivityFeed() {
           <span className="text-xs text-zinc-500">{visibleFeed.length} events</span>
         </div>
         <p className="mt-1 text-[11px] text-zinc-500">
-          High-level lifecycle and delegation updates. Tool and file detail live in their own tabs.
+          {selectedWorkerGroup
+            ? `Focused on ${focusedPresentation?.label ?? "worker"} · showing lifecycle and delegation updates for ${selectedWorkerGroup.taskTitle || "this run"}.`
+            : "High-level lifecycle and delegation updates. Tool and file detail live in their own tabs."}
         </p>
       </div>
       <ScrollArea.Root className="flex-1 overflow-hidden">
         <ScrollArea.Viewport className="h-full w-full">
           {visibleFeed.length === 0 ? (
             <div className="flex h-20 items-center justify-center text-sm text-zinc-500">
-              No high-level events yet
+              {selectedWorkerGroup ? "No live events captured for this worker yet" : "No high-level events yet"}
             </div>
           ) : (
             <ul className="px-2 py-1">

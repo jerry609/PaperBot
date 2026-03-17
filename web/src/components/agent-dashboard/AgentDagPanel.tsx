@@ -13,9 +13,12 @@ import { useAgentEventStore } from "@/lib/agent-events/store"
 import { useStudioStore } from "@/lib/store/studio-store"
 import { buildDagNodes, buildDagEdges, taskStatusToDagStyle } from "@/lib/agent-events/dag"
 import { buildSubagentActivityGroups } from "@/lib/agent-events/subagent-groups"
+import { resolveSelectedWorkerGroup } from "@/lib/agent-events/worker-focus"
 import { Handle, Position } from "@xyflow/react"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import type { AgentTask } from "@/lib/store/studio-store"
+import { getAgentPresentation } from "@/lib/agent-runtime"
 
 /* ── TaskDagNode ── */
 
@@ -26,6 +29,8 @@ function TaskDagNode({
     task: AgentTask
     workerRunId?: string | null
     onOpenWorker?: ((workerRunId: string) => void) | null
+    isFocused?: boolean
+    isDimmed?: boolean
   }
 }) {
   const { task } = data
@@ -41,9 +46,9 @@ function TaskDagNode({
         }
       }}
       disabled={!interactive}
-      className={`rounded-lg border-2 px-3 py-2 min-w-[160px] max-w-[220px] text-left ${style} ${
+      className={`min-w-[160px] max-w-[220px] rounded-lg border-2 px-3 py-2 text-left ${style} ${
         interactive ? "cursor-pointer transition-shadow hover:shadow-md" : "cursor-default"
-      }`}
+      } ${data.isFocused ? "ring-2 ring-slate-900 ring-offset-2" : ""} ${data.isDimmed ? "opacity-45" : ""}`}
       title={interactive ? "Open worker details" : task.title}
     >
       <Handle type="target" position={Position.Left} className="!bg-slate-400" />
@@ -60,7 +65,7 @@ function TaskDagNode({
       </div>
       {interactive ? (
         <div className="mt-1.5 text-[10px] text-muted-foreground">
-          Open worker detail
+          {data.isFocused ? "Focused worker" : "Open worker detail"}
         </div>
       ) : null}
       <Handle type="source" position={Position.Right} className="!bg-slate-400" />
@@ -80,12 +85,25 @@ export function AgentDagPanel() {
   const codexDelegations = useAgentEventStore((s) => s.codexDelegations)
   const toolCalls = useAgentEventStore((s) => s.toolCalls)
   const openWorkerRun = useAgentEventStore((s) => s.openWorkerRun)
+  const selectedWorkerRunId = useAgentEventStore((s) => s.selectedWorkerRunId)
+  const setSelectedWorkerRunId = useAgentEventStore((s) => s.setSelectedWorkerRunId)
 
   const tasks = studioTasks.length > 0 ? studioTasks : eventKanbanTasks
+  const workerGroups = useMemo(
+    () => buildSubagentActivityGroups(codexDelegations, toolCalls),
+    [codexDelegations, toolCalls],
+  )
   const workerRunIdByTaskId = useMemo(() => {
-    const groups = buildSubagentActivityGroups(codexDelegations, toolCalls)
-    return new Map(groups.map((group) => [group.taskId, group.workerRunId]))
-  }, [codexDelegations, toolCalls])
+    return new Map(workerGroups.map((group) => [group.taskId, group.workerRunId]))
+  }, [workerGroups])
+  const selectedWorkerGroup = useMemo(
+    () => resolveSelectedWorkerGroup(selectedWorkerRunId, codexDelegations, toolCalls),
+    [codexDelegations, selectedWorkerRunId, toolCalls],
+  )
+  const focusedTaskId = selectedWorkerGroup?.taskId ?? null
+  const focusedPresentation = selectedWorkerGroup
+    ? getAgentPresentation(selectedWorkerGroup.assignee)
+    : null
 
   const nodes: Node[] = useMemo(
     () =>
@@ -97,10 +115,12 @@ export function AgentDagPanel() {
             task,
             workerRunId: workerRunIdByTaskId.get(task.id) ?? null,
             onOpenWorker: openWorkerRun,
+            isFocused: focusedTaskId === task.id,
+            isDimmed: Boolean(focusedTaskId) && focusedTaskId !== task.id,
           },
         }
       }),
-    [tasks, workerRunIdByTaskId, openWorkerRun],
+    [tasks, workerRunIdByTaskId, openWorkerRun, focusedTaskId],
   )
   const edges: Edge[] = useMemo(() => buildDagEdges(tasks, scoreEdges), [tasks, scoreEdges])
 
@@ -113,7 +133,29 @@ export function AgentDagPanel() {
   }
 
   return (
-    <div className="h-full w-full" data-testid="agent-dag-panel">
+    <div className="relative h-full w-full" data-testid="agent-dag-panel">
+      {selectedWorkerGroup ? (
+        <div className="absolute left-3 top-3 z-10 flex max-w-[340px] items-center justify-between gap-2 rounded-2xl border border-slate-200 bg-white/95 px-3 py-2 shadow-sm backdrop-blur">
+          <div className="min-w-0">
+            <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+              Focused worker
+            </div>
+            <div className="truncate text-[12px] font-medium text-slate-800">
+              {focusedPresentation?.label ? `${focusedPresentation.label} · ` : ""}
+              {selectedWorkerGroup.taskTitle || "Untitled task"}
+            </div>
+          </div>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-7 rounded-full px-2 text-[11px] text-slate-600"
+            onClick={() => setSelectedWorkerRunId(null)}
+          >
+            Clear
+          </Button>
+        </div>
+      ) : null}
       <ReactFlow
         nodes={nodes}
         edges={edges}
