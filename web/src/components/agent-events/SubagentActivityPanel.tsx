@@ -6,6 +6,7 @@ import {
   ArrowLeft,
   ArrowUpRight,
   Ban,
+  ChevronRight,
   Command,
   Cpu,
   FileCheck2,
@@ -269,6 +270,18 @@ function summarizeToolDetail(entry: ToolCallEntry): string {
   return "No summary"
 }
 
+function formatRecentToolStrip(entries: ToolCallEntry[]): string {
+  if (entries.length === 0) return "No nested tool activity"
+
+  const labels = entries
+    .slice(0, 3)
+    .map((entry) => entry.tool.trim())
+    .filter((value) => value.length > 0)
+
+  const unique = Array.from(new Set(labels))
+  return unique.join(" · ")
+}
+
 function WorkerChip({ label }: { label: string }) {
   return (
     <span className="rounded-full border border-slate-200 bg-[#f7f8f4] px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-slate-500">
@@ -373,78 +386,65 @@ function WorkerListCard({
   const StatusIcon = appearance.icon
   const fileCount = group.filesGenerated.length
   const duration = formatDuration(group.startedAt, group.finishedAt)
+  const recentToolStrip = formatRecentToolStrip(group.recentTools)
 
   return (
-    <li className="rounded-[22px] border border-slate-200 bg-white px-3 py-3 shadow-[0_1px_0_rgba(255,255,255,0.75)_inset]">
-      <div className="flex items-start gap-3">
-        <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-2xl border border-slate-200 bg-[#f5f6f1]">
+    <li>
+      <button
+        type="button"
+        onClick={onOpen}
+        className="flex w-full items-start gap-3 rounded-[20px] border border-slate-200 bg-white px-3 py-2.5 text-left shadow-[0_1px_0_rgba(255,255,255,0.75)_inset] transition-colors hover:border-slate-300 hover:bg-[#fbfcf8]"
+      >
+        <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl border border-slate-200 bg-[#f5f6f1]">
           <StatusIcon className={`h-4 w-4 ${appearance.iconClass} ${group.status === "running" ? "animate-spin" : ""}`} />
         </div>
 
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="truncate text-sm font-semibold text-slate-900">{presentation.label}</span>
+            <span className="truncate text-[12px] font-semibold text-slate-900">{presentation.label}</span>
             <span className={`rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.12em] ${appearance.chipClass}`}>
               {appearance.label}
             </span>
-            <span className="text-[11px] text-slate-400">{formatTimestamp(group.updatedAt)}</span>
+            <span className="rounded-full border border-slate-200 bg-[#f7f8f4] px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-slate-500">
+              {controlModeChipLabel(group.controlMode)}
+            </span>
+            <span className="text-[10px] text-slate-400">{formatTimestamp(group.updatedAt)}</span>
           </div>
 
-          <p className="mt-1 text-[12px] font-medium text-slate-700" title={group.taskTitle}>
+          <p className="mt-1 truncate text-[12px] font-medium text-slate-700" title={group.taskTitle}>
             {group.taskTitle || "Untitled task"}
           </p>
 
-          <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[10px] uppercase tracking-[0.12em] text-slate-500">
+          <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[10px] uppercase tracking-[0.12em] text-slate-500">
             <WorkerChip label={humanizeRuntime(group.runtime)} />
-            <WorkerChip label={controlModeChipLabel(group.controlMode)} />
             <WorkerChip label={`${group.toolCount} tools`} />
             {fileCount > 0 ? <WorkerChip label={`${fileCount} files`} /> : null}
             {duration ? <WorkerChip label={duration} /> : null}
           </div>
 
-          {group.recentTools.length > 0 ? (
-            <div className="mt-2 rounded-2xl border border-slate-200 bg-[#f8faf6] px-2.5 py-2">
-              <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-                <Terminal className="h-3 w-3" />
-                Recent tools
-              </div>
-              <div className="space-y-1.5">
-                {group.recentTools.map((tool) => (
-                  <WorkerToolRow key={tool.id} entry={tool} dotClass={appearance.dotClass} />
-                ))}
-              </div>
-            </div>
-          ) : (
-            <div className="mt-2 rounded-2xl border border-dashed border-slate-200 bg-[#fafaf8] px-2.5 py-2 text-[11px] text-slate-500">
-              {group.status === "queued"
-                ? "Waiting for the first worker action."
-                : "No nested worker tool activity was captured for this run."}
-            </div>
-          )}
+          <div className="mt-1.5 flex items-center gap-2 text-[11px] text-slate-500">
+            <Terminal className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+            <span className="truncate">
+              {group.status === "queued" ? "Waiting for the first worker action." : recentToolStrip}
+            </span>
+          </div>
 
           {group.error ? (
-            <div className="mt-2 rounded-2xl border border-rose-200 bg-rose-50 px-2.5 py-2 text-[11px] leading-4 text-rose-700">
-              {truncate(group.error, 220)}
+            <div className="mt-1.5 rounded-xl border border-rose-200 bg-rose-50 px-2 py-1.5 text-[11px] leading-4 text-rose-700">
+              {truncate(group.error, 180)}
               {group.reasonCode ? ` (${group.reasonCode})` : ""}
             </div>
           ) : null}
 
-          <div className="mt-3 flex items-center justify-between gap-2">
-            <div className="min-w-0 text-[11px] text-slate-400">
-              <span className="font-mono">{group.workerRunId}</span>
-            </div>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-8 rounded-full border-slate-200 px-3 text-[11px] text-slate-700"
-              onClick={onOpen}
-            >
+          <div className="mt-2 flex items-center justify-between gap-2 text-[10px] text-slate-400">
+            <span className="truncate font-mono">{group.workerRunId}</span>
+            <span className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-600">
               Open
-            </Button>
+              <ChevronRight className="h-3.5 w-3.5" />
+            </span>
           </div>
         </div>
-      </div>
+      </button>
     </li>
   )
 }
