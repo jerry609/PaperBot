@@ -154,6 +154,14 @@ function paperStatusClassName(status: StudioPaperStatus): string {
   return "border-zinc-200 bg-zinc-100 text-zinc-600"
 }
 
+function inspectorViewLabel(view: AgentInspectorView): string {
+  if (view === "tools") return "Tools"
+  if (view === "files") return "Files"
+  if (view === "agents") return "Workers"
+  if (view === "graph") return "Graph"
+  return "Live"
+}
+
 function formatWorkspaceLabel(outputDir: string | null | undefined): string {
   if (!outputDir) return "Workspace not configured"
   const segments = outputDir.split("/").filter(Boolean)
@@ -455,30 +463,52 @@ function RightInspector({
           </p>
 
           {selectedWorkerTitle ? (
-            <div className="mt-3 flex items-center justify-between gap-2 rounded-2xl border border-slate-200 bg-[#f7f8f4] px-3 py-2">
-              <div className="min-w-0">
-                <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">
-                  Focused Worker
+            <div
+              className={`mt-3 rounded-[22px] border px-3 py-2.5 ${
+                selectedWorkerControlMode === "managed"
+                  ? "border-emerald-200 bg-[linear-gradient(180deg,#fcfdf9_0%,#f3f7ef_100%)]"
+                  : "border-slate-200 bg-[linear-gradient(180deg,#ffffff_0%,#f2f5f8_100%)]"
+              }`}
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+                    Focused Worker
+                  </div>
+                  <div className="mt-1 truncate text-[12px] font-medium text-slate-800">
+                    {selectedWorkerLabel ? `${selectedWorkerLabel} · ` : ""}
+                    {selectedWorkerTitle}
+                  </div>
+                  <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                    <span
+                      className={`rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.12em] ${
+                        selectedWorkerControlMode === "managed"
+                          ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                          : "border-slate-200 bg-white text-slate-700"
+                      }`}
+                    >
+                      {selectedWorkerControlMode === "managed" ? "Studio-controlled" : "Claude-controlled"}
+                    </span>
+                    <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-slate-500">
+                      {inspectorViewLabel(activeView)} focus
+                    </span>
+                  </div>
+                  <div className="mt-1 text-[11px] text-slate-500">
+                    {selectedWorkerControlMode === "managed"
+                      ? "Monitor stays scoped to this worker and Studio owns the session controls."
+                      : "Monitor stays scoped to this worker while control remains in the parent Claude session."}
+                  </div>
                 </div>
-                <div className="truncate text-[12px] font-medium text-slate-800">
-                  {selectedWorkerLabel ? `${selectedWorkerLabel} · ` : ""}
-                  {selectedWorkerTitle}
-                </div>
-                <div className="mt-1 text-[11px] text-slate-500">
-                  {selectedWorkerControlMode === "managed"
-                    ? "Studio-controlled. Live, tools, files, and graph stay scoped to this worker until you clear focus."
-                    : "Claude-controlled. Continue or interrupt this worker from the parent Claude session; Studio stays in sync here."}
-                </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 rounded-full px-2 text-[11px] text-slate-600"
+                  onClick={onClearWorkerSelection}
+                >
+                  Clear
+                </Button>
               </div>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="h-7 rounded-full px-2 text-[11px] text-slate-600"
-                onClick={onClearWorkerSelection}
-              >
-                Clear
-              </Button>
             </div>
           ) : null}
         </div>

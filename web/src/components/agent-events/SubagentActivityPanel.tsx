@@ -110,6 +110,12 @@ function formatCheckpointLabel(thread: RelatedWorkerThread, action: AgentAction)
   return thread.latestBridgeResult?.summary || "Worker checkpoint"
 }
 
+function checkpointKindLabel(action: AgentAction): string {
+  if (action.type === "approval_request") return "Approval"
+  if (action.type === "function_call") return "Result"
+  return "Update"
+}
+
 function humanizeRuntime(runtime: string): string {
   const normalized = runtime.trim().toLowerCase()
   if (normalized === "codex") return "Codex"
@@ -492,6 +498,7 @@ function WorkerDetail({
   const relatedThreadButtonLabel = relatedThread?.pendingApproval ? "Open Approval" : "Open Parent Thread"
   const controlCardTone = controlCardClassName(group.controlMode)
   const controlStateTone = controlStateClassName(group.controlMode, displayStatus, relatedThread)
+  const relatedThreadSessionId = approvalRequest?.cliSessionId?.trim() || null
 
   async function performControl(action: "pause" | "resume" | "cancel") {
     if (!isManaged || !group.sessionId) return
@@ -774,16 +781,34 @@ function WorkerDetail({
         </div>
 
         {relatedThread ? (
-          <div className="mt-3 rounded-[22px] border border-slate-200 bg-white px-3 py-3">
+          <div
+            className={`mt-3 rounded-[24px] border px-3 py-3 shadow-[0_1px_0_rgba(255,255,255,0.7)_inset] ${
+              relatedThread.pendingApproval
+                ? "border-amber-200 bg-[linear-gradient(180deg,#fffdf8_0%,#f9f2dd_100%)]"
+                : "border-slate-200 bg-[linear-gradient(180deg,#ffffff_0%,#f5f7fa_100%)]"
+            }`}
+          >
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">
-                  {group.controlMode === "managed" ? "Linked Chat Thread" : "Parent Claude Thread"}
+                  {group.controlMode === "managed" ? "Linked Chat Thread" : "Parent Claude Session"}
                 </div>
-                <div className="mt-1 truncate text-[12px] font-semibold text-slate-900">
-                  {relatedThread.task.name}
+                <div className="mt-1 flex items-center gap-2">
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-2xl border border-white/80 bg-white/80">
+                    <MessageSquareText className={`h-4 w-4 ${relatedThread.pendingApproval ? "text-amber-700" : "text-slate-700"}`} />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="truncate text-[12px] font-semibold text-slate-900">
+                      {relatedThread.task.name}
+                    </div>
+                    <div className="text-[11px] text-slate-500">
+                      {group.controlMode === "managed"
+                        ? "Worker status is mirrored back into the linked Studio chat thread."
+                        : "This is the parent Claude session that owns approval and continuation for the mirrored worker."}
+                    </div>
+                  </div>
                 </div>
-                <p className="mt-1 text-[11px] leading-4 text-slate-500">
+                <p className="mt-2 text-[11px] leading-4 text-slate-500">
                   {truncate(buildWorkerThreadPreview(relatedThread.task), 180)}
                 </p>
               </div>
@@ -791,14 +816,19 @@ function WorkerDetail({
                 type="button"
                 variant="outline"
                 size="sm"
-                className="h-8 shrink-0 rounded-full border-slate-200 px-3 text-[11px] text-slate-700"
+                className={`h-8 shrink-0 rounded-full px-3 text-[11px] ${
+                  relatedThread.pendingApproval
+                    ? "border-amber-200 bg-white text-amber-800 hover:bg-amber-50"
+                    : "border-slate-200 bg-white text-slate-700"
+                }`}
                 onClick={onOpenRelatedThread}
               >
+                <ArrowUpRight className="mr-1.5 h-3.5 w-3.5" />
                 {relatedThreadButtonLabel}
               </Button>
             </div>
 
-            <div className="mt-2 flex flex-wrap items-center gap-1.5">
+            <div className="mt-3 flex flex-wrap items-center gap-1.5">
               <WorkerChip label={chatThreadStatusLabel(relatedThread.task.status)} />
               {relatedThread.latestBridgeResult ? (
                 <WorkerChip label={formatBridgeTaskKind(relatedThread.latestBridgeResult.taskKind)} />
@@ -809,8 +839,29 @@ function WorkerDetail({
               {relatedThread.pendingApproval ? <WorkerChip label="approval pending" /> : null}
             </div>
 
+            <div className="mt-3 grid grid-cols-2 gap-2 text-[11px] text-zinc-500">
+              <div className="rounded-2xl border border-white/80 bg-white/80 px-2.5 py-2">
+                <div className="text-[10px] uppercase tracking-[0.12em] text-slate-400">Thread state</div>
+                <div className="mt-1 text-[11px] font-medium text-slate-700">
+                  {chatThreadStatusLabel(relatedThread.task.status)}
+                </div>
+              </div>
+              <div className="rounded-2xl border border-white/80 bg-white/80 px-2.5 py-2">
+                <div className="text-[10px] uppercase tracking-[0.12em] text-slate-400">
+                  {relatedThreadSessionId ? "Resume session" : "Latest checkpoint"}
+                </div>
+                <div className="mt-1 font-mono text-[11px] text-slate-700">
+                  {relatedThreadSessionId || formatTimestamp(
+                    relatedThread.latestMatchedAction.timestamp instanceof Date
+                      ? relatedThread.latestMatchedAction.timestamp.toISOString()
+                      : String(relatedThread.latestMatchedAction.timestamp),
+                  )}
+                </div>
+              </div>
+            </div>
+
             {relatedThread.pendingApproval && relatedThread.latestApprovalAction?.metadata?.approvalRequest?.command ? (
-              <div className="mt-2 rounded-2xl border border-amber-200 bg-amber-50 px-2.5 py-2">
+              <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 px-2.5 py-2">
                 <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-amber-700">
                   Pending command
                 </div>
@@ -821,7 +872,10 @@ function WorkerDetail({
             ) : null}
 
             {relatedThread.latestBridgeResult ? (
-              <div className="mt-2 rounded-2xl border border-slate-200 bg-[#f8faf6] px-2.5 py-2">
+              <div className="mt-3 rounded-2xl border border-white/80 bg-white/80 px-2.5 py-2">
+                <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+                  Latest handoff
+                </div>
                 <div className="text-[11px] leading-4 text-slate-700">
                   {relatedThread.latestBridgeResult.summary}
                 </div>
@@ -836,18 +890,25 @@ function WorkerDetail({
             ) : null}
 
             {relatedThread.matchedActions.length > 1 ? (
-              <div className="mt-2 rounded-2xl border border-slate-200 bg-[#fafaf8] px-2.5 py-2">
+              <div className="mt-3 rounded-2xl border border-white/80 bg-white/80 px-2.5 py-2">
                 <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-                  Thread checkpoints
+                  Session timeline
                 </div>
                 <div className="mt-2 space-y-1.5">
                   {relatedThread.matchedActions.slice(0, 4).map((action) => (
                     <div
                       key={action.id}
-                      className="flex items-start justify-between gap-2 rounded-xl border border-slate-200 bg-white px-2 py-1.5"
+                      className="flex items-start justify-between gap-2 rounded-xl border border-slate-200 bg-[#fcfcfb] px-2 py-1.5"
                     >
-                      <div className="min-w-0 text-[11px] leading-4 text-slate-700">
-                        {formatCheckpointLabel(relatedThread, action)}
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span className="rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-slate-500">
+                            {checkpointKindLabel(action)}
+                          </span>
+                        </div>
+                        <div className="mt-1 text-[11px] leading-4 text-slate-700">
+                          {formatCheckpointLabel(relatedThread, action)}
+                        </div>
                       </div>
                       <div className="shrink-0 text-[10px] text-slate-400">
                         {formatTimestamp(action.timestamp instanceof Date ? action.timestamp.toISOString() : String(action.timestamp))}
@@ -859,7 +920,7 @@ function WorkerDetail({
             ) : null}
 
             {relatedThread.pendingApproval ? (
-              <div className="mt-2 rounded-2xl border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] leading-4 text-amber-800">
+              <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] leading-4 text-amber-800">
                 Approval is pending in the linked Claude chat thread. Open the thread to approve and continue that worker run.
               </div>
             ) : null}
