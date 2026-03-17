@@ -371,6 +371,23 @@ function stringifyToolPayload(payload: unknown): string {
     return typeof payload === "string" ? payload : JSON.stringify(payload, null, 2) || ""
 }
 
+function buildActivityStageBadges(
+    counts: Partial<Record<"read" | "search" | "write" | "command" | "delegation" | "web" | "other", number>>,
+): string[] {
+    const ordered: Array<[keyof typeof counts, string]> = [
+        ["search", "search"],
+        ["read", "read"],
+        ["command", "run"],
+        ["write", "edit"],
+        ["delegation", "delegate"],
+        ["web", "web"],
+    ]
+
+    return ordered
+        .filter(([key]) => (counts[key] ?? 0) > 0)
+        .map(([, label]) => label)
+}
+
 function formatBridgeTaskKind(taskKind: StudioBridgeResult["taskKind"]): string {
     if (taskKind === "approval_required") return "Approval"
     if (taskKind === "code") return "Code"
@@ -709,16 +726,16 @@ function MarkdownActionBlock({
     return (
         <div
             className={cn(
-                "group/markdown max-w-[86%] overflow-hidden rounded-[16px] border shadow-[0_1px_0_rgba(255,255,255,0.6)_inset] transition-colors",
+                "group/markdown max-w-[88%] overflow-hidden rounded-[16px] border transition-colors",
                 tone === "error"
-                    ? "border-rose-200 bg-rose-50 hover:border-rose-300 focus-within:border-rose-300"
-                    : "border-slate-200/90 bg-[#f7f8f4] hover:border-slate-300 focus-within:border-slate-300",
+                    ? "border-rose-200 bg-rose-50 shadow-[0_1px_0_rgba(255,255,255,0.6)_inset] hover:border-rose-300 focus-within:border-rose-300"
+                    : "border-slate-200 bg-white shadow-[0_10px_24px_rgba(15,23,42,0.05),0_1px_0_rgba(255,255,255,0.7)_inset] hover:border-slate-300 focus-within:border-slate-300",
             )}
         >
             <div
                 className={cn(
                     "flex items-center justify-between gap-2 border-b px-2.5 py-1",
-                    tone === "error" ? "border-rose-200/80 bg-rose-100/60" : "border-slate-200 bg-[#eef1ea]",
+                    tone === "error" ? "border-rose-200/80 bg-rose-100/60" : "border-slate-200 bg-[#f4f6f1]",
                 )}
             >
                 <span
@@ -737,7 +754,7 @@ function MarkdownActionBlock({
                         "h-5.5 gap-1 rounded-full px-1.5 text-[9px] opacity-50 transition-opacity hover:opacity-100 focus-visible:opacity-100 group-hover/markdown:opacity-100 group-focus-within/markdown:opacity-100",
                         tone === "error"
                             ? "text-rose-700 hover:bg-rose-100 hover:text-rose-800"
-                            : "text-slate-500 hover:bg-white hover:text-slate-700",
+                            : "text-slate-500 hover:bg-[#eef1ea] hover:text-slate-700",
                     )}
                     onClick={copy}
                 >
@@ -950,6 +967,7 @@ function ActionItem({
     if (action.type === "activity_summary" && action.metadata?.activitySummary) {
         const summary = action.metadata.activitySummary
         const toolActions = summary.toolActions ?? []
+        const stageBadges = buildActivityStageBadges(summary.counts)
         const countBadges = [
             summary.counts.read ? `${summary.counts.read} reads` : null,
             summary.counts.search ? `${summary.counts.search} searches` : null,
@@ -1009,6 +1027,24 @@ function ActionItem({
                         )}
                     </button>
 
+                    {stageBadges.length > 0 ? (
+                        <div className="mt-1.5 flex flex-wrap gap-1">
+                            {stageBadges.map((badge) => (
+                                <span
+                                    key={badge}
+                                    className={cn(
+                                        "rounded-full border px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em]",
+                                        liveSummary
+                                            ? "border-amber-200 bg-white text-amber-700"
+                                            : "border-slate-200 bg-white text-slate-500",
+                                    )}
+                                >
+                                    {badge}
+                                </span>
+                            ))}
+                        </div>
+                    ) : null}
+
                     {countBadges.length > 0 ? (
                         <div className="mt-1.5 flex flex-wrap gap-1">
                             {countBadges.map((badge) => (
@@ -1030,7 +1066,7 @@ function ActionItem({
 
                     <div className="mt-1 flex items-center justify-between gap-2">
                         <div className="text-[9px] text-slate-400">
-                            Main chat keeps this collapsed. Full raw activity stays in Monitor.
+                            Chat shows the compressed activity stream. Monitor keeps the full raw details.
                         </div>
                         {onOpenMonitor && summary.delegationTaskId ? (
                             <Button
