@@ -398,6 +398,7 @@ function RightInspector({
   onViewChange,
   selectedWorkerTitle,
   selectedWorkerLabel,
+  selectedWorkerControlMode,
   onClearWorkerSelection,
 }: {
   activeAgents: number
@@ -410,6 +411,7 @@ function RightInspector({
   onViewChange: (value: AgentInspectorView) => void
   selectedWorkerTitle: string | null
   selectedWorkerLabel: string | null
+  selectedWorkerControlMode: "managed" | "mirrored" | null
   onClearWorkerSelection: () => void
 }) {
   return (
@@ -463,7 +465,9 @@ function RightInspector({
                   {selectedWorkerTitle}
                 </div>
                 <div className="mt-1 text-[11px] text-slate-500">
-                  Live, tools, files, and graph stay scoped to this worker until you clear focus.
+                  {selectedWorkerControlMode === "managed"
+                    ? "Studio-controlled. Live, tools, files, and graph stay scoped to this worker until you clear focus."
+                    : "Claude-controlled. Continue or interrupt this worker from the parent Claude session; Studio stays in sync here."}
                 </div>
               </div>
               <Button
@@ -956,6 +960,7 @@ export function AgentWorkspace({
                   onViewChange={setInspectorView}
                   selectedWorkerTitle={selectedWorkerGroup?.taskTitle ?? null}
                   selectedWorkerLabel={selectedWorkerPresentation?.label ?? null}
+                  selectedWorkerControlMode={selectedWorkerGroup?.controlMode ?? null}
                   onClearWorkerSelection={() => setSelectedWorkerRunId(null)}
                 />
               </div>
@@ -1040,6 +1045,7 @@ export function AgentWorkspace({
               onViewChange={setInspectorView}
               selectedWorkerTitle={selectedWorkerGroup?.taskTitle ?? null}
               selectedWorkerLabel={selectedWorkerPresentation?.label ?? null}
+              selectedWorkerControlMode={selectedWorkerGroup?.controlMode ?? null}
               onClearWorkerSelection={() => setSelectedWorkerRunId(null)}
             />
           </TabsContent>

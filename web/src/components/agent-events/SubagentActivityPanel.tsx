@@ -4,6 +4,7 @@ import { useMemo, useState } from "react"
 import {
   ArrowLeft,
   Ban,
+  Copy,
   Cpu,
   FileCheck2,
   FileCode2,
@@ -111,6 +112,64 @@ function humanizeRuntime(runtime: string): string {
   if (normalized === "claude") return "Claude"
   if (normalized === "worker") return "Worker"
   return runtime || "Worker"
+}
+
+function controlModeChipLabel(controlMode: SubagentActivityGroup["controlMode"]): string {
+  return controlMode === "managed" ? "studio-controlled" : "claude-controlled"
+}
+
+function controlOwnerLabel(controlMode: SubagentActivityGroup["controlMode"]): string {
+  return controlMode === "managed" ? "Studio session" : "Claude session"
+}
+
+function controlSessionLabel(controlMode: SubagentActivityGroup["controlMode"]): string {
+  return controlMode === "managed" ? "Managed session" : "Parent session"
+}
+
+function workerControlSummary(
+  controlMode: SubagentActivityGroup["controlMode"],
+  displayStatus: WorkerDisplayStatus,
+  relatedThread: RelatedWorkerThread | null,
+): string {
+  if (controlMode === "managed") {
+    if (displayStatus === "paused") return "Studio controls this managed worker session. Resume or cancel from here."
+    if (displayStatus === "cancelled") return "This managed worker session was cancelled from Studio."
+    if (displayStatus === "completed") return "This managed worker session completed. Studio kept the full worker trace."
+    if (displayStatus === "failed") return "This managed worker session failed. Studio still owns the session controls."
+    return "Studio controls this managed worker session. Pause, resume, or cancel act on the underlying managed session."
+  }
+
+  if (relatedThread?.pendingApproval) {
+    return "This worker is controlled by its parent Claude session. Approval is waiting in that session before the run can continue."
+  }
+  if (displayStatus === "completed") {
+    return "This worker was controlled by its parent Claude session. Studio mirrors the completed trace and links back to the parent thread."
+  }
+  if (displayStatus === "failed") {
+    return "This worker is controlled by its parent Claude session. The mirrored run failed and should be continued or retried from Claude."
+  }
+  return "This worker is controlled by its parent Claude session. Studio mirrors activity here and can open the controlling thread when action is needed."
+}
+
+function workerControlStateLabel(
+  controlMode: SubagentActivityGroup["controlMode"],
+  displayStatus: WorkerDisplayStatus,
+  relatedThread: RelatedWorkerThread | null,
+): string {
+  if (controlMode === "managed") {
+    if (displayStatus === "paused") return "Paused in Studio session"
+    if (displayStatus === "cancelled") return "Cancelled in Studio session"
+    if (displayStatus === "completed") return "Completed in Studio session"
+    if (displayStatus === "failed") return "Failed in Studio session"
+    if (displayStatus === "queued") return "Queued in Studio session"
+    return "Running in Studio session"
+  }
+
+  if (relatedThread?.pendingApproval) return "Waiting for approval in parent session"
+  if (displayStatus === "completed") return "Completed in parent session"
+  if (displayStatus === "failed") return "Failed in parent session"
+  if (displayStatus === "queued") return "Queued in parent session"
+  return "Running in parent session"
 }
 
 function statusAppearance(status: WorkerDisplayStatus) {
@@ -274,7 +333,7 @@ function WorkerListCard({
 
           <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[10px] uppercase tracking-[0.12em] text-slate-500">
             <WorkerChip label={humanizeRuntime(group.runtime)} />
-            <WorkerChip label={group.controlMode === "managed" ? "interruptible" : "view only"} />
+            <WorkerChip label={controlModeChipLabel(group.controlMode)} />
             <WorkerChip label={`${group.toolCount} tools`} />
             {fileCount > 0 ? <WorkerChip label={`${fileCount} files`} /> : null}
             {duration ? <WorkerChip label={duration} /> : null}
@@ -360,7 +419,18 @@ function WorkerDetail({
   const [controlBusy, setControlBusy] = useState<"pause" | "resume" | "cancel" | null>(null)
   const [controlError, setControlError] = useState<string | null>(null)
   const [controlNotice, setControlNotice] = useState<string | null>(null)
+  const [resumeCopied, setResumeCopied] = useState(false)
   const isManaged = group.controlMode === "managed" && Boolean(group.sessionId) && !group.sessionId.startsWith("studio-")
+  const approvalRequest = relatedThread?.latestApprovalAction?.metadata?.approvalRequest
+  const controlSessionId =
+    approvalRequest?.cliSessionId?.trim() ||
+    (group.sessionId.trim().length > 0 ? group.sessionId.trim() : "") ||
+    null
+  const controlResumeCommand = controlSessionId ? `claude --resume ${controlSessionId}` : null
+  const controlOwner = controlOwnerLabel(group.controlMode)
+  const controlState = workerControlStateLabel(group.controlMode, displayStatus, relatedThread)
+  const controlSummary = workerControlSummary(group.controlMode, displayStatus, relatedThread)
+  const relatedThreadButtonLabel = relatedThread?.pendingApproval ? "Open Approval" : "Open Parent Thread"
 
   async function performControl(action: "pause" | "resume" | "cancel") {
     if (!isManaged || !group.sessionId) return
@@ -404,6 +474,20 @@ function WorkerDetail({
     }
   }
 
+  async function copyResumeCommand() {
+    if (!controlResumeCommand) return
+    setControlError(null)
+    setControlNotice(null)
+    try {
+      await navigator.clipboard.writeText(controlResumeCommand)
+      setResumeCopied(true)
+      setControlNotice("Resume command copied.")
+      window.setTimeout(() => setResumeCopied(false), 1800)
+    } catch (error) {
+      setControlError(error instanceof Error ? error.message : "Failed to copy resume command")
+    }
+  }
+
   return (
     <div className="flex h-full min-h-0 flex-col bg-[#f5f5f3]">
       <div className="border-b border-zinc-200 px-3 py-2.5">
@@ -430,7 +514,7 @@ function WorkerDetail({
 
         <div className="mt-3 flex flex-wrap items-center gap-1.5">
           <WorkerChip label={humanizeRuntime(group.runtime)} />
-          <WorkerChip label={group.controlMode === "managed" ? "interruptible" : "view only"} />
+          <WorkerChip label={controlModeChipLabel(group.controlMode)} />
           {duration ? <WorkerChip label={duration} /> : null}
           <WorkerChip label={formatTimestamp(group.startedAt)} />
         </div>
@@ -441,15 +525,128 @@ function WorkerDetail({
             <div className="mt-1 font-mono text-[11px] text-slate-700">{group.workerRunId}</div>
           </div>
           <div className="rounded-2xl border border-slate-200 bg-white px-2.5 py-2">
-            <div className="text-[10px] uppercase tracking-[0.12em] text-slate-400">Session</div>
-            <div className="mt-1 font-mono text-[11px] text-slate-700">{group.sessionId}</div>
+            <div className="text-[10px] uppercase tracking-[0.12em] text-slate-400">{controlSessionLabel(group.controlMode)}</div>
+            <div className="mt-1 font-mono text-[11px] text-slate-700">{group.sessionId || "Unavailable"}</div>
           </div>
         </div>
 
-        <div className="mt-3 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-[11px] text-zinc-500">
-          {isManaged
-            ? "This worker run belongs to a managed PaperBot session. Controls below act on the whole managed session."
-            : "This worker run is mirrored from Claude Code. You can inspect it, but Studio cannot interrupt it yet."}
+        <div className="mt-3 rounded-[22px] border border-slate-200 bg-white px-3 py-3">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+                Control
+              </div>
+              <div className="mt-1 text-[12px] font-semibold text-slate-900">{controlOwner}</div>
+              <p className="mt-1 text-[11px] leading-4 text-slate-500">{controlSummary}</p>
+            </div>
+            <WorkerChip label={controlModeChipLabel(group.controlMode)} />
+          </div>
+
+          <div className="mt-3 grid grid-cols-2 gap-2 text-[11px] text-zinc-500">
+            <div className="rounded-2xl border border-slate-200 bg-[#f7f8f4] px-2.5 py-2">
+              <div className="text-[10px] uppercase tracking-[0.12em] text-slate-400">Current state</div>
+              <div className="mt-1 text-[11px] font-medium text-slate-700">{controlState}</div>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-[#f7f8f4] px-2.5 py-2">
+              <div className="text-[10px] uppercase tracking-[0.12em] text-slate-400">Control owner</div>
+              <div className="mt-1 text-[11px] font-medium text-slate-700">{controlOwner}</div>
+            </div>
+            {approvalRequest?.workerAgentId ? (
+              <div className="rounded-2xl border border-slate-200 bg-[#f7f8f4] px-2.5 py-2">
+                <div className="text-[10px] uppercase tracking-[0.12em] text-slate-400">Worker agent</div>
+                <div className="mt-1 font-mono text-[11px] text-slate-700">{approvalRequest.workerAgentId}</div>
+              </div>
+            ) : null}
+            {controlResumeCommand ? (
+              <div className="rounded-2xl border border-slate-200 bg-[#f7f8f4] px-2.5 py-2">
+                <div className="text-[10px] uppercase tracking-[0.12em] text-slate-400">Resume command</div>
+                <div className="mt-1 font-mono text-[11px] text-slate-700">{controlResumeCommand}</div>
+              </div>
+            ) : null}
+          </div>
+
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            {isManaged ? (
+              <>
+                {displayStatus === "paused" ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="h-8 rounded-full bg-slate-900 px-3 text-[11px] text-white hover:bg-slate-800"
+                    onClick={() => void performControl("resume")}
+                    disabled={controlBusy !== null}
+                  >
+                    {controlBusy === "resume" ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <PlayCircle className="mr-1.5 h-3.5 w-3.5" />}
+                    Resume Session
+                  </Button>
+                ) : displayStatus !== "cancelled" && displayStatus !== "completed" && displayStatus !== "failed" ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-8 rounded-full border-amber-200 px-3 text-[11px] text-amber-800 hover:bg-amber-50"
+                    onClick={() => void performControl("pause")}
+                    disabled={controlBusy !== null}
+                  >
+                    {controlBusy === "pause" ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <PauseCircle className="mr-1.5 h-3.5 w-3.5" />}
+                    Pause Session
+                  </Button>
+                ) : null}
+
+                {displayStatus !== "cancelled" && displayStatus !== "completed" && displayStatus !== "failed" ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-8 rounded-full border-rose-200 px-3 text-[11px] text-rose-700 hover:bg-rose-50"
+                    onClick={() => void performControl("cancel")}
+                    disabled={controlBusy !== null}
+                  >
+                    {controlBusy === "cancel" ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Ban className="mr-1.5 h-3.5 w-3.5" />}
+                    Cancel Session
+                  </Button>
+                ) : null}
+              </>
+            ) : (
+              <>
+                {relatedThread ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="h-8 rounded-full bg-slate-900 px-3 text-[11px] text-white hover:bg-slate-800"
+                    onClick={onOpenRelatedThread}
+                  >
+                    {relatedThreadButtonLabel}
+                  </Button>
+                ) : null}
+                {controlResumeCommand ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-8 rounded-full border-slate-200 px-3 text-[11px] text-slate-700"
+                    onClick={() => void copyResumeCommand()}
+                  >
+                    <Copy className="mr-1.5 h-3.5 w-3.5" />
+                    {resumeCopied ? "Copied" : "Copy Resume Command"}
+                  </Button>
+                ) : null}
+              </>
+            )}
+          </div>
+
+          {group.controlMode === "mirrored" && !relatedThread && !controlResumeCommand ? (
+            <div className="mt-3 rounded-2xl border border-slate-200 bg-[#fafaf8] px-2.5 py-2 text-[11px] leading-4 text-slate-500">
+              Studio is mirroring this worker run, but the controlling Claude session is not linked in this workspace.
+            </div>
+          ) : null}
+
+          {controlNotice ? (
+            <p className="mt-2 text-[11px] text-emerald-700">{controlNotice}</p>
+          ) : null}
+          {controlError ? (
+            <p className="mt-2 text-[11px] text-rose-700">{controlError}</p>
+          ) : null}
         </div>
 
         <div className="mt-3 rounded-[22px] border border-slate-200 bg-white px-3 py-3">
@@ -496,63 +693,12 @@ function WorkerDetail({
           </div>
         </div>
 
-        {isManaged ? (
-          <div className="mt-3 rounded-[22px] border border-slate-200 bg-white px-3 py-3">
-            <div className="flex flex-wrap items-center gap-2">
-              {displayStatus === "paused" ? (
-                <Button
-                  type="button"
-                  size="sm"
-                  className="h-8 rounded-full bg-slate-900 px-3 text-[11px] text-white hover:bg-slate-800"
-                  onClick={() => void performControl("resume")}
-                  disabled={controlBusy !== null}
-                >
-                  {controlBusy === "resume" ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <PlayCircle className="mr-1.5 h-3.5 w-3.5" />}
-                  Resume Session
-                </Button>
-              ) : displayStatus !== "cancelled" && displayStatus !== "completed" && displayStatus !== "failed" ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="h-8 rounded-full border-amber-200 px-3 text-[11px] text-amber-800 hover:bg-amber-50"
-                  onClick={() => void performControl("pause")}
-                  disabled={controlBusy !== null}
-                >
-                  {controlBusy === "pause" ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <PauseCircle className="mr-1.5 h-3.5 w-3.5" />}
-                  Pause Session
-                </Button>
-              ) : null}
-
-              {displayStatus !== "cancelled" && displayStatus !== "completed" && displayStatus !== "failed" ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="h-8 rounded-full border-rose-200 px-3 text-[11px] text-rose-700 hover:bg-rose-50"
-                  onClick={() => void performControl("cancel")}
-                  disabled={controlBusy !== null}
-                >
-                  {controlBusy === "cancel" ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Ban className="mr-1.5 h-3.5 w-3.5" />}
-                  Cancel Session
-                </Button>
-              ) : null}
-            </div>
-            {controlNotice ? (
-              <p className="mt-2 text-[11px] text-emerald-700">{controlNotice}</p>
-            ) : null}
-            {controlError ? (
-              <p className="mt-2 text-[11px] text-rose-700">{controlError}</p>
-            ) : null}
-          </div>
-        ) : null}
-
         {relatedThread ? (
           <div className="mt-3 rounded-[22px] border border-slate-200 bg-white px-3 py-3">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">
-                  Related Chat Thread
+                  {group.controlMode === "managed" ? "Linked Chat Thread" : "Parent Claude Thread"}
                 </div>
                 <div className="mt-1 truncate text-[12px] font-semibold text-slate-900">
                   {relatedThread.task.name}
@@ -568,7 +714,7 @@ function WorkerDetail({
                 className="h-8 shrink-0 rounded-full border-slate-200 px-3 text-[11px] text-slate-700"
                 onClick={onOpenRelatedThread}
               >
-                {relatedThread.pendingApproval ? "Open Approval" : "Open Thread"}
+                {relatedThreadButtonLabel}
               </Button>
             </div>
 
