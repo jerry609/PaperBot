@@ -17,7 +17,7 @@ import {
     AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { cn } from "@/lib/utils"
-import { Plus, Search, Trash2, FlaskConical, Loader2 } from "lucide-react"
+import { Plus, Search, Trash2, FlaskConical, Loader2, FolderOpen, MessageSquare } from "lucide-react"
 
 const STOP_WORDS = new Set([
     "a", "an", "the", "and", "or", "of", "for", "to", "in", "on", "with", "from", "by", "at", "is", "are",
@@ -277,6 +277,10 @@ export function PaperGallery() {
                 new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
         )
     }, [statusFilteredPapers])
+    const totalPaperCount = papers.length
+    const draftCount = papers.filter((paper) => paper.status === "draft").length
+    const runningCount = papers.filter((paper) => paper.status === "running").length
+    const completedCount = papers.filter((paper) => paper.status === "completed").length
 
     const handleDeleteClick = (
         e: React.MouseEvent,
@@ -335,17 +339,41 @@ export function PaperGallery() {
             `}</style>
             {/* Header */}
             <div className="border-b border-zinc-300 bg-background px-6 py-5 shrink-0">
-                <div className="mx-auto w-full max-w-[1360px] flex items-center justify-between">
-                    <div>
-                        <h1 className="text-xl font-semibold">DeepCode Studio</h1>
-                        <p className="mt-0.5 text-sm text-zinc-500">
-                            Paper-to-code reproduction workspace
-                        </p>
+                <div className="mx-auto flex w-full max-w-[1360px] flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+                    <div className="max-w-[720px] space-y-3">
+                        <span className="inline-flex rounded-full border border-zinc-300 bg-white px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                            Step 1 of 3
+                        </span>
+                        <div>
+                            <h1 className="text-[28px] font-semibold tracking-[-0.03em] text-zinc-950">
+                                Choose a paper to start Studio
+                            </h1>
+                            <p className="mt-1.5 text-sm leading-6 text-zinc-500">
+                                Pick an existing paper or add a new one. Workspace review and Claude Code chat happen next,
+                                and Monitor stays secondary until you need raw execution detail.
+                            </p>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                            <span className="rounded-full border border-zinc-300 bg-white px-2.5 py-1 text-[11px] text-zinc-600">
+                                {totalPaperCount} papers
+                            </span>
+                            <span className="rounded-full border border-zinc-300 bg-white px-2.5 py-1 text-[11px] text-zinc-600">
+                                {draftCount} draft
+                            </span>
+                            <span className="rounded-full border border-zinc-300 bg-white px-2.5 py-1 text-[11px] text-zinc-600">
+                                {runningCount} running
+                            </span>
+                            <span className="rounded-full border border-zinc-300 bg-white px-2.5 py-1 text-[11px] text-zinc-600">
+                                {completedCount} completed
+                            </span>
+                        </div>
                     </div>
-                    <Button onClick={() => setNewPaperOpen(true)} size="sm">
-                        <Plus className="h-4 w-4 mr-1.5" />
-                        New Paper
-                    </Button>
+                    <div className="flex items-center gap-2">
+                        <Button onClick={() => setNewPaperOpen(true)} size="sm" className="h-10 rounded-full px-4">
+                            <Plus className="mr-1.5 h-4 w-4" />
+                            Add Paper
+                        </Button>
+                    </div>
                 </div>
             </div>
 
@@ -406,27 +434,77 @@ export function PaperGallery() {
 
                     {sortedPapers.length === 0 ? (
                         /* Empty state */
-                        <div className="flex flex-col items-center justify-center border border-zinc-300 bg-white py-24 text-center">
-                            <div className="rounded-full bg-muted p-4 mb-4">
-                                <FlaskConical className="h-8 w-8 text-muted-foreground" />
+                        <div className="rounded-[30px] border border-zinc-300 bg-white px-6 py-8 shadow-[0_18px_40px_rgba(15,23,42,0.04)]">
+                            <div className="mx-auto max-w-[920px] text-center">
+                                <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-3xl border border-zinc-300 bg-[#f7f8f4]">
+                                    <FlaskConical className="h-7 w-7 text-zinc-500" />
+                                </div>
+                                <h2 className="mt-5 text-[26px] font-semibold tracking-[-0.03em] text-zinc-950">
+                                    {query ? "No papers match this search" : "Add your first paper"}
+                                </h2>
+                                <p className="mx-auto mt-2 max-w-[38rem] text-sm leading-6 text-zinc-500">
+                                    {query
+                                        ? "Try a different title, keyword, or abstract phrase."
+                                        : "Start with a paper title and abstract. Studio will guide the next steps: workspace review first, then Claude Code chat, then Monitor only when execution detail matters."}
+                                </p>
+
+                                {!query ? (
+                                    <>
+                                        <div className="mt-6 grid gap-3 text-left md:grid-cols-3">
+                                            <div className="rounded-[22px] border border-zinc-300 bg-[#fafaf7] px-4 py-4">
+                                                <div className="flex items-center gap-2">
+                                                    <FlaskConical className="h-4 w-4 text-zinc-500" />
+                                                    <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                                                        1. Add paper
+                                                    </p>
+                                                </div>
+                                                <p className="mt-2 text-sm font-medium text-zinc-900">
+                                                    Paste the title and abstract for the paper you want to reproduce.
+                                                </p>
+                                            </div>
+                                            <div className="rounded-[22px] border border-zinc-300 bg-[#fafaf7] px-4 py-4">
+                                                <div className="flex items-center gap-2">
+                                                    <FolderOpen className="h-4 w-4 text-zinc-500" />
+                                                    <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                                                        2. Review workspace
+                                                    </p>
+                                                </div>
+                                                <p className="mt-2 text-sm font-medium text-zinc-900">
+                                                    Confirm where generated code should live before the Studio session starts.
+                                                </p>
+                                            </div>
+                                            <div className="rounded-[22px] border border-zinc-300 bg-[#fafaf7] px-4 py-4">
+                                                <div className="flex items-center gap-2">
+                                                    <MessageSquare className="h-4 w-4 text-zinc-500" />
+                                                    <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                                                        3. Start chat
+                                                    </p>
+                                                </div>
+                                                <p className="mt-2 text-sm font-medium text-zinc-900">
+                                                    Open a focused Claude Code thread and keep Monitor for compressed execution detail only.
+                                                </p>
+                                            </div>
+                                        </div>
+
+                                        <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
+                                            <Button
+                                                onClick={() => setNewPaperOpen(true)}
+                                                size="sm"
+                                                className="h-10 rounded-full px-4"
+                                            >
+                                                <Plus className="mr-1.5 h-4 w-4" />
+                                                Add Paper
+                                            </Button>
+                                            <span className="rounded-full border border-zinc-300 bg-[#f7f8f4] px-3 py-1 text-[11px] text-zinc-600">
+                                                Review before runtime
+                                            </span>
+                                            <span className="rounded-full border border-zinc-300 bg-[#f7f8f4] px-3 py-1 text-[11px] text-zinc-600">
+                                                Chat first, Monitor second
+                                            </span>
+                                        </div>
+                                    </>
+                                ) : null}
                             </div>
-                            <h2 className="text-lg font-medium mb-1">
-                                {query ? "No papers found" : "Add your first paper"}
-                            </h2>
-                            <p className="text-sm text-muted-foreground mb-4 max-w-sm">
-                                {query
-                                    ? "Try a different search term."
-                                    : "Start by adding a paper to reproduce its code. Paste a title and abstract to get started."}
-                            </p>
-                            {!query && (
-                                <Button
-                                    onClick={() => setNewPaperOpen(true)}
-                                    size="sm"
-                                >
-                                    <Plus className="h-4 w-4 mr-1.5" />
-                                    Add Paper
-                                </Button>
-                            )}
                         </div>
                     ) : (
                         /* Tiled catalog grid (Image-2 style) */

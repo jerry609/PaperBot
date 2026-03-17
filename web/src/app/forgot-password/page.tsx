@@ -1,6 +1,7 @@
 "use client"
 
-import { useState } from "react"
+import { Suspense, useState } from "react"
+import { useSearchParams } from "next/navigation"
 import Link from "next/link"
 import { BookOpen, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -8,10 +9,28 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 
 export default function ForgotPasswordPage() {
+  return (
+    <Suspense fallback={<ForgotPasswordContent callbackUrl="/login" />}>
+      <ForgotPasswordWithSearchParams />
+    </Suspense>
+  )
+}
+
+function ForgotPasswordWithSearchParams() {
+  const searchParams = useSearchParams()
+  const callbackUrl = searchParams.get("callbackUrl") || "/login"
+  return <ForgotPasswordContent callbackUrl={callbackUrl} />
+}
+
+function ForgotPasswordContent({ callbackUrl }: { callbackUrl: string }) {
   const [email, setEmail] = useState("")
   const [loading, setLoading] = useState(false)
   const [submitted, setSubmitted] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const loginHref = callbackUrl.startsWith("/login")
+    ? callbackUrl
+    : `/login?callbackUrl=${encodeURIComponent(callbackUrl)}`
+  const studioReturn = callbackUrl.startsWith("/studio")
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -60,7 +79,7 @@ export default function ForgotPasswordPage() {
               .
             </p>
             <Link
-              href="/login"
+              href={loginHref}
               className="block text-sm font-medium text-foreground underline-offset-4 hover:underline"
             >
               Back to sign in
@@ -71,7 +90,9 @@ export default function ForgotPasswordPage() {
             <div className="space-y-1">
               <h1 className="text-2xl font-semibold tracking-tight">Forgot your password?</h1>
               <p className="text-sm text-muted-foreground">
-                Enter your email and we&apos;ll send you a reset link.
+                {studioReturn
+                  ? "Enter your email and we&apos;ll send you a reset link so you can return to the Studio sign-in gate."
+                  : "Enter your email and we&apos;ll send you a reset link."}
               </p>
             </div>
 
@@ -101,7 +122,7 @@ export default function ForgotPasswordPage() {
             <p className="text-center text-sm text-muted-foreground">
               Remember your password?{" "}
               <Link
-                href="/login"
+                href={loginHref}
                 className="font-medium text-foreground underline-offset-4 hover:underline"
               >
                 Sign in

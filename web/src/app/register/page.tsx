@@ -1,8 +1,8 @@
 "use client"
 
-import { useState, useMemo } from "react"
+import { Suspense, useState, useMemo } from "react"
 import { signIn } from "next-auth/react"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import Link from "next/link"
 import { Loader2, Eye, EyeOff, BookOpen } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -35,6 +35,20 @@ function getStrength(pw: string): Strength {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function RegisterPage() {
+  return (
+    <Suspense fallback={<RegisterPageContent callbackUrl="/dashboard" />}>
+      <RegisterPageWithSearchParams />
+    </Suspense>
+  )
+}
+
+function RegisterPageWithSearchParams() {
+  const searchParams = useSearchParams()
+  const callbackUrl = searchParams.get("callbackUrl") || "/dashboard"
+  return <RegisterPageContent callbackUrl={callbackUrl} />
+}
+
+function RegisterPageContent({ callbackUrl }: { callbackUrl: string }) {
   const [displayName, setDisplayName] = useState("")
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
@@ -48,6 +62,8 @@ export default function RegisterPage() {
 
   const strength = useMemo(() => getStrength(password), [password])
   const mismatch = confirm.length > 0 && confirm !== password
+  const studioReturn = callbackUrl.startsWith("/studio")
+  const loginHref = `/login?callbackUrl=${encodeURIComponent(callbackUrl)}`
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -75,15 +91,15 @@ export default function RegisterPage() {
     setLoading(false)
     if (r?.error) {
       setError("Account created. Please sign in.")
-      router.push("/login")
+      router.push(loginHref)
     } else {
-      router.push("/dashboard")
+      router.push(callbackUrl)
     }
   }
 
   const onGithub = () => {
     setGithubLoading(true)
-    signIn("github", { callbackUrl: "/dashboard" })
+    signIn("github", { callbackUrl })
   }
 
   return (
@@ -121,9 +137,13 @@ export default function RegisterPage() {
 
           {/* Heading */}
           <div className="space-y-1">
-            <h1 className="text-2xl font-semibold tracking-tight">Create an account</h1>
+            <h1 className="text-2xl font-semibold tracking-tight">
+              {studioReturn ? "Create an account to continue to Studio" : "Create an account"}
+            </h1>
             <p className="text-sm text-muted-foreground">
-              Get started for free in under a minute
+              {studioReturn
+                ? "Finish account setup once, then return directly to the DeepCode Studio launch flow."
+                : "Get started for free in under a minute"}
             </p>
           </div>
 
@@ -286,7 +306,7 @@ export default function RegisterPage() {
           <p className="text-center text-sm text-muted-foreground">
             Already have an account?{" "}
             <Link
-              href="/login"
+              href={loginHref}
               className="font-medium text-foreground underline-offset-4 hover:underline"
             >
               Sign in
