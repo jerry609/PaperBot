@@ -7,6 +7,7 @@ import {
 
 export interface RelatedWorkerThread {
   task: Task
+  matchedActions: AgentAction[]
   latestMatchedAction: AgentAction
   latestBridgeResult: StudioBridgeResult | null
   latestApprovalAction: AgentAction | null
@@ -95,6 +96,7 @@ export function findRelatedWorkerThread(
 
     const candidate: RelatedWorkerThread = {
       task,
+      matchedActions: matchedActions.sort((left, right) => toTimestamp(right) - toTimestamp(left)),
       latestMatchedAction,
       latestBridgeResult,
       latestApprovalAction,

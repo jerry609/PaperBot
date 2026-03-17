@@ -928,7 +928,7 @@ export function AgentWorkspace({
           <div className={`min-w-[380px] flex-1 bg-slate-100 ${showMonitorInspector ? "border-r border-slate-200" : ""}`}>
             <CenterSurface
               activeView={centerView}
-              onViewChange={setCenterView}
+              onViewChange={updateCenterView}
               runtimeInfo={runtimeInfo}
               runtimeLoading={runtimeLoading}
             />

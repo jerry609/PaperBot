@@ -25,7 +25,7 @@ import {
   type SubagentActivityGroup,
 } from "@/lib/agent-events/subagent-groups"
 import type { ActivityFeedItem, FileTouchedEntry, ToolCallEntry } from "@/lib/agent-events/types"
-import { useStudioStore, type AgentTask } from "@/lib/store/studio-store"
+import { useStudioStore, type AgentAction, type AgentTask } from "@/lib/store/studio-store"
 import {
   buildWorkerThreadPreview,
   findRelatedWorkerThread,
@@ -85,6 +85,18 @@ function chatThreadStatusLabel(status: "running" | "completed" | "pending" | "er
   if (status === "completed") return "Done"
   if (status === "error") return "Error"
   return "Draft"
+}
+
+function formatCheckpointLabel(thread: RelatedWorkerThread, action: AgentAction): string {
+  if (action.type === "approval_request") {
+    const approval = action.metadata?.approvalRequest
+    return approval?.message?.trim() || "Approval required"
+  }
+  if (action.type === "function_call") {
+    const bridgeResult = action.metadata?.bridgeResult
+    return bridgeResult?.summary?.trim() || "Worker result updated"
+  }
+  return thread.latestBridgeResult?.summary || "Worker checkpoint"
 }
 
 function humanizeRuntime(runtime: string): string {
@@ -505,7 +517,7 @@ function WorkerDetail({
                 className="h-8 shrink-0 rounded-full border-slate-200 px-3 text-[11px] text-slate-700"
                 onClick={onOpenRelatedThread}
               >
-                Open Thread
+                {relatedThread.pendingApproval ? "Open Approval" : "Open Thread"}
               </Button>
             </div>
 
@@ -520,6 +532,17 @@ function WorkerDetail({
               {relatedThread.pendingApproval ? <WorkerChip label="approval pending" /> : null}
             </div>
 
+            {relatedThread.pendingApproval && relatedThread.latestApprovalAction?.metadata?.approvalRequest?.command ? (
+              <div className="mt-2 rounded-2xl border border-amber-200 bg-amber-50 px-2.5 py-2">
+                <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-amber-700">
+                  Pending command
+                </div>
+                <code className="mt-1 block break-all text-[11px] text-amber-950">
+                  {relatedThread.latestApprovalAction.metadata.approvalRequest.command}
+                </code>
+              </div>
+            ) : null}
+
             {relatedThread.latestBridgeResult ? (
               <div className="mt-2 rounded-2xl border border-slate-200 bg-[#f8faf6] px-2.5 py-2">
                 <div className="text-[11px] leading-4 text-slate-700">
@@ -532,6 +555,29 @@ function WorkerDetail({
                     ))}
                   </div>
                 ) : null}
+              </div>
+            ) : null}
+
+            {relatedThread.matchedActions.length > 1 ? (
+              <div className="mt-2 rounded-2xl border border-slate-200 bg-[#fafaf8] px-2.5 py-2">
+                <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                  Thread checkpoints
+                </div>
+                <div className="mt-2 space-y-1.5">
+                  {relatedThread.matchedActions.slice(0, 4).map((action) => (
+                    <div
+                      key={action.id}
+                      className="flex items-start justify-between gap-2 rounded-xl border border-slate-200 bg-white px-2 py-1.5"
+                    >
+                      <div className="min-w-0 text-[11px] leading-4 text-slate-700">
+                        {formatCheckpointLabel(relatedThread, action)}
+                      </div>
+                      <div className="shrink-0 text-[10px] text-slate-400">
+                        {formatTimestamp(action.timestamp instanceof Date ? action.timestamp.toISOString() : String(action.timestamp))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             ) : null}
 

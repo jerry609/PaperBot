@@ -66,6 +66,7 @@ describe("findRelatedWorkerThread", () => {
     expect(related?.task.id).toBe("thread-1")
     expect(related?.latestBridgeResult?.summary).toBe("Implemented telemetry bridge.")
     expect(related?.pendingApproval).toBe(false)
+    expect(related?.matchedActions).toHaveLength(1)
   })
 
   it("falls back to worker run id matching", () => {
@@ -198,5 +199,6 @@ describe("findRelatedWorkerThread", () => {
     expect(related?.task.id).toBe("thread-newer")
     expect(related?.pendingApproval).toBe(true)
     expect(related?.latestApprovalAction?.id).toBe("action-new")
+    expect(related?.matchedActions[0]?.id).toBe("action-new")
   })
 })
