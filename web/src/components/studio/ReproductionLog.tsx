@@ -52,6 +52,7 @@ import {
     FileText,
     Bot,
     FileCode,
+    FolderOpen,
     Wrench,
     Terminal,
     ChevronDown,
@@ -1496,6 +1497,7 @@ export function ReproductionLog({
     const composerInteractionHint = commandMode
         ? "Enter to run · Esc clears command mode"
         : "Enter to send · Shift+Enter for newline · / for commands"
+    const workspaceRequired = mode === "Code" && !projectDir
 
     useEffect(() => {
         if (activeTask && activeTask.kind !== "chat") {
@@ -2390,6 +2392,12 @@ export function ReproductionLog({
         focusComposerAt(nextCursor)
     }, [focusComposerAt, messageInput.length])
 
+    const seedComposerDraft = useCallback((nextValue: string) => {
+        setMessageInput(nextValue)
+        setLastError(null)
+        focusComposerAt(nextValue.length)
+    }, [focusComposerAt])
+
     const handleComposerFileSelection = useCallback(
         async (event: ChangeEvent<HTMLInputElement>) => {
             const selectedFiles = Array.from(event.target.files ?? [])
@@ -2429,6 +2437,26 @@ export function ReproductionLog({
         setLastError(null)
         focusComposerAt(cursor + 1)
     }
+
+    const handleEmptyStatePrimaryAction = useCallback(() => {
+        if (workspaceRequired) {
+            if (!selectedPaper) {
+                setLastError("Select or create a paper first.")
+                return
+            }
+            setShowWorkspaceSetup(true)
+            return
+        }
+
+        focusComposerToEnd()
+    }, [focusComposerToEnd, selectedPaper, workspaceRequired])
+
+    const handleSeedStarterPrompt = useCallback(() => {
+        const starterPrompt = selectedPaper
+            ? `Summarize the reproduction approach for "${selectedPaper.title}" and identify the first concrete steps we should take in this workspace.`
+            : "Summarize the reproduction approach and identify the first concrete implementation steps."
+        seedComposerDraft(starterPrompt)
+    }, [seedComposerDraft, selectedPaper])
 
     function openAgentBoardWorkspace(delegationTaskId?: string) {
         const workerRunId = delegationTaskId
@@ -2819,6 +2847,16 @@ export function ReproductionLog({
         modelOption === "custom"
             ? requestedModel || "Custom model"
             : requestedModel
+    const launchStatusLabel = workspaceRequired ? "Workspace needed" : "Launch ready"
+    const launchStatusClassName = workspaceRequired
+        ? "border-amber-200 bg-amber-50 text-amber-700"
+        : "border-emerald-200 bg-emerald-50 text-emerald-700"
+    const emptyStateTitle = workspaceRequired
+        ? "Review the workspace before starting"
+        : "Launch a focused Claude Code thread"
+    const emptyStateDescription = workspaceRequired
+        ? "Code mode needs a writable project directory first. Review the workspace, then send the opening request from chat."
+        : "Paper, model, and chat are ready. Start in the composer here, and keep the raw worker and tool detail in Monitor."
     const composerBadges = [
         selectedPaper
             ? {
@@ -3103,41 +3141,135 @@ export function ReproductionLog({
                         <div className="px-3 py-3">
                             {!visibleTask || visibleActions.length === 0 ? (
                                 <div className="flex min-h-full items-center justify-center py-14 text-slate-500">
-                                    <div className="w-full max-w-[420px] rounded-[28px] border border-slate-200 bg-white/75 px-5 py-5 shadow-[0_18px_40px_rgba(15,23,42,0.06)]">
-                                        <div className="flex items-center gap-3">
-                                            <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-200 bg-[#eceee8]">
-                                                <MessageSquare className="h-5 w-5 opacity-40" />
+                                    <div className="w-full max-w-[640px] rounded-[30px] border border-slate-200 bg-white/88 px-5 py-5 shadow-[0_20px_44px_rgba(15,23,42,0.08)] backdrop-blur-sm">
+                                        <div className="flex flex-wrap items-start justify-between gap-3">
+                                            <div className="flex min-w-0 items-center gap-3">
+                                                <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-200 bg-[#eceee8]">
+                                                    <MessageSquare className="h-5 w-5 opacity-40" />
+                                                </div>
+                                                <div className="min-w-0">
+                                                    <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+                                                        Claude Code
+                                                    </p>
+                                                    <p className="truncate text-[16px] font-semibold text-slate-900">
+                                                        {emptyStateTitle}
+                                                    </p>
+                                                </div>
                                             </div>
-                                            <div className="min-w-0">
-                                                <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">
-                                                    Claude Code
+                                            <span
+                                                className={cn(
+                                                    "rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.12em]",
+                                                    launchStatusClassName,
+                                                )}
+                                            >
+                                                {launchStatusLabel}
+                                            </span>
+                                        </div>
+
+                                        <p className="mt-4 max-w-[42rem] text-[12px] leading-5 text-slate-600">
+                                            {emptyStateDescription}
+                                        </p>
+
+                                        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                                            <div className="rounded-[22px] border border-slate-200 bg-[#f8faf5] px-4 py-3">
+                                                <div className="flex items-center gap-2">
+                                                    <FileText className="h-4 w-4 text-slate-500" />
+                                                    <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                                                        Paper
+                                                    </p>
+                                                </div>
+                                                <p className="mt-2 line-clamp-2 text-[13px] font-medium text-slate-900">
+                                                    {selectedPaper?.title ?? "No paper selected"}
                                                 </p>
-                                                <p className="truncate text-[15px] font-semibold text-slate-900">
-                                                    {selectedPaper ? "Start a thread" : "Select a paper"}
+                                            </div>
+
+                                            <div className="rounded-[22px] border border-slate-200 bg-[#f8faf5] px-4 py-3">
+                                                <div className="flex items-center gap-2">
+                                                    <FolderOpen className="h-4 w-4 text-slate-500" />
+                                                    <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                                                        Workspace
+                                                    </p>
+                                                </div>
+                                                <p className="mt-2 break-all font-mono text-[11px] leading-5 text-slate-700">
+                                                    {projectDir ?? "Review in launch step"}
+                                                </p>
+                                            </div>
+
+                                            <div className="rounded-[22px] border border-slate-200 bg-[#f8faf5] px-4 py-3">
+                                                <div className="flex items-center gap-2">
+                                                    <Bot className="h-4 w-4 text-slate-500" />
+                                                    <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                                                        Session
+                                                    </p>
+                                                </div>
+                                                <p className="mt-2 text-[12px] font-medium text-slate-900">
+                                                    {activeModeLabel} · {activeModelLabel}
+                                                </p>
+                                                <p className="mt-1 text-[11px] leading-5 text-slate-500">
+                                                    Permission {permissionProfile.replace("_", " ")}.
+                                                </p>
+                                            </div>
+
+                                            <div className="rounded-[22px] border border-slate-200 bg-[#f8faf5] px-4 py-3">
+                                                <div className="flex items-center gap-2">
+                                                    <LayoutDashboard className="h-4 w-4 text-slate-500" />
+                                                    <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                                                        Monitor
+                                                    </p>
+                                                </div>
+                                                <p className="mt-2 text-[12px] font-medium text-slate-900">
+                                                    Activity stays mirrored
+                                                </p>
+                                                <p className="mt-1 text-[11px] leading-5 text-slate-500">
+                                                    Chat keeps the compressed stream. Monitor keeps raw worker, tool, and runtime detail.
                                                 </p>
                                             </div>
                                         </div>
 
-                                        <p className="mt-4 text-[12px] leading-5 text-slate-600">
-                                            {selectedPaper
-                                                ? `Chat about ${selectedPaper.title}. Runtime activity stays compact here and full worker details continue in Monitor.`
-                                                : "Choose a paper to open a focused Claude Code thread with chat, slash commands, uploads, and monitor mirroring."}
-                                        </p>
+                                        <div className="mt-4 flex flex-wrap items-center gap-2">
+                                            <Button
+                                                type="button"
+                                                className="h-9 rounded-full bg-slate-900 px-4 text-[12px] font-medium text-white hover:bg-slate-800"
+                                                onClick={handleEmptyStatePrimaryAction}
+                                            >
+                                                {workspaceRequired ? "Review workspace" : "Start in chat"}
+                                            </Button>
+                                            <Button
+                                                type="button"
+                                                variant="outline"
+                                                className="h-9 rounded-full border-slate-200 bg-white px-4 text-[12px] text-slate-700"
+                                                onClick={handleInsertSlashCommand}
+                                            >
+                                                Insert slash command
+                                            </Button>
+                                            <Button
+                                                type="button"
+                                                variant="outline"
+                                                className="h-9 rounded-full border-slate-200 bg-white px-4 text-[12px] text-slate-700"
+                                                onClick={handleSeedStarterPrompt}
+                                            >
+                                                Use starter prompt
+                                            </Button>
+                                            <Button
+                                                type="button"
+                                                variant="outline"
+                                                className="h-9 rounded-full border-slate-200 bg-white px-4 text-[12px] text-slate-700"
+                                                onClick={handleOpenComposerUpload}
+                                                disabled={!canAttachFiles}
+                                            >
+                                                Attach file
+                                            </Button>
+                                        </div>
 
                                         <div className="mt-4 flex flex-wrap gap-1.5">
-                                            {selectedPaper ? (
-                                                <span className="max-w-full truncate rounded-full border border-slate-200 bg-[#f7f8f4] px-2 py-0.5 text-[10px] text-slate-600">
-                                                    {selectedPaper.title}
-                                                </span>
-                                            ) : null}
                                             <span className="rounded-full border border-slate-200 bg-[#f7f8f4] px-2 py-0.5 text-[10px] text-slate-600">
-                                                `/` commands
+                                                1. Review workspace
                                             </span>
                                             <span className="rounded-full border border-slate-200 bg-[#f7f8f4] px-2 py-0.5 text-[10px] text-slate-600">
-                                                file upload
+                                                2. Ask Claude Code
                                             </span>
                                             <span className="rounded-full border border-slate-200 bg-[#f7f8f4] px-2 py-0.5 text-[10px] text-slate-600">
-                                                monitor mirrored
+                                                3. Inspect Monitor only when needed
                                             </span>
                                         </div>
                                     </div>
@@ -3166,7 +3298,132 @@ export function ReproductionLog({
             {consoleMode && (
                 /* Rich Input Area - CodePilot Style */
                 <div className="shrink-0 border-t border-slate-200 bg-[#f1f2ed] p-2">
-                    <div className="overflow-hidden rounded-[24px] border border-slate-200 bg-[#e8ebe4] shadow-[0_16px_36px_rgba(15,23,42,0.06)]">
+                    <div className="relative">
+                        {slashPaletteActive ? (
+                            <div className="pointer-events-none absolute inset-x-0 bottom-full z-30 mb-2 px-1">
+                                <div className="pointer-events-auto w-full max-w-[620px] overflow-hidden rounded-[22px] border border-slate-200 bg-[#f8faf5] shadow-[0_18px_40px_rgba(15,23,42,0.10)]">
+                                    <div className="flex items-start justify-between gap-3 border-b border-slate-200 bg-[#f0f2ec] px-3 py-2.5">
+                                        <div className="min-w-0 flex-1">
+                                            <div className="flex flex-wrap items-center gap-1.5">
+                                                <span className="rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                    Slash
+                                                </span>
+                                                <span className="text-[9px] uppercase tracking-[0.12em] text-slate-400">
+                                                    {filteredSlashCommands.length} match{filteredSlashCommands.length === 1 ? "" : "es"}
+                                                </span>
+                                            </div>
+                                            <div className="mt-1 text-[11px] font-medium text-slate-800">
+                                                Claude Code commands
+                                            </div>
+                                            <div className="mt-0.5 max-w-[32rem] text-[10px] leading-4 text-slate-500">
+                                                Insert Claude-style chat commands or managed runtime utilities without leaving the composer.
+                                            </div>
+                                        </div>
+                                        <div className="flex shrink-0 flex-col items-end gap-1">
+                                            <span className="max-w-[12rem] truncate rounded-full border border-slate-200 bg-white px-2 py-0.5 font-mono text-[10px] text-slate-500">
+                                                /{slashToken || ""}
+                                            </span>
+                                            <span className="rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-slate-400">
+                                                Enter, Tab, or click
+                                            </span>
+                                        </div>
+                                    </div>
+
+                                    <div
+                                        ref={slashPaletteListRef}
+                                        role="listbox"
+                                        aria-label="Slash commands"
+                                        className="max-h-64 overflow-y-auto overscroll-contain px-1.5 py-1.5 [scrollbar-gutter:stable]"
+                                        onWheelCapture={(event) => event.stopPropagation()}
+                                    >
+                                        {filteredSlashCommands.length === 0 ? (
+                                            <div className="px-3 py-4 text-[11px] text-slate-500">
+                                                No matching slash command.
+                                            </div>
+                                        ) : (
+                                            <div className="space-y-2 px-1 py-1">
+                                                {slashCommandGroups.map(({ group, items }) => {
+                                                    return (
+                                                        <div key={group}>
+                                                            <div className="px-2 py-1 text-[9px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+                                                                {group}
+                                                            </div>
+                                                            <div className="space-y-1">
+                                                                {items.map(({ item, index: globalIndex }) => {
+                                                                    const selected = globalIndex === slashSelectedIndex
+                                                                    const ItemIcon = item.icon
+
+                                                                    return (
+                                                                        <button
+                                                                            key={item.id}
+                                                                            type="button"
+                                                                            role="option"
+                                                                            aria-selected={selected}
+                                                                            data-slash-index={globalIndex}
+                                                                            data-selected={selected ? "true" : "false"}
+                                                                            className={cn(
+                                                                                "flex w-full items-start gap-2.5 rounded-[16px] border px-2.5 py-2 text-left transition-[border-color,background-color,box-shadow]",
+                                                                                selected
+                                                                                    ? "border-slate-300 bg-[#edf0e7] shadow-[inset_0_0_0_1px_rgba(148,163,184,0.15)]"
+                                                                                    : "border-transparent bg-transparent hover:border-slate-200 hover:bg-[#eef1ea]",
+                                                                            )}
+                                                                            onMouseEnter={() => setSlashSelectedIndex(globalIndex)}
+                                                                            onMouseDown={(event) => {
+                                                                                event.preventDefault()
+                                                                            }}
+                                                                            onClick={() => handleApplySlashCommand(item)}
+                                                                        >
+                                                                            <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white">
+                                                                                <ItemIcon className="h-3 w-3 text-slate-500" />
+                                                                            </div>
+                                                                            <div className="min-w-0 flex-1">
+                                                                                <div className="flex flex-wrap items-center gap-1.5">
+                                                                                    <span className="font-mono text-[10px] font-medium text-slate-900">
+                                                                                        /{item.command}
+                                                                                    </span>
+                                                                                    <span className="truncate text-[10px] text-slate-500">
+                                                                                        {item.label}
+                                                                                    </span>
+                                                                                </div>
+                                                                                <div className="mt-0.5 line-clamp-2 text-[10px] leading-4 text-slate-500">
+                                                                                    {item.description}
+                                                                                </div>
+                                                                            </div>
+                                                                            {selected ? (
+                                                                                <span className="mt-0.5 shrink-0 rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-slate-500">
+                                                                                    return
+                                                                                </span>
+                                                                            ) : null}
+                                                                        </button>
+                                                                    )
+                                                                })}
+                                                            </div>
+                                                        </div>
+                                                    )
+                                                })}
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    <div className="flex flex-wrap items-center gap-1.5 border-t border-slate-200 bg-[#f2f4ef] px-3 py-2">
+                                        <span className="rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-slate-400">
+                                            ↑↓ move
+                                        </span>
+                                        <span className="rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-slate-400">
+                                            Enter or Tab select
+                                        </span>
+                                        <span className="rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-slate-400">
+                                            Click to insert
+                                        </span>
+                                        <span className="rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-slate-400">
+                                            Esc close
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+                        ) : null}
+
+                        <div className="overflow-hidden rounded-[24px] border border-slate-200 bg-[#e8ebe4] shadow-[0_16px_36px_rgba(15,23,42,0.06)]">
                         <div className="border-b border-slate-200 bg-[#eef1ea] px-3.5 py-2">
                             <div className="flex flex-wrap items-center justify-between gap-3">
                                 <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
@@ -3279,126 +3536,6 @@ export function ReproductionLog({
                                         }
                                     }}
                                 />
-
-                                {slashPaletteActive ? (
-                                    <div className="px-3.5 pb-2.5">
-                                        <div className="max-w-[560px] overflow-hidden rounded-[22px] border border-slate-200 bg-[#f8faf5] shadow-[0_18px_40px_rgba(15,23,42,0.10)]">
-                                            <div className="flex items-start justify-between gap-3 border-b border-slate-200 bg-[#f0f2ec] px-3 py-2.5">
-                                                <div className="min-w-0 flex-1">
-                                                    <div className="flex flex-wrap items-center gap-1.5">
-                                                        <span className="rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-slate-500">
-                                                            Slash
-                                                        </span>
-                                                        <span className="text-[9px] uppercase tracking-[0.12em] text-slate-400">
-                                                            {filteredSlashCommands.length} match{filteredSlashCommands.length === 1 ? "" : "es"}
-                                                        </span>
-                                                    </div>
-                                                    <div className="mt-1 text-[11px] font-medium text-slate-800">
-                                                        Claude Code commands
-                                                    </div>
-                                                    <div className="mt-0.5 max-w-[28rem] text-[10px] leading-4 text-slate-500">
-                                                        Insert Claude-style chat commands or managed runtime utilities without leaving the composer.
-                                                    </div>
-                                                </div>
-                                                <div className="flex shrink-0 flex-col items-end gap-1">
-                                                    <span className="max-w-[10rem] truncate rounded-full border border-slate-200 bg-white px-2 py-0.5 font-mono text-[10px] text-slate-500">
-                                                        /{slashToken || ""}
-                                                    </span>
-                                                    <span className="rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-slate-400">
-                                                        Return
-                                                    </span>
-                                                </div>
-                                            </div>
-
-                                            <div
-                                                ref={slashPaletteListRef}
-                                                role="listbox"
-                                                aria-label="Slash commands"
-                                                className="max-h-56 overflow-y-auto overscroll-y-contain px-1.5 py-1.5 [scrollbar-gutter:stable]"
-                                                onWheelCapture={(event) => event.stopPropagation()}
-                                            >
-                                                {filteredSlashCommands.length === 0 ? (
-                                                    <div className="px-3 py-4 text-[11px] text-slate-500">
-                                                        No matching slash command.
-                                                    </div>
-                                                ) : (
-                                                    <div className="space-y-2 px-1 py-1">
-                                                        {slashCommandGroups.map(({ group, items }) => {
-                                                            return (
-                                                                <div key={group}>
-                                                                    <div className="px-2 py-1 text-[9px] font-semibold uppercase tracking-[0.14em] text-slate-400">
-                                                                        {group}
-                                                                    </div>
-                                                                    <div className="space-y-1">
-                                                                        {items.map(({ item, index: globalIndex }) => {
-                                                                            const selected = globalIndex === slashSelectedIndex
-                                                                            const ItemIcon = item.icon
-
-                                                                            return (
-                                                                                <button
-                                                                                    key={item.id}
-                                                                                    type="button"
-                                                                                    role="option"
-                                                                                    aria-selected={selected}
-                                                                                    data-slash-index={globalIndex}
-                                                                                    data-selected={selected ? "true" : "false"}
-                                                                                    className={cn(
-                                                                                        "flex w-full items-start gap-2.5 rounded-[16px] border px-2.5 py-2 text-left transition-[border-color,background-color,box-shadow]",
-                                                                                        selected
-                                                                                            ? "border-slate-300 bg-[#edf0e7] shadow-[inset_0_0_0_1px_rgba(148,163,184,0.15)]"
-                                                                                            : "border-transparent bg-transparent hover:border-slate-200 hover:bg-[#eef1ea]",
-                                                                                    )}
-                                                                                    onMouseEnter={() => setSlashSelectedIndex(globalIndex)}
-                                                                                    onMouseDown={(event) => {
-                                                                                        event.preventDefault()
-                                                                                    }}
-                                                                                    onClick={() => handleApplySlashCommand(item)}
-                                                                                >
-                                                                                    <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white">
-                                                                                        <ItemIcon className="h-3 w-3 text-slate-500" />
-                                                                                    </div>
-                                                                                    <div className="min-w-0 flex-1">
-                                                                                        <div className="flex flex-wrap items-center gap-1.5">
-                                                                                            <span className="font-mono text-[10px] font-medium text-slate-900">
-                                                                                                /{item.command}
-                                                                                            </span>
-                                                                                            <span className="truncate text-[10px] text-slate-500">
-                                                                                                {item.label}
-                                                                                            </span>
-                                                                                        </div>
-                                                                                        <div className="mt-0.5 line-clamp-2 text-[10px] leading-4 text-slate-500">
-                                                                                            {item.description}
-                                                                                        </div>
-                                                                                    </div>
-                                                                                    {selected ? (
-                                                                                        <span className="mt-0.5 shrink-0 rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-slate-500">
-                                                                                            return
-                                                                                        </span>
-                                                                                    ) : null}
-                                                                                </button>
-                                                                            )
-                                                                        })}
-                                                                    </div>
-                                                                </div>
-                                                            )
-                                                        })}
-                                                    </div>
-                                                )}
-                                            </div>
-                                            <div className="flex flex-wrap items-center gap-1.5 border-t border-slate-200 bg-[#f2f4ef] px-3 py-2">
-                                                <span className="rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-slate-400">
-                                                    ↑↓ move
-                                                </span>
-                                                <span className="rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-slate-400">
-                                                    Enter or Tab select
-                                                </span>
-                                                <span className="rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-slate-400">
-                                                    Esc close
-                                                </span>
-                                            </div>
-                                        </div>
-                                    </div>
-                                ) : null}
                             </div>
                         </div>
 
@@ -3529,6 +3666,7 @@ export function ReproductionLog({
                                     {composerInteractionHint}
                                 </span>
                             </div>
+                        </div>
                         </div>
                     </div>
                 </div>
