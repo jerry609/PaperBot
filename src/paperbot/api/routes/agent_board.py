@@ -102,6 +102,11 @@ async def _emit_codex_event(
             "task_id": task.id,
             "task_title": task.title,
             "session_id": session.session_id if session is not None else None,
+            "worker_run_id": task.id,
+            "runtime": "codex",
+            "control_mode": "managed",
+            "interruptible": True,
+            "assignee": getattr(task, "assignee", "codex"),
         }
         payload.update(extra)
 

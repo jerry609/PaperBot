@@ -1,19 +1,23 @@
 "use client"
 
-import { useMemo } from "react"
+import { useMemo, useState } from "react"
 import {
   ArrowLeft,
+  Ban,
   Cpu,
   FileCheck2,
   FileCode2,
   Loader2,
   MessageSquareText,
+  PauseCircle,
+  PlayCircle,
   Terminal,
   TriangleAlert,
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { backendUrl } from "@/lib/backend-url"
 import { getAgentPresentation } from "@/lib/agent-runtime"
 import { useAgentEventStore } from "@/lib/agent-events/store"
 import {
@@ -21,6 +25,9 @@ import {
   type SubagentActivityGroup,
 } from "@/lib/agent-events/subagent-groups"
 import type { ActivityFeedItem, FileTouchedEntry, ToolCallEntry } from "@/lib/agent-events/types"
+import { useStudioStore, type AgentTask } from "@/lib/store/studio-store"
+
+type WorkerDisplayStatus = SubagentActivityGroup["status"] | "paused" | "cancelled"
 
 function formatTimestamp(ts: string): string {
   try {
@@ -58,7 +65,7 @@ function humanizeRuntime(runtime: string): string {
   return runtime || "Worker"
 }
 
-function statusAppearance(status: SubagentActivityGroup["status"]) {
+function statusAppearance(status: WorkerDisplayStatus) {
   if (status === "failed") {
     return {
       label: "Failed",
@@ -84,6 +91,24 @@ function statusAppearance(status: SubagentActivityGroup["status"]) {
       dotClass: "bg-sky-500",
       chipClass: "border-sky-200 bg-sky-50 text-sky-700",
       iconClass: "text-sky-600",
+    }
+  }
+  if (status === "paused") {
+    return {
+      label: "Paused",
+      icon: PauseCircle,
+      dotClass: "bg-amber-500",
+      chipClass: "border-amber-200 bg-amber-50 text-amber-700",
+      iconClass: "text-amber-600",
+    }
+  }
+  if (status === "cancelled") {
+    return {
+      label: "Cancelled",
+      icon: Ban,
+      dotClass: "bg-slate-400",
+      chipClass: "border-slate-200 bg-slate-100 text-slate-600",
+      iconClass: "text-slate-500",
     }
   }
   return {
@@ -166,13 +191,15 @@ function WorkerTranscriptRow({ item }: { item: ActivityFeedItem }) {
 
 function WorkerListCard({
   group,
+  displayStatus,
   onOpen,
 }: {
   group: SubagentActivityGroup
+  displayStatus: WorkerDisplayStatus
   onOpen: () => void
 }) {
   const presentation = getAgentPresentation(group.assignee)
-  const appearance = statusAppearance(group.status)
+  const appearance = statusAppearance(displayStatus)
   const StatusIcon = appearance.icon
   const fileCount = group.filesGenerated.length
   const duration = formatDuration(group.startedAt, group.finishedAt)
@@ -254,20 +281,74 @@ function WorkerListCard({
 
 function WorkerDetail({
   group,
+  displayStatus,
+  matchedTask,
+  onTaskStatusPatched,
+  boardSessionId,
   transcript,
   tools,
   files,
   onBack,
 }: {
   group: SubagentActivityGroup
+  displayStatus: WorkerDisplayStatus
+  matchedTask: AgentTask | null
+  onTaskStatusPatched: (status: AgentTask["status"], sessionId: string) => void
+  boardSessionId: string | null
   transcript: ActivityFeedItem[]
   tools: ToolCallEntry[]
   files: FileTouchedEntry[]
   onBack: () => void
 }) {
   const presentation = getAgentPresentation(group.assignee)
-  const appearance = statusAppearance(group.status)
+  const appearance = statusAppearance(displayStatus)
   const duration = formatDuration(group.startedAt, group.finishedAt)
+  const [controlBusy, setControlBusy] = useState<"pause" | "resume" | "cancel" | null>(null)
+  const [controlError, setControlError] = useState<string | null>(null)
+  const [controlNotice, setControlNotice] = useState<string | null>(null)
+  const isManaged = group.controlMode === "managed" && Boolean(group.sessionId) && !group.sessionId.startsWith("studio-")
+
+  async function performControl(action: "pause" | "resume" | "cancel") {
+    if (!isManaged || !group.sessionId) return
+    setControlBusy(action)
+    setControlError(null)
+    setControlNotice(null)
+    try {
+      const response = await fetch(
+        backendUrl(`/api/agent-board/sessions/${group.sessionId}/${action}`),
+        {
+          method: "POST",
+          cache: "no-store",
+        },
+      )
+      if (!response.ok) {
+        const detail = await response.text()
+        throw new Error(detail || `Failed to ${action} session (${response.status})`)
+      }
+
+      if (matchedTask) {
+        if (action === "pause") onTaskStatusPatched("paused", group.sessionId)
+        if (action === "resume") onTaskStatusPatched("in_progress", group.sessionId)
+        if (action === "cancel") onTaskStatusPatched("cancelled", group.sessionId)
+      } else if (boardSessionId === group.sessionId) {
+        if (action === "pause") onTaskStatusPatched("paused", group.sessionId)
+        if (action === "resume") onTaskStatusPatched("in_progress", group.sessionId)
+        if (action === "cancel") onTaskStatusPatched("cancelled", group.sessionId)
+      }
+
+      setControlNotice(
+        action === "pause"
+          ? "Managed session pause requested."
+          : action === "resume"
+            ? "Managed session resume requested."
+            : "Managed session cancel requested.",
+      )
+    } catch (error) {
+      setControlError(error instanceof Error ? error.message : `Failed to ${action} session`)
+    } finally {
+      setControlBusy(null)
+    }
+  }
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-[#f5f5f3]">
@@ -312,10 +393,61 @@ function WorkerDetail({
         </div>
 
         <div className="mt-3 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-[11px] text-zinc-500">
-          {group.interruptible
-            ? "This worker run is managed by Studio and can be interrupted."
+          {isManaged
+            ? "This worker run belongs to a managed PaperBot session. Controls below act on the whole managed session."
             : "This worker run is mirrored from Claude Code. You can inspect it, but Studio cannot interrupt it yet."}
         </div>
+
+        {isManaged ? (
+          <div className="mt-3 rounded-[22px] border border-slate-200 bg-white px-3 py-3">
+            <div className="flex flex-wrap items-center gap-2">
+              {displayStatus === "paused" ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  className="h-8 rounded-full bg-slate-900 px-3 text-[11px] text-white hover:bg-slate-800"
+                  onClick={() => void performControl("resume")}
+                  disabled={controlBusy !== null}
+                >
+                  {controlBusy === "resume" ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <PlayCircle className="mr-1.5 h-3.5 w-3.5" />}
+                  Resume Session
+                </Button>
+              ) : displayStatus !== "cancelled" && displayStatus !== "completed" && displayStatus !== "failed" ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 rounded-full border-amber-200 px-3 text-[11px] text-amber-800 hover:bg-amber-50"
+                  onClick={() => void performControl("pause")}
+                  disabled={controlBusy !== null}
+                >
+                  {controlBusy === "pause" ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <PauseCircle className="mr-1.5 h-3.5 w-3.5" />}
+                  Pause Session
+                </Button>
+              ) : null}
+
+              {displayStatus !== "cancelled" && displayStatus !== "completed" && displayStatus !== "failed" ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 rounded-full border-rose-200 px-3 text-[11px] text-rose-700 hover:bg-rose-50"
+                  onClick={() => void performControl("cancel")}
+                  disabled={controlBusy !== null}
+                >
+                  {controlBusy === "cancel" ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Ban className="mr-1.5 h-3.5 w-3.5" />}
+                  Cancel Session
+                </Button>
+              ) : null}
+            </div>
+            {controlNotice ? (
+              <p className="mt-2 text-[11px] text-emerald-700">{controlNotice}</p>
+            ) : null}
+            {controlError ? (
+              <p className="mt-2 text-[11px] text-rose-700">{controlError}</p>
+            ) : null}
+          </div>
+        ) : null}
       </div>
 
       <ScrollArea className="flex-1 min-h-0">
@@ -380,10 +512,26 @@ export function SubagentActivityPanel() {
   const filesTouched = useAgentEventStore((state) => state.filesTouched)
   const selectedWorkerRunId = useAgentEventStore((state) => state.selectedWorkerRunId)
   const setSelectedWorkerRunId = useAgentEventStore((state) => state.setSelectedWorkerRunId)
+  const agentTasks = useStudioStore((state) => state.agentTasks)
+  const boardSessionId = useStudioStore((state) => state.boardSessionId)
+  const updateAgentTask = useStudioStore((state) => state.updateAgentTask)
+  const setPipelinePhase = useStudioStore((state) => state.setPipelinePhase)
   const groups = useMemo(
     () => buildSubagentActivityGroups(codexDelegations, toolCalls),
     [codexDelegations, toolCalls],
   )
+
+  const managedTaskStatusById = useMemo(
+    () => new Map(agentTasks.map((task) => [task.id, task.status])),
+    [agentTasks],
+  )
+
+  function resolveDisplayStatus(group: SubagentActivityGroup): WorkerDisplayStatus {
+    const taskStatus = managedTaskStatusById.get(group.taskId)
+    if (taskStatus === "paused") return "paused"
+    if (taskStatus === "cancelled") return "cancelled"
+    return group.status
+  }
 
   const selectedGroup = useMemo(
     () =>
@@ -392,6 +540,11 @@ export function SubagentActivityPanel() {
         : null,
     [groups, selectedWorkerRunId],
   )
+  const selectedTask = useMemo(
+    () => (selectedGroup ? agentTasks.find((task) => task.id === selectedGroup.taskId) ?? null : null),
+    [agentTasks, selectedGroup],
+  )
+  const selectedDisplayStatus = selectedGroup ? resolveDisplayStatus(selectedGroup) : null
 
   const selectedTranscript = useMemo(() => {
     if (!selectedGroup) return []
@@ -414,10 +567,25 @@ export function SubagentActivityPanel() {
       .sort((left, right) => right.ts.localeCompare(left.ts))
   }, [filesTouched, selectedGroup])
 
+  function patchManagedTaskStatus(status: AgentTask["status"], sessionId: string) {
+    if (selectedGroup?.taskId) {
+      updateAgentTask(selectedGroup.taskId, { status })
+    }
+    if (boardSessionId === sessionId) {
+      if (status === "paused") setPipelinePhase("paused")
+      else if (status === "cancelled") setPipelinePhase("cancelled")
+      else setPipelinePhase("executing")
+    }
+  }
+
   if (selectedGroup) {
     return (
       <WorkerDetail
         group={selectedGroup}
+        displayStatus={selectedDisplayStatus ?? selectedGroup.status}
+        matchedTask={selectedTask}
+        onTaskStatusPatched={patchManagedTaskStatus}
+        boardSessionId={boardSessionId}
         transcript={selectedTranscript}
         tools={selectedTools}
         files={selectedFiles}
@@ -449,6 +617,7 @@ export function SubagentActivityPanel() {
               <WorkerListCard
                 key={group.id}
                 group={group}
+                displayStatus={resolveDisplayStatus(group)}
                 onOpen={() => setSelectedWorkerRunId(group.workerRunId)}
               />
             ))}

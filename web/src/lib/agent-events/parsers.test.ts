@@ -270,6 +270,20 @@ describe("parseCodexDelegation", () => {
     expect(result?.event_type).toBe("codex_accepted")
   })
 
+  it("preserves managed control metadata when present", () => {
+    const raw: AgentEventEnvelopeRaw = {
+      ...CODEX_DISPATCHED,
+      payload: {
+        ...CODEX_DISPATCHED.payload,
+        control_mode: "managed",
+        interruptible: true,
+      },
+    }
+    const result = parseCodexDelegation(raw)
+    expect(result?.control_mode).toBe("managed")
+    expect(result?.interruptible).toBe(true)
+  })
+
   it("returns CodexDelegationEntry with files_generated for codex_completed", () => {
     const raw: AgentEventEnvelopeRaw = {
       ...CODEX_DISPATCHED,
