@@ -12,7 +12,7 @@ import {
     DialogHeader,
     DialogTitle,
 } from "@/components/ui/dialog"
-import { Folder, FolderOpen, Loader2, Circle, CheckCircle2, ShieldAlert } from "lucide-react"
+import { Folder, FolderOpen, Loader2, Circle, CheckCircle2, ShieldAlert, ChevronRight, ChevronLeft, MessageSquare, LayoutDashboard } from "lucide-react"
 import { StudioPaper } from "@/lib/store/studio-store"
 import { cn } from "@/lib/utils"
 
@@ -82,6 +82,7 @@ export function WorkspaceSetupDialog({
     onConfirm,
     onCancel,
 }: WorkspaceSetupDialogProps) {
+    const [step, setStep] = useState<"workspace" | "review">("workspace")
     const [loading, setLoading] = useState(true)
     const [currentDir, setCurrentDir] = useState("")
     const [choice, setChoice] = useState<"current" | "custom">("current")
@@ -95,6 +96,7 @@ export function WorkspaceSetupDialog({
     // Fetch current working directory on mount
     useEffect(() => {
         if (open) {
+            setStep("workspace")
             setLoading(true)
             setError(null)
             setPendingAllowDir(null)
@@ -213,10 +215,21 @@ export function WorkspaceSetupDialog({
     }
 
     const selectedDir = choice === "current" ? currentDir : customDir
+    const normalizedSelectedDir = trimTrailingSlashes(selectedDir)
+    const directoryAllowed =
+        !normalizedSelectedDir || allowedPrefixes.length === 0
+            ? false
+            : isUnderAllowedStudioRoot(normalizedSelectedDir, allowedPrefixes)
+    const directoryNeedsAccess =
+        Boolean(normalizedSelectedDir) &&
+        !directoryAllowed &&
+        choice === "custom" &&
+        allowedPrefixes.length > 0
+    const canContinueToReview = Boolean(selectedDir && selectedDir.trim())
 
     return (
         <Dialog open={open} onOpenChange={(isOpen) => !isOpen && onCancel()}>
-            <DialogContent className="sm:max-w-md">
+            <DialogContent className="sm:max-w-[640px]">
                 <DialogHeader>
                     <DialogTitle className="flex items-center gap-2">
                         <FolderOpen className="h-5 w-5 text-blue-500" />
@@ -227,6 +240,39 @@ export function WorkspaceSetupDialog({
                         {paper.title.length > 50 ? "..." : ""}&quot;
                     </DialogDescription>
                 </DialogHeader>
+
+                <div className="flex items-center gap-2 rounded-2xl border border-slate-200 bg-[#f7f8f4] p-1">
+                    {[
+                        { key: "workspace" as const, label: "Workspace" },
+                        { key: "review" as const, label: "Review" },
+                    ].map((item, index) => {
+                        const active = step === item.key
+                        const complete = step === "review" && item.key === "workspace"
+                        return (
+                            <div
+                                key={item.key}
+                                className={cn(
+                                    "flex min-w-0 flex-1 items-center justify-center gap-2 rounded-xl px-3 py-2 text-[11px] font-medium",
+                                    active
+                                        ? "bg-white text-slate-900 shadow-[0_1px_0_rgba(255,255,255,0.9)_inset]"
+                                        : "text-slate-500",
+                                )}
+                            >
+                                <span
+                                    className={cn(
+                                        "flex h-5 w-5 items-center justify-center rounded-full border text-[10px]",
+                                        active || complete
+                                            ? "border-slate-300 bg-[#eef1ea] text-slate-800"
+                                            : "border-slate-200 bg-white text-slate-400",
+                                    )}
+                                >
+                                    {index + 1}
+                                </span>
+                                <span className="truncate">{item.label}</span>
+                            </div>
+                        )
+                    })}
+                </div>
 
                 {loading ? (
                     <div className="flex items-center justify-center py-8">
@@ -260,92 +306,195 @@ export function WorkspaceSetupDialog({
                             </div>
                         )}
 
-                        <div className="space-y-3">
-                            {/* Option 1: Current directory */}
-                            <button
-                                type="button"
-                                onClick={() => setChoice("current")}
-                                className={cn(
-                                    "w-full flex items-start gap-3 p-3 rounded-lg border text-left transition-colors",
-                                    choice === "current"
-                                        ? "border-primary bg-primary/5"
-                                        : "border-border hover:bg-muted/50"
-                                )}
-                            >
-                                {choice === "current" ? (
-                                    <CheckCircle2 className="h-5 w-5 text-primary shrink-0 mt-0.5" />
-                                ) : (
-                                    <Circle className="h-5 w-5 text-muted-foreground shrink-0 mt-0.5" />
-                                )}
-                                <div className="flex-1 min-w-0">
-                                    <Label className="font-medium cursor-pointer">
-                                        Use current directory
-                                    </Label>
-                                    <div className="mt-1 flex items-center gap-2 text-sm text-muted-foreground">
-                                        <Folder className="h-4 w-4 shrink-0" />
-                                        <code className="bg-muted px-2 py-0.5 rounded text-xs break-all">
-                                            {currentDir}
-                                        </code>
-                                    </div>
-                                </div>
-                            </button>
-
-                            {/* Option 2: Custom directory */}
-                            <button
-                                type="button"
-                                onClick={() => setChoice("custom")}
-                                className={cn(
-                                    "w-full flex items-start gap-3 p-3 rounded-lg border text-left transition-colors",
-                                    choice === "custom"
-                                        ? "border-primary bg-primary/5"
-                                        : "border-border hover:bg-muted/50"
-                                )}
-                            >
-                                {choice === "custom" ? (
-                                    <CheckCircle2 className="h-5 w-5 text-primary shrink-0 mt-0.5" />
-                                ) : (
-                                    <Circle className="h-5 w-5 text-muted-foreground shrink-0 mt-0.5" />
-                                )}
-                                <div className="flex-1 min-w-0 space-y-2">
-                                    <Label className="font-medium cursor-pointer">
-                                        Choose a different directory
-                                    </Label>
-                                    <Input
-                                        value={customDir}
-                                        onChange={(e) => {
-                                            setCustomDir(e.target.value)
-                                            setChoice("custom")
-                                        }}
-                                        onClick={(e) => {
-                                            e.stopPropagation()
-                                            setChoice("custom")
-                                        }}
-                                        placeholder="/path/to/project"
-                                        className="font-mono text-sm"
-                                    />
-                                    <p className="text-xs text-muted-foreground">
-                                        Tip: Use terminal <code className="bg-muted px-1 rounded">pwd</code> to get current path
+                        {step === "workspace" ? (
+                            <div className="space-y-4">
+                                <div className="rounded-[22px] border border-slate-200 bg-[#f8faf5] px-4 py-3">
+                                    <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                                        Workspace Choice
+                                    </p>
+                                    <p className="mt-1 text-[12px] text-slate-600">
+                                        Pick the directory that Claude Code should use when this paper thread starts.
                                     </p>
                                 </div>
-                            </button>
-                        </div>
 
-                        <div className="pt-2 border-t">
-                            <p className="text-xs text-muted-foreground">
-                                Generated code will be saved to:{" "}
-                                <code className="bg-muted px-1 rounded">{selectedDir || "..."}</code>
-                            </p>
-                        </div>
+                                <div className="space-y-3">
+                                    <button
+                                        type="button"
+                                        onClick={() => setChoice("current")}
+                                        className={cn(
+                                            "w-full flex items-start gap-3 p-3 rounded-xl border text-left transition-colors",
+                                            choice === "current"
+                                                ? "border-primary bg-primary/5"
+                                                : "border-border hover:bg-muted/50"
+                                        )}
+                                    >
+                                        {choice === "current" ? (
+                                            <CheckCircle2 className="h-5 w-5 text-primary shrink-0 mt-0.5" />
+                                        ) : (
+                                            <Circle className="h-5 w-5 text-muted-foreground shrink-0 mt-0.5" />
+                                        )}
+                                        <div className="flex-1 min-w-0">
+                                            <Label className="font-medium cursor-pointer">
+                                                Use current directory
+                                            </Label>
+                                            <div className="mt-1 flex items-center gap-2 text-sm text-muted-foreground">
+                                                <Folder className="h-4 w-4 shrink-0" />
+                                                <code className="bg-muted px-2 py-0.5 rounded text-xs break-all">
+                                                    {currentDir}
+                                                </code>
+                                            </div>
+                                        </div>
+                                    </button>
+
+                                    <button
+                                        type="button"
+                                        onClick={() => setChoice("custom")}
+                                        className={cn(
+                                            "w-full flex items-start gap-3 p-3 rounded-xl border text-left transition-colors",
+                                            choice === "custom"
+                                                ? "border-primary bg-primary/5"
+                                                : "border-border hover:bg-muted/50"
+                                        )}
+                                    >
+                                        {choice === "custom" ? (
+                                            <CheckCircle2 className="h-5 w-5 text-primary shrink-0 mt-0.5" />
+                                        ) : (
+                                            <Circle className="h-5 w-5 text-muted-foreground shrink-0 mt-0.5" />
+                                        )}
+                                        <div className="flex-1 min-w-0 space-y-2">
+                                            <Label className="font-medium cursor-pointer">
+                                                Choose a different directory
+                                            </Label>
+                                            <Input
+                                                value={customDir}
+                                                onChange={(e) => {
+                                                    setCustomDir(e.target.value)
+                                                    setChoice("custom")
+                                                }}
+                                                onClick={(e) => {
+                                                    e.stopPropagation()
+                                                    setChoice("custom")
+                                                }}
+                                                placeholder="/path/to/project"
+                                                className="font-mono text-sm"
+                                            />
+                                            <p className="text-xs text-muted-foreground">
+                                                Tip: Use terminal <code className="bg-muted px-1 rounded">pwd</code> to get current path
+                                            </p>
+                                        </div>
+                                    </button>
+                                </div>
+
+                                <div className="pt-2 border-t">
+                                    <p className="text-xs text-muted-foreground">
+                                        Generated code will be saved to:{" "}
+                                        <code className="bg-muted px-1 rounded">{selectedDir || "..."}</code>
+                                    </p>
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="space-y-4">
+                                <div className="rounded-[22px] border border-slate-200 bg-[#f8faf5] px-4 py-3">
+                                    <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                                        Review Session Launch
+                                    </p>
+                                    <p className="mt-1 text-[12px] text-slate-600">
+                                        Confirm the paper, workspace, and launch surface before starting the Claude Code session.
+                                    </p>
+                                </div>
+
+                                <div className="grid gap-3 sm:grid-cols-2">
+                                    <div className="rounded-[20px] border border-slate-200 bg-white px-4 py-3">
+                                        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Paper</p>
+                                        <p className="mt-1 text-[13px] font-medium text-slate-900">
+                                            {paper.title}
+                                        </p>
+                                    </div>
+                                    <div className="rounded-[20px] border border-slate-200 bg-white px-4 py-3">
+                                        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Workspace</p>
+                                        <p className="mt-1 break-all font-mono text-[11px] text-slate-700">
+                                            {selectedDir || "..."}
+                                        </p>
+                                    </div>
+                                    <div className="rounded-[20px] border border-slate-200 bg-white px-4 py-3">
+                                        <div className="flex items-center gap-2">
+                                            <MessageSquare className="h-4 w-4 text-slate-500" />
+                                            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Session</p>
+                                        </div>
+                                        <p className="mt-1 text-[12px] font-medium text-slate-900">
+                                            Claude Code chat
+                                        </p>
+                                        <p className="mt-1 text-[11px] leading-5 text-slate-500">
+                                            Main replies stay in chat and tool/thinking activity streams underneath.
+                                        </p>
+                                    </div>
+                                    <div className="rounded-[20px] border border-slate-200 bg-white px-4 py-3">
+                                        <div className="flex items-center gap-2">
+                                            <LayoutDashboard className="h-4 w-4 text-slate-500" />
+                                            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Monitor</p>
+                                        </div>
+                                        <p className="mt-1 text-[12px] font-medium text-slate-900">
+                                            Mirrored activity
+                                        </p>
+                                        <p className="mt-1 text-[11px] leading-5 text-slate-500">
+                                            Full worker, tool, and delegation detail remains available in Monitor.
+                                        </p>
+                                    </div>
+                                </div>
+
+                                <div className="rounded-[20px] border border-slate-200 bg-white px-4 py-3">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                        <span className="rounded-full border border-slate-200 bg-[#f7f8f4] px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-slate-500">
+                                            {choice === "current" ? "current dir" : "custom dir"}
+                                        </span>
+                                        <span
+                                            className={cn(
+                                                "rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-[0.12em]",
+                                                directoryAllowed
+                                                    ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                                    : directoryNeedsAccess
+                                                        ? "border-amber-200 bg-amber-50 text-amber-700"
+                                                        : "border-slate-200 bg-[#f7f8f4] text-slate-500",
+                                            )}
+                                        >
+                                            {directoryAllowed ? "allowed root" : directoryNeedsAccess ? "needs access" : "validate on start"}
+                                        </span>
+                                    </div>
+                                    <p className="mt-2 text-[11px] leading-5 text-slate-600">
+                                        {directoryAllowed
+                                            ? "This workspace is already inside an allowed Studio root."
+                                            : directoryNeedsAccess
+                                                ? "This workspace sits outside the current Studio roots. Start Session will request access before continuing."
+                                                : "Studio will validate this workspace when the session starts."}
+                                    </p>
+                                </div>
+                            </div>
+                        )}
                     </div>
                 )}
 
                 <DialogFooter>
-                    <Button variant="outline" onClick={onCancel}>
-                        Cancel
-                    </Button>
-                    <Button onClick={handleConfirm} disabled={loading || !selectedDir || validating}>
-                        {validating ? "Preparing..." : "Start Session"}
-                    </Button>
+                    {step === "workspace" ? (
+                        <>
+                            <Button variant="outline" onClick={onCancel}>
+                                Cancel
+                            </Button>
+                            <Button onClick={() => setStep("review")} disabled={loading || !canContinueToReview}>
+                                Continue
+                                <ChevronRight className="ml-1 h-4 w-4" />
+                            </Button>
+                        </>
+                    ) : (
+                        <>
+                            <Button variant="outline" onClick={() => setStep("workspace")} disabled={validating}>
+                                <ChevronLeft className="mr-1 h-4 w-4" />
+                                Back
+                            </Button>
+                            <Button onClick={handleConfirm} disabled={loading || !selectedDir || validating}>
+                                {validating ? "Preparing..." : "Start Session"}
+                            </Button>
+                        </>
+                    )}
                 </DialogFooter>
             </DialogContent>
         </Dialog>
