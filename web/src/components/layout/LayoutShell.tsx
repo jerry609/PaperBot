@@ -9,7 +9,7 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
   const [collapsed, setCollapsed] = useState(true)
   const pathname = usePathname()
   const isAgentBoardFocusPage = pathname.startsWith("/studio/agent-board/")
-  const isAuthPage = pathname === "/login"
+  const isAuthPage = ["/login", "/register", "/forgot-password"].includes(pathname)
   const hideSidebar = isAgentBoardFocusPage || isAuthPage
 
   return (
