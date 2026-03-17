@@ -209,6 +209,7 @@ function buildActivitySummaryAction(actions: AgentAction[]): AgentAction {
         counts,
         recent,
         delegationTaskId: latestDelegationAction?.metadata?.toolId?.trim() || undefined,
+        toolActions: actions,
       },
     },
   }

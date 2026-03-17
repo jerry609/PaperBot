@@ -58,6 +58,7 @@ export interface AgentAction {
             counts: Partial<Record<'read' | 'search' | 'write' | 'command' | 'delegation' | 'web' | 'other', number>>
             recent: string[]
             delegationTaskId?: string
+            toolActions?: AgentAction[]
         }
         approvalRequest?: {
             message: string

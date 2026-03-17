@@ -252,6 +252,10 @@ function formatFileSize(bytes: number): string {
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
+function compactInlineText(value: string): string {
+    return value.replace(/\s+/g, " ").trim()
+}
+
 function readFileAsDataUrl(file: File): Promise<string> {
     return new Promise((resolve, reject) => {
         const reader = new FileReader()
@@ -358,6 +362,10 @@ function summarizeToolPayload(payload: unknown): string | null {
     return null
 }
 
+function stringifyToolPayload(payload: unknown): string {
+    return typeof payload === "string" ? payload : JSON.stringify(payload, null, 2) || ""
+}
+
 function formatBridgeTaskKind(taskKind: StudioBridgeResult["taskKind"]): string {
     if (taskKind === "approval_required") return "Approval"
     if (taskKind === "code") return "Code"
@@ -411,6 +419,150 @@ function bridgePayloadMetricBadges(bridgeResult: StudioBridgeResult): string[] {
     }
 
     return badges
+}
+
+function ToolActivityStreamRow({
+    action,
+    onOpenMonitor,
+    nested = false,
+}: {
+    action: AgentAction
+    onOpenMonitor?: (delegationTaskId?: string) => void
+    nested?: boolean
+}) {
+    const bridgeResult = action.metadata?.bridgeResult ?? null
+    const hasExpandableContent = Boolean(action.metadata?.params || action.metadata?.result || bridgeResult)
+    const hasToolResult = action.metadata?.result !== undefined || bridgeResult !== null
+    const toolSummary =
+        bridgeResult?.summary ??
+        summarizeToolPayload(action.metadata?.params) ??
+        summarizeToolPayload(action.metadata?.result)
+    const monitorTaskId =
+        getStudioBridgeDelegationTaskId(bridgeResult) ??
+        action.metadata?.toolId ??
+        null
+    const workerRunId = getStudioBridgeWorkerRunId(bridgeResult)
+    const [expanded, setExpanded] = useState(() => !hasToolResult)
+
+    return (
+        <div
+            className={cn(
+                "rounded-[16px] border border-slate-200 bg-white/90 shadow-[0_1px_0_rgba(255,255,255,0.75)_inset]",
+                nested ? "px-1.5 py-1.5" : "max-w-[86%] px-2 py-1.5",
+            )}
+        >
+            <button
+                type="button"
+                disabled={!hasExpandableContent}
+                onClick={() => {
+                    if (!hasExpandableContent) return
+                    setExpanded((current) => !current)
+                }}
+                className={cn(
+                    "flex w-full items-center gap-1.5 text-left",
+                    hasExpandableContent ? "cursor-pointer" : "cursor-default",
+                )}
+            >
+                <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-[#f3f5ef]">
+                    <Wrench className="h-3 w-3 text-slate-500" />
+                </div>
+                <code className="shrink-0 rounded-full bg-[#eef1ea] px-1.5 py-0.5 text-[9px] font-mono text-slate-700">
+                    {action.metadata?.functionName || "tool"}()
+                </code>
+                {bridgeResult ? (
+                    <span className="shrink-0 rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-slate-500">
+                        {formatBridgeTaskKind(bridgeResult.taskKind)}
+                    </span>
+                ) : null}
+                <span className="min-w-0 flex-1 truncate text-[10px] text-slate-500">
+                    {toolSummary || (hasToolResult ? "done" : "running")}
+                </span>
+                <span
+                    className={cn(
+                        "shrink-0 rounded-full border px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em]",
+                        hasToolResult
+                            ? bridgeResult
+                                ? bridgeStatusClassName(bridgeResult.status)
+                                : "border-emerald-200 bg-emerald-50 text-emerald-700"
+                            : "border-slate-200 bg-[#f8faf6] text-slate-500",
+                    )}
+                >
+                    {hasToolResult ? (bridgeResult ? formatBridgeStatus(bridgeResult.status) : "done") : "running"}
+                </span>
+                {hasExpandableContent ? (
+                    expanded ? (
+                        <ChevronDown className="h-3.5 w-3.5 shrink-0 text-slate-500" />
+                    ) : (
+                        <ChevronRight className="h-3.5 w-3.5 shrink-0 text-slate-500" />
+                    )
+                ) : null}
+            </button>
+
+            {expanded ? (
+                <div className="mt-1.5 space-y-1">
+                    {bridgeResult ? (
+                        <div className="rounded-[12px] border border-slate-200 bg-[#f8faf5] px-2 py-1.5">
+                            <div className="text-[10px] leading-[18px] text-slate-800">
+                                {bridgeResult.summary}
+                            </div>
+                            <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                                <span className="rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-slate-500">
+                                    {bridgeResult.executor}
+                                </span>
+                                {workerRunId ? (
+                                    <span className="rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-slate-500">
+                                        run {workerRunId.slice(0, 18)}
+                                    </span>
+                                ) : null}
+                                {bridgePayloadMetricBadges(bridgeResult).map((badge) => (
+                                    <span
+                                        key={badge}
+                                        className="rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-slate-500"
+                                    >
+                                        {badge}
+                                    </span>
+                                ))}
+                            </div>
+                            {bridgeResult.artifacts.length > 0 ? (
+                                <div className="mt-1.5 flex flex-wrap gap-1">
+                                    {bridgeResult.artifacts.slice(0, 4).map((artifact) => (
+                                        <span
+                                            key={`${artifact.kind}:${artifact.label}:${artifact.path ?? artifact.value ?? ""}`}
+                                            className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] text-slate-600"
+                                        >
+                                            {artifact.label}
+                                        </span>
+                                    ))}
+                                </div>
+                            ) : null}
+                            {onOpenMonitor && monitorTaskId ? (
+                                <div className="mt-1.5">
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        className="h-6 rounded-full border-slate-200 bg-white px-2.5 text-[10px] text-slate-700 hover:bg-slate-50"
+                                        onClick={() => onOpenMonitor(monitorTaskId)}
+                                    >
+                                        Open in Monitor
+                                    </Button>
+                                </div>
+                            ) : null}
+                        </div>
+                    ) : null}
+                    {Boolean(action.metadata?.params) ? (
+                        <CodeBlock title="Args" code={stringifyToolPayload(action.metadata?.params)} />
+                    ) : null}
+                    {bridgeResult ? (
+                        <CodeBlock title="Bridge Result" code={JSON.stringify(bridgeResult.raw, null, 2)} />
+                    ) : null}
+                    {Boolean(action.metadata?.result) ? (
+                        <CodeBlock title="Result" code={stringifyToolPayload(action.metadata?.result)} />
+                    ) : null}
+                </div>
+            ) : null}
+        </div>
+    )
 }
 
 type ComposerPillTone = "neutral" | "accent" | "success" | "warning"
@@ -657,18 +809,11 @@ function ActionItem({
     onApproveApprovalRequest,
     approvalPending = false,
 }: ActionItemProps) {
-    const [expanded, setExpanded] = useState(false)
     const attachments = action.metadata?.attachments ?? []
-    const bridgeResult = action.metadata?.bridgeResult ?? null
-    const hasExpandableContent = Boolean(action.metadata?.params || action.metadata?.result || bridgeResult)
-    const hasToolResult = action.metadata?.result !== undefined || bridgeResult !== null
     const commandOutput = action.metadata?.commandOutput
-    const toolSummary =
-        bridgeResult?.summary ??
-        summarizeToolPayload(action.metadata?.params) ??
-        summarizeToolPayload(action.metadata?.result)
-    const stringifyPayload = (payload: unknown): string =>
-        typeof payload === "string" ? payload : JSON.stringify(payload, null, 2) || ""
+    const [expanded, setExpanded] = useState(() =>
+        action.type === "activity_summary" ? action.metadata?.activitySummary?.status !== "done" : false,
+    )
 
     if (action.type === "user") {
         const hasTextContent = action.content.trim().length > 0
@@ -700,14 +845,43 @@ function ActionItem({
     }
 
     if (action.type === "thinking") {
+        const preview = compactInlineText(action.content)
+        const expandable = preview.length > 84 || action.content.includes("\n")
         return (
             <div className="pb-1">
-                <div className="inline-flex max-w-[86%] items-start gap-1.5 rounded-full border border-slate-200 bg-white/85 px-2.5 py-1 text-[10px] leading-4 text-slate-500 shadow-[0_1px_0_rgba(255,255,255,0.75)_inset]">
-                    <Loader2 className="mt-0.5 h-3 w-3 shrink-0 animate-spin text-slate-400" />
-                    <span className="shrink-0 uppercase tracking-[0.12em] text-slate-400">thinking</span>
-                    <span className="min-w-0 whitespace-pre-wrap text-slate-500">
-                        {action.content}
-                    </span>
+                <div className="max-w-[86%]">
+                    <button
+                        type="button"
+                        disabled={!expandable}
+                        onClick={() => {
+                            if (!expandable) return
+                            setExpanded((current) => !current)
+                        }}
+                        className={cn(
+                            "inline-flex w-full items-center gap-1.5 rounded-full border border-slate-200 bg-white/85 px-2.5 py-1 text-[10px] leading-4 text-slate-500 shadow-[0_1px_0_rgba(255,255,255,0.75)_inset]",
+                            expandable ? "cursor-pointer" : "cursor-default",
+                        )}
+                    >
+                        <Loader2 className="h-3 w-3 shrink-0 animate-spin text-slate-400" />
+                        <span className="shrink-0 uppercase tracking-[0.12em] text-slate-400">thinking</span>
+                        <span className={cn("min-w-0 flex-1 text-left text-slate-500", expanded ? "whitespace-pre-wrap" : "truncate")}>
+                            {expanded ? action.content : preview}
+                        </span>
+                        {expandable ? (
+                            expanded ? (
+                                <ChevronDown className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                            ) : (
+                                <ChevronRight className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                            )
+                        ) : null}
+                    </button>
+                    {expanded ? (
+                        <div className="pl-6 pt-1 text-[10px] leading-4 text-slate-500">
+                            <div className="whitespace-pre-wrap rounded-[14px] border border-slate-200 bg-white/75 px-2.5 py-2">
+                                {action.content}
+                            </div>
+                        </div>
+                    ) : null}
                 </div>
             </div>
         )
@@ -715,6 +889,7 @@ function ActionItem({
 
     if (action.type === "activity_summary" && action.metadata?.activitySummary) {
         const summary = action.metadata.activitySummary
+        const toolActions = summary.toolActions ?? []
         const countBadges = [
             summary.counts.read ? `${summary.counts.read} reads` : null,
             summary.counts.search ? `${summary.counts.search} searches` : null,
@@ -727,68 +902,89 @@ function ActionItem({
         const sharedClassName =
             "block w-full max-w-[86%] rounded-[18px] border border-slate-200 bg-white/90 px-2 py-1.5 text-left shadow-[0_1px_0_rgba(255,255,255,0.75)_inset]"
 
-        const content = (
-            <>
-                <div className="flex items-center gap-1.5">
-                    <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-[#f3f5ef]">
-                        <Activity className="h-3 w-3 text-slate-500" />
-                    </div>
-                    <span className="min-w-0 flex-1 truncate text-[10px] font-medium text-slate-800">
-                        {summary.label}
-                    </span>
-                    <span className="shrink-0 rounded-full border border-slate-200 bg-[#eef1ea] px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-slate-500">
-                        {summary.totalTools} action{summary.totalTools === 1 ? "" : "s"}
-                    </span>
-                    <span
-                        className={cn(
-                            "shrink-0 rounded-full border px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em]",
-                            summary.status === "done"
-                                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                                : "border-slate-200 bg-[#f8faf6] text-slate-500",
-                        )}
-                    >
-                        {summary.status}
-                    </span>
-                </div>
-
-                {countBadges.length > 0 ? (
-                    <div className="mt-1.5 flex flex-wrap gap-1">
-                        {countBadges.map((badge) => (
-                            <span
-                                key={badge}
-                                className="rounded-full border border-slate-200 bg-[#f7f8f4] px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-slate-500"
-                            >
-                                {badge}
-                            </span>
-                        ))}
-                    </div>
-                ) : null}
-
-                {summary.recent.length > 0 ? (
-                    <div className="mt-1.5 text-[9px] leading-4 text-slate-500">
-                        Recent: {summary.recent.join(" · ")}
-                    </div>
-                ) : null}
-
-                <div className="mt-1 text-[9px] text-slate-400">
-                    Full tool activity stays in Monitor.
-                </div>
-            </>
-        )
-
         return (
             <div className="pb-1.5">
-                {onOpenMonitor ? (
+                <div className={sharedClassName}>
                     <button
                         type="button"
-                        onClick={() => onOpenMonitor(summary.delegationTaskId)}
-                        className={`${sharedClassName} transition-colors hover:bg-white`}
+                        onClick={() => setExpanded((current) => !current)}
+                        className="flex w-full items-center gap-1.5 text-left"
                     >
-                        {content}
+                        <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-[#f3f5ef]">
+                            <Activity className="h-3 w-3 text-slate-500" />
+                        </div>
+                        <span className="min-w-0 flex-1 truncate text-[10px] font-medium text-slate-800">
+                            {summary.label}
+                        </span>
+                        <span className="shrink-0 rounded-full border border-slate-200 bg-[#eef1ea] px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-slate-500">
+                            {summary.totalTools} action{summary.totalTools === 1 ? "" : "s"}
+                        </span>
+                        <span
+                            className={cn(
+                                "shrink-0 rounded-full border px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em]",
+                                summary.status === "done"
+                                    ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                    : "border-slate-200 bg-[#f8faf6] text-slate-500",
+                            )}
+                        >
+                            {summary.status}
+                        </span>
+                        {expanded ? (
+                            <ChevronDown className="h-3.5 w-3.5 shrink-0 text-slate-500" />
+                        ) : (
+                            <ChevronRight className="h-3.5 w-3.5 shrink-0 text-slate-500" />
+                        )}
                     </button>
-                ) : (
-                    <div className={sharedClassName}>{content}</div>
-                )}
+
+                    {countBadges.length > 0 ? (
+                        <div className="mt-1.5 flex flex-wrap gap-1">
+                            {countBadges.map((badge) => (
+                                <span
+                                    key={badge}
+                                    className="rounded-full border border-slate-200 bg-[#f7f8f4] px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-slate-500"
+                                >
+                                    {badge}
+                                </span>
+                            ))}
+                        </div>
+                    ) : null}
+
+                    {summary.recent.length > 0 ? (
+                        <div className="mt-1.5 text-[9px] leading-4 text-slate-500">
+                            Recent: {summary.recent.join(" · ")}
+                        </div>
+                    ) : null}
+
+                    <div className="mt-1 flex items-center justify-between gap-2">
+                        <div className="text-[9px] text-slate-400">
+                            Main chat keeps this collapsed. Full raw activity stays in Monitor.
+                        </div>
+                        {onOpenMonitor && summary.delegationTaskId ? (
+                            <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="h-6 rounded-full border-slate-200 bg-white px-2.5 text-[10px] text-slate-700 hover:bg-slate-50"
+                                onClick={() => onOpenMonitor(summary.delegationTaskId)}
+                            >
+                                Monitor
+                            </Button>
+                        ) : null}
+                    </div>
+
+                    {expanded && toolActions.length > 0 ? (
+                        <div className="mt-2 space-y-1.5 border-t border-slate-200/80 pt-2">
+                            {toolActions.map((toolAction) => (
+                                <ToolActivityStreamRow
+                                    key={toolAction.id}
+                                    action={toolAction}
+                                    onOpenMonitor={onOpenMonitor}
+                                    nested
+                                />
+                            ))}
+                        </div>
+                    ) : null}
+                </div>
             </div>
         )
     }
@@ -880,126 +1076,9 @@ function ActionItem({
     }
 
     if (action.type === "function_call" && action.metadata?.functionName) {
-        const monitorTaskId =
-            getStudioBridgeDelegationTaskId(bridgeResult) ??
-            action.metadata?.toolId ??
-            null
-        const workerRunId = getStudioBridgeWorkerRunId(bridgeResult)
         return (
             <div className="pb-1">
-                <div className="max-w-[86%] rounded-[18px] border border-slate-200 bg-white/90 px-2 py-1.5 shadow-[0_1px_0_rgba(255,255,255,0.75)_inset]">
-                    <div className="flex items-center gap-1.5">
-                        <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-[#f3f5ef]">
-                            <Wrench className="h-3 w-3 text-slate-500" />
-                        </div>
-                        <code className="shrink-0 rounded-full bg-[#eef1ea] px-1.5 py-0.5 text-[9px] font-mono text-slate-700">
-                            {action.metadata.functionName}()
-                        </code>
-                        {bridgeResult ? (
-                            <span className="shrink-0 rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-slate-500">
-                                {formatBridgeTaskKind(bridgeResult.taskKind)}
-                            </span>
-                        ) : null}
-                        {toolSummary ? (
-                            <span className="min-w-0 flex-1 truncate text-[10px] text-slate-500">
-                                {toolSummary}
-                            </span>
-                        ) : (
-                            <span className="min-w-0 flex-1 text-[10px] text-slate-400">
-                                {hasToolResult ? "done" : "running"}
-                            </span>
-                        )}
-                        <span
-                            className={cn(
-                                "shrink-0 rounded-full border px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em]",
-                                hasToolResult
-                                    ? bridgeResult
-                                        ? bridgeStatusClassName(bridgeResult.status)
-                                        : "border-emerald-200 bg-emerald-50 text-emerald-700"
-                                    : "border-slate-200 bg-[#f8faf6] text-slate-500",
-                            )}
-                        >
-                            {hasToolResult ? (bridgeResult ? formatBridgeStatus(bridgeResult.status) : "done") : "running"}
-                        </span>
-                        {hasExpandableContent ? (
-                            <button
-                                type="button"
-                                onClick={() => setExpanded((current) => !current)}
-                                className="rounded-full p-0.5 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700"
-                                title={expanded ? "Collapse tool output" : "Expand tool output"}
-                            >
-                                {expanded ? (
-                                    <ChevronDown className="h-3.5 w-3.5" />
-                                ) : (
-                                    <ChevronRight className="h-3.5 w-3.5" />
-                                )}
-                            </button>
-                        ) : null}
-                    </div>
-                    {bridgeResult ? (
-                        <div className="mt-1.5 rounded-[12px] border border-slate-200 bg-[#f8faf5] px-2 py-1.5">
-                            <div className="text-[10px] leading-[18px] text-slate-800">
-                                {bridgeResult.summary}
-                            </div>
-                            <div className="mt-1.5 flex flex-wrap items-center gap-1">
-                                <span className="rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-slate-500">
-                                    {bridgeResult.executor}
-                                </span>
-                                {workerRunId ? (
-                                    <span className="rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-slate-500">
-                                        run {workerRunId.slice(0, 18)}
-                                    </span>
-                                ) : null}
-                                {bridgePayloadMetricBadges(bridgeResult).map((badge) => (
-                                    <span
-                                        key={badge}
-                                        className="rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-slate-500"
-                                    >
-                                        {badge}
-                                    </span>
-                                ))}
-                            </div>
-                            {bridgeResult.artifacts.length > 0 ? (
-                                <div className="mt-1.5 flex flex-wrap gap-1">
-                                    {bridgeResult.artifacts.slice(0, 4).map((artifact) => (
-                                        <span
-                                            key={`${artifact.kind}:${artifact.label}:${artifact.path ?? artifact.value ?? ""}`}
-                                            className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] text-slate-600"
-                                        >
-                                            {artifact.label}
-                                        </span>
-                                    ))}
-                                </div>
-                            ) : null}
-                            {onOpenMonitor && monitorTaskId ? (
-                                <div className="mt-2">
-                                    <Button
-                                        type="button"
-                                        variant="outline"
-                                        size="sm"
-                                        className="h-6 rounded-full border-slate-200 bg-white px-2.5 text-[10px] text-slate-700 hover:bg-slate-50"
-                                        onClick={() => onOpenMonitor(monitorTaskId)}
-                                    >
-                                        Open in Monitor
-                                    </Button>
-                                </div>
-                            ) : null}
-                        </div>
-                    ) : null}
-                    {expanded ? (
-                        <div className="mt-1 space-y-1">
-                            {Boolean(action.metadata.params) ? (
-                                <CodeBlock title="Args" code={stringifyPayload(action.metadata.params)} />
-                            ) : null}
-                            {bridgeResult ? (
-                                <CodeBlock title="Bridge Result" code={JSON.stringify(bridgeResult.raw, null, 2)} />
-                            ) : null}
-                            {Boolean(action.metadata.result) ? (
-                                <CodeBlock title="Result" code={stringifyPayload(action.metadata.result)} />
-                            ) : null}
-                        </div>
-                    ) : null}
-                </div>
+                <ToolActivityStreamRow action={action} onOpenMonitor={onOpenMonitor} />
             </div>
         )
     }
