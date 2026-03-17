@@ -256,6 +256,11 @@ function compactInlineText(value: string): string {
     return value.replace(/\s+/g, " ").trim()
 }
 
+function useAutoDisclosure(live: boolean, initialExpanded = false) {
+    const [manualExpanded, setManualExpanded] = useState(() => initialExpanded)
+    return [live || manualExpanded, setManualExpanded] as const
+}
+
 function readFileAsDataUrl(file: File): Promise<string> {
     return new Promise((resolve, reject) => {
         const reader = new FileReader()
@@ -425,10 +430,12 @@ function ToolActivityStreamRow({
     action,
     onOpenMonitor,
     nested = false,
+    live = false,
 }: {
     action: AgentAction
     onOpenMonitor?: (delegationTaskId?: string) => void
     nested?: boolean
+    live?: boolean
 }) {
     const bridgeResult = action.metadata?.bridgeResult ?? null
     const hasExpandableContent = Boolean(action.metadata?.params || action.metadata?.result || bridgeResult)
@@ -442,7 +449,7 @@ function ToolActivityStreamRow({
         action.metadata?.toolId ??
         null
     const workerRunId = getStudioBridgeWorkerRunId(bridgeResult)
-    const [expanded, setExpanded] = useState(() => !hasToolResult)
+    const [expanded, setExpanded] = useAutoDisclosure(live && !hasToolResult, live && !hasToolResult)
 
     return (
         <div
@@ -490,11 +497,16 @@ function ToolActivityStreamRow({
                     {hasToolResult ? (bridgeResult ? formatBridgeStatus(bridgeResult.status) : "done") : "running"}
                 </span>
                 {hasExpandableContent ? (
-                    expanded ? (
-                        <ChevronDown className="h-3.5 w-3.5 shrink-0 text-slate-500" />
-                    ) : (
-                        <ChevronRight className="h-3.5 w-3.5 shrink-0 text-slate-500" />
-                    )
+                    <>
+                        <span className="shrink-0 rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-slate-500">
+                            {expanded ? "hide details" : "show details"}
+                        </span>
+                        {expanded ? (
+                            <ChevronDown className="h-3.5 w-3.5 shrink-0 text-slate-500" />
+                        ) : (
+                            <ChevronRight className="h-3.5 w-3.5 shrink-0 text-slate-500" />
+                        )}
+                    </>
                 ) : null}
             </button>
 
@@ -645,6 +657,8 @@ interface ActionItemProps {
     onOpenMonitor?: (delegationTaskId?: string) => void
     onApproveApprovalRequest?: (action: AgentAction) => void
     approvalPending?: boolean
+    isLatest?: boolean
+    taskRunning?: boolean
 }
 
 type MarkdownActionBlockTone = "default" | "error"
@@ -808,12 +822,18 @@ function ActionItem({
     onOpenMonitor,
     onApproveApprovalRequest,
     approvalPending = false,
+    isLatest = false,
+    taskRunning = false,
 }: ActionItemProps) {
     const attachments = action.metadata?.attachments ?? []
     const commandOutput = action.metadata?.commandOutput
-    const [expanded, setExpanded] = useState(() =>
-        action.type === "activity_summary" ? action.metadata?.activitySummary?.status !== "done" : false,
-    )
+    const liveThinking = action.type === "thinking" && isLatest && taskRunning
+    const liveSummary =
+        action.type === "activity_summary" &&
+        action.metadata?.activitySummary?.status !== "done" &&
+        isLatest &&
+        taskRunning
+    const [expanded, setExpanded] = useAutoDisclosure(Boolean(liveThinking || liveSummary), Boolean(liveThinking || liveSummary))
 
     if (action.type === "user") {
         const hasTextContent = action.content.trim().length > 0
@@ -846,7 +866,7 @@ function ActionItem({
 
     if (action.type === "thinking") {
         const preview = compactInlineText(action.content)
-        const expandable = preview.length > 84 || action.content.includes("\n")
+        const expandable = preview.length > 84 || action.content.includes("\n") || liveThinking
         return (
             <div className="pb-1">
                 <div className="max-w-[86%]">
@@ -868,11 +888,16 @@ function ActionItem({
                             {expanded ? action.content : preview}
                         </span>
                         {expandable ? (
-                            expanded ? (
-                                <ChevronDown className="h-3.5 w-3.5 shrink-0 text-slate-400" />
-                            ) : (
-                                <ChevronRight className="h-3.5 w-3.5 shrink-0 text-slate-400" />
-                            )
+                            <>
+                                <span className="shrink-0 rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-slate-400">
+                                    {expanded ? "hide reasoning" : "show reasoning"}
+                                </span>
+                                {expanded ? (
+                                    <ChevronDown className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                                ) : (
+                                    <ChevronRight className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                                )}
+                            </>
                         ) : null}
                     </button>
                     {expanded ? (
@@ -929,6 +954,9 @@ function ActionItem({
                         >
                             {summary.status}
                         </span>
+                        <span className="shrink-0 rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-slate-500">
+                            {expanded ? "hide steps" : "show steps"}
+                        </span>
                         {expanded ? (
                             <ChevronDown className="h-3.5 w-3.5 shrink-0 text-slate-500" />
                         ) : (
@@ -980,6 +1008,7 @@ function ActionItem({
                                     action={toolAction}
                                     onOpenMonitor={onOpenMonitor}
                                     nested
+                                    live={liveSummary && toolAction.id === toolActions[toolActions.length - 1]?.id}
                                 />
                             ))}
                         </div>
@@ -1076,9 +1105,14 @@ function ActionItem({
     }
 
     if (action.type === "function_call" && action.metadata?.functionName) {
+        const bridgeResult = action.metadata?.bridgeResult ?? null
         return (
             <div className="pb-1">
-                <ToolActivityStreamRow action={action} onOpenMonitor={onOpenMonitor} />
+                <ToolActivityStreamRow
+                    action={action}
+                    onOpenMonitor={onOpenMonitor}
+                    live={isLatest && taskRunning && action.metadata?.result === undefined && bridgeResult === null}
+                />
             </div>
         )
     }
@@ -3004,7 +3038,7 @@ export function ReproductionLog({
                                 </div>
                             ) : (
                                 <div className="space-y-0">
-                                    {visibleActions.map((action) => (
+                                    {visibleActions.map((action, index) => (
                                         <MemoizedActionItem
                                             key={action.id}
                                             action={action}
@@ -3012,6 +3046,8 @@ export function ReproductionLog({
                                             onOpenMonitor={onOpenBoardWorkspace}
                                             onApproveApprovalRequest={handleApproveApprovalRequest}
                                             approvalPending={runningApprovalActionId === action.id}
+                                            isLatest={index === visibleActions.length - 1}
+                                            taskRunning={visibleTask?.status === "running"}
                                         />
                                     ))}
                                 </div>
