@@ -431,11 +431,13 @@ function ToolActivityStreamRow({
     onOpenMonitor,
     nested = false,
     live = false,
+    initialExpanded = false,
 }: {
     action: AgentAction
     onOpenMonitor?: (delegationTaskId?: string) => void
     nested?: boolean
     live?: boolean
+    initialExpanded?: boolean
 }) {
     const bridgeResult = action.metadata?.bridgeResult ?? null
     const hasExpandableContent = Boolean(action.metadata?.params || action.metadata?.result || bridgeResult)
@@ -449,12 +451,15 @@ function ToolActivityStreamRow({
         action.metadata?.toolId ??
         null
     const workerRunId = getStudioBridgeWorkerRunId(bridgeResult)
-    const [expanded, setExpanded] = useAutoDisclosure(live && !hasToolResult, live && !hasToolResult)
+    const [expanded, setExpanded] = useAutoDisclosure(live && !hasToolResult, initialExpanded || (live && !hasToolResult))
 
     return (
         <div
             className={cn(
-                "rounded-[16px] border border-slate-200 bg-white/90 shadow-[0_1px_0_rgba(255,255,255,0.75)_inset]",
+                "rounded-[16px] border shadow-[0_1px_0_rgba(255,255,255,0.75)_inset]",
+                live
+                    ? "border-amber-200 bg-amber-50/80"
+                    : "border-slate-200 bg-white/90",
                 nested ? "px-1.5 py-1.5" : "max-w-[86%] px-2 py-1.5",
             )}
         >
@@ -470,10 +475,20 @@ function ToolActivityStreamRow({
                     hasExpandableContent ? "cursor-pointer" : "cursor-default",
                 )}
             >
-                <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-[#f3f5ef]">
-                    <Wrench className="h-3 w-3 text-slate-500" />
+                <div
+                    className={cn(
+                        "flex h-5 w-5 shrink-0 items-center justify-center rounded-full border",
+                        live ? "border-amber-200 bg-white" : "border-slate-200 bg-[#f3f5ef]",
+                    )}
+                >
+                    <Wrench className={cn("h-3 w-3", live ? "text-amber-700" : "text-slate-500")} />
                 </div>
-                <code className="shrink-0 rounded-full bg-[#eef1ea] px-1.5 py-0.5 text-[9px] font-mono text-slate-700">
+                <code
+                    className={cn(
+                        "shrink-0 rounded-full px-1.5 py-0.5 text-[9px] font-mono",
+                        live ? "bg-white text-amber-900" : "bg-[#eef1ea] text-slate-700",
+                    )}
+                >
                     {action.metadata?.functionName || "tool"}()
                 </code>
                 {bridgeResult ? (
@@ -496,6 +511,11 @@ function ToolActivityStreamRow({
                 >
                     {hasToolResult ? (bridgeResult ? formatBridgeStatus(bridgeResult.status) : "done") : "running"}
                 </span>
+                {live ? (
+                    <span className="shrink-0 rounded-full border border-amber-200 bg-white px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-amber-700">
+                        live
+                    </span>
+                ) : null}
                 {hasExpandableContent ? (
                     <>
                         <span className="shrink-0 rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-slate-500">
@@ -878,24 +898,39 @@ function ActionItem({
                             setExpanded((current) => !current)
                         }}
                         className={cn(
-                            "inline-flex w-full items-center gap-1.5 rounded-full border border-slate-200 bg-white/85 px-2.5 py-1 text-[10px] leading-4 text-slate-500 shadow-[0_1px_0_rgba(255,255,255,0.75)_inset]",
+                            "inline-flex w-full items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] leading-4 shadow-[0_1px_0_rgba(255,255,255,0.75)_inset]",
+                            liveThinking
+                                ? "border-amber-200 bg-amber-50/80 text-amber-800"
+                                : "border-slate-200 bg-white/85 text-slate-500",
                             expandable ? "cursor-pointer" : "cursor-default",
                         )}
                     >
-                        <Loader2 className="h-3 w-3 shrink-0 animate-spin text-slate-400" />
-                        <span className="shrink-0 uppercase tracking-[0.12em] text-slate-400">thinking</span>
-                        <span className={cn("min-w-0 flex-1 text-left text-slate-500", expanded ? "whitespace-pre-wrap" : "truncate")}>
+                        <Loader2 className={cn("h-3 w-3 shrink-0 animate-spin", liveThinking ? "text-amber-600" : "text-slate-400")} />
+                        <span className={cn("shrink-0 uppercase tracking-[0.12em]", liveThinking ? "text-amber-700" : "text-slate-400")}>
+                            thinking
+                        </span>
+                        <span className={cn("min-w-0 flex-1 text-left", liveThinking ? "text-amber-900" : "text-slate-500", expanded ? "whitespace-pre-wrap" : "truncate")}>
                             {expanded ? action.content : preview}
                         </span>
+                        {liveThinking ? (
+                            <span className="shrink-0 rounded-full border border-amber-200 bg-white px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-amber-700">
+                                live
+                            </span>
+                        ) : null}
                         {expandable ? (
                             <>
-                                <span className="shrink-0 rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-slate-400">
+                                <span
+                                    className={cn(
+                                        "shrink-0 rounded-full border bg-white px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em]",
+                                        liveThinking ? "border-amber-200 text-amber-700" : "border-slate-200 text-slate-400",
+                                    )}
+                                >
                                     {expanded ? "hide reasoning" : "show reasoning"}
                                 </span>
                                 {expanded ? (
-                                    <ChevronDown className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                                    <ChevronDown className={cn("h-3.5 w-3.5 shrink-0", liveThinking ? "text-amber-700" : "text-slate-400")} />
                                 ) : (
-                                    <ChevronRight className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                                    <ChevronRight className={cn("h-3.5 w-3.5 shrink-0", liveThinking ? "text-amber-700" : "text-slate-400")} />
                                 )}
                             </>
                         ) : null}
@@ -929,14 +964,19 @@ function ActionItem({
 
         return (
             <div className="pb-1.5">
-                <div className={sharedClassName}>
+                <div className={cn(sharedClassName, liveSummary ? "border-amber-200 bg-amber-50/70" : undefined)}>
                     <button
                         type="button"
                         onClick={() => setExpanded((current) => !current)}
                         className="flex w-full items-center gap-1.5 text-left"
                     >
-                        <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-[#f3f5ef]">
-                            <Activity className="h-3 w-3 text-slate-500" />
+                        <div
+                            className={cn(
+                                "flex h-5 w-5 shrink-0 items-center justify-center rounded-full border",
+                                liveSummary ? "border-amber-200 bg-white" : "border-slate-200 bg-[#f3f5ef]",
+                            )}
+                        >
+                            <Activity className={cn("h-3 w-3", liveSummary ? "text-amber-700" : "text-slate-500")} />
                         </div>
                         <span className="min-w-0 flex-1 truncate text-[10px] font-medium text-slate-800">
                             {summary.label}
@@ -954,6 +994,11 @@ function ActionItem({
                         >
                             {summary.status}
                         </span>
+                        {liveSummary ? (
+                            <span className="shrink-0 rounded-full border border-amber-200 bg-white px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-amber-700">
+                                live
+                            </span>
+                        ) : null}
                         <span className="shrink-0 rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-slate-500">
                             {expanded ? "hide steps" : "show steps"}
                         </span>
@@ -1008,6 +1053,7 @@ function ActionItem({
                                     action={toolAction}
                                     onOpenMonitor={onOpenMonitor}
                                     nested
+                                    initialExpanded={!liveSummary && toolAction.id === toolActions[toolActions.length - 1]?.id}
                                     live={liveSummary && toolAction.id === toolActions[toolActions.length - 1]?.id}
                                 />
                             ))}
