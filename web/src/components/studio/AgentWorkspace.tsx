@@ -424,98 +424,90 @@ function RightInspector({
 }) {
   return (
     <div className="flex h-full min-h-0 flex-col bg-[#f8f9f6] text-slate-900">
-      <div className="border-b border-slate-200 bg-[#f4f5f1] px-4 py-3">
-        <div className="rounded-[24px] border border-slate-200 bg-white px-3 py-3 shadow-sm">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-            Monitor
-          </p>
-          <div className="mt-2 flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <h2 className="text-sm font-semibold text-slate-900">Claude Code Monitor</h2>
-              <p className="mt-1 text-[11px] text-slate-500">
-                {runtimeLoading ? "Checking Claude Code..." : runtimeInfo.statusLabel}
-              </p>
-            </div>
-            <span className="rounded-full border border-slate-200 bg-[#f7f8f4] px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-slate-500">
-              Live
-            </span>
+      <div className="border-b border-slate-200 bg-[#f4f5f1] px-3 py-3">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+              Monitor
+            </p>
+            <h2 className="mt-1 text-sm font-semibold text-slate-900">Claude Code Monitor</h2>
+            <p className="mt-1 text-[11px] text-slate-500">
+              {runtimeLoading ? "Checking Claude Code..." : runtimeInfo.statusLabel}
+            </p>
           </div>
-
-          <div className="mt-3 grid grid-cols-3 gap-2">
-            <div className="rounded-2xl border border-slate-200 bg-[#f7f8f4] px-3 py-2">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">Runtime</p>
-              <p className="mt-1 truncate text-[12px] font-medium text-slate-800">
-                {runtimeLoading ? "Checking..." : runtimeInfo.label}
-              </p>
-            </div>
-            <div className="rounded-2xl border border-slate-200 bg-[#f7f8f4] px-3 py-2">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">Agents</p>
-              <p className="mt-1 truncate text-[12px] font-medium text-slate-800">{activeAgents} active</p>
-            </div>
-            <div className="rounded-2xl border border-slate-200 bg-[#f7f8f4] px-3 py-2">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">Events</p>
-              <p className="mt-1 truncate text-[12px] font-medium text-slate-800">{eventCount} total</p>
-            </div>
-          </div>
-
-          <p className="mt-3 text-[11px] text-slate-500">
-            {runtimeInfo.workspaceLabel} · {subagentEvents} worker runs · {fileCount} files touched
-          </p>
-
-          {selectedWorkerTitle ? (
-            <div
-              className={`mt-3 rounded-[22px] border px-3 py-2.5 ${
-                selectedWorkerControlMode === "managed"
-                  ? "border-emerald-200 bg-[linear-gradient(180deg,#fcfdf9_0%,#f3f7ef_100%)]"
-                  : "border-slate-200 bg-[linear-gradient(180deg,#ffffff_0%,#f2f5f8_100%)]"
-              }`}
-            >
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">
-                    Focused Worker
-                  </div>
-                  <div className="mt-1 truncate text-[12px] font-medium text-slate-800">
-                    {selectedWorkerLabel ? `${selectedWorkerLabel} · ` : ""}
-                    {selectedWorkerTitle}
-                  </div>
-                  <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                    <span
-                      className={`rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.12em] ${
-                        selectedWorkerControlMode === "managed"
-                          ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                          : "border-slate-200 bg-white text-slate-700"
-                      }`}
-                    >
-                      {selectedWorkerControlMode === "managed" ? "Studio-controlled" : "Claude-controlled"}
-                    </span>
-                    <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-slate-500">
-                      {inspectorViewLabel(activeView)} focus
-                    </span>
-                  </div>
-                  <div className="mt-1 text-[11px] text-slate-500">
-                    {selectedWorkerControlMode === "managed"
-                      ? "Monitor stays scoped to this worker and Studio owns the session controls."
-                      : "Monitor stays scoped to this worker while control remains in the parent Claude session."}
-                  </div>
-                </div>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 rounded-full px-2 text-[11px] text-slate-600"
-                  onClick={onClearWorkerSelection}
-                >
-                  Clear
-                </Button>
-              </div>
-            </div>
-          ) : null}
+          <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-slate-500">
+            {inspectorViewLabel(activeView)}
+          </span>
         </div>
-      </div>
 
-      <div className="border-b border-slate-200 bg-slate-100/70">
-              <AgentStatusPanel compact />
+        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-slate-500">
+            {runtimeLoading ? "Checking runtime" : runtimeInfo.label}
+          </span>
+          <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-slate-500">
+            {activeAgents} agents
+          </span>
+          <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-slate-500">
+            {subagentEvents} workers
+          </span>
+          <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-slate-500">
+            {fileCount} files
+          </span>
+          <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-slate-500">
+            {eventCount} events
+          </span>
+        </div>
+
+        <p className="mt-2 text-[11px] text-slate-500">{runtimeInfo.workspaceLabel}</p>
+
+        {selectedWorkerTitle ? (
+          <div
+            className={`mt-2 rounded-[18px] border px-2.5 py-2 ${
+              selectedWorkerControlMode === "managed"
+                ? "border-emerald-200 bg-[linear-gradient(180deg,#fcfdf9_0%,#f3f7ef_100%)]"
+                : "border-slate-200 bg-[linear-gradient(180deg,#ffffff_0%,#f2f5f8_100%)]"
+            }`}
+          >
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+                  Focused Worker
+                </div>
+                <div className="mt-0.5 truncate text-[12px] font-medium text-slate-800">
+                  {selectedWorkerLabel ? `${selectedWorkerLabel} · ` : ""}
+                  {selectedWorkerTitle}
+                </div>
+                <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                  <span
+                    className={`rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.12em] ${
+                      selectedWorkerControlMode === "managed"
+                        ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                        : "border-slate-200 bg-white text-slate-700"
+                    }`}
+                  >
+                    {selectedWorkerControlMode === "managed" ? "Studio-controlled" : "Claude-controlled"}
+                  </span>
+                  <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-slate-500">
+                    {inspectorViewLabel(activeView)} focus
+                  </span>
+                </div>
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-7 rounded-full px-2 text-[11px] text-slate-600"
+                onClick={onClearWorkerSelection}
+              >
+                Clear
+              </Button>
+            </div>
+          </div>
+        ) : null}
+
+        <div className="mt-2 rounded-[18px] border border-slate-200 bg-white px-2.5 py-2">
+          <AgentStatusPanel compact />
+        </div>
       </div>
 
       <Tabs
@@ -523,25 +515,25 @@ function RightInspector({
         onValueChange={(value) => onViewChange(value as AgentInspectorView)}
         className="flex flex-1 min-h-0 flex-col"
       >
-        <div className="border-b border-slate-200 bg-slate-50 px-3 py-3">
-          <TabsList className="grid w-full grid-cols-5 rounded-2xl border border-slate-200 bg-white p-1">
-            <TabsTrigger value="live" className="rounded-xl border border-transparent px-1 text-[11px] text-slate-500 shadow-none data-[state=active]:border-slate-200 data-[state=active]:bg-[#eef1ea] data-[state=active]:text-slate-900">
+        <div className="border-b border-slate-200 bg-slate-50 px-2.5 py-2">
+          <TabsList className="grid w-full grid-cols-5 rounded-[16px] border border-slate-200 bg-white p-1">
+            <TabsTrigger value="live" className="rounded-[12px] border border-transparent px-1 text-[10px] text-slate-500 shadow-none data-[state=active]:border-slate-200 data-[state=active]:bg-[#eef1ea] data-[state=active]:text-slate-900">
               <Activity className="mr-1 h-3.5 w-3.5" />
               Live
             </TabsTrigger>
-            <TabsTrigger value="tools" className="rounded-xl border border-transparent px-1 text-[11px] text-slate-500 shadow-none data-[state=active]:border-slate-200 data-[state=active]:bg-[#eef1ea] data-[state=active]:text-slate-900">
+            <TabsTrigger value="tools" className="rounded-[12px] border border-transparent px-1 text-[10px] text-slate-500 shadow-none data-[state=active]:border-slate-200 data-[state=active]:bg-[#eef1ea] data-[state=active]:text-slate-900">
               <Wrench className="mr-1 h-3.5 w-3.5" />
               Tools
             </TabsTrigger>
-            <TabsTrigger value="files" className="rounded-xl border border-transparent px-1 text-[11px] text-slate-500 shadow-none data-[state=active]:border-slate-200 data-[state=active]:bg-[#eef1ea] data-[state=active]:text-slate-900">
+            <TabsTrigger value="files" className="rounded-[12px] border border-transparent px-1 text-[10px] text-slate-500 shadow-none data-[state=active]:border-slate-200 data-[state=active]:bg-[#eef1ea] data-[state=active]:text-slate-900">
               <FileCode2 className="mr-1 h-3.5 w-3.5" />
               Files
             </TabsTrigger>
-            <TabsTrigger value="agents" className="rounded-xl border border-transparent px-1 text-[11px] text-slate-500 shadow-none data-[state=active]:border-slate-200 data-[state=active]:bg-[#eef1ea] data-[state=active]:text-slate-900">
+            <TabsTrigger value="agents" className="rounded-[12px] border border-transparent px-1 text-[10px] text-slate-500 shadow-none data-[state=active]:border-slate-200 data-[state=active]:bg-[#eef1ea] data-[state=active]:text-slate-900">
               <Bot className="mr-1 h-3.5 w-3.5" />
               Workers
             </TabsTrigger>
-            <TabsTrigger value="graph" className="rounded-xl border border-transparent px-1 text-[11px] text-slate-500 shadow-none data-[state=active]:border-slate-200 data-[state=active]:bg-[#eef1ea] data-[state=active]:text-slate-900">
+            <TabsTrigger value="graph" className="rounded-[12px] border border-transparent px-1 text-[10px] text-slate-500 shadow-none data-[state=active]:border-slate-200 data-[state=active]:bg-[#eef1ea] data-[state=active]:text-slate-900">
               <GitBranch className="mr-1 h-3.5 w-3.5" />
               Graph
             </TabsTrigger>

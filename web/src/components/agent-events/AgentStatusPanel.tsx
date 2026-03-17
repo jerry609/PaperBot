@@ -64,6 +64,30 @@ function AgentStatusBadge({
     : fullLabel
   const interactive = presentation.kind === "subagent" && Boolean(workerRunId)
 
+  if (compact) {
+    return (
+      <button
+        type="button"
+        className={`inline-flex min-w-0 items-center gap-1.5 rounded-full border px-2 py-1 text-left ${cfg.bgClass} ${
+          interactive ? "transition-colors hover:bg-white/80" : ""
+        }`}
+        title={interactive ? `${entry.agent_name} · ${cfg.label} · Open worker details` : `${entry.agent_name} · ${cfg.label}`}
+        onClick={() => {
+          if (workerRunId) {
+            onOpenWorkerRun(workerRunId)
+          }
+        }}
+        disabled={!interactive}
+      >
+        <Icon
+          size={12}
+          className={`${cfg.colorClass} shrink-0 ${cfg.spin ? "animate-spin" : ""}`}
+        />
+        <span className="truncate text-[11px] font-medium text-zinc-900">{displayName}</span>
+      </button>
+    )
+  }
+
   return (
     <button
       type="button"
@@ -125,7 +149,7 @@ export function AgentStatusPanel({ compact = false }: { compact?: boolean }) {
       {entries.length === 0 ? (
         <div className="text-xs text-zinc-500">No agents active</div>
       ) : (
-        <div className={compact ? "grid grid-cols-1 gap-2" : "grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4"}>
+        <div className={compact ? "flex flex-wrap gap-1.5" : "grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4"}>
           {entries.map((entry) => (
             <AgentStatusBadge
               key={entry.agent_name}
