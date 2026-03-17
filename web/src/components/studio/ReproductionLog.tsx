@@ -2883,17 +2883,44 @@ export function ReproductionLog({
                     <ScrollArea className="h-full bg-[#f5f5f2]">
                         <div className="px-3 py-3">
                             {!visibleTask || visibleActions.length === 0 ? (
-                                <div className="flex flex-col items-center justify-center space-y-4 py-20 text-slate-500">
-                                    <div className="flex h-16 w-16 items-center justify-center rounded-2xl border border-slate-200 bg-[#eceee8]">
-                                        <MessageSquare className="h-8 w-8 opacity-30" />
-                                    </div>
-                                    <div className="text-center space-y-2">
-                                        <p className="font-medium text-slate-900">Talk to Claude Code</p>
-                                        <p className="text-xs max-w-[280px]">
+                                <div className="flex min-h-full items-center justify-center py-14 text-slate-500">
+                                    <div className="w-full max-w-[420px] rounded-[28px] border border-slate-200 bg-white/75 px-5 py-5 shadow-[0_18px_40px_rgba(15,23,42,0.06)]">
+                                        <div className="flex items-center gap-3">
+                                            <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-200 bg-[#eceee8]">
+                                                <MessageSquare className="h-5 w-5 opacity-40" />
+                                            </div>
+                                            <div className="min-w-0">
+                                                <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+                                                    Claude Code
+                                                </p>
+                                                <p className="truncate text-[15px] font-semibold text-slate-900">
+                                                    {selectedPaper ? "Start a thread" : "Select a paper"}
+                                                </p>
+                                            </div>
+                                        </div>
+
+                                        <p className="mt-4 text-[12px] leading-5 text-slate-600">
                                             {selectedPaper
-                                                ? `Start a thread for ${selectedPaper.title}. Runtime and delegation activity mirror into Monitor.`
-                                                : "Select or create a paper to get started"}
+                                                ? `Chat about ${selectedPaper.title}. Runtime activity stays compact here and full worker details continue in Monitor.`
+                                                : "Choose a paper to open a focused Claude Code thread with chat, slash commands, uploads, and monitor mirroring."}
                                         </p>
+
+                                        <div className="mt-4 flex flex-wrap gap-1.5">
+                                            {selectedPaper ? (
+                                                <span className="max-w-full truncate rounded-full border border-slate-200 bg-[#f7f8f4] px-2 py-0.5 text-[10px] text-slate-600">
+                                                    {selectedPaper.title}
+                                                </span>
+                                            ) : null}
+                                            <span className="rounded-full border border-slate-200 bg-[#f7f8f4] px-2 py-0.5 text-[10px] text-slate-600">
+                                                `/` commands
+                                            </span>
+                                            <span className="rounded-full border border-slate-200 bg-[#f7f8f4] px-2 py-0.5 text-[10px] text-slate-600">
+                                                file upload
+                                            </span>
+                                            <span className="rounded-full border border-slate-200 bg-[#f7f8f4] px-2 py-0.5 text-[10px] text-slate-600">
+                                                monitor mirrored
+                                            </span>
+                                        </div>
                                     </div>
                                 </div>
                             ) : (
