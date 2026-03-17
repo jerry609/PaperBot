@@ -17,7 +17,7 @@ import {
     AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { cn } from "@/lib/utils"
-import { Plus, Search, Trash2, FlaskConical, Loader2, FolderOpen, MessageSquare } from "lucide-react"
+import { Plus, Search, Trash2, FlaskConical, Loader2, FolderOpen, MessageSquare, ArrowRight } from "lucide-react"
 
 const STOP_WORDS = new Set([
     "a", "an", "the", "and", "or", "of", "for", "to", "in", "on", "with", "from", "by", "at", "is", "are",
@@ -68,18 +68,6 @@ function PixelCornerIcon({
             aria-hidden="true"
         />
     )
-}
-
-function buildDisplayWords(title: string): string[] {
-    const cleaned = (title || "")
-        .replace(/[^A-Za-z0-9\s-]/g, " ")
-        .split(/\s+/)
-        .map((word) => word.trim())
-        .filter(Boolean)
-        .filter((word) => !STOP_WORDS.has(word.toLowerCase()))
-    if (cleaned.length === 0) return ["untitled"]
-    const words = cleaned.slice(0, 2).map((word) => word.toLowerCase())
-    return words
 }
 
 function summarizeAbstract(abstract: string): string {
@@ -133,6 +121,53 @@ function inferTags(paper: StudioPaper): { shown: string[]; extraCount: number } 
     return { shown, extraCount }
 }
 
+function formatPaperStatus(status: StudioPaper["status"]): string {
+    if (status === "running") return "Running"
+    if (status === "completed") return "Completed"
+    return "Draft"
+}
+
+function paperStatusClassName(status: StudioPaper["status"]): string {
+    if (status === "running") return "border-amber-200 bg-amber-50 text-amber-700"
+    if (status === "completed") return "border-emerald-200 bg-emerald-50 text-emerald-700"
+    return "border-slate-200 bg-[#f7f8f4] text-slate-600"
+}
+
+function buildPaperStageBadges(paper: StudioPaper): Array<{
+    label: string
+    className: string
+}> {
+    const badges = [
+        paper.outputDir
+            ? {
+                label: "workspace ready",
+                className: "border-emerald-200 bg-emerald-50 text-emerald-700",
+            }
+            : {
+                label: "review workspace",
+                className: "border-slate-200 bg-[#f7f8f4] text-slate-600",
+            },
+        paper.contextPackId
+            ? {
+                label: "context ready",
+                className: "border-emerald-200 bg-emerald-50 text-emerald-700",
+            }
+            : {
+                label: "context pending",
+                className: "border-slate-200 bg-[#f7f8f4] text-slate-600",
+            },
+    ]
+
+    if ((paper.taskIds?.length ?? 0) > 0 || paper.boardSessionId) {
+        badges.push({
+            label: "thread started",
+            className: "border-sky-200 bg-sky-50 text-sky-700",
+        })
+    }
+
+    return badges
+}
+
 export function PaperGallery() {
     const { papers, selectPaper, deletePaper, updatePaper } = useStudioStore()
     const [query, setQuery] = useState("")
@@ -146,7 +181,6 @@ export function PaperGallery() {
     } | null>(null)
     const [deleting, setDeleting] = useState(false)
     const [deleteError, setDeleteError] = useState<string | null>(null)
-    const [gridColumns, setGridColumns] = useState(4)
     const [spriteFrame, setSpriteFrame] = useState(0)
 
     useEffect(() => {
@@ -155,25 +189,6 @@ export function PaperGallery() {
             setSpriteFrame((prev) => (prev + 1) % 6)
         }, 140)
         return () => window.clearInterval(interval)
-    }, [])
-
-    useEffect(() => {
-        const updateColumns = () => {
-            const width = window.innerWidth
-            if (width >= 1280) {
-                setGridColumns(4)
-                return
-            }
-            if (width >= 768) {
-                setGridColumns(2)
-                return
-            }
-            setGridColumns(1)
-        }
-
-        updateColumns()
-        window.addEventListener("resize", updateColumns)
-        return () => window.removeEventListener("resize", updateColumns)
     }, [])
 
     useEffect(() => {
@@ -281,6 +296,9 @@ export function PaperGallery() {
     const draftCount = papers.filter((paper) => paper.status === "draft").length
     const runningCount = papers.filter((paper) => paper.status === "running").length
     const completedCount = papers.filter((paper) => paper.status === "completed").length
+    const featuredPaper =
+        !query.trim() && activeFilter === "all" && sortedPapers.length > 0 ? sortedPapers[0] : null
+    const remainingPapers = featuredPaper ? sortedPapers.slice(1) : sortedPapers
 
     const handleDeleteClick = (
         e: React.MouseEvent,
@@ -387,49 +405,48 @@ export function PaperGallery() {
                             value={query}
                             onChange={(e) => setQuery(e.target.value)}
                             placeholder="Search papers..."
-                            className="h-11 rounded-none border-zinc-300 bg-white pl-9"
+                            className="h-11 rounded-full border-zinc-300 bg-white pl-9"
                         />
                     </div>
 
-                    {/* Filter strip to mirror catalog-like browsing */}
-                    <div className="mb-5 flex flex-wrap items-center gap-1 border-b border-zinc-300 pb-2 text-sm">
-                        <button
-                            onClick={() => setActiveFilter("all")}
-                            className={cn(
-                                "rounded px-2 py-1",
-                                activeFilter === "all" ? "font-medium text-zinc-900" : "text-zinc-600 hover:text-zinc-900",
-                            )}
-                        >
-                            All Papers ({filteredPapers.length})
-                        </button>
-                        <span className="px-1 text-zinc-300">|</span>
-                        <button
-                            onClick={() => setActiveFilter("draft")}
-                            className={cn(
-                                "rounded px-2 py-1",
-                                activeFilter === "draft" ? "font-medium text-zinc-900" : "text-zinc-600 hover:text-zinc-900",
-                            )}
-                        >
-                            Drafts ({filteredPapers.filter((paper) => paper.status === "draft").length})
-                        </button>
-                        <button
-                            onClick={() => setActiveFilter("running")}
-                            className={cn(
-                                "rounded px-2 py-1",
-                                activeFilter === "running" ? "font-medium text-zinc-900" : "text-zinc-600 hover:text-zinc-900",
-                            )}
-                        >
-                            Running ({filteredPapers.filter((paper) => paper.status === "running").length})
-                        </button>
-                        <button
-                            onClick={() => setActiveFilter("completed")}
-                            className={cn(
-                                "rounded px-2 py-1",
-                                activeFilter === "completed" ? "font-medium text-zinc-900" : "text-zinc-600 hover:text-zinc-900",
-                            )}
-                        >
-                            Completed ({filteredPapers.filter((paper) => paper.status === "completed").length})
-                        </button>
+                    <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+                        <div className="flex flex-wrap gap-2">
+                            {[
+                                {
+                                    key: "all" as const,
+                                    label: `All Papers (${filteredPapers.length})`,
+                                },
+                                {
+                                    key: "draft" as const,
+                                    label: `Drafts (${filteredPapers.filter((paper) => paper.status === "draft").length})`,
+                                },
+                                {
+                                    key: "running" as const,
+                                    label: `Running (${filteredPapers.filter((paper) => paper.status === "running").length})`,
+                                },
+                                {
+                                    key: "completed" as const,
+                                    label: `Completed (${filteredPapers.filter((paper) => paper.status === "completed").length})`,
+                                },
+                            ].map((filter) => (
+                                <button
+                                    key={filter.key}
+                                    onClick={() => setActiveFilter(filter.key)}
+                                    className={cn(
+                                        "rounded-full border px-3 py-1.5 text-[12px] transition-colors",
+                                        activeFilter === filter.key
+                                            ? "border-zinc-900 bg-zinc-900 text-white"
+                                            : "border-zinc-300 bg-white text-zinc-600 hover:border-zinc-400 hover:text-zinc-900",
+                                    )}
+                                >
+                                    {filter.label}
+                                </button>
+                            ))}
+                        </div>
+
+                        <p className="text-[12px] text-zinc-500">
+                            {sortedPapers.length} paper{sortedPapers.length === 1 ? "" : "s"} ready for the next Studio step
+                        </p>
                     </div>
 
                     {sortedPapers.length === 0 ? (
@@ -507,87 +524,212 @@ export function PaperGallery() {
                             </div>
                         </div>
                     ) : (
-                        /* Tiled catalog grid (Image-2 style) */
-                        <div className="grid grid-cols-1 gap-0 md:grid-cols-2 xl:grid-cols-4">
-                            {sortedPapers.map((paper, index) => {
-                                const rowIndex = Math.floor(index / gridColumns)
-                                const colIndex = index % gridColumns
-                                const isFirstRow = rowIndex === 0
-                                const isFirstCol = colIndex === 0
-                                return (
-                                    <article
-                                        key={paper.id}
-                                        onClick={() => selectPaper(paper.id)}
-                                        onKeyDown={(event) => {
-                                            if (event.key === "Enter" || event.key === " ") {
-                                                event.preventDefault()
-                                                selectPaper(paper.id)
-                                            }
-                                        }}
-                                        role="button"
-                                        tabIndex={0}
-                                        className={cn(
-                                            "group relative flex min-h-[300px] cursor-pointer flex-col border-r border-b border-zinc-300 bg-background p-6 text-left transition-colors hover:bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 focus-visible:ring-offset-2",
-                                            isFirstRow && "border-t",
-                                            isFirstCol && "border-l",
-                                        )}
-                                    >
-                                        {/* Delete button */}
-                                        <button
-                                            onClick={(e) =>
-                                                handleDeleteClick(e, paper)
-                                            }
-                                            className="absolute right-3 top-3 z-10 rounded-md p-1.5 opacity-0 transition-all hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100"
-                                            title="Delete paper"
-                                        >
-                                            <Trash2 className="h-3.5 w-3.5" />
-                                        </button>
+                        <div className="space-y-4">
+                            {featuredPaper ? (
+                                <article
+                                    onClick={() => selectPaper(featuredPaper.id)}
+                                    onKeyDown={(event) => {
+                                        if (event.key === "Enter" || event.key === " ") {
+                                            event.preventDefault()
+                                            selectPaper(featuredPaper.id)
+                                        }
+                                    }}
+                                    role="button"
+                                    tabIndex={0}
+                                    className="group rounded-[30px] border border-zinc-300 bg-white px-5 py-5 text-left shadow-[0_18px_40px_rgba(15,23,42,0.04)] transition-[border-color,box-shadow] hover:border-zinc-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 focus-visible:ring-offset-2"
+                                >
+                                    <div className="flex flex-wrap items-start justify-between gap-3">
+                                        <div>
+                                            <span className="inline-flex rounded-full border border-zinc-300 bg-[#f7f8f4] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                                                Resume latest
+                                            </span>
+                                            <h2 className="mt-3 text-[26px] font-semibold tracking-[-0.03em] text-zinc-950">
+                                                {featuredPaper.title}
+                                            </h2>
+                                            <p className="mt-2 max-w-[48rem] text-sm leading-6 text-zinc-500">
+                                                {summarizeAbstract(featuredPaper.abstract)}
+                                            </p>
+                                        </div>
+                                        <span className={cn(
+                                            "rounded-full border px-2.5 py-1 text-[11px] font-medium",
+                                            paperStatusClassName(featuredPaper.status),
+                                        )}>
+                                            {formatPaperStatus(featuredPaper.status)}
+                                        </span>
+                                    </div>
 
-                                        {/* Header row: icon + abbreviation */}
-                                        <div className="mb-4 flex items-center gap-4">
+                                    <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+                                        <div className="flex gap-4">
                                             <PixelCornerIcon
                                                 frame={spriteFrame}
+                                                size={84}
                                                 style={{
                                                     animation: "paperRowSync 2.2s ease-in-out infinite",
-                                                    animationDelay: `${rowIndex * 140}ms`,
                                                 }}
                                             />
-                                            <div className="leading-[0.95]">
-                                                {buildDisplayWords(paper.title).map((word) => (
-                                                    <p
-                                                        key={`${paper.id}-${word}`}
-                                                        className="text-[18px] font-bold tracking-[-0.01em] text-zinc-900"
-                                                    >
-                                                        {word}
-                                                    </p>
-                                                ))}
+                                            <div className="min-w-0 space-y-3">
+                                                <p className="text-sm text-zinc-600">
+                                                    {inferAuthor(featuredPaper)}
+                                                </p>
+                                                <div className="flex flex-wrap gap-2">
+                                                    {buildPaperStageBadges(featuredPaper).map((badge) => (
+                                                        <span
+                                                            key={badge.label}
+                                                            className={cn(
+                                                                "rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-[0.12em]",
+                                                                badge.className,
+                                                            )}
+                                                        >
+                                                            {badge.label}
+                                                        </span>
+                                                    ))}
+                                                </div>
+                                                <p className="text-[13px] leading-6 text-zinc-500">
+                                                    {(() => {
+                                                        const tags = inferTags(featuredPaper)
+                                                        if (tags.shown.length === 0) return "#research #paper"
+                                                        const prefix = tags.shown.map((tag) => `#${tag}`).join(" ")
+                                                        return tags.extraCount > 0 ? `${prefix} +${tags.extraCount} more` : prefix
+                                                    })()}
+                                                </p>
                                             </div>
                                         </div>
 
-                                        {/* Main content */}
-                                        <div className="flex-1 space-y-2">
-                                            <p className="line-clamp-4 text-[17px] leading-[1.4] text-zinc-500">
-                                                {summarizeAbstract(paper.abstract)}
+                                        <div className="rounded-[24px] border border-zinc-300 bg-[#fafaf7] px-4 py-4">
+                                            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                                                Next Studio move
                                             </p>
-                                            <p className="line-clamp-1 text-[13px] leading-5 text-zinc-500">
-                                                {inferAuthor(paper)}
+                                            <p className="mt-2 text-sm font-medium text-zinc-900">
+                                                Review workspace, then continue in Claude Code chat.
                                             </p>
-                                            <p className="line-clamp-2 text-[13px] leading-5 text-zinc-500">
-                                                {(() => {
-                                                    const tags = inferTags(paper)
-                                                    if (tags.shown.length === 0) return "#research #paper"
-                                                    const prefix = tags.shown.map((tag) => `#${tag}`).join(" ")
-                                                    return tags.extraCount > 0 ? `${prefix} +${tags.extraCount} more` : prefix
-                                                })()}
+                                            <p className="mt-2 text-[12px] leading-5 text-zinc-500">
+                                                Updated {formatRelativeTime(featuredPaper.updatedAt)}
+                                            </p>
+                                            <div className="mt-4 flex items-center gap-2">
+                                                <Button
+                                                    type="button"
+                                                    className="h-9 rounded-full px-4"
+                                                    onClick={(event) => {
+                                                        event.stopPropagation()
+                                                        selectPaper(featuredPaper.id)
+                                                    }}
+                                                >
+                                                    Continue in Studio
+                                                    <ArrowRight className="ml-1.5 h-4 w-4" />
+                                                </Button>
+                                                <button
+                                                    type="button"
+                                                    onClick={(event) => handleDeleteClick(event, featuredPaper)}
+                                                    className="rounded-full border border-zinc-300 bg-white px-3 py-2 text-[12px] text-zinc-600 transition-colors hover:border-rose-200 hover:text-rose-600"
+                                                >
+                                                    Delete
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </article>
+                            ) : null}
+
+                            {remainingPapers.length > 0 ? (
+                                <div className="space-y-3">
+                                    {featuredPaper ? (
+                                        <div className="flex items-center justify-between gap-3 px-1">
+                                            <h3 className="text-[13px] font-semibold uppercase tracking-[0.14em] text-zinc-500">
+                                                More papers
+                                            </h3>
+                                            <p className="text-[12px] text-zinc-500">
+                                                Choose one and continue straight into Studio
                                             </p>
                                         </div>
+                                    ) : null}
 
-                                        <p className="mt-4 text-[12px] text-zinc-500">
-                                            Updated {formatRelativeTime(paper.updatedAt)}
-                                        </p>
-                                    </article>
-                                )
-                            })}
+                                    {remainingPapers.map((paper, index) => (
+                                        <article
+                                            key={paper.id}
+                                            onClick={() => selectPaper(paper.id)}
+                                            onKeyDown={(event) => {
+                                                if (event.key === "Enter" || event.key === " ") {
+                                                    event.preventDefault()
+                                                    selectPaper(paper.id)
+                                                }
+                                            }}
+                                            role="button"
+                                            tabIndex={0}
+                                            className="group rounded-[26px] border border-zinc-300 bg-white px-4 py-4 text-left transition-[border-color,box-shadow] hover:border-zinc-400 hover:shadow-[0_12px_28px_rgba(15,23,42,0.04)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 focus-visible:ring-offset-2"
+                                        >
+                                            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                                                <div className="flex min-w-0 gap-4">
+                                                    <PixelCornerIcon
+                                                        frame={spriteFrame}
+                                                        size={68}
+                                                        style={{
+                                                            animation: "paperRowSync 2.2s ease-in-out infinite",
+                                                            animationDelay: `${index * 120}ms`,
+                                                        }}
+                                                    />
+                                                    <div className="min-w-0">
+                                                        <div className="flex flex-wrap items-center gap-2">
+                                                            <h3 className="text-[18px] font-semibold tracking-[-0.02em] text-zinc-950">
+                                                                {paper.title}
+                                                            </h3>
+                                                            <span className={cn(
+                                                                "rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.12em]",
+                                                                paperStatusClassName(paper.status),
+                                                            )}>
+                                                                {formatPaperStatus(paper.status)}
+                                                            </span>
+                                                        </div>
+                                                        <p className="mt-2 line-clamp-2 text-sm leading-6 text-zinc-500">
+                                                            {summarizeAbstract(paper.abstract)}
+                                                        </p>
+                                                        <div className="mt-3 flex flex-wrap items-center gap-2 text-[12px] text-zinc-500">
+                                                            <span>{inferAuthor(paper)}</span>
+                                                            <span className="text-zinc-300">/</span>
+                                                            <span>Updated {formatRelativeTime(paper.updatedAt)}</span>
+                                                        </div>
+                                                        <div className="mt-3 flex flex-wrap gap-2">
+                                                            {buildPaperStageBadges(paper).map((badge) => (
+                                                                <span
+                                                                    key={badge.label}
+                                                                    className={cn(
+                                                                        "rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-[0.12em]",
+                                                                        badge.className,
+                                                                    )}
+                                                                >
+                                                                    {badge.label}
+                                                                </span>
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                <div className="flex shrink-0 items-center gap-2">
+                                                    <Button
+                                                        type="button"
+                                                        variant="outline"
+                                                        className="h-9 rounded-full border-zinc-300 bg-white px-4 text-zinc-700"
+                                                        onClick={(event) => {
+                                                            event.stopPropagation()
+                                                            selectPaper(paper.id)
+                                                        }}
+                                                    >
+                                                        Continue
+                                                        <ArrowRight className="ml-1.5 h-4 w-4" />
+                                                    </Button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={(event) => handleDeleteClick(event, paper)}
+                                                        className="rounded-full border border-zinc-300 bg-white p-2.5 text-zinc-500 transition-colors hover:border-rose-200 hover:text-rose-600"
+                                                        title="Delete paper"
+                                                    >
+                                                        <Trash2 className="h-3.5 w-3.5" />
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </article>
+                                    ))}
+                                </div>
+                            ) : null}
                         </div>
                     )}
                 </div>
