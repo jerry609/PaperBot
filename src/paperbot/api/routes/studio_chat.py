@@ -1253,6 +1253,54 @@ def _parse_bridge_result_content(content: Any) -> Optional[Dict[str, Any]]:
     return None
 
 
+def _enrich_bridge_result(
+    bridge_result: Dict[str, Any],
+    *,
+    tool_name: str,
+    tool_id: str,
+    telemetry_state: Optional[_StudioTelemetryState],
+) -> Dict[str, Any]:
+    enriched = dict(bridge_result)
+    payload = bridge_result.get("payload")
+    payload_dict = dict(payload) if isinstance(payload, dict) else {}
+
+    if telemetry_state is None:
+        enriched["payload"] = payload_dict
+        return enriched
+
+    delegation = _find_pending_delegation_by_tool_id(telemetry_state, tool_id=tool_id)
+    if delegation is None and tool_name:
+        invocation = _find_tool_invocation(
+            telemetry_state,
+            tool_name=tool_name,
+            tool_id=tool_id,
+        )
+        if invocation is not None:
+            delegation = _find_pending_delegation_by_tool_id(
+                telemetry_state,
+                tool_id=invocation.tool_id,
+            )
+
+    if delegation is not None:
+        enriched["delegation"] = {
+            "task_id": delegation.task_id,
+            "worker_run_id": delegation.worker_run_id,
+            "task_title": delegation.task_title,
+            "assignee": delegation.assignee,
+            "session_id": telemetry_state.session_id,
+            "runtime": delegation.runtime,
+            "control_mode": delegation.control_mode,
+            "interruptible": delegation.interruptible,
+        }
+        payload_dict.setdefault("delegation_task_id", delegation.task_id)
+        payload_dict.setdefault("worker_run_id", delegation.worker_run_id)
+        payload_dict.setdefault("runtime", delegation.runtime)
+        payload_dict.setdefault("assignee", delegation.assignee)
+
+    enriched["payload"] = payload_dict
+    return enriched
+
+
 def _extract_approval_command(result_content: str) -> Optional[str]:
     for pattern in _APPROVAL_COMMAND_PATTERNS:
         match = pattern.search(result_content)
@@ -1301,6 +1349,7 @@ def _extract_approval_request_from_bridge_result(
 def _build_studio_approval_progress_event(
     content: Any,
     *,
+    tool_name: str = "",
     tool_id: str,
     telemetry_state: Optional[_StudioTelemetryState] = None,
 ) -> Optional[StreamEvent]:
@@ -1309,6 +1358,12 @@ def _build_studio_approval_progress_event(
 
     bridge_result = _parse_bridge_result_content(content)
     if bridge_result is not None:
+        bridge_result = _enrich_bridge_result(
+            bridge_result,
+            tool_name=tool_name,
+            tool_id=tool_id,
+            telemetry_state=telemetry_state,
+        )
         approval_request = _extract_approval_request_from_bridge_result(bridge_result)
         if approval_request is not None:
             invocation = _find_tool_invocation(telemetry_state, tool_id=tool_id) if tool_id else None
@@ -1941,6 +1996,12 @@ def _parse_user_tool_result_blocks(
         ))
         bridge_result = _parse_bridge_result_content(block.get("content", ""))
         if bridge_result is not None:
+            bridge_result = _enrich_bridge_result(
+                bridge_result,
+                tool_name=invocation.tool_name if invocation is not None else "tool",
+                tool_id=tool_id,
+                telemetry_state=telemetry_state,
+            )
             events.append(
                 StreamEvent(
                     type="progress",
@@ -1954,6 +2015,7 @@ def _parse_user_tool_result_blocks(
             )
         approval_event = _build_studio_approval_progress_event(
             block.get("content", ""),
+            tool_name=invocation.tool_name if invocation is not None else "tool",
             tool_id=tool_id,
             telemetry_state=telemetry_state,
         )
@@ -1996,6 +2058,12 @@ def _parse_cli_event(
         ))
         bridge_result = _parse_bridge_result_content(line_data.get("content", ""))
         if bridge_result is not None:
+            bridge_result = _enrich_bridge_result(
+                bridge_result,
+                tool_name=str(line_data.get("tool_name", "") or "tool"),
+                tool_id=str(line_data.get("tool_use_id") or line_data.get("tool_id") or "").strip(),
+                telemetry_state=telemetry_state,
+            )
             events.append(
                 StreamEvent(
                     type="progress",
@@ -2009,6 +2077,7 @@ def _parse_cli_event(
             )
         approval_event = _build_studio_approval_progress_event(
             line_data.get("content", ""),
+            tool_name=str(line_data.get("tool_name", "") or "tool"),
             tool_id=str(line_data.get("tool_use_id") or line_data.get("tool_id") or "").strip(),
             telemetry_state=telemetry_state,
         )

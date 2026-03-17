@@ -33,7 +33,12 @@ import {
     buildStudioApprovalContinuePrompt,
     parseStudioApprovalRequest,
 } from "@/lib/studio-approval"
-import { parseStudioBridgeResult, type StudioBridgeResult } from "@/lib/studio-bridge-result"
+import {
+    getStudioBridgeDelegationTaskId,
+    getStudioBridgeWorkerRunId,
+    parseStudioBridgeResult,
+    type StudioBridgeResult,
+} from "@/lib/studio-bridge-result"
 import { collapseToolActivityActions } from "@/lib/studio-chat-activity"
 import {
     resolveDetectedModelSelection,
@@ -792,6 +797,11 @@ function ActionItem({
         const approval = action.metadata.approvalRequest
         const canApprove = Boolean(approval.cliSessionId) && !approvalPending
         const approvalBridgeResult = approval.bridgeResult ?? null
+        const approvalMonitorTaskId =
+            getStudioBridgeDelegationTaskId(approvalBridgeResult) ??
+            approval.toolId ??
+            null
+        const approvalWorkerRunId = getStudioBridgeWorkerRunId(approvalBridgeResult)
 
         return (
             <div className="pb-2">
@@ -835,6 +845,17 @@ function ActionItem({
                                     {approvalPending ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : null}
                                     Approve & Continue
                                 </Button>
+                                {onOpenMonitor && approvalMonitorTaskId ? (
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        className="h-7 rounded-full border-amber-200 bg-white px-3 text-[11px] text-amber-900 hover:bg-amber-100"
+                                        onClick={() => onOpenMonitor(approvalMonitorTaskId)}
+                                    >
+                                        Open in Monitor
+                                    </Button>
+                                ) : null}
                                 <span className="text-[10px] text-amber-800/80">
                                     {approval.cliSessionId
                                         ? "Resumes the parent Claude session in full access mode."
@@ -843,6 +864,11 @@ function ActionItem({
                                 {approval.workerAgentId ? (
                                     <span className="rounded-full border border-amber-200 bg-white px-2 py-0.5 text-[9px] uppercase tracking-[0.12em] text-amber-800">
                                         worker {approval.workerAgentId}
+                                    </span>
+                                ) : null}
+                                {approvalWorkerRunId ? (
+                                    <span className="rounded-full border border-amber-200 bg-white px-2 py-0.5 text-[9px] uppercase tracking-[0.12em] text-amber-800">
+                                        run {approvalWorkerRunId.slice(0, 18)}
                                     </span>
                                 ) : null}
                             </div>
@@ -854,6 +880,11 @@ function ActionItem({
     }
 
     if (action.type === "function_call" && action.metadata?.functionName) {
+        const monitorTaskId =
+            getStudioBridgeDelegationTaskId(bridgeResult) ??
+            action.metadata?.toolId ??
+            null
+        const workerRunId = getStudioBridgeWorkerRunId(bridgeResult)
         return (
             <div className="pb-1.5">
                 <div className="rounded-2xl border border-slate-200 bg-white/90 px-2.5 py-1.5 shadow-[0_1px_0_rgba(255,255,255,0.75)_inset]">
@@ -914,6 +945,11 @@ function ActionItem({
                                 <span className="rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-slate-500">
                                     {bridgeResult.executor}
                                 </span>
+                                {workerRunId ? (
+                                    <span className="rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-slate-500">
+                                        run {workerRunId.slice(0, 18)}
+                                    </span>
+                                ) : null}
                                 {bridgePayloadMetricBadges(bridgeResult).map((badge) => (
                                     <span
                                         key={badge}
@@ -933,6 +969,19 @@ function ActionItem({
                                             {artifact.label}
                                         </span>
                                     ))}
+                                </div>
+                            ) : null}
+                            {onOpenMonitor && monitorTaskId ? (
+                                <div className="mt-2">
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        className="h-7 rounded-full border-slate-200 bg-white px-3 text-[11px] text-slate-700 hover:bg-slate-50"
+                                        onClick={() => onOpenMonitor(monitorTaskId)}
+                                    >
+                                        Open in Monitor
+                                    </Button>
                                 </div>
                             ) : null}
                         </div>

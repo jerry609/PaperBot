@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest"
 
-import { parseStudioBridgeResult } from "./studio-bridge-result"
+import {
+  getStudioBridgeDelegationTaskId,
+  getStudioBridgeWorkerRunId,
+  parseStudioBridgeResult,
+} from "./studio-bridge-result"
 
 describe("parseStudioBridgeResult", () => {
   it("parses plain JSON bridge results", () => {
@@ -61,6 +65,32 @@ describe("parseStudioBridgeResult", () => {
     expect(parsed?.taskKind).toBe("approval_required")
     expect(parsed?.status).toBe("approval_required")
     expect(parsed?.payload.command).toBe("git -C /home/master1/PaperBot branch --show-current")
+  })
+
+  it("parses delegation metadata when present", () => {
+    const parsed = parseStudioBridgeResult({
+      version: "1",
+      executor: "codex",
+      task_kind: "code",
+      status: "completed",
+      summary: "Implemented the task.",
+      artifacts: [],
+      delegation: {
+        task_id: "toolu_delegate",
+        worker_run_id: "worker-run-toolu_delegate",
+        task_title: "Implement telemetry bridge",
+        assignee: "codex-toolu_",
+        session_id: "studio-session-1",
+        runtime: "codex",
+        control_mode: "mirrored",
+        interruptible: false,
+      },
+      payload: {},
+    })
+
+    expect(parsed?.delegation?.taskId).toBe("toolu_delegate")
+    expect(getStudioBridgeDelegationTaskId(parsed)).toBe("toolu_delegate")
+    expect(getStudioBridgeWorkerRunId(parsed)).toBe("worker-run-toolu_delegate")
   })
 
   it("returns null for plain text", () => {

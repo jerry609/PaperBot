@@ -21,6 +21,17 @@ export interface StudioBridgeArtifact {
   value: string | null
 }
 
+export interface StudioBridgeDelegation {
+  taskId: string
+  workerRunId: string | null
+  taskTitle: string | null
+  assignee: string | null
+  sessionId: string | null
+  runtime: string | null
+  controlMode: "mirrored" | "managed" | null
+  interruptible: boolean
+}
+
 export interface StudioBridgeResult {
   version: string
   executor: string
@@ -28,6 +39,7 @@ export interface StudioBridgeResult {
   status: StudioBridgeStatus
   summary: string
   artifacts: StudioBridgeArtifact[]
+  delegation: StudioBridgeDelegation | null
   payload: Record<string, unknown>
   raw: Record<string, unknown>
 }
@@ -88,6 +100,25 @@ function normalizeArtifacts(value: unknown): StudioBridgeArtifact[] {
   })
 }
 
+function normalizeDelegation(value: unknown): StudioBridgeDelegation | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null
+  const raw = value as Record<string, unknown>
+  const taskId = cleanString(raw.task_id)
+  if (!taskId) return null
+
+  const controlMode = cleanString(raw.control_mode)
+  return {
+    taskId,
+    workerRunId: cleanString(raw.worker_run_id),
+    taskTitle: cleanString(raw.task_title),
+    assignee: cleanString(raw.assignee),
+    sessionId: cleanString(raw.session_id),
+    runtime: cleanString(raw.runtime),
+    controlMode: controlMode === "managed" ? "managed" : controlMode === "mirrored" ? "mirrored" : null,
+    interruptible: raw.interruptible === true,
+  }
+}
+
 function normalizeBridgeResult(value: unknown): StudioBridgeResult | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null
 
@@ -104,11 +135,34 @@ function normalizeBridgeResult(value: unknown): StudioBridgeResult | null {
     status,
     summary,
     artifacts: normalizeArtifacts(raw.artifacts),
+    delegation: normalizeDelegation(raw.delegation),
     payload: raw.payload && typeof raw.payload === "object" && !Array.isArray(raw.payload)
       ? (raw.payload as Record<string, unknown>)
       : {},
     raw,
   }
+}
+
+export function getStudioBridgeDelegationTaskId(result: StudioBridgeResult | null | undefined): string | null {
+  if (!result) return null
+  if (result.delegation?.taskId) return result.delegation.taskId
+
+  const fromPayload = result.payload.delegation_task_id
+  if (typeof fromPayload === "string" && fromPayload.trim().length > 0) {
+    return fromPayload.trim()
+  }
+  return null
+}
+
+export function getStudioBridgeWorkerRunId(result: StudioBridgeResult | null | undefined): string | null {
+  if (!result) return null
+  if (result.delegation?.workerRunId) return result.delegation.workerRunId
+
+  const fromPayload = result.payload.worker_run_id
+  if (typeof fromPayload === "string" && fromPayload.trim().length > 0) {
+    return fromPayload.trim()
+  }
+  return null
 }
 
 function extractJsonCandidates(text: string): string[] {

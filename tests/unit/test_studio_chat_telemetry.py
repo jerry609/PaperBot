@@ -598,6 +598,9 @@ def test_parse_cli_event_emits_bridge_result_for_structured_worker_output():
     assert events[1].data["bridge_result"]["task_kind"] == "code"
     assert events[1].data["bridge_result"]["status"] == "completed"
     assert events[1].data["bridge_result"]["summary"] == "Implemented the telemetry bridge."
+    assert events[1].data["bridge_result"]["delegation"]["task_id"] == "tooluse_agent"
+    assert events[1].data["bridge_result"]["delegation"]["worker_run_id"] == "worker-run-tooluse_agen"
+    assert events[1].data["bridge_result"]["payload"]["delegation_task_id"] == "tooluse_agent"
 
 
 def test_parse_cli_event_emits_structured_approval_request_from_bridge_result():
@@ -664,3 +667,5 @@ def test_parse_cli_event_emits_structured_approval_request_from_bridge_result():
     assert events[2].data["message"] == "Need approval to run a read-only git command."
     assert events[2].data["command"] == "git -C /home/master1/PaperBot branch --show-current"
     assert events[2].data["worker_agent_id"] == "afec8e10340629da4"
+    assert events[2].data["bridge_result"]["delegation"]["task_id"] == "tooluse_agent"
+    assert events[2].data["bridge_result"]["delegation"]["worker_run_id"] == "worker-run-tooluse_agen"

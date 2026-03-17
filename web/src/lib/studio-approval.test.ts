@@ -70,6 +70,7 @@ describe("buildStudioApprovalContinuePrompt", () => {
         status: "approval_required",
         summary: "Need approval",
         artifacts: [],
+        delegation: null,
         payload: {},
         raw: {},
       },
