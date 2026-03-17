@@ -685,11 +685,14 @@ export function AgentWorkspace({
   const setInspectorView = useAgentEventStore((state) => state.setInspectorView)
   const selectedWorkerRunId = useAgentEventStore((state) => state.selectedWorkerRunId)
   const setSelectedWorkerRunId = useAgentEventStore((state) => state.setSelectedWorkerRunId)
+  const requestedWorkspaceSurface = useAgentEventStore((state) => state.requestedWorkspaceSurface)
+  const clearWorkspaceSurfaceRequest = useAgentEventStore((state) => state.clearWorkspaceSurfaceRequest)
 
   const requestedPaperId = searchParams.get("paperId") || searchParams.get("paper_id")
   const requestedSurface = normalizeCenterView(searchParams.get("surface"), defaultCenterView)
-  const [centerView, setCenterView] = useState<CenterView>(requestedSurface)
+  const [localCenterView, setLocalCenterView] = useState<CenterView>(requestedSurface)
   const [mobilePinnedView, setMobilePinnedView] = useState<"threads" | null>(null)
+  const centerView: CenterView = requestedWorkspaceSurface ?? localCenterView
 
   useEffect(() => {
     loadPapers()
@@ -701,6 +704,11 @@ export function AgentWorkspace({
     if (!papers.some((paper) => paper.id === requestedPaperId)) return
     selectPaper(requestedPaperId)
   }, [papers, requestedPaperId, selectPaper, selectedPaperId])
+
+  function updateCenterView(value: CenterView) {
+    clearWorkspaceSurfaceRequest()
+    setLocalCenterView(value)
+  }
 
   const selectedPaper = useMemo(
     () => (selectedPaperId ? papers.find((paper) => paper.id === selectedPaperId) || null : null),
@@ -965,11 +973,11 @@ export function AgentWorkspace({
 
             setMobilePinnedView(null)
             if (nextView === "monitor") {
-              setCenterView("board")
+              updateCenterView("board")
               return
             }
             if (nextView === "console" && centerView === "board") {
-              setCenterView("log")
+              updateCenterView("log")
             }
           }}
           className="flex h-full w-full flex-col"
@@ -1004,12 +1012,12 @@ export function AgentWorkspace({
             <ReproductionLog
               viewMode={centerView === "board" ? "log" : centerView}
               onViewModeChange={(value) => {
-                setCenterView(value)
+                updateCenterView(value)
                 setMobilePinnedView(null)
               }}
               hideNavigation={false}
               onOpenBoardWorkspace={() => {
-                setCenterView("board")
+                updateCenterView("board")
                 setMobilePinnedView(null)
               }}
               runtimeInfo={runtimeInfo}

@@ -10,6 +10,7 @@ const CODEX_DELEGATIONS_MAX = 100
 const SCORE_EDGES_MAX = 200
 
 export type AgentInspectorView = "live" | "tools" | "files" | "agents" | "graph"
+export type AgentWorkspaceSurface = "log" | "context" | "board" | "commands" | null
 
 interface AgentEventState {
   // SSE connection status
@@ -56,6 +57,11 @@ interface AgentEventState {
   selectedWorkerRunId: string | null
   setSelectedWorkerRunId: (workerRunId: string | null) => void
   openWorkerRun: (workerRunId: string) => void
+
+  // Cross-panel workspace navigation
+  requestedWorkspaceSurface: AgentWorkspaceSurface
+  requestWorkspaceSurface: (surface: Exclude<AgentWorkspaceSurface, null>) => void
+  clearWorkspaceSurfaceRequest: () => void
 }
 
 export const useAgentEventStore = create<AgentEventState>((set) => ({
@@ -142,4 +148,8 @@ export const useAgentEventStore = create<AgentEventState>((set) => ({
     inspectorView: "agents",
     selectedWorkerRunId: workerRunId,
   }),
+
+  requestedWorkspaceSurface: null,
+  requestWorkspaceSurface: (surface) => set({ requestedWorkspaceSurface: surface }),
+  clearWorkspaceSurfaceRequest: () => set({ requestedWorkspaceSurface: null }),
 }))

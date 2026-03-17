@@ -231,6 +231,17 @@ describe("useAgentEventStore", () => {
       expect(state.inspectorView).toBe("agents")
       expect(state.selectedWorkerRunId).toBe("worker-run-open")
     })
+
+    it("requestWorkspaceSurface stores a cross-panel surface switch request", () => {
+      useAgentEventStore.getState().requestWorkspaceSurface("log")
+      expect(useAgentEventStore.getState().requestedWorkspaceSurface).toBe("log")
+    })
+
+    it("clearWorkspaceSurfaceRequest clears the pending surface switch", () => {
+      useAgentEventStore.getState().requestWorkspaceSurface("board")
+      useAgentEventStore.getState().clearWorkspaceSurfaceRequest()
+      expect(useAgentEventStore.getState().requestedWorkspaceSurface).toBeNull()
+    })
   })
 })
 

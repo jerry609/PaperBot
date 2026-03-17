@@ -26,6 +26,11 @@ import {
 } from "@/lib/agent-events/subagent-groups"
 import type { ActivityFeedItem, FileTouchedEntry, ToolCallEntry } from "@/lib/agent-events/types"
 import { useStudioStore, type AgentTask } from "@/lib/store/studio-store"
+import {
+  buildWorkerThreadPreview,
+  findRelatedWorkerThread,
+  type RelatedWorkerThread,
+} from "@/lib/studio-worker-links"
 
 type WorkerDisplayStatus = SubagentActivityGroup["status"] | "paused" | "cancelled"
 
@@ -54,6 +59,32 @@ function formatDuration(startedAt: string, finishedAt: string | null): string | 
 function truncate(text: string, max = 84): string {
   if (text.length <= max) return text
   return `${text.slice(0, max - 1)}...`
+}
+
+function formatBridgeTaskKind(value: string): string {
+  if (value === "approval_required") return "Approval"
+  if (value === "code") return "Code"
+  if (value === "review") return "Review"
+  if (value === "research") return "Research"
+  if (value === "plan") return "Plan"
+  if (value === "ops") return "Ops"
+  if (value === "failure") return "Failure"
+  return "Result"
+}
+
+function formatBridgeStatus(value: string): string {
+  if (value === "approval_required") return "Approval"
+  if (value === "completed") return "Completed"
+  if (value === "partial") return "Partial"
+  if (value === "failed") return "Failed"
+  return "Unknown"
+}
+
+function chatThreadStatusLabel(status: "running" | "completed" | "pending" | "error"): string {
+  if (status === "running") return "Live"
+  if (status === "completed") return "Done"
+  if (status === "error") return "Error"
+  return "Draft"
 }
 
 function humanizeRuntime(runtime: string): string {
@@ -285,6 +316,8 @@ function WorkerDetail({
   matchedTask,
   onTaskStatusPatched,
   boardSessionId,
+  relatedThread,
+  onOpenRelatedThread,
   transcript,
   tools,
   files,
@@ -295,6 +328,8 @@ function WorkerDetail({
   matchedTask: AgentTask | null
   onTaskStatusPatched: (status: AgentTask["status"], sessionId: string) => void
   boardSessionId: string | null
+  relatedThread: RelatedWorkerThread | null
+  onOpenRelatedThread: () => void
   transcript: ActivityFeedItem[]
   tools: ToolCallEntry[]
   files: FileTouchedEntry[]
@@ -448,6 +483,65 @@ function WorkerDetail({
             ) : null}
           </div>
         ) : null}
+
+        {relatedThread ? (
+          <div className="mt-3 rounded-[22px] border border-slate-200 bg-white px-3 py-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+                  Related Chat Thread
+                </div>
+                <div className="mt-1 truncate text-[12px] font-semibold text-slate-900">
+                  {relatedThread.task.name}
+                </div>
+                <p className="mt-1 text-[11px] leading-4 text-slate-500">
+                  {truncate(buildWorkerThreadPreview(relatedThread.task), 180)}
+                </p>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-8 shrink-0 rounded-full border-slate-200 px-3 text-[11px] text-slate-700"
+                onClick={onOpenRelatedThread}
+              >
+                Open Thread
+              </Button>
+            </div>
+
+            <div className="mt-2 flex flex-wrap items-center gap-1.5">
+              <WorkerChip label={chatThreadStatusLabel(relatedThread.task.status)} />
+              {relatedThread.latestBridgeResult ? (
+                <WorkerChip label={formatBridgeTaskKind(relatedThread.latestBridgeResult.taskKind)} />
+              ) : null}
+              {relatedThread.latestBridgeResult ? (
+                <WorkerChip label={formatBridgeStatus(relatedThread.latestBridgeResult.status)} />
+              ) : null}
+              {relatedThread.pendingApproval ? <WorkerChip label="approval pending" /> : null}
+            </div>
+
+            {relatedThread.latestBridgeResult ? (
+              <div className="mt-2 rounded-2xl border border-slate-200 bg-[#f8faf6] px-2.5 py-2">
+                <div className="text-[11px] leading-4 text-slate-700">
+                  {relatedThread.latestBridgeResult.summary}
+                </div>
+                {relatedThread.latestBridgeResult.artifacts.length > 0 ? (
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {relatedThread.latestBridgeResult.artifacts.slice(0, 4).map((artifact) => (
+                      <WorkerChip key={`${artifact.kind}:${artifact.label}:${artifact.path ?? artifact.value ?? ""}`} label={artifact.label} />
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+
+            {relatedThread.pendingApproval ? (
+              <div className="mt-2 rounded-2xl border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] leading-4 text-amber-800">
+                Approval is pending in the linked Claude chat thread. Open the thread to approve and continue that worker run.
+              </div>
+            ) : null}
+          </div>
+        ) : null}
       </div>
 
       <ScrollArea className="flex-1 min-h-0">
@@ -512,6 +606,10 @@ export function SubagentActivityPanel() {
   const filesTouched = useAgentEventStore((state) => state.filesTouched)
   const selectedWorkerRunId = useAgentEventStore((state) => state.selectedWorkerRunId)
   const setSelectedWorkerRunId = useAgentEventStore((state) => state.setSelectedWorkerRunId)
+  const requestWorkspaceSurface = useAgentEventStore((state) => state.requestWorkspaceSurface)
+  const chatTasks = useStudioStore((state) => state.tasks)
+  const selectedPaperId = useStudioStore((state) => state.selectedPaperId)
+  const setActiveTask = useStudioStore((state) => state.setActiveTask)
   const agentTasks = useStudioStore((state) => state.agentTasks)
   const boardSessionId = useStudioStore((state) => state.boardSessionId)
   const updateAgentTask = useStudioStore((state) => state.updateAgentTask)
@@ -545,6 +643,17 @@ export function SubagentActivityPanel() {
     [agentTasks, selectedGroup],
   )
   const selectedDisplayStatus = selectedGroup ? resolveDisplayStatus(selectedGroup) : null
+  const relatedThread = useMemo(
+    () =>
+      selectedGroup
+        ? findRelatedWorkerThread(chatTasks, {
+            paperId: selectedPaperId,
+            delegationTaskId: selectedGroup.taskId,
+            workerRunId: selectedGroup.workerRunId,
+          })
+        : null,
+    [chatTasks, selectedGroup, selectedPaperId],
+  )
 
   const selectedTranscript = useMemo(() => {
     if (!selectedGroup) return []
@@ -578,6 +687,12 @@ export function SubagentActivityPanel() {
     }
   }
 
+  function openRelatedThread() {
+    if (!relatedThread) return
+    setActiveTask(relatedThread.task.id)
+    requestWorkspaceSurface("log")
+  }
+
   if (selectedGroup) {
     return (
       <WorkerDetail
@@ -586,6 +701,8 @@ export function SubagentActivityPanel() {
         matchedTask={selectedTask}
         onTaskStatusPatched={patchManagedTaskStatus}
         boardSessionId={boardSessionId}
+        relatedThread={relatedThread}
+        onOpenRelatedThread={openRelatedThread}
         transcript={selectedTranscript}
         tools={selectedTools}
         files={selectedFiles}
