@@ -1,7 +1,8 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { type ComponentType, useMemo, useState } from "react"
 import {
+  Activity,
   ArrowLeft,
   ArrowUpRight,
   Ban,
@@ -9,10 +10,12 @@ import {
   Cpu,
   FileCheck2,
   FileCode2,
+  GitBranch,
   Loader2,
   MessageSquareText,
   PauseCircle,
   PlayCircle,
+  Wrench,
   ShieldCheck,
   Terminal,
   TriangleAlert,
@@ -321,6 +324,35 @@ function WorkerTranscriptRow({ item }: { item: ActivityFeedItem }) {
   )
 }
 
+function MonitorSurfaceButton({
+  label,
+  active,
+  onClick,
+  icon,
+}: {
+  label: string
+  active: boolean
+  onClick: () => void
+  icon: ComponentType<{ className?: string }>
+}) {
+  const Icon = icon
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] transition-colors ${
+        active
+          ? "border-slate-900 bg-slate-900 text-white shadow-sm"
+          : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-900"
+      }`}
+    >
+      <Icon className="h-3.5 w-3.5" />
+      {label}
+    </button>
+  )
+}
+
 function WorkerListCard({
   group,
   displayStatus,
@@ -419,6 +451,7 @@ function WorkerDetail({
   boardSessionId,
   relatedThread,
   onOpenRelatedThread,
+  activeInspectorView,
   onOpenInspectorView,
   transcript,
   tools,
@@ -432,6 +465,7 @@ function WorkerDetail({
   boardSessionId: string | null
   relatedThread: RelatedWorkerThread | null
   onOpenRelatedThread: () => void
+  activeInspectorView: AgentInspectorView
   onOpenInspectorView: (view: AgentInspectorView) => void
   transcript: ActivityFeedItem[]
   tools: ToolCallEntry[]
@@ -706,44 +740,37 @@ function WorkerDetail({
           <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">
             Inspect in Monitor
           </div>
-          <div className="mt-2 flex flex-wrap gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-8 rounded-full border-slate-200 px-3 text-[11px] text-slate-700"
-              onClick={() => onOpenInspectorView("live")}
-            >
-              Live Feed
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-8 rounded-full border-slate-200 px-3 text-[11px] text-slate-700"
-              onClick={() => onOpenInspectorView("tools")}
-            >
-              Tools
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-8 rounded-full border-slate-200 px-3 text-[11px] text-slate-700"
-              onClick={() => onOpenInspectorView("files")}
-            >
-              Files
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-8 rounded-full border-slate-200 px-3 text-[11px] text-slate-700"
-              onClick={() => onOpenInspectorView("graph")}
-            >
-              Graph
-            </Button>
+          <div className="mt-2 rounded-[20px] border border-slate-200 bg-[#f5f6f2] p-1.5">
+            <div className="flex flex-wrap gap-1.5">
+              <MonitorSurfaceButton
+                label="Live"
+                icon={Activity}
+                active={activeInspectorView === "live"}
+                onClick={() => onOpenInspectorView("live")}
+              />
+              <MonitorSurfaceButton
+                label="Tools"
+                icon={Wrench}
+                active={activeInspectorView === "tools"}
+                onClick={() => onOpenInspectorView("tools")}
+              />
+              <MonitorSurfaceButton
+                label="Files"
+                icon={FileCode2}
+                active={activeInspectorView === "files"}
+                onClick={() => onOpenInspectorView("files")}
+              />
+              <MonitorSurfaceButton
+                label="Graph"
+                icon={GitBranch}
+                active={activeInspectorView === "graph"}
+                onClick={() => onOpenInspectorView("graph")}
+              />
+            </div>
           </div>
+          <p className="mt-2 text-[11px] text-slate-500">
+            The active monitor tab stays scoped to this worker until you clear focus.
+          </p>
         </div>
 
         {relatedThread ? (
@@ -902,6 +929,7 @@ export function SubagentActivityPanel() {
   const filesTouched = useAgentEventStore((state) => state.filesTouched)
   const selectedWorkerRunId = useAgentEventStore((state) => state.selectedWorkerRunId)
   const setSelectedWorkerRunId = useAgentEventStore((state) => state.setSelectedWorkerRunId)
+  const inspectorView = useAgentEventStore((state) => state.inspectorView)
   const setInspectorView = useAgentEventStore((state) => state.setInspectorView)
   const requestWorkspaceSurface = useAgentEventStore((state) => state.requestWorkspaceSurface)
   const chatTasks = useStudioStore((state) => state.tasks)
@@ -1000,6 +1028,7 @@ export function SubagentActivityPanel() {
         boardSessionId={boardSessionId}
         relatedThread={relatedThread}
         onOpenRelatedThread={openRelatedThread}
+        activeInspectorView={inspectorView}
         onOpenInspectorView={setInspectorView}
         transcript={selectedTranscript}
         tools={selectedTools}
