@@ -182,6 +182,19 @@ function formatRecentTool(action: AgentAction): string {
   return payloadSummary ? `${functionName}: ${payloadSummary}` : functionName
 }
 
+function buildStageSequence(actions: AgentAction[]): ActivityCategory[] {
+  const sequence: ActivityCategory[] = []
+
+  for (const action of actions) {
+    const category = classifyTool(action)
+    if (category === "other") continue
+    if (sequence[sequence.length - 1] === category) continue
+    sequence.push(category)
+  }
+
+  return sequence.length > 0 ? sequence : ["other"]
+}
+
 function buildActivitySummaryAction(actions: AgentAction[]): AgentAction {
   const counts = { ...EMPTY_COUNTS }
 
@@ -207,6 +220,7 @@ function buildActivitySummaryAction(actions: AgentAction[]): AgentAction {
         status: latest?.metadata?.result === undefined ? "running" : "done",
         totalTools: actions.length,
         counts,
+        stageSequence: buildStageSequence(actions),
         recent,
         delegationTaskId: latestDelegationAction?.metadata?.toolId?.trim() || undefined,
         toolActions: actions,

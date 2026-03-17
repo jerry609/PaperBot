@@ -56,6 +56,7 @@ export interface AgentAction {
             status: 'running' | 'done'
             totalTools: number
             counts: Partial<Record<'read' | 'search' | 'write' | 'command' | 'delegation' | 'web' | 'other', number>>
+            stageSequence?: Array<'read' | 'search' | 'write' | 'command' | 'delegation' | 'web' | 'other'>
             recent: string[]
             delegationTaskId?: string
             toolActions?: AgentAction[]

@@ -388,6 +388,16 @@ function buildActivityStageBadges(
         .map(([, label]) => label)
 }
 
+function formatActivityStageLabel(stage: "read" | "search" | "write" | "command" | "delegation" | "web" | "other"): string {
+    if (stage === "search") return "search"
+    if (stage === "read") return "read"
+    if (stage === "command") return "run"
+    if (stage === "write") return "edit"
+    if (stage === "delegation") return "delegate"
+    if (stage === "web") return "web"
+    return "work"
+}
+
 function formatBridgeTaskKind(taskKind: StudioBridgeResult["taskKind"]): string {
     if (taskKind === "approval_required") return "Approval"
     if (taskKind === "code") return "Code"
@@ -967,7 +977,9 @@ function ActionItem({
     if (action.type === "activity_summary" && action.metadata?.activitySummary) {
         const summary = action.metadata.activitySummary
         const toolActions = summary.toolActions ?? []
-        const stageBadges = buildActivityStageBadges(summary.counts)
+        const stageSequence = (summary.stageSequence?.length ? summary.stageSequence : buildActivityStageBadges(summary.counts)) as Array<
+            "read" | "search" | "write" | "command" | "delegation" | "web" | "other"
+        >
         const countBadges = [
             summary.counts.read ? `${summary.counts.read} reads` : null,
             summary.counts.search ? `${summary.counts.search} searches` : null,
@@ -1027,21 +1039,33 @@ function ActionItem({
                         )}
                     </button>
 
-                    {stageBadges.length > 0 ? (
-                        <div className="mt-1.5 flex flex-wrap gap-1">
-                            {stageBadges.map((badge) => (
-                                <span
-                                    key={badge}
-                                    className={cn(
-                                        "rounded-full border px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em]",
-                                        liveSummary
-                                            ? "border-amber-200 bg-white text-amber-700"
-                                            : "border-slate-200 bg-white text-slate-500",
-                                    )}
-                                >
-                                    {badge}
-                                </span>
-                            ))}
+                    {stageSequence.length > 0 ? (
+                        <div className="mt-1.5 rounded-[14px] border border-slate-200/80 bg-white/70 px-2 py-1.5">
+                            <div className="flex flex-wrap items-center gap-1">
+                                {stageSequence.map((stage, index) => {
+                                    const isLast = index === stageSequence.length - 1
+                                    const isCurrent = liveSummary && isLast
+                                    return (
+                                        <div key={`${stage}-${index}`} className="flex items-center gap-1">
+                                            <span
+                                                className={cn(
+                                                    "rounded-full border px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em]",
+                                                    isCurrent
+                                                        ? "border-amber-200 bg-white text-amber-700"
+                                                        : "border-slate-200 bg-[#f8faf5] text-slate-500",
+                                                )}
+                                            >
+                                                {formatActivityStageLabel(stage)}
+                                            </span>
+                                            {!isLast ? (
+                                                <span className="text-[9px] uppercase tracking-[0.12em] text-slate-300">
+                                                    →
+                                                </span>
+                                            ) : null}
+                                        </div>
+                                    )
+                                })}
+                            </div>
                         </div>
                     ) : null}
 
