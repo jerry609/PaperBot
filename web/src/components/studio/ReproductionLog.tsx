@@ -523,7 +523,7 @@ function MarkdownActionBlock({
     return (
         <div
             className={cn(
-                "max-w-[88%] overflow-hidden rounded-[18px] border shadow-[0_1px_0_rgba(255,255,255,0.6)_inset]",
+                "max-w-[86%] overflow-hidden rounded-[16px] border shadow-[0_1px_0_rgba(255,255,255,0.6)_inset]",
                 tone === "error"
                     ? "border-rose-200 bg-rose-50"
                     : "border-slate-200/90 bg-[#f7f8f4]",
@@ -531,7 +531,7 @@ function MarkdownActionBlock({
         >
             <div
                 className={cn(
-                    "flex items-center justify-between gap-2 border-b px-3 py-1.5",
+                    "flex items-center justify-between gap-2 border-b px-2.5 py-1",
                     tone === "error" ? "border-rose-200/80 bg-rose-100/60" : "border-slate-200 bg-[#eef1ea]",
                 )}
             >
@@ -548,7 +548,7 @@ function MarkdownActionBlock({
                     variant="ghost"
                     size="sm"
                     className={cn(
-                        "h-6 gap-1 rounded-full px-2 text-[10px]",
+                        "h-5.5 gap-1 rounded-full px-1.5 text-[9px]",
                         tone === "error"
                             ? "text-rose-700 hover:bg-rose-100 hover:text-rose-800"
                             : "text-slate-500 hover:bg-white hover:text-slate-700",
@@ -559,31 +559,31 @@ function MarkdownActionBlock({
                     {copied ? "Copied" : "Copy"}
                 </Button>
             </div>
-            <div className="px-3 py-2.5">
-                <div className="space-y-2 text-[12px] leading-6 text-slate-800">
+            <div className="px-2.5 py-2">
+                <div className="space-y-1.5 text-[11px] leading-5 text-slate-800">
                     <Markdown
                         remarkPlugins={[remarkGfm]}
                         components={{
                             h1: ({ className, ...props }) => (
-                                <h1 className={cn("mb-2 text-[15px] font-semibold text-slate-900", className)} {...props} />
+                                <h1 className={cn("mb-1.5 text-[14px] font-semibold text-slate-900", className)} {...props} />
                             ),
                             h2: ({ className, ...props }) => (
-                                <h2 className={cn("mb-2 text-[13px] font-semibold text-slate-900", className)} {...props} />
+                                <h2 className={cn("mb-1.5 text-[12px] font-semibold text-slate-900", className)} {...props} />
                             ),
                             h3: ({ className, ...props }) => (
-                                <h3 className={cn("mb-1 text-[12px] font-semibold text-slate-900", className)} {...props} />
+                                <h3 className={cn("mb-1 text-[11px] font-semibold text-slate-900", className)} {...props} />
                             ),
                             p: ({ className, ...props }) => (
-                                <p className={cn("my-0 whitespace-pre-wrap text-[12px] leading-6 text-slate-800", className)} {...props} />
+                                <p className={cn("my-0 whitespace-pre-wrap text-[11px] leading-5 text-slate-800", className)} {...props} />
                             ),
                             ul: ({ className, ...props }) => (
-                                <ul className={cn("my-2 list-disc space-y-1 pl-5 text-[12px] text-slate-800", className)} {...props} />
+                                <ul className={cn("my-1.5 list-disc space-y-0.5 pl-4 text-[11px] text-slate-800", className)} {...props} />
                             ),
                             ol: ({ className, ...props }) => (
-                                <ol className={cn("my-2 list-decimal space-y-1 pl-5 text-[12px] text-slate-800", className)} {...props} />
+                                <ol className={cn("my-1.5 list-decimal space-y-0.5 pl-4 text-[11px] text-slate-800", className)} {...props} />
                             ),
                             li: ({ className, ...props }) => (
-                                <li className={cn("leading-6", className)} {...props} />
+                                <li className={cn("leading-5", className)} {...props} />
                             ),
                             a: ({ className, ...props }) => (
                                 <a
@@ -598,14 +598,14 @@ function MarkdownActionBlock({
                             ),
                             blockquote: ({ className, ...props }) => (
                                 <blockquote
-                                    className={cn("my-2 border-l-2 border-slate-300 pl-3 text-slate-600", className)}
+                                    className={cn("my-1.5 border-l-2 border-slate-300 pl-2.5 text-[11px] text-slate-600", className)}
                                     {...props}
                                 />
                             ),
                             pre: ({ className, ...props }) => (
                                 <pre
                                     className={cn(
-                                        "my-0 overflow-auto rounded-xl border border-slate-200 bg-slate-950 px-3 py-2.5 text-[11px] leading-5 text-slate-100",
+                                        "my-0 overflow-auto rounded-[12px] border border-slate-200 bg-slate-950 px-2.5 py-2 text-[10px] leading-[18px] text-slate-100",
                                         className,
                                     )}
                                     {...props}
@@ -618,7 +618,7 @@ function MarkdownActionBlock({
                                         className={cn(
                                             blockCode
                                                 ? "bg-transparent p-0 font-mono text-inherit"
-                                                : "rounded bg-white px-1 py-0.5 font-mono text-[11px] text-slate-800",
+                                                : "rounded bg-white px-1 py-0.5 font-mono text-[10px] text-slate-800",
                                             className,
                                         )}
                                         {...props}
@@ -626,19 +626,19 @@ function MarkdownActionBlock({
                                 )
                             },
                             table: ({ className, ...props }) => (
-                                <table className={cn("my-2 w-full border-collapse text-[12px]", className)} {...props} />
+                                <table className={cn("my-1.5 w-full border-collapse text-[11px]", className)} {...props} />
                             ),
                             th: ({ className, ...props }) => (
                                 <th
                                     className={cn(
-                                        "border border-slate-200 bg-white px-2 py-1 text-left text-[11px] font-semibold text-slate-700",
+                                        "border border-slate-200 bg-white px-1.5 py-1 text-left text-[10px] font-semibold text-slate-700",
                                         className,
                                     )}
                                     {...props}
                                 />
                             ),
                             td: ({ className, ...props }) => (
-                                <td className={cn("border border-slate-200 px-2 py-1 align-top text-slate-700", className)} {...props} />
+                                <td className={cn("border border-slate-200 px-1.5 py-1 align-top text-[10px] text-slate-700", className)} {...props} />
                             ),
                         }}
                     >
@@ -677,10 +677,10 @@ function ActionItem({
         }
 
         return (
-            <div className="flex justify-end pb-3">
-                <div className="flex max-w-[88%] flex-col items-end gap-1.5">
+            <div className="flex justify-end pb-2">
+                <div className="flex max-w-[86%] flex-col items-end gap-1">
                     {attachments.length > 0 ? (
-                        <div className="flex flex-wrap justify-end gap-1.5">
+                        <div className="flex flex-wrap justify-end gap-1">
                             {attachments.map((attachment) => (
                                 <MessageAttachmentPill
                                     key={`${attachment.name}:${attachment.size}:${attachment.type}`}
@@ -690,7 +690,7 @@ function ActionItem({
                         </div>
                     ) : null}
                     {hasTextContent ? (
-                        <div className="rounded-[18px] bg-slate-700 px-3 py-2 text-[12px] leading-5 text-white shadow-sm">
+                        <div className="rounded-[16px] bg-slate-700 px-3 py-1.5 text-[11px] leading-[18px] text-white shadow-sm">
                             <p className="whitespace-pre-wrap">{action.content}</p>
                         </div>
                     ) : null}
@@ -701,11 +701,11 @@ function ActionItem({
 
     if (action.type === "thinking") {
         return (
-            <div className="pb-1.5">
-                <div className="flex items-start gap-1.5 px-0.5 text-[10px] text-slate-500">
+            <div className="pb-1">
+                <div className="inline-flex max-w-[86%] items-start gap-1.5 rounded-full border border-slate-200 bg-white/85 px-2.5 py-1 text-[10px] leading-4 text-slate-500 shadow-[0_1px_0_rgba(255,255,255,0.75)_inset]">
                     <Loader2 className="mt-0.5 h-3 w-3 shrink-0 animate-spin text-slate-400" />
-                    <span className="shrink-0 uppercase tracking-[0.14em] text-slate-400">thinking</span>
-                    <span className="min-w-0 whitespace-pre-wrap leading-[18px] text-slate-500">
+                    <span className="shrink-0 uppercase tracking-[0.12em] text-slate-400">thinking</span>
+                    <span className="min-w-0 whitespace-pre-wrap text-slate-500">
                         {action.content}
                     </span>
                 </div>
@@ -725,15 +725,15 @@ function ActionItem({
         ].filter(Boolean) as string[]
 
         const sharedClassName =
-            "block w-full max-w-[88%] rounded-2xl border border-slate-200 bg-white/90 px-2.5 py-2 text-left shadow-[0_1px_0_rgba(255,255,255,0.75)_inset]"
+            "block w-full max-w-[86%] rounded-[18px] border border-slate-200 bg-white/90 px-2 py-1.5 text-left shadow-[0_1px_0_rgba(255,255,255,0.75)_inset]"
 
         const content = (
             <>
                 <div className="flex items-center gap-1.5">
-                    <div className="flex h-5.5 w-5.5 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-[#f3f5ef]">
+                    <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-[#f3f5ef]">
                         <Activity className="h-3 w-3 text-slate-500" />
                     </div>
-                    <span className="min-w-0 flex-1 truncate text-[11px] font-medium text-slate-800">
+                    <span className="min-w-0 flex-1 truncate text-[10px] font-medium text-slate-800">
                         {summary.label}
                     </span>
                     <span className="shrink-0 rounded-full border border-slate-200 bg-[#eef1ea] px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-slate-500">
@@ -752,7 +752,7 @@ function ActionItem({
                 </div>
 
                 {countBadges.length > 0 ? (
-                    <div className="mt-2 flex flex-wrap gap-1.5">
+                    <div className="mt-1.5 flex flex-wrap gap-1">
                         {countBadges.map((badge) => (
                             <span
                                 key={badge}
@@ -765,12 +765,12 @@ function ActionItem({
                 ) : null}
 
                 {summary.recent.length > 0 ? (
-                    <div className="mt-2 text-[10px] leading-4 text-slate-500">
+                    <div className="mt-1.5 text-[9px] leading-4 text-slate-500">
                         Recent: {summary.recent.join(" · ")}
                     </div>
                 ) : null}
 
-                <div className="mt-1.5 text-[10px] text-slate-400">
+                <div className="mt-1 text-[9px] text-slate-400">
                     Full tool activity stays in Monitor.
                 </div>
             </>
@@ -804,18 +804,18 @@ function ActionItem({
         const approvalWorkerRunId = getStudioBridgeWorkerRunId(approvalBridgeResult)
 
         return (
-            <div className="pb-2">
-                <div className="max-w-[88%] rounded-2xl border border-amber-200 bg-amber-50/90 px-3 py-2.5 shadow-[0_1px_0_rgba(255,255,255,0.75)_inset]">
+            <div className="pb-1.5">
+                <div className="max-w-[86%] rounded-[18px] border border-amber-200 bg-amber-50/90 px-2.5 py-2 shadow-[0_1px_0_rgba(255,255,255,0.75)_inset]">
                     <div className="flex items-start gap-2">
-                        <div className="mt-0.5 flex h-5.5 w-5.5 shrink-0 items-center justify-center rounded-full border border-amber-200 bg-white">
-                            <AlertCircle className="h-3.5 w-3.5 text-amber-700" />
+                        <div className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-amber-200 bg-white">
+                            <AlertCircle className="h-3 w-3 text-amber-700" />
                         </div>
                         <div className="min-w-0 flex-1">
-                            <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-amber-800">
+                            <div className="text-[9px] font-semibold uppercase tracking-[0.12em] text-amber-800">
                                 Approval required
                             </div>
                             {approvalBridgeResult ? (
-                                <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                                <div className="mt-0.5 flex flex-wrap items-center gap-1">
                                     <span className="rounded-full border border-amber-200 bg-white px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-amber-800">
                                         {formatBridgeTaskKind(approvalBridgeResult.taskKind)}
                                     </span>
@@ -824,21 +824,21 @@ function ActionItem({
                                     </span>
                                 </div>
                             ) : null}
-                            <p className="mt-1 whitespace-pre-wrap text-[12px] leading-5 text-amber-950">
+                            <p className="mt-1 whitespace-pre-wrap text-[11px] leading-[18px] text-amber-950">
                                 {approval.message}
                             </p>
                             {approval.command ? (
-                                <div className="mt-2 rounded-xl border border-amber-200 bg-white px-2.5 py-2">
-                                    <code className="break-all text-[11px] text-slate-800">
+                                <div className="mt-1.5 rounded-[12px] border border-amber-200 bg-white px-2 py-1.5">
+                                    <code className="break-all text-[10px] text-slate-800">
                                         {approval.command}
                                     </code>
                                 </div>
                             ) : null}
-                            <div className="mt-2 flex flex-wrap items-center gap-2">
+                            <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                                 <Button
                                     type="button"
                                     size="sm"
-                                    className="h-7 rounded-full bg-amber-700 px-3 text-[11px] text-white hover:bg-amber-800"
+                                    className="h-6 rounded-full bg-amber-700 px-2.5 text-[10px] text-white hover:bg-amber-800"
                                     onClick={() => onApproveApprovalRequest?.(action)}
                                     disabled={!canApprove}
                                 >
@@ -850,13 +850,13 @@ function ActionItem({
                                         type="button"
                                         variant="outline"
                                         size="sm"
-                                        className="h-7 rounded-full border-amber-200 bg-white px-3 text-[11px] text-amber-900 hover:bg-amber-100"
+                                        className="h-6 rounded-full border-amber-200 bg-white px-2.5 text-[10px] text-amber-900 hover:bg-amber-100"
                                         onClick={() => onOpenMonitor(approvalMonitorTaskId)}
                                     >
                                         Open in Monitor
                                     </Button>
                                 ) : null}
-                                <span className="text-[10px] text-amber-800/80">
+                                <span className="text-[9px] leading-4 text-amber-800/80">
                                     {approval.cliSessionId
                                         ? "Resumes the parent Claude session in full access mode."
                                         : "Missing Claude session id for resume."}
@@ -886,13 +886,13 @@ function ActionItem({
             null
         const workerRunId = getStudioBridgeWorkerRunId(bridgeResult)
         return (
-            <div className="pb-1.5">
-                <div className="rounded-2xl border border-slate-200 bg-white/90 px-2.5 py-1.5 shadow-[0_1px_0_rgba(255,255,255,0.75)_inset]">
+            <div className="pb-1">
+                <div className="max-w-[86%] rounded-[18px] border border-slate-200 bg-white/90 px-2 py-1.5 shadow-[0_1px_0_rgba(255,255,255,0.75)_inset]">
                     <div className="flex items-center gap-1.5">
-                        <div className="flex h-5.5 w-5.5 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-[#f3f5ef]">
+                        <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-[#f3f5ef]">
                             <Wrench className="h-3 w-3 text-slate-500" />
                         </div>
-                        <code className="shrink-0 rounded-full bg-[#eef1ea] px-1.5 py-0.5 text-[10px] font-mono text-slate-700">
+                        <code className="shrink-0 rounded-full bg-[#eef1ea] px-1.5 py-0.5 text-[9px] font-mono text-slate-700">
                             {action.metadata.functionName}()
                         </code>
                         {bridgeResult ? (
@@ -937,11 +937,11 @@ function ActionItem({
                         ) : null}
                     </div>
                     {bridgeResult ? (
-                        <div className="mt-2 rounded-xl border border-slate-200 bg-[#f8faf5] px-2.5 py-2">
-                            <div className="text-[11px] leading-5 text-slate-800">
+                        <div className="mt-1.5 rounded-[12px] border border-slate-200 bg-[#f8faf5] px-2 py-1.5">
+                            <div className="text-[10px] leading-[18px] text-slate-800">
                                 {bridgeResult.summary}
                             </div>
-                            <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                            <div className="mt-1.5 flex flex-wrap items-center gap-1">
                                 <span className="rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-slate-500">
                                     {bridgeResult.executor}
                                 </span>
@@ -960,7 +960,7 @@ function ActionItem({
                                 ))}
                             </div>
                             {bridgeResult.artifacts.length > 0 ? (
-                                <div className="mt-2 flex flex-wrap gap-1.5">
+                                <div className="mt-1.5 flex flex-wrap gap-1">
                                     {bridgeResult.artifacts.slice(0, 4).map((artifact) => (
                                         <span
                                             key={`${artifact.kind}:${artifact.label}:${artifact.path ?? artifact.value ?? ""}`}
@@ -977,7 +977,7 @@ function ActionItem({
                                         type="button"
                                         variant="outline"
                                         size="sm"
-                                        className="h-7 rounded-full border-slate-200 bg-white px-3 text-[11px] text-slate-700 hover:bg-slate-50"
+                                        className="h-6 rounded-full border-slate-200 bg-white px-2.5 text-[10px] text-slate-700 hover:bg-slate-50"
                                         onClick={() => onOpenMonitor(monitorTaskId)}
                                     >
                                         Open in Monitor
@@ -987,7 +987,7 @@ function ActionItem({
                         </div>
                     ) : null}
                     {expanded ? (
-                        <div className="mt-1.5 space-y-1.5">
+                        <div className="mt-1 space-y-1">
                             {Boolean(action.metadata.params) ? (
                                 <CodeBlock title="Args" code={stringifyPayload(action.metadata.params)} />
                             ) : null}
@@ -1006,16 +1006,16 @@ function ActionItem({
 
     if (action.type === "file_change" && action.metadata?.filename) {
         return (
-            <div className="pb-1.5">
+            <div className="pb-1">
                 <button
                     type="button"
                     onClick={() => onViewDiff(action)}
-                    className="flex max-w-full items-center gap-1.5 rounded-2xl border border-slate-200 bg-white/90 px-2.5 py-1.5 text-left text-[10px] text-slate-600 shadow-[0_1px_0_rgba(255,255,255,0.75)_inset] transition-colors hover:bg-white"
+                    className="flex max-w-[86%] items-center gap-1.5 rounded-[16px] border border-slate-200 bg-white/90 px-2 py-1 text-left text-[9px] text-slate-600 shadow-[0_1px_0_rgba(255,255,255,0.75)_inset] transition-colors hover:bg-white"
                 >
-                    <div className="flex h-5.5 w-5.5 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-[#f3f5ef]">
+                    <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-[#f3f5ef]">
                         <FileCode className="h-3 w-3 text-slate-500" />
                     </div>
-                    <span className="truncate font-mono text-slate-700">{action.metadata.filename}</span>
+                    <span className="truncate font-mono text-[10px] text-slate-700">{action.metadata.filename}</span>
                     <span className="shrink-0 rounded-full bg-[#eef1ea] px-1.5 py-0.5 text-[9px]">
                         <span className="text-emerald-700">+{action.metadata.linesAdded || 0}</span>
                         <span className="mx-0.5 text-slate-400">/</span>
@@ -1032,7 +1032,7 @@ function ActionItem({
                 ? `\`\`\`\n${action.content}\n\`\`\``
                 : action.content
         return (
-            <div className="pb-2">
+            <div className="pb-1.5">
                 <MarkdownActionBlock
                     rawContent={action.content}
                     renderContent={renderContent}
@@ -1045,7 +1045,7 @@ function ActionItem({
 
     if (action.type === "complete") {
         return (
-            <div className="pb-2">
+            <div className="pb-1.5">
                 <span className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[9px] font-medium uppercase tracking-[0.12em] text-emerald-700">
                     done
                 </span>
@@ -1059,7 +1059,7 @@ function ActionItem({
                 ? `\`\`\`\n${action.content}\n\`\`\``
                 : action.content
         return (
-            <div className="pb-2">
+            <div className="pb-1.5">
                 <MarkdownActionBlock
                     rawContent={action.content}
                     renderContent={renderContent}
@@ -1070,7 +1070,7 @@ function ActionItem({
     }
 
     return (
-        <div className="pb-2">
+        <div className="pb-1.5">
             <MarkdownActionBlock rawContent={action.content} label="Claude Code" />
         </div>
     )
@@ -2869,7 +2869,7 @@ export function ReproductionLog({
                 ) : (
                     /* Chat Timeline */
                     <ScrollArea className="h-full bg-[#f5f5f2]">
-                        <div className="p-4">
+                        <div className="px-3 py-3">
                             {!visibleTask || visibleActions.length === 0 ? (
                                 <div className="flex flex-col items-center justify-center space-y-4 py-20 text-slate-500">
                                     <div className="flex h-16 w-16 items-center justify-center rounded-2xl border border-slate-200 bg-[#eceee8]">
