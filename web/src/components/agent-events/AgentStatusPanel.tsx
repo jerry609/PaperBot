@@ -127,7 +127,7 @@ export function AgentStatusPanel({ compact = false }: { compact?: boolean }) {
   }, [codexDelegations, toolCalls])
 
   return (
-    <div className="flex flex-col gap-2 p-3">
+    <div className={compact ? "flex flex-col gap-1.5" : "flex flex-col gap-2 p-3"}>
       {!compact && (
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-semibold text-zinc-900">Agent Status</h3>
@@ -147,7 +147,7 @@ export function AgentStatusPanel({ compact = false }: { compact?: boolean }) {
         </div>
       )}
       {entries.length === 0 ? (
-        <div className="text-xs text-zinc-500">No agents active</div>
+        <div className="text-xs text-zinc-500">{compact ? "No active agents" : "No agents active"}</div>
       ) : (
         <div className={compact ? "flex flex-wrap gap-1.5" : "grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4"}>
           {entries.map((entry) => (

@@ -162,6 +162,10 @@ function inspectorViewLabel(view: AgentInspectorView): string {
   return "Live"
 }
 
+function compactMonitorMetric(value: string): string {
+  return value.trim()
+}
+
 function formatWorkspaceLabel(outputDir: string | null | undefined): string {
   if (!outputDir) return "Workspace not configured"
   const segments = outputDir.split("/").filter(Boolean)
@@ -424,7 +428,7 @@ function RightInspector({
 }) {
   return (
     <div className="flex h-full min-h-0 flex-col bg-[#f8f9f6] text-slate-900">
-      <div className="border-b border-slate-200 bg-[#f4f5f1] px-3 py-3">
+      <div className="border-b border-slate-200 bg-[#f4f5f1] px-3 py-2.5">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">
@@ -442,7 +446,7 @@ function RightInspector({
 
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
           <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-slate-500">
-            {runtimeLoading ? "Checking runtime" : runtimeInfo.label}
+            {runtimeLoading ? "Checking runtime" : compactMonitorMetric(runtimeInfo.label)}
           </span>
           <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-slate-500">
             {activeAgents} agents
@@ -456,9 +460,10 @@ function RightInspector({
           <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-slate-500">
             {eventCount} events
           </span>
+          <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-slate-500">
+            {compactMonitorMetric(runtimeInfo.workspaceLabel)}
+          </span>
         </div>
-
-        <p className="mt-2 text-[11px] text-slate-500">{runtimeInfo.workspaceLabel}</p>
 
         {selectedWorkerTitle ? (
           <div
@@ -491,6 +496,11 @@ function RightInspector({
                     {inspectorViewLabel(activeView)} focus
                   </span>
                 </div>
+                <div className="mt-1 text-[11px] text-slate-500">
+                  {selectedWorkerControlMode === "managed"
+                    ? "Studio-owned session"
+                    : "Parent Claude session owns control"}
+                </div>
               </div>
               <Button
                 type="button"
@@ -505,7 +515,7 @@ function RightInspector({
           </div>
         ) : null}
 
-        <div className="mt-2 rounded-[18px] border border-slate-200 bg-white px-2.5 py-2">
+        <div className="mt-2 rounded-[16px] border border-slate-200 bg-white px-2 py-1.5">
           <AgentStatusPanel compact />
         </div>
       </div>
@@ -515,7 +525,7 @@ function RightInspector({
         onValueChange={(value) => onViewChange(value as AgentInspectorView)}
         className="flex flex-1 min-h-0 flex-col"
       >
-        <div className="border-b border-slate-200 bg-slate-50 px-2.5 py-2">
+        <div className="border-b border-slate-200 bg-slate-50 px-2 py-1.5">
           <TabsList className="grid w-full grid-cols-5 rounded-[16px] border border-slate-200 bg-white p-1">
             <TabsTrigger value="live" className="rounded-[12px] border border-transparent px-1 text-[10px] text-slate-500 shadow-none data-[state=active]:border-slate-200 data-[state=active]:bg-[#eef1ea] data-[state=active]:text-slate-900">
               <Activity className="mr-1 h-3.5 w-3.5" />
