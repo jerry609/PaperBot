@@ -529,3 +529,138 @@ def test_parse_cli_event_emits_approval_required_for_worker_result():
     assert events[1].data["command"] == "git -C /home/master1/PaperBot branch --show-current"
     assert events[1].data["worker_agent_id"] == "afec8e10340629da4"
     assert events[1].data["cli_session_id"] == "5807135f-411e-4365-9b27-9e39ca13c3d5"
+
+
+def test_parse_cli_event_emits_bridge_result_for_structured_worker_output():
+    state = _make_state()
+
+    _build_cli_telemetry_events(
+        {
+            "type": "assistant",
+            "message": {
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": "tooluse_agent",
+                        "name": "Agent",
+                        "input": {
+                            "description": "Implement telemetry bridge",
+                            "subagent_type": "codex-worker",
+                        },
+                    }
+                ]
+            },
+        },
+        state,
+        now_monotonic=70.0,
+    )
+
+    events = _parse_cli_event(
+        {
+            "type": "user",
+            "message": {
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "tooluse_agent",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": """```json
+{
+  "version": "1",
+  "executor": "codex",
+  "task_kind": "code",
+  "status": "completed",
+  "summary": "Implemented the telemetry bridge.",
+  "artifacts": [
+    { "kind": "file", "label": "studio_chat.py", "path": "src/paperbot/api/routes/studio_chat.py" }
+  ],
+  "payload": {
+    "files_changed": ["src/paperbot/api/routes/studio_chat.py"],
+    "checks": [{ "label": "pytest", "status": "passed" }]
+  }
+}
+```""",
+                            }
+                        ],
+                        "is_error": False,
+                    }
+                ]
+            },
+        },
+        state,
+    )
+
+    assert len(events) == 2
+    assert events[0].data["cli_event"] == "tool_result"
+    assert events[1].data["cli_event"] == "bridge_result"
+    assert events[1].data["bridge_result"]["task_kind"] == "code"
+    assert events[1].data["bridge_result"]["status"] == "completed"
+    assert events[1].data["bridge_result"]["summary"] == "Implemented the telemetry bridge."
+
+
+def test_parse_cli_event_emits_structured_approval_request_from_bridge_result():
+    state = _make_state()
+    state.cli_session_id = "5807135f-411e-4365-9b27-9e39ca13c3d5"
+
+    _build_cli_telemetry_events(
+        {
+            "type": "assistant",
+            "message": {
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": "tooluse_agent",
+                        "name": "Agent",
+                        "input": {
+                            "description": "Inspect branch",
+                            "subagent_type": "codex-worker",
+                        },
+                    }
+                ]
+            },
+        },
+        state,
+        now_monotonic=80.0,
+    )
+
+    events = _parse_cli_event(
+        {
+            "type": "user",
+            "message": {
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "tooluse_agent",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": """{
+  "version": "1",
+  "executor": "codex",
+  "task_kind": "approval_required",
+  "status": "approval_required",
+  "summary": "Need approval to run a read-only git command.",
+  "artifacts": [],
+  "payload": {
+    "command": "git -C /home/master1/PaperBot branch --show-current",
+    "resume_hint": { "worker_agent_id": "afec8e10340629da4" }
+  }
+}""",
+                            }
+                        ],
+                        "is_error": False,
+                    }
+                ]
+            },
+        },
+        state,
+    )
+
+    assert len(events) == 3
+    assert events[1].data["cli_event"] == "bridge_result"
+    assert events[2].data["cli_event"] == "approval_required"
+    assert events[2].data["message"] == "Need approval to run a read-only git command."
+    assert events[2].data["command"] == "git -C /home/master1/PaperBot branch --show-current"
+    assert events[2].data["worker_agent_id"] == "afec8e10340629da4"

@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { ReproContextPack, StageObservationsEvent, StageProgressEvent } from '@/lib/types/p2c'
+import type { StudioBridgeResult } from '@/lib/studio-bridge-result'
 
 // Agent Action Types
 export type ActionType = 'thinking' | 'file_change' | 'function_call' | 'mcp_call' | 'activity_summary' | 'approval_request' | 'error' | 'complete' | 'text' | 'user'
@@ -27,6 +28,7 @@ export interface AgentAction {
         functionName?: string
         params?: Record<string, unknown>
         result?: unknown
+        bridgeResult?: StudioBridgeResult
         // For uploaded/user-selected files
         attachments?: Array<{
             name: string
@@ -64,6 +66,7 @@ export interface AgentAction {
             workerAgentId?: string
             toolId?: string
             toolName?: string
+            bridgeResult?: StudioBridgeResult | null
         }
     }
 }
@@ -501,7 +504,13 @@ interface StudioState {
     updateTaskStatus: (taskId: string, status: Task['status']) => void
     addAction: (taskId: string, action: Omit<AgentAction, 'id' | 'timestamp'>) => void
     upsertThinkingAction: (taskId: string, content: string) => void
-    attachResultToLatestFunctionCall: (taskId: string, functionName: string, result: unknown, toolId?: string) => boolean
+    attachResultToLatestFunctionCall: (
+        taskId: string,
+        functionName: string,
+        result?: unknown,
+        toolId?: string,
+        metadataPatch?: Partial<NonNullable<AgentAction["metadata"]>>,
+    ) => boolean
     appendToLastAction: (taskId: string, text: string) => void
     appendTaskHistory: (taskId: string, message: TaskMessage) => void
     setActiveTask: (taskId: string | null) => void
@@ -996,10 +1005,11 @@ export const useStudioStore = create<StudioState>((set, get) => ({
         }))
     },
 
-    attachResultToLatestFunctionCall: (taskId, functionName, result, toolId) => {
+    attachResultToLatestFunctionCall: (taskId, functionName, result, toolId, metadataPatch) => {
         const state = get()
         const targetTask = state.tasks.find(task => task.id === taskId)
         if (!targetTask) return false
+        const isMetadataOnlyPatch = result === undefined && metadataPatch !== undefined
 
         const attachAtIndex = (index: number) => {
             const action = targetTask.actions[index]
@@ -1007,7 +1017,8 @@ export const useStudioStore = create<StudioState>((set, get) => ({
                 ...action,
                 metadata: {
                     ...action.metadata,
-                    result,
+                    ...(result !== undefined ? { result } : {}),
+                    ...metadataPatch,
                 },
             }
             set(currentState => ({
@@ -1031,7 +1042,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
                 if (
                     action.type === 'function_call' &&
                     action.metadata?.toolId === toolId &&
-                    action.metadata?.result === undefined
+                    (isMetadataOnlyPatch || action.metadata?.result === undefined)
                 ) {
                     return attachAtIndex(index)
                 }
@@ -1039,15 +1050,15 @@ export const useStudioStore = create<StudioState>((set, get) => ({
         }
 
         for (let index = targetTask.actions.length - 1; index >= 0; index -= 1) {
-            const action = targetTask.actions[index]
-            if (
-                action.type === 'function_call' &&
-                action.metadata?.functionName === functionName &&
-                action.metadata?.result === undefined
-            ) {
-                return attachAtIndex(index)
+                const action = targetTask.actions[index]
+                if (
+                    action.type === 'function_call' &&
+                    action.metadata?.functionName === functionName &&
+                    (isMetadataOnlyPatch || action.metadata?.result === undefined)
+                ) {
+                    return attachAtIndex(index)
+                }
             }
-        }
 
         return false
     },

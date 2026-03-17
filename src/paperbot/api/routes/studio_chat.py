@@ -1165,6 +1165,92 @@ _APPROVAL_COMMAND_PATTERNS = (
     re.compile(r"run `([^`]+)`", re.IGNORECASE),
 )
 _APPROVAL_AGENT_ID_PATTERN = re.compile(r"\bagentId:\s*([A-Za-z0-9_-]+)")
+_BRIDGE_RESULT_JSON_BLOCK_PATTERN = re.compile(
+    r"```(?:json)?\s*(\{[\s\S]*?\})\s*```",
+    re.IGNORECASE,
+)
+
+
+def _normalize_bridge_result(value: Any) -> Optional[Dict[str, Any]]:
+    if not isinstance(value, dict):
+        return None
+
+    task_kind = str(value.get("task_kind") or "").strip().lower()
+    status = str(value.get("status") or "").strip().lower()
+    summary = str(value.get("summary") or "").strip()
+    if not task_kind or not status or not summary:
+        return None
+
+    executor = str(value.get("executor") or "unknown").strip() or "unknown"
+    version = str(value.get("version") or "1").strip() or "1"
+    payload = value.get("payload")
+    artifacts = value.get("artifacts")
+
+    normalized_artifacts: List[Dict[str, Any]] = []
+    if isinstance(artifacts, list):
+        for item in artifacts:
+            if not isinstance(item, dict):
+                continue
+            label = str(item.get("label") or "").strip()
+            if not label:
+                continue
+            normalized_artifacts.append(
+                {
+                    "kind": str(item.get("kind") or "other").strip() or "other",
+                    "label": label,
+                    "path": str(item.get("path") or "").strip() or None,
+                    "value": str(item.get("value") or "").strip() or None,
+                }
+            )
+
+    return {
+        "version": version,
+        "executor": executor,
+        "task_kind": task_kind,
+        "status": status,
+        "summary": summary,
+        "artifacts": normalized_artifacts,
+        "payload": payload if isinstance(payload, dict) else {},
+    }
+
+
+def _parse_bridge_result_content(content: Any) -> Optional[Dict[str, Any]]:
+    if isinstance(content, dict):
+        return _normalize_bridge_result(content)
+
+    result_content = _stringify_tool_result_content(content).strip()
+    if not result_content:
+        return None
+
+    candidates: List[str] = []
+    if result_content.startswith("{") and result_content.endswith("}"):
+        candidates.append(result_content)
+
+    for match in _BRIDGE_RESULT_JSON_BLOCK_PATTERN.finditer(result_content):
+        candidate = match.group(1).strip()
+        if candidate:
+            candidates.append(candidate)
+
+    if "{" in result_content and "}" in result_content:
+        start = result_content.find("{")
+        end = result_content.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            candidates.append(result_content[start:end + 1].strip())
+
+    seen: set[str] = set()
+    for candidate in candidates:
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        try:
+            parsed = json.loads(candidate)
+        except (json.JSONDecodeError, ValueError, TypeError):
+            continue
+        normalized = _normalize_bridge_result(parsed)
+        if normalized is not None:
+            return normalized
+
+    return None
 
 
 def _extract_approval_command(result_content: str) -> Optional[str]:
@@ -1185,6 +1271,33 @@ def _extract_approval_command(result_content: str) -> Optional[str]:
     return None
 
 
+def _extract_approval_request_from_bridge_result(
+    bridge_result: Dict[str, Any],
+) -> Optional[Dict[str, Optional[str]]]:
+    status = str(bridge_result.get("status") or "").strip().lower()
+    task_kind = str(bridge_result.get("task_kind") or "").strip().lower()
+    if status != "approval_required" and task_kind != "approval_required":
+        return None
+
+    payload = bridge_result.get("payload")
+    payload_dict = payload if isinstance(payload, dict) else {}
+    resume_hint = payload_dict.get("resume_hint")
+    resume_hint_dict = resume_hint if isinstance(resume_hint, dict) else {}
+
+    command = str(payload_dict.get("command") or "").strip() or None
+    worker_agent_id = (
+        str(payload_dict.get("worker_agent_id") or "").strip()
+        or str(resume_hint_dict.get("worker_agent_id") or "").strip()
+        or None
+    )
+
+    return {
+        "message": str(bridge_result.get("summary") or "").strip() or None,
+        "command": command,
+        "worker_agent_id": worker_agent_id,
+    }
+
+
 def _build_studio_approval_progress_event(
     content: Any,
     *,
@@ -1193,6 +1306,25 @@ def _build_studio_approval_progress_event(
 ) -> Optional[StreamEvent]:
     if telemetry_state is None:
         return None
+
+    bridge_result = _parse_bridge_result_content(content)
+    if bridge_result is not None:
+        approval_request = _extract_approval_request_from_bridge_result(bridge_result)
+        if approval_request is not None:
+            invocation = _find_tool_invocation(telemetry_state, tool_id=tool_id) if tool_id else None
+            return StreamEvent(
+                type="progress",
+                data={
+                    "cli_event": "approval_required",
+                    "tool_name": invocation.tool_name if invocation is not None else "tool",
+                    "tool_id": tool_id,
+                    "message": approval_request["message"] or bridge_result["summary"],
+                    "command": approval_request["command"],
+                    "worker_agent_id": approval_request["worker_agent_id"],
+                    "cli_session_id": telemetry_state.cli_session_id,
+                    "bridge_result": bridge_result,
+                },
+            )
 
     result_content = _stringify_tool_result_content(content).strip()
     normalized = result_content.lower()
@@ -1807,6 +1939,19 @@ def _parse_user_tool_result_blocks(
                 "content": _truncate(_stringify_tool_result_content(block.get("content", "")), 2000),
             },
         ))
+        bridge_result = _parse_bridge_result_content(block.get("content", ""))
+        if bridge_result is not None:
+            events.append(
+                StreamEvent(
+                    type="progress",
+                    data={
+                        "cli_event": "bridge_result",
+                        "tool_name": invocation.tool_name if invocation is not None else "tool",
+                        "tool_id": tool_id,
+                        "bridge_result": bridge_result,
+                    },
+                )
+            )
         approval_event = _build_studio_approval_progress_event(
             block.get("content", ""),
             tool_id=tool_id,
@@ -1849,6 +1994,19 @@ def _parse_cli_event(
                 "content": _truncate(_stringify_tool_result_content(line_data.get("content", "")), 2000),
             },
         ))
+        bridge_result = _parse_bridge_result_content(line_data.get("content", ""))
+        if bridge_result is not None:
+            events.append(
+                StreamEvent(
+                    type="progress",
+                    data={
+                        "cli_event": "bridge_result",
+                        "tool_name": line_data.get("tool_name", ""),
+                        "tool_id": line_data.get("tool_use_id") or line_data.get("tool_id") or "",
+                        "bridge_result": bridge_result,
+                    },
+                )
+            )
         approval_event = _build_studio_approval_progress_event(
             line_data.get("content", ""),
             tool_id=str(line_data.get("tool_use_id") or line_data.get("tool_id") or "").strip(),

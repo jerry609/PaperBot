@@ -33,6 +33,7 @@ import {
     buildStudioApprovalContinuePrompt,
     parseStudioApprovalRequest,
 } from "@/lib/studio-approval"
+import { parseStudioBridgeResult, type StudioBridgeResult } from "@/lib/studio-bridge-result"
 import { collapseToolActivityActions } from "@/lib/studio-chat-activity"
 import {
     resolveDetectedModelSelection,
@@ -323,6 +324,9 @@ function summarizeToolPayload(payload: unknown): string | null {
 
     const record = payload as Record<string, unknown>
     const priorityKeys = [
+        "summary",
+        "status",
+        "task_kind",
         "path",
         "file_path",
         "filename",
@@ -347,6 +351,61 @@ function summarizeToolPayload(payload: unknown): string | null {
     }
 
     return null
+}
+
+function formatBridgeTaskKind(taskKind: StudioBridgeResult["taskKind"]): string {
+    if (taskKind === "approval_required") return "Approval"
+    if (taskKind === "code") return "Code"
+    if (taskKind === "review") return "Review"
+    if (taskKind === "research") return "Research"
+    if (taskKind === "plan") return "Plan"
+    if (taskKind === "ops") return "Ops"
+    if (taskKind === "failure") return "Failure"
+    return "Result"
+}
+
+function formatBridgeStatus(status: StudioBridgeResult["status"]): string {
+    if (status === "approval_required") return "approval"
+    if (status === "completed") return "completed"
+    if (status === "partial") return "partial"
+    if (status === "failed") return "failed"
+    return status
+}
+
+function bridgeStatusClassName(status: StudioBridgeResult["status"]): string {
+    if (status === "completed") return "border-emerald-200 bg-emerald-50 text-emerald-700"
+    if (status === "partial") return "border-amber-200 bg-amber-50 text-amber-700"
+    if (status === "approval_required") return "border-amber-200 bg-amber-50 text-amber-700"
+    if (status === "failed") return "border-rose-200 bg-rose-50 text-rose-700"
+    return "border-slate-200 bg-[#f8faf6] text-slate-500"
+}
+
+function bridgePayloadMetricBadges(bridgeResult: StudioBridgeResult): string[] {
+    const payload = bridgeResult.payload
+    const badges: string[] = []
+    const metricKeys: Array<[keyof typeof payload, string]> = [
+        ["files_changed", "files"],
+        ["files_created", "created"],
+        ["findings", "findings"],
+        ["claims", "claims"],
+        ["steps", "steps"],
+        ["commands", "commands"],
+        ["checks", "checks"],
+        ["tests_run", "tests"],
+    ]
+
+    for (const [key, label] of metricKeys) {
+        const value = payload[key]
+        if (Array.isArray(value) && value.length > 0) {
+            badges.push(`${value.length} ${label}`)
+        }
+    }
+
+    if (bridgeResult.artifacts.length > 0) {
+        badges.push(`${bridgeResult.artifacts.length} artifact${bridgeResult.artifacts.length === 1 ? "" : "s"}`)
+    }
+
+    return badges
 }
 
 type ComposerPillTone = "neutral" | "accent" | "success" | "warning"
@@ -595,10 +654,12 @@ function ActionItem({
 }: ActionItemProps) {
     const [expanded, setExpanded] = useState(false)
     const attachments = action.metadata?.attachments ?? []
-    const hasExpandableContent = Boolean(action.metadata?.params || action.metadata?.result)
-    const hasToolResult = action.metadata?.result !== undefined
+    const bridgeResult = action.metadata?.bridgeResult ?? null
+    const hasExpandableContent = Boolean(action.metadata?.params || action.metadata?.result || bridgeResult)
+    const hasToolResult = action.metadata?.result !== undefined || bridgeResult !== null
     const commandOutput = action.metadata?.commandOutput
     const toolSummary =
+        bridgeResult?.summary ??
         summarizeToolPayload(action.metadata?.params) ??
         summarizeToolPayload(action.metadata?.result)
     const stringifyPayload = (payload: unknown): string =>
@@ -730,6 +791,7 @@ function ActionItem({
     if (action.type === "approval_request" && action.metadata?.approvalRequest) {
         const approval = action.metadata.approvalRequest
         const canApprove = Boolean(approval.cliSessionId) && !approvalPending
+        const approvalBridgeResult = approval.bridgeResult ?? null
 
         return (
             <div className="pb-2">
@@ -742,6 +804,16 @@ function ActionItem({
                             <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-amber-800">
                                 Approval required
                             </div>
+                            {approvalBridgeResult ? (
+                                <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                                    <span className="rounded-full border border-amber-200 bg-white px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-amber-800">
+                                        {formatBridgeTaskKind(approvalBridgeResult.taskKind)}
+                                    </span>
+                                    <span className="rounded-full border border-amber-200 bg-white px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-amber-800">
+                                        {approvalBridgeResult.executor}
+                                    </span>
+                                </div>
+                            ) : null}
                             <p className="mt-1 whitespace-pre-wrap text-[12px] leading-5 text-amber-950">
                                 {approval.message}
                             </p>
@@ -792,6 +864,11 @@ function ActionItem({
                         <code className="shrink-0 rounded-full bg-[#eef1ea] px-1.5 py-0.5 text-[10px] font-mono text-slate-700">
                             {action.metadata.functionName}()
                         </code>
+                        {bridgeResult ? (
+                            <span className="shrink-0 rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-slate-500">
+                                {formatBridgeTaskKind(bridgeResult.taskKind)}
+                            </span>
+                        ) : null}
                         {toolSummary ? (
                             <span className="min-w-0 flex-1 truncate text-[10px] text-slate-500">
                                 {toolSummary}
@@ -805,11 +882,13 @@ function ActionItem({
                             className={cn(
                                 "shrink-0 rounded-full border px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em]",
                                 hasToolResult
-                                    ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                    ? bridgeResult
+                                        ? bridgeStatusClassName(bridgeResult.status)
+                                        : "border-emerald-200 bg-emerald-50 text-emerald-700"
                                     : "border-slate-200 bg-[#f8faf6] text-slate-500",
                             )}
                         >
-                            {hasToolResult ? "done" : "running"}
+                            {hasToolResult ? (bridgeResult ? formatBridgeStatus(bridgeResult.status) : "done") : "running"}
                         </span>
                         {hasExpandableContent ? (
                             <button
@@ -826,10 +905,45 @@ function ActionItem({
                             </button>
                         ) : null}
                     </div>
+                    {bridgeResult ? (
+                        <div className="mt-2 rounded-xl border border-slate-200 bg-[#f8faf5] px-2.5 py-2">
+                            <div className="text-[11px] leading-5 text-slate-800">
+                                {bridgeResult.summary}
+                            </div>
+                            <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                                <span className="rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-slate-500">
+                                    {bridgeResult.executor}
+                                </span>
+                                {bridgePayloadMetricBadges(bridgeResult).map((badge) => (
+                                    <span
+                                        key={badge}
+                                        className="rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-slate-500"
+                                    >
+                                        {badge}
+                                    </span>
+                                ))}
+                            </div>
+                            {bridgeResult.artifacts.length > 0 ? (
+                                <div className="mt-2 flex flex-wrap gap-1.5">
+                                    {bridgeResult.artifacts.slice(0, 4).map((artifact) => (
+                                        <span
+                                            key={`${artifact.kind}:${artifact.label}:${artifact.path ?? artifact.value ?? ""}`}
+                                            className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] text-slate-600"
+                                        >
+                                            {artifact.label}
+                                        </span>
+                                    ))}
+                                </div>
+                            ) : null}
+                        </div>
+                    ) : null}
                     {expanded ? (
                         <div className="mt-1.5 space-y-1.5">
                             {Boolean(action.metadata.params) ? (
                                 <CodeBlock title="Args" code={stringifyPayload(action.metadata.params)} />
+                            ) : null}
+                            {bridgeResult ? (
+                                <CodeBlock title="Bridge Result" code={JSON.stringify(bridgeResult.raw, null, 2)} />
                             ) : null}
                             {Boolean(action.metadata.result) ? (
                                 <CodeBlock title="Result" code={stringifyPayload(action.metadata.result)} />
@@ -1388,11 +1502,16 @@ export function ReproductionLog({
                         lastStreamActionType = "tool"
                         lastThinkingContent = null
                         const functionName = data.tool_name as string
+                        const rawResult = data.content as string
+                        const bridgeResult =
+                            parseStudioBridgeResult((data as Record<string, unknown>).bridge_result) ??
+                            parseStudioBridgeResult(rawResult)
                         const attached = attachResultToLatestFunctionCall(
                             taskId,
                             functionName,
-                            data.content as string,
+                            rawResult,
                             data.tool_id as string | undefined,
+                            bridgeResult ? { bridgeResult } : undefined,
                         )
                         if (!attached) {
                             addAction(taskId, {
@@ -1401,7 +1520,35 @@ export function ReproductionLog({
                                 metadata: {
                                     toolId: data.tool_id as string | undefined,
                                     functionName,
-                                    result: data.content as string,
+                                    result: rawResult,
+                                    bridgeResult: bridgeResult ?? undefined,
+                                },
+                            })
+                        }
+                    } else if (cliEvent === "bridge_result") {
+                        lastActionIsText = false
+                        lastStreamActionType = "tool"
+                        lastThinkingContent = null
+                        const functionName = data.tool_name as string
+                        const bridgeResult = parseStudioBridgeResult((data as Record<string, unknown>).bridge_result)
+                        if (!bridgeResult) {
+                            continue
+                        }
+                        const attached = attachResultToLatestFunctionCall(
+                            taskId,
+                            functionName,
+                            undefined,
+                            data.tool_id as string | undefined,
+                            { bridgeResult },
+                        )
+                        if (!attached) {
+                            addAction(taskId, {
+                                type: "function_call",
+                                content: `${functionName}()`,
+                                metadata: {
+                                    toolId: data.tool_id as string | undefined,
+                                    functionName,
+                                    bridgeResult,
                                 },
                             })
                         }
@@ -1411,8 +1558,12 @@ export function ReproductionLog({
                         lastThinkingContent = null
 
                         const rawMessage = typeof data.message === "string" ? data.message : ""
+                        const approvalBridgeResult =
+                            parseStudioBridgeResult((data as Record<string, unknown>).bridge_result) ??
+                            parseStudioBridgeResult(rawMessage)
                         const parsedApproval = parseStudioApprovalRequest(rawMessage)
                         const approvalMessage =
+                            approvalBridgeResult?.summary ||
                             parsedApproval?.message ||
                             rawMessage.trim() ||
                             "This action requires approval before Claude can continue."
@@ -1440,6 +1591,7 @@ export function ReproductionLog({
                                     workerAgentId: explicitWorkerAgentId,
                                     toolId: typeof data.tool_id === "string" ? data.tool_id : undefined,
                                     toolName: typeof data.tool_name === "string" ? data.tool_name : undefined,
+                                    bridgeResult: approvalBridgeResult ?? parsedApproval?.bridgeResult ?? null,
                                 },
                             },
                         })
@@ -1590,6 +1742,7 @@ export function ReproductionLog({
                 effectiveMessage: buildStudioApprovalContinuePrompt({
                     command: approval.command,
                     workerAgentId: approval.workerAgentId,
+                    bridgeResult: approval.bridgeResult,
                 }),
                 outgoingMode: approvalMode,
                 preparedProjectDir: projectDir ?? undefined,
