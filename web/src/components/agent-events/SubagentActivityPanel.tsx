@@ -144,23 +144,23 @@ function workerControlSummary(
   relatedThread: RelatedWorkerThread | null,
 ): string {
   if (controlMode === "managed") {
-    if (displayStatus === "paused") return "Studio controls this managed worker session. Resume or cancel from here."
-    if (displayStatus === "cancelled") return "This managed worker session was cancelled from Studio."
-    if (displayStatus === "completed") return "This managed worker session completed. Studio kept the full worker trace."
-    if (displayStatus === "failed") return "This managed worker session failed. Studio still owns the session controls."
-    return "Studio controls this managed worker session. Pause, resume, or cancel act on the underlying managed session."
+    if (displayStatus === "paused") return "Studio owns this worker session. Resume or cancel here."
+    if (displayStatus === "cancelled") return "Studio-owned session cancelled."
+    if (displayStatus === "completed") return "Studio-owned session completed. Full trace stays here."
+    if (displayStatus === "failed") return "Studio-owned session failed. Controls stay here."
+    return "Studio owns this worker session."
   }
 
   if (relatedThread?.pendingApproval) {
-    return "This worker is controlled by its parent Claude session. Approval is waiting in that session before the run can continue."
+    return "Parent Claude session is waiting for approval."
   }
   if (displayStatus === "completed") {
-    return "This worker was controlled by its parent Claude session. Studio mirrors the completed trace and links back to the parent thread."
+    return "Completed in the parent Claude session."
   }
   if (displayStatus === "failed") {
-    return "This worker is controlled by its parent Claude session. The mirrored run failed and should be continued or retried from Claude."
+    return "Failed in the parent Claude session."
   }
-  return "This worker is controlled by its parent Claude session. Studio mirrors activity here and can open the controlling thread when action is needed."
+  return "Parent Claude session owns this worker."
 }
 
 function workerControlStateLabel(
@@ -284,7 +284,7 @@ function formatRecentToolStrip(entries: ToolCallEntry[]): string {
 
 function WorkerChip({ label }: { label: string }) {
   return (
-    <span className="rounded-full border border-slate-200 bg-[#f7f8f4] px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-slate-500">
+    <span className="rounded-full border border-slate-200 bg-[#f7f8f4] px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-slate-500">
       {label}
     </span>
   )
@@ -360,13 +360,13 @@ function MonitorSurfaceButton({
     <button
       type="button"
       onClick={onClick}
-      className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] transition-colors ${
+      className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[10px] transition-colors ${
         active
           ? "border-slate-900 bg-slate-900 text-white shadow-sm"
           : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-900"
       }`}
     >
-      <Icon className="h-3.5 w-3.5" />
+      <Icon className="h-3 w-3" />
       {label}
     </button>
   )
@@ -495,7 +495,6 @@ function WorkerDetail({
   const controlOwner = controlOwnerLabel(group.controlMode)
   const controlState = workerControlStateLabel(group.controlMode, displayStatus, relatedThread)
   const controlSummary = workerControlSummary(group.controlMode, displayStatus, relatedThread)
-  const relatedThreadButtonLabel = relatedThread?.pendingApproval ? "Open Approval" : "Open Parent Thread"
   const controlCardTone = controlCardClassName(group.controlMode)
   const controlStateTone = controlStateClassName(group.controlMode, displayStatus, relatedThread)
   const relatedThreadSessionId = approvalRequest?.cliSessionId?.trim() || null
@@ -598,19 +597,19 @@ function WorkerDetail({
           </div>
         </div>
 
-        <div className={`mt-3 rounded-[24px] border px-3 py-3 shadow-[0_1px_0_rgba(255,255,255,0.7)_inset] ${controlCardTone}`}>
+        <div className={`mt-3 rounded-[22px] border px-2.5 py-2.5 shadow-[0_1px_0_rgba(255,255,255,0.7)_inset] ${controlCardTone}`}>
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">
                 Session Control
               </div>
               <div className="mt-1 flex items-center gap-2">
-                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-2xl border border-slate-200 bg-white/80">
+                <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-2xl border border-slate-200 bg-white/80">
                   <ShieldCheck className={`h-4 w-4 ${group.controlMode === "managed" ? "text-emerald-700" : "text-slate-700"}`} />
                 </div>
                 <div className="min-w-0">
                   <div className="text-[12px] font-semibold text-slate-900">{controlOwner}</div>
-                  <div className="text-[11px] text-slate-500">
+                  <div className="text-[10px] text-slate-500">
                     {group.controlMode === "managed" ? "Controls execute directly from Studio." : "Actions route back to the parent Claude session."}
                   </div>
                 </div>
@@ -625,33 +624,22 @@ function WorkerDetail({
             </div>
           </div>
 
-          <div className="mt-3 grid grid-cols-2 gap-2 text-[11px] text-zinc-500">
-            <div className="rounded-2xl border border-white/80 bg-white/80 px-2.5 py-2">
-              <div className="text-[10px] uppercase tracking-[0.12em] text-slate-400">Control owner</div>
-              <div className="mt-1 text-[11px] font-medium text-slate-700">{controlOwner}</div>
-            </div>
-            <div className="rounded-2xl border border-white/80 bg-white/80 px-2.5 py-2">
-              <div className="text-[10px] uppercase tracking-[0.12em] text-slate-400">{controlSessionLabel(group.controlMode)}</div>
-              <div className="mt-1 font-mono text-[11px] text-slate-700">{group.sessionId || "Unavailable"}</div>
-            </div>
-            {approvalRequest?.workerAgentId ? (
-              <div className="rounded-2xl border border-white/80 bg-white/80 px-2.5 py-2">
-                <div className="text-[10px] uppercase tracking-[0.12em] text-slate-400">Worker agent</div>
-                <div className="mt-1 font-mono text-[11px] text-slate-700">{approvalRequest.workerAgentId}</div>
-              </div>
-            ) : null}
-            {controlResumeCommand ? (
-              <div className="rounded-2xl border border-white/80 bg-white/80 px-2.5 py-2">
-                <div className="text-[10px] uppercase tracking-[0.12em] text-slate-400">Resume command</div>
-                <div className="mt-1 font-mono text-[11px] text-slate-700">{controlResumeCommand}</div>
-              </div>
-            ) : null}
+          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+            {group.sessionId ? <WorkerChip label={controlSessionLabel(group.controlMode)} /> : null}
+            {group.sessionId ? <WorkerChip label={group.sessionId} /> : null}
+            {approvalRequest?.workerAgentId ? <WorkerChip label={`worker ${approvalRequest.workerAgentId}`} /> : null}
+            {controlResumeCommand ? <WorkerChip label="resume available" /> : null}
           </div>
 
-          <div className="mt-3 rounded-2xl border border-white/80 bg-white/80 px-2.5 py-2.5">
-            <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">
-              Available actions
+          {controlResumeCommand ? (
+            <div className="mt-2 rounded-2xl border border-white/80 bg-white/80 px-2.5 py-2">
+              <div className="text-[10px] uppercase tracking-[0.12em] text-slate-400">Resume command</div>
+              <code className="mt-1 block break-all text-[10px] text-slate-700">{controlResumeCommand}</code>
             </div>
+          ) : null}
+
+          <div className="mt-2 rounded-2xl border border-white/80 bg-white/80 px-2.5 py-2.5">
+            <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">Actions</div>
             <div className="mt-2 flex flex-wrap items-center gap-2">
             {isManaged ? (
               <>
@@ -659,24 +647,24 @@ function WorkerDetail({
                   <Button
                     type="button"
                     size="sm"
-                    className="h-8 rounded-full bg-slate-900 px-3 text-[11px] text-white hover:bg-slate-800"
+                    className="h-7 rounded-full bg-slate-900 px-2.5 text-[10px] text-white hover:bg-slate-800"
                     onClick={() => void performControl("resume")}
                     disabled={controlBusy !== null}
                   >
                     {controlBusy === "resume" ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <PlayCircle className="mr-1.5 h-3.5 w-3.5" />}
-                    Resume Session
+                    Resume
                   </Button>
                 ) : displayStatus !== "cancelled" && displayStatus !== "completed" && displayStatus !== "failed" ? (
                   <Button
                     type="button"
                     variant="outline"
                     size="sm"
-                    className="h-8 rounded-full border-amber-200 px-3 text-[11px] text-amber-800 hover:bg-amber-50"
+                    className="h-7 rounded-full border-amber-200 px-2.5 text-[10px] text-amber-800 hover:bg-amber-50"
                     onClick={() => void performControl("pause")}
                     disabled={controlBusy !== null}
                   >
                     {controlBusy === "pause" ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <PauseCircle className="mr-1.5 h-3.5 w-3.5" />}
-                    Pause Session
+                    Pause
                   </Button>
                 ) : null}
 
@@ -685,12 +673,12 @@ function WorkerDetail({
                     type="button"
                     variant="outline"
                     size="sm"
-                    className="h-8 rounded-full border-rose-200 px-3 text-[11px] text-rose-700 hover:bg-rose-50"
+                    className="h-7 rounded-full border-rose-200 px-2.5 text-[10px] text-rose-700 hover:bg-rose-50"
                     onClick={() => void performControl("cancel")}
                     disabled={controlBusy !== null}
                   >
                     {controlBusy === "cancel" ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Ban className="mr-1.5 h-3.5 w-3.5" />}
-                    Cancel Session
+                    Cancel
                   </Button>
                 ) : null}
               </>
@@ -700,11 +688,11 @@ function WorkerDetail({
                   <Button
                     type="button"
                     size="sm"
-                    className="h-8 rounded-full bg-slate-900 px-3 text-[11px] text-white hover:bg-slate-800"
+                    className="h-7 rounded-full bg-slate-900 px-2.5 text-[10px] text-white hover:bg-slate-800"
                     onClick={onOpenRelatedThread}
                   >
                     <ArrowUpRight className="mr-1.5 h-3.5 w-3.5" />
-                    {relatedThreadButtonLabel}
+                    Open thread
                   </Button>
                 ) : null}
                 {controlResumeCommand ? (
@@ -712,43 +700,22 @@ function WorkerDetail({
                     type="button"
                     variant="outline"
                     size="sm"
-                    className="h-8 rounded-full border-slate-200 px-3 text-[11px] text-slate-700"
+                    className="h-7 rounded-full border-slate-200 px-2.5 text-[10px] text-slate-700"
                     onClick={() => void copyResumeCommand()}
                   >
                     <Command className="mr-1.5 h-3.5 w-3.5" />
-                    {resumeCopied ? "Copied" : "Copy Resume Command"}
+                    {resumeCopied ? "Copied" : "Copy resume"}
                   </Button>
                 ) : null}
                 {!relatedThread && controlResumeCommand ? (
-                  <span className="text-[11px] text-slate-500">
-                    Resume this worker from Claude CLI if the parent thread is not linked here.
+                  <span className="text-[10px] text-slate-500">
+                    Resume from Claude CLI if the parent thread is not linked here.
                   </span>
                 ) : null}
               </>
             )}
             </div>
-          </div>
-
-          {group.controlMode === "mirrored" && !relatedThread && !controlResumeCommand ? (
-            <div className="mt-3 rounded-2xl border border-slate-200 bg-[#fafaf8] px-2.5 py-2 text-[11px] leading-4 text-slate-500">
-              Studio is mirroring this worker run, but the controlling Claude session is not linked in this workspace.
-            </div>
-          ) : null}
-
-          {controlNotice ? (
-            <p className="mt-2 text-[11px] text-emerald-700">{controlNotice}</p>
-          ) : null}
-          {controlError ? (
-            <p className="mt-2 text-[11px] text-rose-700">{controlError}</p>
-          ) : null}
-        </div>
-
-        <div className="mt-3 rounded-[22px] border border-slate-200 bg-white px-3 py-3">
-          <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">
-            Inspect in Monitor
-          </div>
-          <div className="mt-2 rounded-[20px] border border-slate-200 bg-[#f5f6f2] p-1.5">
-            <div className="flex flex-wrap gap-1.5">
+            <div className="mt-2 flex flex-wrap gap-1.5">
               <MonitorSurfaceButton
                 label="Live"
                 icon={Activity}
@@ -775,14 +742,24 @@ function WorkerDetail({
               />
             </div>
           </div>
-          <p className="mt-2 text-[11px] text-slate-500">
-            The active monitor tab stays scoped to this worker until you clear focus.
-          </p>
+
+          {group.controlMode === "mirrored" && !relatedThread && !controlResumeCommand ? (
+            <div className="mt-2 rounded-2xl border border-slate-200 bg-[#fafaf8] px-2.5 py-2 text-[11px] leading-4 text-slate-500">
+              Studio is mirroring this worker run, but the controlling Claude session is not linked in this workspace.
+            </div>
+          ) : null}
+
+          {controlNotice ? (
+            <p className="mt-2 text-[11px] text-emerald-700">{controlNotice}</p>
+          ) : null}
+          {controlError ? (
+            <p className="mt-2 text-[11px] text-rose-700">{controlError}</p>
+          ) : null}
         </div>
 
         {relatedThread ? (
           <div
-            className={`mt-3 rounded-[24px] border px-3 py-3 shadow-[0_1px_0_rgba(255,255,255,0.7)_inset] ${
+            className={`mt-3 rounded-[22px] border px-2.5 py-2.5 shadow-[0_1px_0_rgba(255,255,255,0.7)_inset] ${
               relatedThread.pendingApproval
                 ? "border-amber-200 bg-[linear-gradient(180deg,#fffdf8_0%,#f9f2dd_100%)]"
                 : "border-slate-200 bg-[linear-gradient(180deg,#ffffff_0%,#f5f7fa_100%)]"
@@ -794,21 +771,21 @@ function WorkerDetail({
                   {group.controlMode === "managed" ? "Linked Chat Thread" : "Parent Claude Session"}
                 </div>
                 <div className="mt-1 flex items-center gap-2">
-                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-2xl border border-white/80 bg-white/80">
+                  <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-2xl border border-white/80 bg-white/80">
                     <MessageSquareText className={`h-4 w-4 ${relatedThread.pendingApproval ? "text-amber-700" : "text-slate-700"}`} />
                   </div>
                   <div className="min-w-0">
                     <div className="truncate text-[12px] font-semibold text-slate-900">
                       {relatedThread.task.name}
                     </div>
-                    <div className="text-[11px] text-slate-500">
+                    <div className="text-[10px] text-slate-500">
                       {group.controlMode === "managed"
-                        ? "Worker status is mirrored back into the linked Studio chat thread."
-                        : "This is the parent Claude session that owns approval and continuation for the mirrored worker."}
+                        ? "Worker status mirrors into the linked Studio thread."
+                        : "This parent Claude session owns approval and continuation."}
                     </div>
                   </div>
                 </div>
-                <p className="mt-2 text-[11px] leading-4 text-slate-500">
+                <p className="mt-1.5 text-[11px] leading-4 text-slate-500">
                   {truncate(buildWorkerThreadPreview(relatedThread.task), 180)}
                 </p>
               </div>
@@ -816,7 +793,7 @@ function WorkerDetail({
                 type="button"
                 variant="outline"
                 size="sm"
-                className={`h-8 shrink-0 rounded-full px-3 text-[11px] ${
+                className={`h-7 shrink-0 rounded-full px-2.5 text-[10px] ${
                   relatedThread.pendingApproval
                     ? "border-amber-200 bg-white text-amber-800 hover:bg-amber-50"
                     : "border-slate-200 bg-white text-slate-700"
@@ -824,11 +801,11 @@ function WorkerDetail({
                 onClick={onOpenRelatedThread}
               >
                 <ArrowUpRight className="mr-1.5 h-3.5 w-3.5" />
-                {relatedThreadButtonLabel}
+                {relatedThread.pendingApproval ? "Open approval" : "Open thread"}
               </Button>
             </div>
 
-            <div className="mt-3 flex flex-wrap items-center gap-1.5">
+            <div className="mt-2 flex flex-wrap items-center gap-1.5">
               <WorkerChip label={chatThreadStatusLabel(relatedThread.task.status)} />
               {relatedThread.latestBridgeResult ? (
                 <WorkerChip label={formatBridgeTaskKind(relatedThread.latestBridgeResult.taskKind)} />
@@ -836,32 +813,12 @@ function WorkerDetail({
               {relatedThread.latestBridgeResult ? (
                 <WorkerChip label={formatBridgeStatus(relatedThread.latestBridgeResult.status)} />
               ) : null}
+              {relatedThreadSessionId ? <WorkerChip label={relatedThreadSessionId} /> : null}
               {relatedThread.pendingApproval ? <WorkerChip label="approval pending" /> : null}
             </div>
 
-            <div className="mt-3 grid grid-cols-2 gap-2 text-[11px] text-zinc-500">
-              <div className="rounded-2xl border border-white/80 bg-white/80 px-2.5 py-2">
-                <div className="text-[10px] uppercase tracking-[0.12em] text-slate-400">Thread state</div>
-                <div className="mt-1 text-[11px] font-medium text-slate-700">
-                  {chatThreadStatusLabel(relatedThread.task.status)}
-                </div>
-              </div>
-              <div className="rounded-2xl border border-white/80 bg-white/80 px-2.5 py-2">
-                <div className="text-[10px] uppercase tracking-[0.12em] text-slate-400">
-                  {relatedThreadSessionId ? "Resume session" : "Latest checkpoint"}
-                </div>
-                <div className="mt-1 font-mono text-[11px] text-slate-700">
-                  {relatedThreadSessionId || formatTimestamp(
-                    relatedThread.latestMatchedAction.timestamp instanceof Date
-                      ? relatedThread.latestMatchedAction.timestamp.toISOString()
-                      : String(relatedThread.latestMatchedAction.timestamp),
-                  )}
-                </div>
-              </div>
-            </div>
-
             {relatedThread.pendingApproval && relatedThread.latestApprovalAction?.metadata?.approvalRequest?.command ? (
-              <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 px-2.5 py-2">
+              <div className="mt-2 rounded-2xl border border-amber-200 bg-amber-50 px-2.5 py-2">
                 <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-amber-700">
                   Pending command
                 </div>
@@ -872,7 +829,7 @@ function WorkerDetail({
             ) : null}
 
             {relatedThread.latestBridgeResult ? (
-              <div className="mt-3 rounded-2xl border border-white/80 bg-white/80 px-2.5 py-2">
+              <div className="mt-2 rounded-2xl border border-white/80 bg-white/80 px-2.5 py-2">
                 <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">
                   Latest handoff
                 </div>
@@ -890,7 +847,7 @@ function WorkerDetail({
             ) : null}
 
             {relatedThread.matchedActions.length > 1 ? (
-              <div className="mt-3 rounded-2xl border border-white/80 bg-white/80 px-2.5 py-2">
+              <div className="mt-2 rounded-2xl border border-white/80 bg-white/80 px-2.5 py-2">
                 <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
                   Session timeline
                 </div>
@@ -920,8 +877,8 @@ function WorkerDetail({
             ) : null}
 
             {relatedThread.pendingApproval ? (
-              <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] leading-4 text-amber-800">
-                Approval is pending in the linked Claude chat thread. Open the thread to approve and continue that worker run.
+              <div className="mt-2 rounded-2xl border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] leading-4 text-amber-800">
+                Approval is pending in the linked Claude thread.
               </div>
             ) : null}
           </div>
@@ -930,8 +887,8 @@ function WorkerDetail({
 
       <ScrollArea className="flex-1 min-h-0">
         <div className="space-y-3 px-3 py-3">
-          <section className="rounded-[22px] border border-slate-200 bg-white px-3 py-3">
-            <div className="mb-2 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+          <section className="rounded-[20px] border border-slate-200 bg-white px-2.5 py-2.5">
+            <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
               <MessageSquareText className="h-3.5 w-3.5" />
               Transcript
             </div>
@@ -946,8 +903,8 @@ function WorkerDetail({
             )}
           </section>
 
-          <section className="rounded-[22px] border border-slate-200 bg-white px-3 py-3">
-            <div className="mb-2 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+          <section className="rounded-[20px] border border-slate-200 bg-white px-2.5 py-2.5">
+            <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
               <Terminal className="h-3.5 w-3.5" />
               Tool activity
             </div>
@@ -962,8 +919,8 @@ function WorkerDetail({
             )}
           </section>
 
-          <section className="rounded-[22px] border border-slate-200 bg-white px-3 py-3">
-            <div className="mb-2 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+          <section className="rounded-[20px] border border-slate-200 bg-white px-2.5 py-2.5">
+            <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
               <FileCode2 className="h-3.5 w-3.5" />
               File changes
             </div>

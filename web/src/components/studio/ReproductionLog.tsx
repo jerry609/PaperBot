@@ -484,11 +484,11 @@ function ToolActivityStreamRow({
     return (
         <div
             className={cn(
-                "rounded-[16px] border shadow-[0_1px_0_rgba(255,255,255,0.75)_inset]",
+                "rounded-[14px] border shadow-[0_1px_0_rgba(255,255,255,0.75)_inset]",
                 live
                     ? "border-amber-200 bg-amber-50/80"
                     : "border-slate-200 bg-white/90",
-                nested ? "px-1.5 py-1.5" : "max-w-[86%] px-2 py-1.5",
+                nested ? "px-1.5 py-1" : "max-w-[86%] px-2 py-1",
             )}
         >
             <button
@@ -513,7 +513,7 @@ function ToolActivityStreamRow({
                 </div>
                 <code
                     className={cn(
-                        "shrink-0 rounded-full px-1.5 py-0.5 text-[9px] font-mono",
+                        "shrink-0 rounded-full px-1.5 py-0.5 text-[8px] font-mono",
                         live ? "bg-white text-amber-900" : "bg-[#eef1ea] text-slate-700",
                     )}
                 >
@@ -547,7 +547,7 @@ function ToolActivityStreamRow({
                 {hasExpandableContent ? (
                     <>
                         <span className="shrink-0 rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-slate-500">
-                            {expanded ? "hide details" : "show details"}
+                            details
                         </span>
                         {expanded ? (
                             <ChevronDown className="h-3.5 w-3.5 shrink-0 text-slate-500" />
@@ -559,7 +559,7 @@ function ToolActivityStreamRow({
             </button>
 
             {expanded ? (
-                <div className="mt-1.5 space-y-1">
+                <div className="mt-1 space-y-1">
                     {bridgeResult ? (
                         <div className="rounded-[12px] border border-slate-200 bg-[#f8faf5] px-2 py-1.5">
                             <div className="text-[10px] leading-[18px] text-slate-800">
@@ -601,7 +601,7 @@ function ToolActivityStreamRow({
                                         type="button"
                                         variant="outline"
                                         size="sm"
-                                        className="h-6 rounded-full border-slate-200 bg-white px-2.5 text-[10px] text-slate-700 hover:bg-slate-50"
+                                        className="h-5.5 rounded-full border-slate-200 bg-white px-2 text-[9px] text-slate-700 hover:bg-slate-50"
                                         onClick={() => onOpenMonitor(monitorTaskId)}
                                     >
                                         Open in Monitor
@@ -737,15 +737,15 @@ function MarkdownActionBlock({
     return (
         <div
             className={cn(
-                "group/markdown max-w-[88%] overflow-hidden rounded-[16px] border transition-colors",
+                "group/markdown max-w-[88%] overflow-hidden rounded-[15px] border transition-colors",
                 tone === "error"
                     ? "border-rose-200 bg-rose-50 shadow-[0_1px_0_rgba(255,255,255,0.6)_inset] hover:border-rose-300 focus-within:border-rose-300"
-                    : "border-slate-200 bg-white shadow-[0_10px_24px_rgba(15,23,42,0.05),0_1px_0_rgba(255,255,255,0.7)_inset] hover:border-slate-300 focus-within:border-slate-300",
+                    : "border-slate-200 bg-white shadow-[0_8px_20px_rgba(15,23,42,0.04),0_1px_0_rgba(255,255,255,0.7)_inset] hover:border-slate-300 focus-within:border-slate-300",
             )}
         >
             <div
                 className={cn(
-                    "flex items-center justify-between gap-2 border-b px-2.5 py-1",
+                    "flex items-center justify-between gap-2 border-b px-2 py-0.5",
                     tone === "error" ? "border-rose-200/80 bg-rose-100/60" : "border-slate-200 bg-[#f4f6f1]",
                 )}
             >
@@ -762,7 +762,7 @@ function MarkdownActionBlock({
                     variant="ghost"
                     size="sm"
                     className={cn(
-                        "h-5.5 gap-1 rounded-full px-1.5 text-[9px] opacity-50 transition-opacity hover:opacity-100 focus-visible:opacity-100 group-hover/markdown:opacity-100 group-focus-within/markdown:opacity-100",
+                        "h-5 gap-1 rounded-full px-1.5 text-[9px] opacity-40 transition-opacity hover:opacity-100 focus-visible:opacity-100 group-hover/markdown:opacity-100 group-focus-within/markdown:opacity-100",
                         tone === "error"
                             ? "text-rose-700 hover:bg-rose-100 hover:text-rose-800"
                             : "text-slate-500 hover:bg-[#eef1ea] hover:text-slate-700",
@@ -773,31 +773,31 @@ function MarkdownActionBlock({
                     {copied ? "Copied" : "Copy"}
                 </Button>
             </div>
-            <div className="px-2.5 py-2">
-                <div className="space-y-1.5 text-[11px] leading-5 text-slate-800">
+            <div className="px-2 py-1.5">
+                <div className="space-y-1 text-[11px] leading-[19px] text-slate-800">
                     <Markdown
                         remarkPlugins={[remarkGfm]}
                         components={{
                             h1: ({ className, ...props }) => (
-                                <h1 className={cn("mb-1.5 text-[14px] font-semibold text-slate-900", className)} {...props} />
+                                <h1 className={cn("mb-1 text-[14px] font-semibold text-slate-900", className)} {...props} />
                             ),
                             h2: ({ className, ...props }) => (
-                                <h2 className={cn("mb-1.5 text-[12px] font-semibold text-slate-900", className)} {...props} />
+                                <h2 className={cn("mb-1 text-[12px] font-semibold text-slate-900", className)} {...props} />
                             ),
                             h3: ({ className, ...props }) => (
                                 <h3 className={cn("mb-1 text-[11px] font-semibold text-slate-900", className)} {...props} />
                             ),
                             p: ({ className, ...props }) => (
-                                <p className={cn("my-0 whitespace-pre-wrap text-[11px] leading-5 text-slate-800", className)} {...props} />
+                                <p className={cn("my-0 whitespace-pre-wrap text-[11px] leading-[19px] text-slate-800", className)} {...props} />
                             ),
                             ul: ({ className, ...props }) => (
-                                <ul className={cn("my-1.5 list-disc space-y-0.5 pl-4 text-[11px] text-slate-800", className)} {...props} />
+                                <ul className={cn("my-1 list-disc space-y-0.5 pl-4 text-[11px] text-slate-800", className)} {...props} />
                             ),
                             ol: ({ className, ...props }) => (
-                                <ol className={cn("my-1.5 list-decimal space-y-0.5 pl-4 text-[11px] text-slate-800", className)} {...props} />
+                                <ol className={cn("my-1 list-decimal space-y-0.5 pl-4 text-[11px] text-slate-800", className)} {...props} />
                             ),
                             li: ({ className, ...props }) => (
-                                <li className={cn("leading-5", className)} {...props} />
+                                <li className={cn("leading-[19px]", className)} {...props} />
                             ),
                             a: ({ className, ...props }) => (
                                 <a
@@ -812,14 +812,14 @@ function MarkdownActionBlock({
                             ),
                             blockquote: ({ className, ...props }) => (
                                 <blockquote
-                                    className={cn("my-1.5 border-l-2 border-slate-300 pl-2.5 text-[11px] text-slate-600", className)}
+                                    className={cn("my-1 border-l-2 border-slate-300 pl-2.5 text-[11px] text-slate-600", className)}
                                     {...props}
                                 />
                             ),
                             pre: ({ className, ...props }) => (
                                 <pre
                                     className={cn(
-                                        "my-0 overflow-auto rounded-[12px] border border-slate-200 bg-slate-950 px-2.5 py-2 text-[10px] leading-[18px] text-slate-100",
+                                        "my-0 overflow-auto rounded-[12px] border border-slate-200 bg-slate-950 px-2 py-1.5 text-[10px] leading-[18px] text-slate-100",
                                         className,
                                     )}
                                     {...props}
@@ -840,7 +840,7 @@ function MarkdownActionBlock({
                                 )
                             },
                             table: ({ className, ...props }) => (
-                                <table className={cn("my-1.5 w-full border-collapse text-[11px]", className)} {...props} />
+                                <table className={cn("my-1 w-full border-collapse text-[11px]", className)} {...props} />
                             ),
                             th: ({ className, ...props }) => (
                                 <th
@@ -903,7 +903,7 @@ function ActionItem({
                         </div>
                     ) : null}
                     {hasTextContent ? (
-                        <div className="rounded-[16px] bg-slate-700 px-3 py-1.5 text-[11px] leading-[18px] text-white shadow-sm">
+                        <div className="rounded-[15px] bg-slate-700 px-2.5 py-1.5 text-[11px] leading-[18px] text-white shadow-sm">
                             <p className="whitespace-pre-wrap">{action.content}</p>
                         </div>
                     ) : null}
@@ -926,7 +926,7 @@ function ActionItem({
                             setExpanded((current) => !current)
                         }}
                         className={cn(
-                            "inline-flex w-full items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] leading-4 shadow-[0_1px_0_rgba(255,255,255,0.75)_inset]",
+                            "inline-flex w-full items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] leading-4 shadow-[0_1px_0_rgba(255,255,255,0.75)_inset]",
                             liveThinking
                                 ? "border-amber-200 bg-amber-50/80 text-amber-800"
                                 : "border-slate-200 bg-white/85 text-slate-500",
@@ -953,7 +953,7 @@ function ActionItem({
                                         liveThinking ? "border-amber-200 text-amber-700" : "border-slate-200 text-slate-400",
                                     )}
                                 >
-                                    {expanded ? "hide reasoning" : "show reasoning"}
+                                    details
                                 </span>
                                 {expanded ? (
                                     <ChevronDown className={cn("h-3.5 w-3.5 shrink-0", liveThinking ? "text-amber-700" : "text-slate-400")} />
@@ -964,8 +964,8 @@ function ActionItem({
                         ) : null}
                     </button>
                     {expanded ? (
-                        <div className="pl-6 pt-1 text-[10px] leading-4 text-slate-500">
-                            <div className="whitespace-pre-wrap rounded-[14px] border border-slate-200 bg-white/75 px-2.5 py-2">
+                        <div className="pl-5 pt-1 text-[10px] leading-4 text-slate-500">
+                            <div className="whitespace-pre-wrap rounded-[14px] border border-slate-200 bg-white/75 px-2 py-1.5">
                                 {action.content}
                             </div>
                         </div>
@@ -991,7 +991,7 @@ function ActionItem({
         ].filter(Boolean) as string[]
 
         const sharedClassName =
-            "block w-full max-w-[86%] rounded-[18px] border border-slate-200 bg-white/90 px-2 py-1.5 text-left shadow-[0_1px_0_rgba(255,255,255,0.75)_inset]"
+            "block w-full max-w-[86%] rounded-[16px] border border-slate-200 bg-white/90 px-2 py-1 text-left shadow-[0_1px_0_rgba(255,255,255,0.75)_inset]"
 
         return (
             <div className="pb-1.5">
@@ -1031,7 +1031,7 @@ function ActionItem({
                             </span>
                         ) : null}
                         <span className="shrink-0 rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-slate-500">
-                            {expanded ? "hide steps" : "show steps"}
+                            steps
                         </span>
                         {expanded ? (
                             <ChevronDown className="h-3.5 w-3.5 shrink-0 text-slate-500" />
@@ -1041,7 +1041,7 @@ function ActionItem({
                     </button>
 
                     {stageSequence.length > 0 ? (
-                        <div className="mt-1.5 rounded-[14px] border border-slate-200/80 bg-white/70 px-2 py-1.5">
+                        <div className="mt-1 rounded-[14px] border border-slate-200/80 bg-white/70 px-2 py-1">
                             <div className="flex flex-wrap items-center gap-1">
                                 {stageSequence.map((stage, index) => {
                                     const isLast = index === stageSequence.length - 1
@@ -1071,7 +1071,7 @@ function ActionItem({
                     ) : null}
 
                     {countBadges.length > 0 ? (
-                        <div className="mt-1.5 flex flex-wrap gap-1">
+                        <div className="mt-1 flex flex-wrap gap-1">
                             {countBadges.map((badge) => (
                                 <span
                                     key={badge}
@@ -1084,21 +1084,18 @@ function ActionItem({
                     ) : null}
 
                     {summary.recent.length > 0 ? (
-                        <div className="mt-1.5 text-[9px] leading-4 text-slate-500">
+                        <div className="mt-1 text-[9px] leading-4 text-slate-500">
                             Recent: {summary.recent.join(" · ")}
                         </div>
                     ) : null}
 
-                    <div className="mt-1 flex items-center justify-between gap-2">
-                        <div className="text-[9px] text-slate-400">
-                            Chat shows the compressed activity stream. Monitor keeps the full raw details.
-                        </div>
+                    <div className="mt-1 flex items-center justify-end gap-2">
                         {onOpenMonitor && summary.delegationTaskId ? (
                             <Button
                                 type="button"
                                 variant="outline"
                                 size="sm"
-                                className="h-6 rounded-full border-slate-200 bg-white px-2.5 text-[10px] text-slate-700 hover:bg-slate-50"
+                                className="h-5.5 rounded-full border-slate-200 bg-white px-2 text-[9px] text-slate-700 hover:bg-slate-50"
                                 onClick={() => onOpenMonitor(summary.delegationTaskId)}
                             >
                                 Monitor
@@ -1107,7 +1104,7 @@ function ActionItem({
                     </div>
 
                     {expanded && toolActions.length > 0 ? (
-                        <div className="mt-2 space-y-1.5 border-t border-slate-200/80 pt-2">
+                        <div className="mt-1.5 space-y-1 border-t border-slate-200/80 pt-1.5">
                             {toolActions.map((toolAction) => (
                                 <ToolActivityStreamRow
                                     key={toolAction.id}
