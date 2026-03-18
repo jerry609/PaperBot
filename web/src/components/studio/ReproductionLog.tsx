@@ -2965,7 +2965,7 @@ export function ReproductionLog({
         <div className="flex h-full min-h-0 w-full flex-1 flex-col bg-[#f5f5f2]">
             {/* Tab Navigation */}
             {!hideNavigation && (
-                <div className="flex shrink-0 items-center border-b border-slate-200 bg-[#eef0ea]">
+                <div className="flex shrink-0 items-center border-b border-slate-200 bg-[#eef0ea] px-2">
                     {([
                         { key: "context" as const, label: "Context", icon: Activity },
                         { key: "log" as const, label: "Chat", icon: MessageSquare },
@@ -2981,16 +2981,16 @@ export function ReproductionLog({
                                 onViewModeChange(key)
                             }}
                             className={cn(
-                                "relative flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium transition-colors",
+                                "relative flex items-center gap-1.5 px-3 py-2 text-[12px] font-medium transition-colors",
                                 activeNavigationView === key
                                     ? "text-slate-900"
                                     : "text-slate-500 hover:text-slate-700"
                             )}
                         >
-                            <TabIcon className="h-3.5 w-3.5" />
+                            <TabIcon className="h-3 w-3" />
                             {label}
                             {activeNavigationView === key && (
-                                <span className="absolute bottom-0 left-2 right-2 h-0.5 rounded-full bg-slate-600" />
+                                <span className="absolute bottom-0 left-2.5 right-2.5 h-0.5 rounded-full bg-slate-600" />
                             )}
                         </button>
                     ))}
@@ -3086,20 +3086,20 @@ export function ReproductionLog({
                 ) : (
                     /* Chat Timeline */
                     <ScrollArea className="h-full bg-[#f5f5f2]">
-                        <div className="px-3 py-3">
+                        <div className="px-3 py-2.5">
                             {!visibleTask || visibleActions.length === 0 ? (
-                                <div className="flex min-h-full items-center justify-center py-14 text-slate-500">
-                                    <div className="w-full max-w-[640px] rounded-[30px] border border-slate-200 bg-white/88 px-5 py-5 shadow-[0_20px_44px_rgba(15,23,42,0.08)] backdrop-blur-sm">
+                                <div className="flex min-h-full items-center justify-center py-12 text-slate-500">
+                                    <div className="w-full max-w-[620px] rounded-[26px] border border-slate-200 bg-white/88 px-4 py-4 shadow-[0_16px_34px_rgba(15,23,42,0.06)] backdrop-blur-sm">
                                         <div className="flex flex-wrap items-start justify-between gap-3">
                                             <div className="flex min-w-0 items-center gap-3">
-                                                <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-200 bg-[#eceee8]">
-                                                    <MessageSquare className="h-5 w-5 opacity-40" />
+                                                <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-slate-200 bg-[#eceee8]">
+                                                    <MessageSquare className="h-[18px] w-[18px] opacity-40" />
                                                 </div>
                                                 <div className="min-w-0">
                                                     <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">
                                                         Claude Code
                                                     </p>
-                                                    <p className="truncate text-[16px] font-semibold text-slate-900">
+                                                    <p className="truncate text-[15px] font-semibold text-slate-900">
                                                         {emptyStateTitle}
                                                     </p>
                                                 </div>
@@ -3292,10 +3292,10 @@ export function ReproductionLog({
                                                                             data-slash-index={globalIndex}
                                                                             data-selected={selected ? "true" : "false"}
                                                                             className={cn(
-                                                                                "flex w-full items-start gap-2 rounded-[14px] border px-2 py-1.5 text-left transition-[border-color,background-color,box-shadow]",
+                                                                                "relative flex w-full items-start gap-2 rounded-[14px] border px-2 py-1.5 text-left transition-[border-color,background-color,box-shadow,transform]",
                                                                                 selected
-                                                                                    ? "border-slate-300 bg-[#edf0e7] shadow-[inset_0_0_0_1px_rgba(148,163,184,0.15)]"
-                                                                                    : "border-transparent bg-transparent hover:border-slate-200 hover:bg-[#eef1ea]",
+                                                                                    ? "translate-x-[1px] border-slate-300 bg-white shadow-[inset_0_0_0_1px_rgba(148,163,184,0.14),0_6px_18px_rgba(15,23,42,0.05)]"
+                                                                                    : "border-transparent bg-transparent hover:border-slate-200 hover:bg-[#f1f4ed]",
                                                                             )}
                                                                             onMouseEnter={() => setSlashSelectedIndex(globalIndex)}
                                                                             onMouseDown={(event) => {
@@ -3303,6 +3303,9 @@ export function ReproductionLog({
                                                                             }}
                                                                             onClick={() => handleApplySlashCommand(item)}
                                                                         >
+                                                                            {selected ? (
+                                                                                <span className="absolute left-0 top-2 bottom-2 w-0.5 rounded-full bg-slate-400" />
+                                                                            ) : null}
                                                                             <div className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white">
                                                                                 <ItemIcon className="h-2.5 w-2.5 text-slate-500" />
                                                                             </div>
@@ -3350,7 +3353,7 @@ export function ReproductionLog({
                             </div>
                         ) : null}
 
-                        <div className="overflow-hidden rounded-[24px] border border-slate-200 bg-[#e8ebe4] shadow-[0_16px_36px_rgba(15,23,42,0.06)]">
+                        <div className="overflow-hidden rounded-[22px] border border-slate-200 bg-[#e8ebe4] shadow-[0_12px_28px_rgba(15,23,42,0.05)]">
                         {showComposerHeader ? (
                             <div className="border-b border-slate-200 bg-[#eef1ea] px-3 py-1.5">
                                 <div className="flex flex-wrap items-center justify-between gap-2">
