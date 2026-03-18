@@ -210,33 +210,24 @@ function EmptyWorkspace({ onBack }: { onBack: () => void }) {
 }
 
 function TaskRail({
-  selectedPaperTitle,
-  selectedSessionId,
   tasks,
 }: {
-  selectedPaperTitle: string
-  selectedSessionId: string | null
   tasks: AgentTask[]
 }) {
   return (
     <div className="flex h-full min-h-0 flex-col bg-[#f8f9f6]">
-      <div className="border-b border-slate-200 px-4 py-3">
+      <div className="border-b border-slate-200 px-3 py-2.5">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-              Tasks
+            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+              Planned Tasks
             </p>
-            <h2 className="mt-1 truncate text-sm font-semibold text-slate-900">{selectedPaperTitle}</h2>
+            <p className="mt-1 text-[11px] text-slate-500">Claude Code handoffs and review steps</p>
           </div>
           <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-slate-500">
             {tasks.length}
           </span>
         </div>
-        {selectedSessionId ? (
-          <p className="mt-1 font-mono text-[11px] text-slate-500">{selectedSessionId}</p>
-        ) : (
-          <p className="mt-1 text-[11px] text-slate-500">No active session</p>
-        )}
       </div>
 
       <ScrollArea className="flex-1 min-h-0">
@@ -282,8 +273,6 @@ function LeftRail({
   selectedPaperStatus,
   projectDir,
   contextLabel,
-  activeAgents,
-  subagentEvents,
   onOpenInVSCode,
   tasks,
   activeView,
@@ -294,8 +283,6 @@ function LeftRail({
   selectedPaperStatus: StudioPaperStatus
   projectDir: string | null
   contextLabel: string
-  activeAgents: number
-  subagentEvents: number
   onOpenInVSCode: () => void
   tasks: AgentTask[]
   activeView: LeftRailView
@@ -303,56 +290,46 @@ function LeftRail({
 }) {
   return (
     <div className="flex h-full min-h-0 flex-col bg-[#f8f9f6]">
-      <div className="border-b border-slate-200 bg-[#f4f5f1] px-3 py-3">
-        <div className="rounded-[24px] border border-slate-200 bg-white px-3 py-3 shadow-sm">
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-                Workspace
+      <div className="border-b border-slate-200 bg-[#f4f5f1] px-3 py-2.5">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+                Claude Code
               </p>
-              <h2 className="mt-1 truncate text-sm font-semibold text-slate-900">{selectedPaperTitle}</h2>
-              <p className="mt-1 text-[11px] text-slate-500">
-                {selectedSessionId ? selectedSessionId : "No active session"}
-              </p>
+              <span
+                className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-medium ${paperStatusClassName(selectedPaperStatus)}`}
+              >
+                {paperStatusLabel(selectedPaperStatus)}
+              </span>
             </div>
-            <span
-              className={`shrink-0 rounded-full border px-2 py-1 text-[10px] font-medium ${paperStatusClassName(selectedPaperStatus)}`}
-            >
-              {paperStatusLabel(selectedPaperStatus)}
-            </span>
-          </div>
-
-          <div className="mt-3 grid grid-cols-2 gap-2">
-            <div className="rounded-2xl border border-slate-200 bg-[#f7f8f4] px-3 py-2">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">Project</p>
-              <p className="mt-1 truncate text-[12px] font-medium text-slate-800">
+            <h2 className="mt-1 truncate text-sm font-semibold text-slate-900">{selectedPaperTitle}</h2>
+            <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px] text-slate-500">
+              {selectedSessionId ? (
+                <span className="rounded-full border border-slate-200 bg-white px-1.5 py-0.5 font-mono text-[9px] text-slate-500">
+                  {selectedSessionId.slice(0, 12)}
+                </span>
+              ) : (
+                <span>No active session</span>
+              )}
+              <span className="rounded-full border border-slate-200 bg-white px-1.5 py-0.5">
                 {formatWorkspaceLabel(projectDir)}
-              </p>
-            </div>
-            <div className="rounded-2xl border border-slate-200 bg-[#f7f8f4] px-3 py-2">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">Context</p>
-              <p className="mt-1 truncate text-[12px] font-medium text-slate-800">{contextLabel}</p>
-            </div>
-            <div className="rounded-2xl border border-slate-200 bg-[#f7f8f4] px-3 py-2">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">Agents</p>
-              <p className="mt-1 truncate text-[12px] font-medium text-slate-800">{activeAgents} active</p>
-            </div>
-            <div className="rounded-2xl border border-slate-200 bg-[#f7f8f4] px-3 py-2">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">Workers</p>
-              <p className="mt-1 truncate text-[12px] font-medium text-slate-800">{subagentEvents} runs</p>
+              </span>
+              <span className="rounded-full border border-slate-200 bg-white px-1.5 py-0.5">
+                Context {contextLabel}
+              </span>
             </div>
           </div>
 
           <Button
             variant="ghost"
-            size="sm"
-            className="mt-3 h-8 w-full justify-center gap-1.5 rounded-full border border-slate-200 bg-[#f7f8f4] text-[11px] text-slate-600 hover:bg-white hover:text-slate-900"
+            size="icon"
+            className="mt-0.5 h-7 w-7 shrink-0 rounded-full border border-slate-200 bg-white text-slate-600 hover:text-slate-900"
             onClick={onOpenInVSCode}
             disabled={!projectDir}
             title={projectDir ? `Open ${projectDir} in VS Code` : "Set up a workspace first"}
           >
             <ExternalLink className="h-3.5 w-3.5" />
-            Open in VS Code
           </Button>
         </div>
       </div>
@@ -371,7 +348,7 @@ function LeftRail({
               Tasks
             </TabsTrigger>
             <TabsTrigger value="workspace" className="rounded-xl border border-transparent px-1 text-[11px] text-slate-500 shadow-none data-[state=active]:border-slate-200 data-[state=active]:bg-[#eef1ea] data-[state=active]:text-slate-900">
-              Workspace
+              Files
             </TabsTrigger>
           </TabsList>
         </div>
@@ -381,11 +358,7 @@ function LeftRail({
         </TabsContent>
 
         <TabsContent value="tasks" className="m-0 flex-1 min-h-0">
-          <TaskRail
-            selectedPaperTitle={selectedPaperTitle}
-            selectedSessionId={selectedSessionId}
-            tasks={tasks}
-          />
+          <TaskRail tasks={tasks} />
         </TabsContent>
 
         <TabsContent value="workspace" className="m-0 flex-1 min-h-0">
@@ -403,7 +376,6 @@ function RightInspector({
   activeAgents,
   subagentEvents,
   eventCount,
-  fileCount,
   runtimeInfo,
   runtimeLoading,
   activeView,
@@ -416,7 +388,6 @@ function RightInspector({
   activeAgents: number
   subagentEvents: number
   eventCount: number
-  fileCount: number
   runtimeInfo: StudioRuntimeInfo
   runtimeLoading: boolean
   activeView: AgentInspectorView
@@ -431,10 +402,10 @@ function RightInspector({
       <div className="border-b border-slate-200 bg-[#f4f5f1] px-3 py-2.5">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">
               Monitor
             </p>
-            <h2 className="mt-1 text-sm font-semibold text-slate-900">Claude Code Monitor</h2>
+            <h2 className="mt-1 text-sm font-semibold text-slate-900">Runtime Activity</h2>
             <p className="mt-1 text-[11px] text-slate-500">
               {runtimeLoading ? "Checking Claude Code..." : runtimeInfo.statusLabel}
             </p>
@@ -453,9 +424,6 @@ function RightInspector({
           </span>
           <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-slate-500">
             {subagentEvents} workers
-          </span>
-          <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-slate-500">
-            {fileCount} files
           </span>
           <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-slate-500">
             {eventCount} events
@@ -525,7 +493,7 @@ function RightInspector({
         onValueChange={(value) => onViewChange(value as AgentInspectorView)}
         className="flex flex-1 min-h-0 flex-col"
       >
-        <div className="border-b border-slate-200 bg-slate-50 px-2 py-1.5">
+        <div className="border-b border-slate-200 bg-slate-50 px-2 py-1">
           <TabsList className="grid w-full grid-cols-5 rounded-[16px] border border-slate-200 bg-white p-1">
             <TabsTrigger value="live" className="rounded-[12px] border border-transparent px-1 text-[10px] text-slate-500 shadow-none data-[state=active]:border-slate-200 data-[state=active]:bg-[#eef1ea] data-[state=active]:text-slate-900">
               <Activity className="mr-1 h-3.5 w-3.5" />
@@ -586,7 +554,7 @@ function CenterSurface({
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-[#f1f2ed]">
-      <div className="border-b border-slate-200 bg-[#f4f5f1] px-4 py-3">
+      <div className="border-b border-slate-200 bg-[#f4f5f1] px-4 py-2.5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="inline-flex items-center gap-1 rounded-2xl border border-slate-200 bg-white p-1 shadow-sm">
             <button
@@ -625,21 +593,6 @@ function CenterSurface({
               <Sparkles className="h-3.5 w-3.5" />
               Context
             </button>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
-            <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5">
-              {runtimeLoading ? "Checking runtime" : runtimeInfo.label}
-            </span>
-            <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5">
-              {activeView === "commands"
-                ? "Claude commands"
-                : visibleView === "board"
-                  ? "Monitor focus"
-                  : visibleView === "context"
-                    ? "Context prep"
-                    : "Chat focus"}
-            </span>
           </div>
         </div>
       </div>
@@ -719,7 +672,6 @@ export function AgentWorkspace({
   const codexDelegations = useAgentEventStore((state) => state.codexDelegations)
   const toolCalls = useAgentEventStore((state) => state.toolCalls)
   const feed = useAgentEventStore((state) => state.feed)
-  const filesTouched = useAgentEventStore((state) => state.filesTouched)
   const inspectorView = useAgentEventStore((state) => state.inspectorView)
   const setInspectorView = useAgentEventStore((state) => state.setInspectorView)
   const selectedWorkerRunId = useAgentEventStore((state) => state.selectedWorkerRunId)
@@ -766,7 +718,6 @@ export function AgentWorkspace({
   const selectedPaperTitle = selectedPaper?.title || "Untitled paper"
   const selectedPaperStatus = selectedPaper?.status || "draft"
   const projectDir = selectedPaper?.outputDir || selectedPaper?.lastGenCodeResult?.outputDir || null
-  const filesTouchedCount = Object.values(filesTouched).flat().length
   const showMonitorInspector = centerView === "board"
   const mobileView: MobileView =
     mobilePinnedView === "threads" ? "threads" : centerViewToMobileView(centerView)
@@ -887,7 +838,7 @@ export function AgentWorkspace({
   return (
     <div className="flex h-screen min-h-0 flex-col bg-[#f1f2ed]">
       <div className="border-b border-slate-200 bg-[#f6f7f3]">
-        <div className="flex min-h-12 items-center gap-3 px-4 py-2.5">
+        <div className="flex min-h-12 items-center gap-3 px-4 py-2">
           <Button
             variant="ghost"
             size="sm"
@@ -904,31 +855,39 @@ export function AgentWorkspace({
             Papers
           </Button>
 
-          <div className="min-w-0">
-            <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">DeepCode Studio</div>
-            <div className="truncate text-sm font-semibold text-slate-900">{selectedPaperTitle}</div>
-            <div className="truncate text-[11px] text-slate-500">
-              {showMonitorInspector
-                ? runtimeLoading
-                  ? "Monitor is resolving runtime details..."
-                  : `Monitor · ${runtimeInfo.label} · ${runtimeInfo.statusLabel}`
-                : "Chat focus"}
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="truncate text-sm font-semibold text-slate-900">{selectedPaperTitle}</div>
+              <span
+                className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-medium ${paperStatusClassName(selectedPaperStatus)}`}
+              >
+                {paperStatusLabel(selectedPaperStatus)}
+              </span>
+            </div>
+            <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[10px] text-slate-500">
+              {selectedSessionId ? (
+                <Badge variant="outline" className="h-5 border-slate-200 font-mono text-[10px] text-slate-600">
+                  {selectedSessionId.slice(0, 12)}
+                </Badge>
+              ) : (
+                <span>No session</span>
+              )}
+              {projectDir ? (
+                <Badge variant="outline" className="h-5 border-slate-200 text-[10px] text-slate-600">
+                  {formatWorkspaceLabel(projectDir)}
+                </Badge>
+              ) : null}
+              {showMonitorInspector ? (
+                <span>{runtimeLoading ? "Checking runtime" : runtimeInfo.label}</span>
+              ) : (
+                <span>Chat view</span>
+              )}
             </div>
           </div>
 
           <div className="ml-auto flex items-center gap-2 overflow-hidden">
-            <span
-              className={`shrink-0 rounded-full border px-2 py-1 text-[11px] font-medium ${paperStatusClassName(selectedPaperStatus)}`}
-            >
-              {paperStatusLabel(selectedPaperStatus)}
-            </span>
-            {selectedSessionId ? (
-              <Badge variant="outline" className="border-slate-200 font-mono text-[11px] text-slate-600">
-                {selectedSessionId.slice(0, 12)}
-              </Badge>
-            ) : null}
             {showMonitorInspector ? (
-              <Badge variant="outline" className="border-slate-200 text-slate-600">
+              <Badge variant="outline" className="border-slate-200 text-[10px] text-slate-600">
                 {activeAgents} active
               </Badge>
             ) : null}
@@ -949,8 +908,6 @@ export function AgentWorkspace({
               selectedPaperStatus={selectedPaperStatus}
               projectDir={projectDir}
               contextLabel={contextLabel}
-              activeAgents={activeAgents}
-              subagentEvents={codexDelegations.length}
               onOpenInVSCode={() => {
                 if (projectDir) {
                   window.open(`vscode://file${projectDir}`, "_blank")
@@ -985,7 +942,6 @@ export function AgentWorkspace({
                   activeAgents={activeAgents}
                   subagentEvents={codexDelegations.length}
                   eventCount={feed.length}
-                  fileCount={filesTouchedCount}
                   runtimeInfo={runtimeInfo}
                   runtimeLoading={runtimeLoading}
                   activeView={inspectorView}
@@ -1035,8 +991,6 @@ export function AgentWorkspace({
               selectedPaperStatus={selectedPaperStatus}
               projectDir={projectDir}
               contextLabel={contextLabel}
-              activeAgents={activeAgents}
-              subagentEvents={codexDelegations.length}
               onOpenInVSCode={() => {
                 if (projectDir) {
                   window.open(`vscode://file${projectDir}`, "_blank")
@@ -1070,7 +1024,6 @@ export function AgentWorkspace({
               activeAgents={activeAgents}
               subagentEvents={codexDelegations.length}
               eventCount={feed.length}
-              fileCount={filesTouchedCount}
               runtimeInfo={runtimeInfo}
               runtimeLoading={runtimeLoading}
               activeView={inspectorView}
