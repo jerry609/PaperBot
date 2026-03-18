@@ -652,13 +652,13 @@ function ComposerPill({
     return (
         <div
             className={cn(
-                "inline-flex min-w-0 max-w-[min(100%,30rem)] items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] shadow-[0_1px_0_rgba(255,255,255,0.7)_inset]",
+                "inline-flex min-w-0 max-w-[min(100%,24rem)] items-center gap-1 rounded-full border px-1.5 py-0.5 text-[9px] shadow-[0_1px_0_rgba(255,255,255,0.7)_inset]",
                 composerPillToneClassName[tone],
             )}
         >
-            {Icon ? <Icon className="h-3 w-3 shrink-0 opacity-80" /> : null}
+            {Icon ? <Icon className="h-2.5 w-2.5 shrink-0 opacity-80" /> : null}
             {meta ? (
-                <span className="shrink-0 text-[9px] uppercase tracking-[0.12em] opacity-60">{meta}</span>
+                <span className="shrink-0 text-[8px] uppercase tracking-[0.12em] opacity-60">{meta}</span>
             ) : null}
             <span className="truncate font-medium">{label}</span>
             {onRemove ? (
@@ -2854,30 +2854,14 @@ export function ReproductionLog({
     const emptyStateDescription = workspaceRequired
         ? "Code mode needs a writable project directory first. Review the workspace, then send the opening request from chat."
         : "Paper, model, and chat are ready. Start in the composer here, and keep the raw worker and tool detail in Monitor."
+    const advancedComposerOverrideCount = [
+        parsedTools.length > 0,
+        parsedAllowedTools.length > 0,
+        parsedAddDirs.length > 0,
+        parsedMcpConfig.length > 0,
+        settingsText.trim().length > 0,
+    ].filter(Boolean).length
     const composerBadges = [
-        selectedPaper
-            ? {
-                id: "paper",
-                label: selectedPaper.title,
-                meta: "paper",
-                tone: "neutral" as const,
-                icon: FileText,
-            }
-            : null,
-        {
-            id: "mode",
-            label: activeModeLabel,
-            meta: "mode",
-            tone: "accent" as const,
-            icon: Code,
-        },
-        {
-            id: "model",
-            label: activeModelLabel,
-            meta: "model",
-            tone: modelOption === "custom" ? "warning" as const : "neutral" as const,
-            icon: Bot,
-        },
         ...uploadedFiles.map((file) => ({
             id: `file:${file.id}`,
             label: file.name,
@@ -2947,54 +2931,20 @@ export function ReproductionLog({
                 onRemove: () => setEffort("default"),
             }
             : null,
-        parsedTools.length > 0
+        advancedComposerOverrideCount > 0
             ? {
-                id: "tools",
-                label: `${parsedTools.length} tool${parsedTools.length === 1 ? "" : "s"}`,
-                meta: "tools",
-                tone: "neutral" as const,
-                icon: Wrench,
-                onRemove: () => setToolsText(""),
-            }
-            : null,
-        parsedAllowedTools.length > 0
-            ? {
-                id: "allowed-tools",
-                label: `${parsedAllowedTools.length} allow${parsedAllowedTools.length === 1 ? "ed tool" : "ed tools"}`,
-                meta: "allow",
-                tone: "neutral" as const,
-                icon: Wrench,
-                onRemove: () => setAllowedToolsText(""),
-            }
-            : null,
-        parsedAddDirs.length > 0
-            ? {
-                id: "add-dirs",
-                label: `${parsedAddDirs.length} extra dir${parsedAddDirs.length === 1 ? "" : "s"}`,
-                meta: "dirs",
-                tone: "neutral" as const,
-                icon: FileCode,
-                onRemove: () => setAddDirsText(""),
-            }
-            : null,
-        parsedMcpConfig.length > 0
-            ? {
-                id: "mcp",
-                label: `${parsedMcpConfig.length} config${parsedMcpConfig.length === 1 ? "" : "s"}`,
-                meta: "mcp",
-                tone: "neutral" as const,
-                icon: LayoutDashboard,
-                onRemove: () => setMcpConfigText(""),
-            }
-            : null,
-        settingsText.trim()
-            ? {
-                id: "settings",
-                label: "Settings override",
-                meta: "config",
+                id: "advanced",
+                label: `${advancedComposerOverrideCount} override${advancedComposerOverrideCount === 1 ? "" : "s"}`,
+                meta: "advanced",
                 tone: "neutral" as const,
                 icon: Settings2,
-                onRemove: () => setSettingsText(""),
+                onRemove: () => {
+                    setToolsText("")
+                    setAllowedToolsText("")
+                    setAddDirsText("")
+                    setMcpConfigText("")
+                    setSettingsText("")
+                },
             }
             : null,
     ].filter(Boolean) as ComposerPillProps[]
@@ -3002,10 +2952,11 @@ export function ReproductionLog({
     const composerHeaderTitle = commandMode
         ? buildCommandPreview(activeCliCommand!.runtime, activeCliCommand!.preset, messageInput) || "Claude Code command"
         : slashPaletteActive
-            ? "Insert slash command"
+            ? "Slash commands"
             : activeChatTask?.name || "New thread"
     const composerHeaderBadge = commandMode ? "Command" : slashPaletteActive ? "Slash" : "Chat"
-    const composerHeaderRightLabel = slashPaletteActive ? `/${slashToken || ""}` : "/"
+    const composerHeaderRightLabel = slashPaletteActive ? `/${slashToken || ""}` : commandMode ? activeCliCommand!.runtime : ""
+    const showComposerHeader = commandMode || slashPaletteActive || composerBadges.length > 0
 
     const consoleMode = viewMode === "log" || viewMode === "commands"
     const activeNavigationView = viewMode === "commands" ? "log" : viewMode
@@ -3298,30 +3249,27 @@ export function ReproductionLog({
                     <div className="relative">
                         {slashPaletteActive ? (
                             <div className="pointer-events-none absolute inset-x-0 bottom-full z-30 mb-2 px-1">
-                                <div className="pointer-events-auto w-full max-w-[620px] overflow-hidden rounded-[22px] border border-slate-200 bg-[#f8faf5] shadow-[0_18px_40px_rgba(15,23,42,0.10)]">
-                                    <div className="flex items-start justify-between gap-3 border-b border-slate-200 bg-[#f0f2ec] px-3 py-2.5">
+                                <div className="pointer-events-auto w-full max-w-[620px] overflow-hidden rounded-[20px] border border-slate-200 bg-[#f8faf5] shadow-[0_14px_32px_rgba(15,23,42,0.08)]">
+                                    <div className="flex items-center justify-between gap-3 border-b border-slate-200 bg-[#f0f2ec] px-2.5 py-2">
                                         <div className="min-w-0 flex-1">
                                             <div className="flex flex-wrap items-center gap-1.5">
                                                 <span className="rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-slate-500">
                                                     Slash
                                                 </span>
+                                                <div className="text-[11px] font-medium text-slate-800">
+                                                    Claude Code commands
+                                                </div>
                                                 <span className="text-[9px] uppercase tracking-[0.12em] text-slate-400">
                                                     {filteredSlashCommands.length} match{filteredSlashCommands.length === 1 ? "" : "es"}
                                                 </span>
                                             </div>
-                                            <div className="mt-1 text-[11px] font-medium text-slate-800">
-                                                Claude Code commands
-                                            </div>
-                                            <div className="mt-0.5 max-w-[32rem] text-[10px] leading-4 text-slate-500">
-                                                Insert Claude-style chat commands or managed runtime utilities without leaving the composer.
-                                            </div>
                                         </div>
-                                        <div className="flex shrink-0 flex-col items-end gap-1">
+                                        <div className="flex shrink-0 items-center gap-1">
                                             <span className="max-w-[12rem] truncate rounded-full border border-slate-200 bg-white px-2 py-0.5 font-mono text-[10px] text-slate-500">
                                                 /{slashToken || ""}
                                             </span>
                                             <span className="rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-slate-400">
-                                                Enter, Tab, or click
+                                                Enter or click
                                             </span>
                                         </div>
                                     </div>
@@ -3330,7 +3278,7 @@ export function ReproductionLog({
                                         ref={slashPaletteListRef}
                                         role="listbox"
                                         aria-label="Slash commands"
-                                        className="max-h-64 overflow-y-auto overscroll-contain px-1.5 py-1.5 [scrollbar-gutter:stable]"
+                                        className="max-h-64 overflow-y-auto overscroll-contain px-1.5 py-1 [scrollbar-gutter:stable]"
                                         onWheelCapture={(event) => event.stopPropagation()}
                                     >
                                         {filteredSlashCommands.length === 0 ? (
@@ -3338,14 +3286,14 @@ export function ReproductionLog({
                                                 No matching slash command.
                                             </div>
                                         ) : (
-                                            <div className="space-y-2 px-1 py-1">
+                                            <div className="space-y-1.5 px-1 py-1">
                                                 {slashCommandGroups.map(({ group, items }) => {
                                                     return (
                                                         <div key={group}>
-                                                            <div className="px-2 py-1 text-[9px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+                                                            <div className="px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.14em] text-slate-400">
                                                                 {group}
                                                             </div>
-                                                            <div className="space-y-1">
+                                                            <div className="space-y-0.5">
                                                                 {items.map(({ item, index: globalIndex }) => {
                                                                     const selected = globalIndex === slashSelectedIndex
                                                                     const ItemIcon = item.icon
@@ -3359,7 +3307,7 @@ export function ReproductionLog({
                                                                             data-slash-index={globalIndex}
                                                                             data-selected={selected ? "true" : "false"}
                                                                             className={cn(
-                                                                                "flex w-full items-start gap-2.5 rounded-[16px] border px-2.5 py-2 text-left transition-[border-color,background-color,box-shadow]",
+                                                                                "flex w-full items-start gap-2 rounded-[14px] border px-2 py-1.5 text-left transition-[border-color,background-color,box-shadow]",
                                                                                 selected
                                                                                     ? "border-slate-300 bg-[#edf0e7] shadow-[inset_0_0_0_1px_rgba(148,163,184,0.15)]"
                                                                                     : "border-transparent bg-transparent hover:border-slate-200 hover:bg-[#eef1ea]",
@@ -3370,8 +3318,8 @@ export function ReproductionLog({
                                                                             }}
                                                                             onClick={() => handleApplySlashCommand(item)}
                                                                         >
-                                                                            <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white">
-                                                                                <ItemIcon className="h-3 w-3 text-slate-500" />
+                                                                            <div className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white">
+                                                                                <ItemIcon className="h-2.5 w-2.5 text-slate-500" />
                                                                             </div>
                                                                             <div className="min-w-0 flex-1">
                                                                                 <div className="flex flex-wrap items-center gap-1.5">
@@ -3382,13 +3330,13 @@ export function ReproductionLog({
                                                                                         {item.label}
                                                                                     </span>
                                                                                 </div>
-                                                                                <div className="mt-0.5 line-clamp-2 text-[10px] leading-4 text-slate-500">
+                                                                                <div className="mt-0.5 line-clamp-1 text-[10px] leading-4 text-slate-500">
                                                                                     {item.description}
                                                                                 </div>
                                                                             </div>
                                                                             {selected ? (
                                                                                 <span className="mt-0.5 shrink-0 rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-slate-500">
-                                                                                    return
+                                                                                    enter
                                                                                 </span>
                                                                             ) : null}
                                                                         </button>
@@ -3402,15 +3350,12 @@ export function ReproductionLog({
                                         )}
                                     </div>
 
-                                    <div className="flex flex-wrap items-center gap-1.5 border-t border-slate-200 bg-[#f2f4ef] px-3 py-2">
+                                    <div className="flex flex-wrap items-center gap-1 border-t border-slate-200 bg-[#f2f4ef] px-2.5 py-1.5">
                                         <span className="rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-slate-400">
                                             ↑↓ move
                                         </span>
                                         <span className="rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-slate-400">
-                                            Enter or Tab select
-                                        </span>
-                                        <span className="rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-slate-400">
-                                            Click to insert
+                                            Enter apply
                                         </span>
                                         <span className="rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-slate-400">
                                             Esc close
@@ -3421,25 +3366,29 @@ export function ReproductionLog({
                         ) : null}
 
                         <div className="overflow-hidden rounded-[24px] border border-slate-200 bg-[#e8ebe4] shadow-[0_16px_36px_rgba(15,23,42,0.06)]">
-                        <div className="border-b border-slate-200 bg-[#eef1ea] px-3.5 py-2">
-                            <div className="flex flex-wrap items-center justify-between gap-3">
-                                <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
-                                    <span className="rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-slate-500">
-                                        {composerHeaderBadge}
-                                    </span>
-                                    <div className="min-w-0 flex-1 truncate text-[11px] font-medium text-slate-800">
-                                        {composerHeaderTitle}
+                        {showComposerHeader ? (
+                            <div className="border-b border-slate-200 bg-[#eef1ea] px-3 py-1.5">
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                    <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">
+                                        <span className="rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                            {composerHeaderBadge}
+                                        </span>
+                                        <div className="min-w-0 flex-1 truncate text-[11px] font-medium text-slate-800">
+                                            {composerHeaderTitle}
+                                        </div>
                                     </div>
+                                    {composerHeaderRightLabel ? (
+                                        <span className="shrink-0 rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[9px] text-slate-500">
+                                            {composerHeaderRightLabel}
+                                        </span>
+                                    ) : null}
                                 </div>
-                                <span className="shrink-0 rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] text-slate-500">
-                                    {composerHeaderRightLabel}
-                                </span>
                             </div>
-                        </div>
+                        ) : null}
 
                         <div className="relative bg-[#eef0ea]">
                             {composerBadges.length > 0 ? (
-                                <div className="flex gap-1.5 overflow-x-auto px-3.5 pt-2.5 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                                <div className="flex gap-1 overflow-x-auto px-3 pt-1.5 pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                                     {composerBadges.map((badge) => (
                                         <ComposerPill key={badge.label + badge.meta} {...badge} />
                                     ))}
