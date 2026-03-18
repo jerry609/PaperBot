@@ -80,8 +80,8 @@ export function ChatHistoryPanel() {
   }, [])
 
   return (
-    <div className="flex h-full flex-col border-r border-slate-200 bg-[#f8f9f6]">
-      <div className="border-b border-slate-200 px-3 py-2.5">
+    <div className="flex h-full flex-col bg-[#f5f6f2]">
+      <div className="border-b border-slate-200 bg-[#f4f5f1] px-3 py-2.5">
         <div className="flex items-center justify-between gap-2">
           <div className="min-w-0 flex items-center gap-1.5">
             <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">Threads</p>
@@ -100,7 +100,7 @@ export function ChatHistoryPanel() {
           </Button>
         </div>
 
-        <label className="mt-2 flex items-center gap-2 rounded-full border border-slate-200 bg-white px-2.5 py-1.5 shadow-[0_1px_0_rgba(255,255,255,0.8)_inset]">
+        <label className="mt-2 flex items-center gap-2 rounded-full border border-slate-200 bg-white/90 px-2.5 py-1.5 shadow-[0_1px_0_rgba(255,255,255,0.8)_inset]">
           <Search className="h-3 w-3 shrink-0 text-slate-400" />
           <input
             type="text"
@@ -113,9 +113,9 @@ export function ChatHistoryPanel() {
       </div>
 
       <ScrollArea className="flex-1">
-        <div className="space-y-1.5 p-2">
+        <div className="space-y-1 p-2">
           {paperTasks.length === 0 ? (
-            <div className="flex flex-col items-center justify-center rounded-[20px] border border-dashed border-slate-200 bg-white/70 px-4 py-8 text-slate-500">
+            <div className="flex flex-col items-center justify-center rounded-[18px] border border-dashed border-slate-200 bg-white/60 px-4 py-8 text-slate-500">
               <div className="flex h-9 w-9 items-center justify-center rounded-2xl border border-slate-200 bg-[#f7f8f4]">
                 <MessageSquare className="h-4 w-4 opacity-40" />
               </div>
@@ -125,7 +125,7 @@ export function ChatHistoryPanel() {
               </p>
             </div>
           ) : filteredTasks.length === 0 ? (
-            <div className="flex flex-col items-center justify-center rounded-[20px] border border-dashed border-slate-200 bg-white/70 px-4 py-8 text-slate-500">
+            <div className="flex flex-col items-center justify-center rounded-[18px] border border-dashed border-slate-200 bg-white/60 px-4 py-8 text-slate-500">
               <div className="flex h-9 w-9 items-center justify-center rounded-2xl border border-slate-200 bg-[#f7f8f4]">
                 <Search className="h-4 w-4 opacity-40" />
               </div>
@@ -145,14 +145,17 @@ export function ChatHistoryPanel() {
                   key={task.id}
                   onClick={() => setActiveTask(task.id)}
                   className={cn(
-                    "w-full rounded-[16px] border px-2.5 py-1.5 text-left transition-[border-color,background-color,box-shadow]",
+                    "group relative w-full rounded-[15px] px-3 py-1.5 text-left transition-[background-color,box-shadow]",
                     task.id === activeTaskId
-                      ? "border-slate-300 bg-white shadow-[0_1px_0_rgba(255,255,255,0.9)_inset]"
-                      : "border-transparent bg-transparent hover:border-slate-200 hover:bg-white/90",
+                      ? "bg-[#eef1ea] shadow-[inset_0_0_0_1px_rgba(148,163,184,0.14),0_1px_0_rgba(255,255,255,0.9)]"
+                      : "bg-transparent hover:bg-white/75",
                   )}
                 >
+                  {task.id === activeTaskId ? (
+                    <span className="absolute left-0 top-2.5 bottom-2.5 w-[2px] rounded-full bg-slate-400" />
+                  ) : null}
                   <div className="flex items-start gap-2">
-                    <span className={cn("mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full", status.dotClassName)} />
+                    <span className={cn("mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full transition-opacity", status.dotClassName, task.id === activeTaskId ? "opacity-100" : "opacity-80 group-hover:opacity-100")} />
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center justify-between gap-2">
                         <span className="truncate text-[11px] font-medium text-slate-900">{task.name}</span>
@@ -166,7 +169,12 @@ export function ChatHistoryPanel() {
                       </p>
 
                       <div className="mt-1 flex items-center gap-1.5 text-[9px] text-slate-400">
-                        <span className="rounded-full border border-slate-200 bg-[#f7f8f4] px-1.5 py-0.5 uppercase tracking-[0.12em] text-slate-500">
+                        <span className={cn(
+                          "rounded-full border px-1.5 py-0.5 uppercase tracking-[0.12em]",
+                          task.id === activeTaskId
+                            ? "border-slate-300 bg-white text-slate-600"
+                            : "border-slate-200 bg-[#f7f8f4] text-slate-500",
+                        )}>
                           {status.label}
                         </span>
                         <span>{messageCount > 0 ? `${messageCount} msg${messageCount === 1 ? "" : "s"}` : "Draft"}</span>

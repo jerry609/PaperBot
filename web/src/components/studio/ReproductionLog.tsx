@@ -197,6 +197,52 @@ type SlashTriggerMatch = {
     end: number
 }
 
+function buildSlashInsertionDraft(
+    value: string,
+    cursor: number,
+    activeSlashMatch: SlashTriggerMatch | null,
+): { value: string; cursor: number } {
+    if (activeSlashMatch) {
+        return {
+            value,
+            cursor: activeSlashMatch.end,
+        }
+    }
+
+    const normalizedCursor = Math.min(Math.max(cursor, 0), value.length)
+    const before = value.slice(0, normalizedCursor)
+    const after = value.slice(normalizedCursor)
+    const previousChar = before.slice(-1)
+    const previousPreviousChar = before.slice(-2, -1)
+    const nextChar = after.charAt(0)
+
+    const slashImmediatelyBefore =
+        previousChar === "/" &&
+        (before.length === 1 || /\s/.test(previousPreviousChar))
+    if (slashImmediatelyBefore) {
+        return {
+            value,
+            cursor: normalizedCursor,
+        }
+    }
+
+    const slashAtCursor =
+        nextChar === "/" &&
+        (normalizedCursor === 0 || /\s/.test(previousChar))
+    if (slashAtCursor) {
+        return {
+            value,
+            cursor: normalizedCursor + 1,
+        }
+    }
+
+    const insertion = before && !/\s/.test(previousChar) ? " /" : "/"
+    return {
+        value: `${before}${insertion}${after}`,
+        cursor: normalizedCursor + insertion.length,
+    }
+}
+
 function splitCommaSeparatedValues(value: string): string[] {
     return value
         .split(",")
@@ -2418,22 +2464,32 @@ export function ReproductionLog({
         composerFileInputRef.current?.click()
     }, [commandMode])
 
-    const handleInsertSlashCommand = () => {
+    const handleInsertSlashCommand = useCallback(() => {
         const baseValue = commandMode ? chatDraftBeforeUtility : messageInput
         const cursor = commandMode
             ? (chatDraftBeforeUtility.length || 0)
             : (composerTextareaRef.current?.selectionStart ?? messageInput.length)
-        const nextValue = `${baseValue.slice(0, cursor)}/${baseValue.slice(cursor)}`
+        const nextDraft = buildSlashInsertionDraft(
+            baseValue,
+            cursor,
+            commandMode ? null : activeSlashMatch,
+        )
 
         if (commandMode) {
             setActiveCliCommand(null)
             setChatDraftBeforeUtility("")
         }
 
-        setMessageInput(nextValue)
+        setMessageInput(nextDraft.value)
         setLastError(null)
-        focusComposerAt(cursor + 1)
-    }
+        focusComposerAt(nextDraft.cursor)
+    }, [
+        activeSlashMatch,
+        chatDraftBeforeUtility,
+        commandMode,
+        focusComposerAt,
+        messageInput,
+    ])
 
     const handleEmptyStatePrimaryAction = useCallback(() => {
         if (workspaceRequired) {
@@ -3234,8 +3290,8 @@ export function ReproductionLog({
                     <div className="relative">
                         {slashPaletteActive ? (
                             <div className="pointer-events-none absolute inset-x-0 bottom-full z-30 mb-2 px-1">
-                                <div className="pointer-events-auto w-full max-w-[620px] overflow-hidden rounded-[20px] border border-slate-200 bg-[#f8faf5] shadow-[0_14px_32px_rgba(15,23,42,0.08)]">
-                                    <div className="flex items-center justify-between gap-3 border-b border-slate-200 bg-[#f0f2ec] px-2.5 py-2">
+                                    <div className="pointer-events-auto w-full max-w-[620px] overflow-hidden rounded-[20px] border border-slate-200 bg-[#f8faf5] shadow-[0_14px_32px_rgba(15,23,42,0.08)]">
+                                    <div className="flex items-center justify-between gap-3 border-b border-slate-200 bg-[#f0f2ec] px-2.5 py-1.5">
                                         <div className="min-w-0 flex-1">
                                             <div className="flex flex-wrap items-center gap-1.5">
                                                 <span className="rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-slate-500">
@@ -3249,12 +3305,12 @@ export function ReproductionLog({
                                                 </span>
                                             </div>
                                         </div>
-                                        <div className="flex shrink-0 items-center gap-1">
+                                        <div className="flex shrink-0 items-center gap-1.5">
                                             <span className="max-w-[12rem] truncate rounded-full border border-slate-200 bg-white px-2 py-0.5 font-mono text-[10px] text-slate-500">
                                                 /{slashToken || ""}
                                             </span>
-                                            <span className="rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-slate-400">
-                                                Enter or click
+                                            <span className="text-[9px] font-medium uppercase tracking-[0.12em] text-slate-400">
+                                                Enter
                                             </span>
                                         </div>
                                     </div>
@@ -3264,18 +3320,18 @@ export function ReproductionLog({
                                         role="listbox"
                                         aria-label="Slash commands"
                                         className="max-h-64 overflow-y-auto overscroll-contain px-1.5 py-1 [scrollbar-gutter:stable]"
-                                        onWheelCapture={(event) => event.stopPropagation()}
+                                        onWheel={(event) => event.stopPropagation()}
                                     >
                                         {filteredSlashCommands.length === 0 ? (
                                             <div className="px-3 py-4 text-[11px] text-slate-500">
                                                 No matching slash command.
                                             </div>
                                         ) : (
-                                            <div className="space-y-1.5 px-1 py-1">
+                                            <div className="space-y-1 px-1 py-1">
                                                 {slashCommandGroups.map(({ group, items }) => {
                                                     return (
                                                         <div key={group}>
-                                                            <div className="px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+                                                            <div className="px-2.5 py-1 text-[9px] font-semibold uppercase tracking-[0.14em] text-slate-400">
                                                                 {group}
                                                             </div>
                                                             <div className="space-y-0.5">
@@ -3292,21 +3348,29 @@ export function ReproductionLog({
                                                                             data-slash-index={globalIndex}
                                                                             data-selected={selected ? "true" : "false"}
                                                                             className={cn(
-                                                                                "relative flex w-full items-start gap-2 rounded-[14px] border px-2 py-1.5 text-left transition-[border-color,background-color,box-shadow,transform]",
+                                                                                "relative flex w-full items-start gap-2 rounded-[14px] border px-2.5 py-1.5 text-left transition-[border-color,background-color,box-shadow]",
                                                                                 selected
-                                                                                    ? "translate-x-[1px] border-slate-300 bg-white shadow-[inset_0_0_0_1px_rgba(148,163,184,0.14),0_6px_18px_rgba(15,23,42,0.05)]"
-                                                                                    : "border-transparent bg-transparent hover:border-slate-200 hover:bg-[#f1f4ed]",
+                                                                                    ? "border-slate-300 bg-white shadow-[inset_0_0_0_1px_rgba(148,163,184,0.14),0_8px_18px_rgba(15,23,42,0.05)]"
+                                                                                    : "border-transparent bg-transparent hover:border-slate-200 hover:bg-white/80",
                                                                             )}
                                                                             onMouseEnter={() => setSlashSelectedIndex(globalIndex)}
                                                                             onMouseDown={(event) => {
                                                                                 event.preventDefault()
+                                                                                if (event.button !== 0) return
+                                                                                handleApplySlashCommand(item)
                                                                             }}
-                                                                            onClick={() => handleApplySlashCommand(item)}
                                                                         >
                                                                             {selected ? (
                                                                                 <span className="absolute left-0 top-2 bottom-2 w-0.5 rounded-full bg-slate-400" />
                                                                             ) : null}
-                                                                            <div className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white">
+                                                                            <div
+                                                                                className={cn(
+                                                                                    "mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border",
+                                                                                    selected
+                                                                                        ? "border-slate-300 bg-[#eef1ea]"
+                                                                                        : "border-slate-200 bg-white",
+                                                                                )}
+                                                                            >
                                                                                 <ItemIcon className="h-2.5 w-2.5 text-slate-500" />
                                                                             </div>
                                                                             <div className="min-w-0 flex-1">
@@ -3324,7 +3388,7 @@ export function ReproductionLog({
                                                                             </div>
                                                                             {selected ? (
                                                                                 <span className="mt-0.5 shrink-0 rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-slate-500">
-                                                                                    enter
+                                                                                    apply
                                                                                 </span>
                                                                             ) : null}
                                                                         </button>
@@ -3338,16 +3402,9 @@ export function ReproductionLog({
                                         )}
                                     </div>
 
-                                    <div className="flex flex-wrap items-center gap-1 border-t border-slate-200 bg-[#f2f4ef] px-2.5 py-1.5">
-                                        <span className="rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-slate-400">
-                                            ↑↓ move
-                                        </span>
-                                        <span className="rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-slate-400">
-                                            Enter apply
-                                        </span>
-                                        <span className="rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-slate-400">
-                                            Esc close
-                                        </span>
+                                    <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 bg-[#f2f4ef] px-3 py-1.5 text-[9px] uppercase tracking-[0.12em] text-slate-400">
+                                        <span>Arrow keys move</span>
+                                        <span>Enter apply · Esc close</span>
                                     </div>
                                 </div>
                             </div>
@@ -3489,6 +3546,8 @@ export function ReproductionLog({
                                                         : "border-slate-200 bg-[#f7f8f4] hover:bg-white",
                                                 )}
                                                 onClick={handleInsertSlashCommand}
+                                                title="Insert slash command"
+                                                aria-label="Insert slash command"
                                             >
                                                 <span className="font-mono text-[12px] leading-none">/</span>
                                             </Button>
