@@ -268,7 +268,7 @@ function TaskRail({
 }
 
 function LeftRail({
-  selectedPaperTitle,
+  activeThreadLabel,
   selectedSessionId,
   selectedPaperStatus,
   projectDir,
@@ -278,7 +278,7 @@ function LeftRail({
   activeView,
   onViewChange,
 }: {
-  selectedPaperTitle: string
+  activeThreadLabel: string
   selectedSessionId: string | null
   selectedPaperStatus: StudioPaperStatus
   projectDir: string | null
@@ -303,8 +303,8 @@ function LeftRail({
                 {paperStatusLabel(selectedPaperStatus)}
               </span>
             </div>
-            <h2 className="mt-1 truncate text-[12px] font-medium text-slate-800" title={selectedPaperTitle}>
-              {selectedPaperTitle}
+            <h2 className="mt-1 truncate text-[12px] font-medium text-slate-800" title={activeThreadLabel}>
+              {activeThreadLabel}
             </h2>
             <div className="mt-1 flex flex-wrap items-center gap-1 text-[9px] text-slate-500">
               {selectedSessionId ? (
@@ -312,7 +312,7 @@ function LeftRail({
                   {selectedSessionId.slice(0, 12)}
                 </span>
               ) : (
-                <span className="rounded-full border border-slate-200 bg-white px-1.5 py-0.5">New thread</span>
+                <span className="rounded-full border border-slate-200 bg-white px-1.5 py-0.5">Session pending</span>
               )}
               <span className="rounded-full border border-slate-200 bg-white px-1.5 py-0.5">
                 {formatWorkspaceLabel(projectDir)}
@@ -656,6 +656,8 @@ export function AgentWorkspace({
   const selectedPaperId = useStudioStore((state) => state.selectedPaperId)
   const boardSessionId = useStudioStore((state) => state.boardSessionId)
   const studioTasks = useStudioStore((state) => state.agentTasks)
+  const chatTasks = useStudioStore((state) => state.tasks)
+  const activeTaskId = useStudioStore((state) => state.activeTaskId)
   const contextPack = useStudioStore((state) => state.contextPack)
   const contextPackLoading = useStudioStore((state) => state.contextPackLoading)
 
@@ -707,6 +709,17 @@ export function AgentWorkspace({
   const selectedSessionId = selectedPaper?.boardSessionId || boardSessionId || null
   const selectedPaperTitle = selectedPaper?.title || "Untitled paper"
   const selectedPaperStatus = selectedPaper?.status || "draft"
+  const activeChatTask = useMemo(
+    () =>
+      chatTasks.find(
+        (task) =>
+          task.id === activeTaskId &&
+          task.kind === "chat" &&
+          (!selectedPaperId || task.paperId === selectedPaperId),
+      ) ?? null,
+    [activeTaskId, chatTasks, selectedPaperId],
+  )
+  const activeThreadLabel = activeChatTask?.name || "New thread"
   const projectDir = selectedPaper?.outputDir || selectedPaper?.lastGenCodeResult?.outputDir || null
   const showMonitorInspector = centerView === "board"
   const mobileView: MobileView =
@@ -857,16 +870,14 @@ export function AgentWorkspace({
                 {formatWorkspaceLabel(projectDir)}
               </Badge>
             ) : null}
-            {selectedSessionId ? (
-              <Badge variant="outline" className="hidden h-5 border-slate-200 bg-white font-mono text-[9px] text-slate-600 lg:inline-flex">
-                {selectedSessionId.slice(0, 12)}
-              </Badge>
-            ) : (
-              <span className="hidden text-[10px] text-slate-500 lg:inline">New thread</span>
-            )}
-            <span className="hidden text-[10px] text-slate-500 xl:inline">
-              {showMonitorInspector ? (runtimeLoading ? "Checking runtime" : runtimeInfo.label) : "Chat view"}
-            </span>
+            <Badge variant="outline" className="hidden h-5 max-w-[18rem] border-slate-200 bg-white text-[9px] text-slate-600 lg:inline-flex">
+              <span className="truncate">{activeThreadLabel}</span>
+            </Badge>
+            {showMonitorInspector ? (
+              <span className="hidden text-[10px] text-slate-500 xl:inline">
+                {runtimeLoading ? "Checking runtime" : runtimeInfo.label}
+              </span>
+            ) : null}
           </div>
 
           <div className="ml-auto flex items-center gap-2 overflow-hidden">
@@ -889,7 +900,7 @@ export function AgentWorkspace({
             style={{ width: panelWidths.leftWidth }}
           >
             <LeftRail
-              selectedPaperTitle={selectedPaperTitle}
+              activeThreadLabel={activeThreadLabel}
               selectedSessionId={selectedSessionId}
               selectedPaperStatus={selectedPaperStatus}
               projectDir={projectDir}
@@ -971,7 +982,7 @@ export function AgentWorkspace({
 
           <TabsContent value="threads" className="m-0 flex-1 min-h-0">
             <LeftRail
-              selectedPaperTitle={selectedPaperTitle}
+              activeThreadLabel={activeThreadLabel}
               selectedSessionId={selectedSessionId}
               selectedPaperStatus={selectedPaperStatus}
               projectDir={projectDir}

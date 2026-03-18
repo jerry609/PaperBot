@@ -418,31 +418,20 @@ function stringifyToolPayload(payload: unknown): string {
     return typeof payload === "string" ? payload : JSON.stringify(payload, null, 2) || ""
 }
 
-function buildActivityStageBadges(
+function formatActivityCountSummary(
     counts: Partial<Record<"read" | "search" | "write" | "command" | "delegation" | "web" | "other", number>>,
-): string[] {
-    const ordered: Array<[keyof typeof counts, string]> = [
-        ["search", "search"],
-        ["read", "read"],
-        ["command", "run"],
-        ["write", "edit"],
-        ["delegation", "delegate"],
-        ["web", "web"],
+): string {
+    return [
+        counts.read ? `${counts.read} reads` : null,
+        counts.search ? `${counts.search} searches` : null,
+        counts.command ? `${counts.command} commands` : null,
+        counts.write ? `${counts.write} edits` : null,
+        counts.delegation ? `${counts.delegation} delegations` : null,
+        counts.web ? `${counts.web} web` : null,
     ]
-
-    return ordered
-        .filter(([key]) => (counts[key] ?? 0) > 0)
-        .map(([, label]) => label)
-}
-
-function formatActivityStageLabel(stage: "read" | "search" | "write" | "command" | "delegation" | "web" | "other"): string {
-    if (stage === "search") return "search"
-    if (stage === "read") return "read"
-    if (stage === "command") return "run"
-    if (stage === "write") return "edit"
-    if (stage === "delegation") return "delegate"
-    if (stage === "web") return "web"
-    return "work"
+        .filter(Boolean)
+        .slice(0, 4)
+        .join(" · ")
 }
 
 function formatBridgeTaskKind(taskKind: StudioBridgeResult["taskKind"]): string {
@@ -1013,17 +1002,7 @@ function ActionItem({
     if (action.type === "activity_summary" && action.metadata?.activitySummary) {
         const summary = action.metadata.activitySummary
         const toolActions = summary.toolActions ?? []
-        const stageSequence = (summary.stageSequence?.length ? summary.stageSequence : buildActivityStageBadges(summary.counts)) as Array<
-            "read" | "search" | "write" | "command" | "delegation" | "web" | "other"
-        >
-        const countBadges = [
-            summary.counts.read ? `${summary.counts.read} reads` : null,
-            summary.counts.search ? `${summary.counts.search} searches` : null,
-            summary.counts.command ? `${summary.counts.command} commands` : null,
-            summary.counts.write ? `${summary.counts.write} edits` : null,
-            summary.counts.delegation ? `${summary.counts.delegation} delegations` : null,
-            summary.counts.web ? `${summary.counts.web} web` : null,
-        ].filter(Boolean).slice(0, 3) as string[]
+        const countSummary = formatActivityCountSummary(summary.counts)
 
         const sharedClassName =
             "block w-full max-w-[84%] rounded-[15px] border border-slate-200 bg-white/90 px-2 py-1 text-left shadow-[0_1px_0_rgba(255,255,255,0.75)_inset]"
@@ -1072,46 +1051,9 @@ function ActionItem({
                         )}
                     </button>
 
-                    {stageSequence.length > 0 ? (
-                        <div className="mt-1 rounded-[14px] border border-slate-200/80 bg-white/70 px-2 py-1">
-                            <div className="flex flex-wrap items-center gap-1">
-                                {stageSequence.map((stage, index) => {
-                                    const isLast = index === stageSequence.length - 1
-                                    const isCurrent = liveSummary && isLast
-                                    return (
-                                        <div key={`${stage}-${index}`} className="flex items-center gap-1">
-                                            <span
-                                                className={cn(
-                                                    "rounded-full border px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em]",
-                                                    isCurrent
-                                                        ? "border-amber-200 bg-white text-amber-700"
-                                                        : "border-slate-200 bg-[#f8faf5] text-slate-500",
-                                                )}
-                                            >
-                                                {formatActivityStageLabel(stage)}
-                                            </span>
-                                            {!isLast ? (
-                                                <span className="text-[9px] uppercase tracking-[0.12em] text-slate-300">
-                                                    →
-                                                </span>
-                                            ) : null}
-                                        </div>
-                                    )
-                                })}
-                            </div>
-                        </div>
-                    ) : null}
-
-                    {countBadges.length > 0 ? (
-                        <div className="mt-1 flex flex-wrap gap-1">
-                            {countBadges.map((badge) => (
-                                <span
-                                    key={badge}
-                                    className="rounded-full border border-slate-200 bg-[#f7f8f4] px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-slate-500"
-                                >
-                                    {badge}
-                                </span>
-                            ))}
+                    {countSummary ? (
+                        <div className="mt-1 text-[9px] leading-4 text-slate-600">
+                            {countSummary}
                         </div>
                     ) : null}
 
@@ -2880,7 +2822,7 @@ export function ReproductionLog({
             ? `${uploadedFiles.length} uploaded file${uploadedFiles.length === 1 ? "" : "s"} ready.`
         : missingCustomModel
             ? "Enter a full Claude Code model name."
-        : "Type / for Claude Code commands."
+        : ""
     const activeModeLabel = mode
     const activeModelLabel =
         modelOption === "custom"
@@ -2998,7 +2940,7 @@ export function ReproductionLog({
             : activeChatTask?.name || "New thread"
     const composerHeaderBadge = commandMode ? "Command" : slashPaletteActive ? "Slash" : "Chat"
     const composerHeaderRightLabel = slashPaletteActive ? `/${slashToken || ""}` : commandMode ? activeCliCommand!.runtime : ""
-    const showComposerHeader = commandMode || slashPaletteActive || composerBadges.length > 0
+    const showComposerHeader = commandMode || composerBadges.length > 0
 
     const consoleMode = viewMode === "log" || viewMode === "commands"
     const activeNavigationView = viewMode === "commands" ? "log" : viewMode
@@ -3283,9 +3225,7 @@ export function ReproductionLog({
                                                 <span className="rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-slate-500">
                                                     Slash
                                                 </span>
-                                                <div className="text-[11px] font-medium text-slate-800">
-                                                    Claude Code commands
-                                                </div>
+                                                <div className="text-[11px] font-medium text-slate-800">Slash commands</div>
                                                 <span className="text-[9px] uppercase tracking-[0.12em] text-slate-400">
                                                     {filteredSlashCommands.length} match{filteredSlashCommands.length === 1 ? "" : "es"}
                                                 </span>
@@ -3388,8 +3328,7 @@ export function ReproductionLog({
                                         )}
                                     </div>
 
-                                    <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 bg-[#f2f4ef] px-3 py-1.5 text-[9px] uppercase tracking-[0.12em] text-slate-400">
-                                        <span>Arrow keys move</span>
+                                    <div className="flex flex-wrap items-center justify-end gap-2 border-t border-slate-200 bg-[#f2f4ef] px-3 py-1.5 text-[9px] uppercase tracking-[0.12em] text-slate-400">
                                         <span>Enter apply · Esc close</span>
                                     </div>
                                 </div>
@@ -3639,8 +3578,10 @@ export function ReproductionLog({
                                 </Button>
                             </div>
 
-                            <div className="mt-0.5 flex flex-wrap items-center justify-between gap-1.5 text-[8px] text-slate-500">
-                                <span className="min-w-0 flex-1 truncate">{composerHelperText}</span>
+                            <div className="mt-0.5 flex flex-wrap items-center justify-end gap-1.5 text-[8px] text-slate-500">
+                                {composerHelperText ? (
+                                    <span className="min-w-0 flex-1 truncate text-left">{composerHelperText}</span>
+                                ) : null}
                                 <span className="rounded-full border border-slate-200 bg-[#f7f8f4] px-1.5 py-0.5 text-[8px] uppercase tracking-[0.12em] text-slate-500">
                                     {composerInteractionHint}
                                 </span>
