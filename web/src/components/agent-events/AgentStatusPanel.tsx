@@ -68,7 +68,7 @@ function AgentStatusBadge({
     return (
       <button
         type="button"
-        className={`inline-flex min-w-0 items-center gap-1.5 rounded-full border px-2 py-1 text-left ${cfg.bgClass} ${
+        className={`inline-flex min-w-0 items-center gap-1 rounded-full border px-1.5 py-0.5 text-left ${cfg.bgClass} ${
           interactive ? "transition-colors hover:bg-white/80" : ""
         }`}
         title={interactive ? `${entry.agent_name} · ${cfg.label} · Open worker details` : `${entry.agent_name} · ${cfg.label}`}
@@ -80,10 +80,10 @@ function AgentStatusBadge({
         disabled={!interactive}
       >
         <Icon
-          size={12}
+          size={11}
           className={`${cfg.colorClass} shrink-0 ${cfg.spin ? "animate-spin" : ""}`}
         />
-        <span className="truncate text-[11px] font-medium text-zinc-900">{displayName}</span>
+        <span className="truncate text-[10px] font-medium text-zinc-900">{displayName}</span>
       </button>
     )
   }
@@ -127,7 +127,7 @@ export function AgentStatusPanel({ compact = false }: { compact?: boolean }) {
   }, [codexDelegations, toolCalls])
 
   return (
-    <div className={compact ? "flex flex-col gap-1.5" : "flex flex-col gap-2 p-3"}>
+    <div className={compact ? "flex flex-col gap-1" : "flex flex-col gap-2 p-3"}>
       {!compact && (
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-semibold text-zinc-900">Agent Status</h3>
@@ -147,9 +147,9 @@ export function AgentStatusPanel({ compact = false }: { compact?: boolean }) {
         </div>
       )}
       {entries.length === 0 ? (
-        <div className="text-xs text-zinc-500">{compact ? "No active agents" : "No agents active"}</div>
+        <div className="text-xs text-zinc-500">{compact ? "No agents" : "No agents active"}</div>
       ) : (
-        <div className={compact ? "flex flex-wrap gap-1.5" : "grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4"}>
+        <div className={compact ? "flex flex-wrap gap-1" : "grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4"}>
           {entries.map((entry) => (
             <AgentStatusBadge
               key={entry.agent_name}

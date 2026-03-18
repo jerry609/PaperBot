@@ -105,15 +105,15 @@ export function ActivityFeed() {
 
   return (
     <div className="flex h-full flex-col bg-[#f5f5f3]">
-      <div className="border-b border-zinc-200 px-3 py-2.5">
+      <div className="border-b border-zinc-200 px-3 py-2">
         <div className="flex items-center justify-between gap-2">
-          <h3 className="text-sm font-semibold text-zinc-900">Live Activity</h3>
-          <span className="text-xs text-zinc-500">{visibleFeed.length} events</span>
+          <h3 className="text-sm font-semibold text-zinc-900">Live</h3>
+          <span className="text-[11px] text-zinc-500">{visibleFeed.length}</span>
         </div>
         <p className="mt-1 text-[11px] text-zinc-500">
           {selectedWorkerGroup
-            ? `Focused on ${focusedPresentation?.label ?? "worker"} · showing lifecycle and delegation updates for ${selectedWorkerGroup.taskTitle || "this run"}.`
-            : "High-level lifecycle and delegation updates. Tool and file detail live in their own tabs."}
+            ? `Filtered to ${focusedPresentation?.label ?? "worker"} lifecycle events.`
+            : "Lifecycle and delegation updates only."}
         </p>
       </div>
       <ScrollArea.Root className="flex-1 overflow-hidden">
@@ -123,7 +123,7 @@ export function ActivityFeed() {
               {selectedWorkerGroup ? "No live events captured for this worker yet" : "No high-level events yet"}
             </div>
           ) : (
-            <ul className="px-2 py-1">
+            <ul className="px-2 py-0.5">
               {visibleFeed.map((item) => (
                 <ActivityFeedRow
                   key={item.id}

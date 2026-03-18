@@ -103,15 +103,15 @@ export function ToolCallTimeline() {
 
   return (
     <div className="flex h-full flex-col bg-[#f5f5f3]">
-      <div className="border-b border-zinc-200 px-3 py-2.5">
+      <div className="border-b border-zinc-200 px-3 py-2">
         <div className="flex items-center justify-between gap-2">
-          <h3 className="text-sm font-semibold text-zinc-900">Tool Calls</h3>
-          <span className="text-xs text-zinc-500">{visibleToolCalls.length} calls</span>
+          <h3 className="text-sm font-semibold text-zinc-900">Tools</h3>
+          <span className="text-[11px] text-zinc-500">{visibleToolCalls.length}</span>
         </div>
         <p className="mt-1 text-[11px] text-zinc-500">
           {selectedWorkerGroup
-            ? `Focused on ${focusedPresentation?.label ?? "worker"} · showing tool calls for ${selectedWorkerGroup.taskTitle || "this run"}.`
-            : "Full tool detail stays here, including worker-side Bash, Read, and file operations."}
+            ? `Filtered to ${focusedPresentation?.label ?? "worker"} tool activity.`
+            : "Full Bash, Read, and file detail."}
         </p>
       </div>
       {visibleToolCalls.length === 0 ? (
@@ -120,7 +120,7 @@ export function ToolCallTimeline() {
         </div>
       ) : (
         <div className="flex-1 overflow-y-auto">
-          <ul className="px-3 py-1">
+          <ul className="px-3 py-0.5">
             {visibleToolCalls.map((entry) => (
               <ToolCallRow key={entry.id} entry={entry} />
             ))}

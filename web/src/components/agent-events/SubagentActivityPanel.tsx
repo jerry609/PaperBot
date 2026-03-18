@@ -558,7 +558,7 @@ function WorkerDetail({
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-[#f5f5f3]">
-      <div className="border-b border-zinc-200 px-3 py-2.5">
+      <div className="border-b border-zinc-200 px-3 py-2">
         <div className="flex items-center justify-between gap-2">
           <Button
             type="button"
@@ -577,10 +577,10 @@ function WorkerDetail({
 
         <div className="mt-2">
           <h3 className="text-sm font-semibold text-zinc-900">{presentation.label}</h3>
-          <p className="mt-1 text-[12px] text-zinc-600">{group.taskTitle || "Untitled task"}</p>
+          <p className="mt-0.5 text-[12px] text-zinc-600">{group.taskTitle || "Untitled task"}</p>
         </div>
 
-        <div className="mt-3 flex flex-wrap items-center gap-1.5">
+        <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
           <WorkerChip label={humanizeRuntime(group.runtime)} />
           <WorkerChip label={controlModeChipLabel(group.controlMode)} />
           {duration ? <WorkerChip label={duration} /> : null}
@@ -1101,13 +1101,13 @@ export function SubagentActivityPanel() {
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-[#f5f5f3]">
-      <div className="border-b border-zinc-200 px-3 py-2.5">
+      <div className="border-b border-zinc-200 px-3 py-2">
         <div className="flex items-center justify-between gap-2">
           <h3 className="text-sm font-semibold text-zinc-900">Workers</h3>
-          <span className="text-xs text-zinc-500">{groups.length} runs</span>
+          <span className="text-[11px] text-zinc-500">{groups.length}</span>
         </div>
         <p className="mt-1 text-[11px] text-zinc-500">
-          One card per Claude-dispatched worker run. Open a run to inspect its own transcript, tools, and files.
+          Claude-dispatched worker runs.
         </p>
       </div>
 

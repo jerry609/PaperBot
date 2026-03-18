@@ -83,14 +83,11 @@ export function ChatHistoryPanel() {
     <div className="flex h-full flex-col border-r border-slate-200 bg-[#f8f9f6]">
       <div className="border-b border-slate-200 px-3 py-2.5">
         <div className="flex items-center justify-between gap-2">
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-1.5">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">Threads</p>
-              <span className="rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-slate-500">
-                {paperTasks.length}
-              </span>
-            </div>
-            <p className="mt-1 text-[11px] text-slate-500">Claude Code chat sessions</p>
+          <div className="min-w-0 flex items-center gap-1.5">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">Threads</p>
+            <span className="rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-slate-500">
+              {paperTasks.length}
+            </span>
           </div>
           <Button
             variant="ghost"
@@ -103,26 +100,20 @@ export function ChatHistoryPanel() {
           </Button>
         </div>
 
-        <label className="mt-2.5 flex items-center gap-2 rounded-full border border-slate-200 bg-white px-2.5 py-1.5 shadow-[0_1px_0_rgba(255,255,255,0.8)_inset]">
+        <label className="mt-2 flex items-center gap-2 rounded-full border border-slate-200 bg-white px-2.5 py-1.5 shadow-[0_1px_0_rgba(255,255,255,0.8)_inset]">
           <Search className="h-3 w-3 shrink-0 text-slate-400" />
           <input
             type="text"
             value={searchQuery}
             onChange={(event) => setSearchQuery(event.target.value)}
-            placeholder="Search"
+            placeholder="Search threads"
             className="h-4 w-full border-0 bg-transparent p-0 text-[11px] text-slate-700 placeholder:text-slate-400 focus:outline-none"
           />
         </label>
       </div>
 
       <ScrollArea className="flex-1">
-        <div className="space-y-2 p-2">
-          {filteredTasks.length > 0 ? (
-            <div className="px-1.5 text-[9px] font-semibold uppercase tracking-[0.16em] text-slate-400">
-              Recent
-            </div>
-          ) : null}
-
+        <div className="space-y-1.5 p-2">
           {paperTasks.length === 0 ? (
             <div className="flex flex-col items-center justify-center rounded-[20px] border border-dashed border-slate-200 bg-white/70 px-4 py-8 text-slate-500">
               <div className="flex h-9 w-9 items-center justify-center rounded-2xl border border-slate-200 bg-[#f7f8f4]">
@@ -130,7 +121,7 @@ export function ChatHistoryPanel() {
               </div>
               <p className="mt-2.5 text-[12px] font-medium text-slate-800">No threads yet</p>
               <p className="mt-1 max-w-[180px] text-center text-[10px] leading-4 text-slate-500">
-                Start a Claude Code conversation to create the first thread.
+                Start a Claude Code conversation.
               </p>
             </div>
           ) : filteredTasks.length === 0 ? (
@@ -140,7 +131,7 @@ export function ChatHistoryPanel() {
               </div>
               <p className="mt-2.5 text-[12px] font-medium text-slate-800">No matching threads</p>
               <p className="mt-1 max-w-[180px] text-center text-[10px] leading-4 text-slate-500">
-                Try a title keyword or a phrase from the latest assistant reply.
+                Try a title or reply snippet.
               </p>
             </div>
           ) : (
@@ -154,7 +145,7 @@ export function ChatHistoryPanel() {
                   key={task.id}
                   onClick={() => setActiveTask(task.id)}
                   className={cn(
-                    "w-full rounded-[18px] border px-2.5 py-2 text-left transition-[border-color,background-color,box-shadow]",
+                    "w-full rounded-[16px] border px-2.5 py-1.5 text-left transition-[border-color,background-color,box-shadow]",
                     task.id === activeTaskId
                       ? "border-slate-300 bg-white shadow-[0_1px_0_rgba(255,255,255,0.9)_inset]"
                       : "border-transparent bg-transparent hover:border-slate-200 hover:bg-white/90",
@@ -163,18 +154,18 @@ export function ChatHistoryPanel() {
                   <div className="flex items-start gap-2">
                     <span className={cn("mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full", status.dotClassName)} />
                     <div className="min-w-0 flex-1">
-                      <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-center justify-between gap-2">
                         <span className="truncate text-[11px] font-medium text-slate-900">{task.name}</span>
                         <span className="shrink-0 text-[9px] uppercase tracking-[0.12em] text-slate-400">
                           {relativeTime(task.updatedAt)}
                         </span>
                       </div>
 
-                      <p className="mt-0.5 line-clamp-2 text-[10px] leading-4 text-slate-500">
+                      <p className="mt-0.5 line-clamp-1 text-[10px] leading-4 text-slate-500">
                         {preview}
                       </p>
 
-                      <div className="mt-1.5 flex items-center gap-1.5 text-[9px] text-slate-400">
+                      <div className="mt-1 flex items-center gap-1.5 text-[9px] text-slate-400">
                         <span className="rounded-full border border-slate-200 bg-[#f7f8f4] px-1.5 py-0.5 uppercase tracking-[0.12em] text-slate-500">
                           {status.label}
                         </span>

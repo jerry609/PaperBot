@@ -375,7 +375,6 @@ function LeftRail({
 function RightInspector({
   activeAgents,
   subagentEvents,
-  eventCount,
   runtimeInfo,
   runtimeLoading,
   activeView,
@@ -387,7 +386,6 @@ function RightInspector({
 }: {
   activeAgents: number
   subagentEvents: number
-  eventCount: number
   runtimeInfo: StudioRuntimeInfo
   runtimeLoading: boolean
   activeView: AgentInspectorView
@@ -399,14 +397,14 @@ function RightInspector({
 }) {
   return (
     <div className="flex h-full min-h-0 flex-col bg-[#f8f9f6] text-slate-900">
-      <div className="border-b border-slate-200 bg-[#f4f5f1] px-3 py-2.5">
+      <div className="border-b border-slate-200 bg-[#f4f5f1] px-3 py-2">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">
               Monitor
             </p>
-            <h2 className="mt-1 text-sm font-semibold text-slate-900">Runtime Activity</h2>
-            <p className="mt-1 text-[11px] text-slate-500">
+            <h2 className="mt-0.5 text-sm font-semibold text-slate-900">Runtime Activity</h2>
+            <p className="mt-0.5 text-[11px] text-slate-500">
               {runtimeLoading ? "Checking Claude Code..." : runtimeInfo.statusLabel}
             </p>
           </div>
@@ -425,17 +423,11 @@ function RightInspector({
           <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-slate-500">
             {subagentEvents} workers
           </span>
-          <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-slate-500">
-            {eventCount} events
-          </span>
-          <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-slate-500">
-            {compactMonitorMetric(runtimeInfo.workspaceLabel)}
-          </span>
         </div>
 
         {selectedWorkerTitle ? (
           <div
-            className={`mt-2 rounded-[18px] border px-2.5 py-2 ${
+            className={`mt-2 rounded-[18px] border px-2.5 py-1.5 ${
               selectedWorkerControlMode === "managed"
                 ? "border-emerald-200 bg-[linear-gradient(180deg,#fcfdf9_0%,#f3f7ef_100%)]"
                 : "border-slate-200 bg-[linear-gradient(180deg,#ffffff_0%,#f2f5f8_100%)]"
@@ -460,14 +452,11 @@ function RightInspector({
                   >
                     {selectedWorkerControlMode === "managed" ? "Studio-controlled" : "Claude-controlled"}
                   </span>
-                  <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-slate-500">
-                    {inspectorViewLabel(activeView)} focus
-                  </span>
                 </div>
                 <div className="mt-1 text-[11px] text-slate-500">
                   {selectedWorkerControlMode === "managed"
-                    ? "Studio-owned session"
-                    : "Parent Claude session owns control"}
+                    ? "Control stays in Studio."
+                    : "Control stays in the parent Claude session."}
                 </div>
               </div>
               <Button
@@ -483,7 +472,7 @@ function RightInspector({
           </div>
         ) : null}
 
-        <div className="mt-2 rounded-[16px] border border-slate-200 bg-white px-2 py-1.5">
+        <div className="mt-2 rounded-[16px] border border-slate-200 bg-white px-2 py-1">
           <AgentStatusPanel compact />
         </div>
       </div>
@@ -671,7 +660,6 @@ export function AgentWorkspace({
   const agentStatuses = useAgentEventStore((state) => state.agentStatuses)
   const codexDelegations = useAgentEventStore((state) => state.codexDelegations)
   const toolCalls = useAgentEventStore((state) => state.toolCalls)
-  const feed = useAgentEventStore((state) => state.feed)
   const inspectorView = useAgentEventStore((state) => state.inspectorView)
   const setInspectorView = useAgentEventStore((state) => state.setInspectorView)
   const selectedWorkerRunId = useAgentEventStore((state) => state.selectedWorkerRunId)
@@ -941,7 +929,6 @@ export function AgentWorkspace({
                 <RightInspector
                   activeAgents={activeAgents}
                   subagentEvents={codexDelegations.length}
-                  eventCount={feed.length}
                   runtimeInfo={runtimeInfo}
                   runtimeLoading={runtimeLoading}
                   activeView={inspectorView}
@@ -1023,7 +1010,6 @@ export function AgentWorkspace({
             <RightInspector
               activeAgents={activeAgents}
               subagentEvents={codexDelegations.length}
-              eventCount={feed.length}
               runtimeInfo={runtimeInfo}
               runtimeLoading={runtimeLoading}
               activeView={inspectorView}
