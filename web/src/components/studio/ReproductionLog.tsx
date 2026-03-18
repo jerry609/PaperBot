@@ -1492,8 +1492,8 @@ export function ReproductionLog({
         ? `Edit args for ${buildCommandPreview(activeCliCommand!.runtime, activeCliCommand!.preset, "").trim()} and press Enter to run`
         : messagePlaceholder
     const composerInteractionHint = commandMode
-        ? "Enter to run · Esc clears command mode"
-        : "Enter to send · Shift+Enter for newline · / for commands"
+        ? "Enter run · Esc clear"
+        : "Enter send · Shift+Enter newline · / commands"
     const workspaceRequired = mode === "Code" && !projectDir
 
     useEffect(() => {
@@ -2831,14 +2831,14 @@ export function ReproductionLog({
     }, [focusComposerToEnd, replaceActiveSlashToken])
 
     const composerHelperText = commandMode
-        ? "Claude Code command selected. Enter runs it, and clear returns the composer to chat."
+        ? "Command selected. Enter runs it."
         : runtimeInfo.codeModeEnabled === false && mode === "Plan"
-            ? "Code mode is disabled in this runtime. Studio will keep chat turns in Plan mode."
+            ? "Code mode is unavailable in this runtime."
         : uploadedFiles.length > 0
             ? `${uploadedFiles.length} uploaded file${uploadedFiles.length === 1 ? "" : "s"} ready.`
         : missingCustomModel
-            ? "Enter a full Claude Code model name before sending."
-        : "Type / for Claude-style commands, runtime checks, and thread controls."
+            ? "Enter a full Claude Code model name."
+        : "Type / for Claude Code commands."
     const activeModeLabel = mode
     const activeModelLabel =
         modelOption === "custom"
@@ -2852,8 +2852,8 @@ export function ReproductionLog({
         ? "Review the workspace before starting"
         : "Launch a focused Claude Code thread"
     const emptyStateDescription = workspaceRequired
-        ? "Code mode needs a writable project directory first. Review the workspace, then send the opening request from chat."
-        : "Paper, model, and chat are ready. Start in the composer here, and keep the raw worker and tool detail in Monitor."
+        ? "Code mode needs a writable directory before the first turn."
+        : "Start in chat. Open Monitor only when you need the raw runtime trace."
     const advancedComposerOverrideCount = [
         parsedTools.length > 0,
         parsedAllowedTools.length > 0,
@@ -3114,70 +3114,55 @@ export function ReproductionLog({
                                             </span>
                                         </div>
 
-                                        <p className="mt-4 max-w-[42rem] text-[12px] leading-5 text-slate-600">
+                                        <p className="mt-3 max-w-[36rem] text-[12px] leading-5 text-slate-600">
                                             {emptyStateDescription}
                                         </p>
 
-                                        <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                                            <div className="rounded-[22px] border border-slate-200 bg-[#f8faf5] px-4 py-3">
+                                        <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                                            <div className="rounded-[20px] border border-slate-200 bg-[#f8faf5] px-3 py-2.5">
                                                 <div className="flex items-center gap-2">
                                                     <FileText className="h-4 w-4 text-slate-500" />
                                                     <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
                                                         Paper
                                                     </p>
                                                 </div>
-                                                <p className="mt-2 line-clamp-2 text-[13px] font-medium text-slate-900">
+                                                <p className="mt-1.5 line-clamp-2 text-[12px] font-medium text-slate-900">
                                                     {selectedPaper?.title ?? "No paper selected"}
                                                 </p>
                                             </div>
 
-                                            <div className="rounded-[22px] border border-slate-200 bg-[#f8faf5] px-4 py-3">
+                                            <div className="rounded-[20px] border border-slate-200 bg-[#f8faf5] px-3 py-2.5">
                                                 <div className="flex items-center gap-2">
                                                     <FolderOpen className="h-4 w-4 text-slate-500" />
                                                     <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
                                                         Workspace
                                                     </p>
                                                 </div>
-                                                <p className="mt-2 break-all font-mono text-[11px] leading-5 text-slate-700">
+                                                <p className="mt-1.5 break-all font-mono text-[10px] leading-4 text-slate-700">
                                                     {projectDir ?? "Review in launch step"}
                                                 </p>
                                             </div>
 
-                                            <div className="rounded-[22px] border border-slate-200 bg-[#f8faf5] px-4 py-3">
+                                            <div className="rounded-[20px] border border-slate-200 bg-[#f8faf5] px-3 py-2.5">
                                                 <div className="flex items-center gap-2">
                                                     <Bot className="h-4 w-4 text-slate-500" />
                                                     <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-                                                        Session
+                                                        Runtime
                                                     </p>
                                                 </div>
-                                                <p className="mt-2 text-[12px] font-medium text-slate-900">
+                                                <p className="mt-1.5 text-[12px] font-medium text-slate-900">
                                                     {activeModeLabel} · {activeModelLabel}
                                                 </p>
-                                                <p className="mt-1 text-[11px] leading-5 text-slate-500">
+                                                <p className="mt-1 text-[10px] leading-4 text-slate-500">
                                                     Permission {permissionProfile.replace("_", " ")}.
-                                                </p>
-                                            </div>
-
-                                            <div className="rounded-[22px] border border-slate-200 bg-[#f8faf5] px-4 py-3">
-                                                <div className="flex items-center gap-2">
-                                                    <LayoutDashboard className="h-4 w-4 text-slate-500" />
-                                                    <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-                                                        Monitor
-                                                    </p>
-                                                </div>
-                                                <p className="mt-2 text-[12px] font-medium text-slate-900">
-                                                    Activity stays mirrored
-                                                </p>
-                                                <p className="mt-1 text-[11px] leading-5 text-slate-500">
-                                                    Chat keeps the compressed stream. Monitor keeps raw worker, tool, and runtime detail.
                                                 </p>
                                             </div>
                                         </div>
 
-                                        <div className="mt-4 flex flex-wrap items-center gap-2">
+                                        <div className="mt-3 flex flex-wrap items-center gap-2">
                                             <Button
                                                 type="button"
-                                                className="h-9 rounded-full bg-slate-900 px-4 text-[12px] font-medium text-white hover:bg-slate-800"
+                                                className="h-8 rounded-full bg-slate-900 px-3.5 text-[11px] font-medium text-white hover:bg-slate-800"
                                                 onClick={handleEmptyStatePrimaryAction}
                                             >
                                                 {workspaceRequired ? "Review workspace" : "Start in chat"}
@@ -3185,7 +3170,7 @@ export function ReproductionLog({
                                             <Button
                                                 type="button"
                                                 variant="outline"
-                                                className="h-9 rounded-full border-slate-200 bg-white px-4 text-[12px] text-slate-700"
+                                                className="h-8 rounded-full border-slate-200 bg-white px-3 text-[11px] text-slate-700"
                                                 onClick={handleInsertSlashCommand}
                                             >
                                                 Insert slash command
@@ -3193,7 +3178,7 @@ export function ReproductionLog({
                                             <Button
                                                 type="button"
                                                 variant="outline"
-                                                className="h-9 rounded-full border-slate-200 bg-white px-4 text-[12px] text-slate-700"
+                                                className="h-8 rounded-full border-slate-200 bg-white px-3 text-[11px] text-slate-700"
                                                 onClick={handleSeedStarterPrompt}
                                             >
                                                 Use starter prompt
@@ -3201,7 +3186,7 @@ export function ReproductionLog({
                                             <Button
                                                 type="button"
                                                 variant="outline"
-                                                className="h-9 rounded-full border-slate-200 bg-white px-4 text-[12px] text-slate-700"
+                                                className="h-8 rounded-full border-slate-200 bg-white px-3 text-[11px] text-slate-700"
                                                 onClick={handleOpenComposerUpload}
                                                 disabled={!canAttachFiles}
                                             >
@@ -3209,7 +3194,7 @@ export function ReproductionLog({
                                             </Button>
                                         </div>
 
-                                        <div className="mt-4 flex flex-wrap gap-1.5">
+                                        <div className="mt-3 flex flex-wrap gap-1">
                                             <span className="rounded-full border border-slate-200 bg-[#f7f8f4] px-2 py-0.5 text-[10px] text-slate-600">
                                                 1. Review workspace
                                             </span>
@@ -3396,14 +3381,14 @@ export function ReproductionLog({
                             ) : null}
 
                             {modelOption === "custom" && !commandMode ? (
-                                <div className="px-3.5 pt-2">
+                                <div className="px-3 pt-1.5">
                                     <Input
                                         value={customModel}
                                         onChange={(event) =>
                                             applyModelSelection("custom", event.target.value)
                                         }
                                         placeholder="claude-sonnet-4-6"
-                                        className="h-8 border-slate-200 bg-[#f7f8f4] px-3 text-[11px] text-slate-700"
+                                        className="h-7 border-slate-200 bg-[#f7f8f4] px-3 text-[11px] text-slate-700"
                                         title="Full Claude Code model name"
                                     />
                                 </div>
@@ -3485,7 +3470,7 @@ export function ReproductionLog({
                             </div>
                         </div>
 
-                        <div className="border-t border-slate-200 bg-[#f3f4ef] px-2.5 py-2.5">
+                        <div className="border-t border-slate-200 bg-[#f3f4ef] px-2 py-2">
                             <div className="flex flex-wrap items-center justify-between gap-2">
                                 <div className="flex flex-1 flex-wrap items-center gap-1">
                                     <Tooltip>
@@ -3495,10 +3480,10 @@ export function ReproductionLog({
                                                 variant="ghost"
                                                 size="icon"
                                                 className={cn(
-                                                    "h-7 w-7 rounded-full border text-slate-600",
+                                                    "h-6.5 w-6.5 rounded-full border text-slate-600",
                                                     slashPaletteActive
-                                                        ? "border-slate-300 bg-[#eef1ea] text-slate-900"
-                                                        : "border-slate-200 bg-white hover:bg-slate-50",
+                                                        ? "border-slate-300 bg-[#edf0e7] text-slate-900"
+                                                        : "border-slate-200 bg-[#f7f8f4] hover:bg-white",
                                                 )}
                                                 onClick={handleInsertSlashCommand}
                                             >
@@ -3514,7 +3499,7 @@ export function ReproductionLog({
                                                 type="button"
                                                 variant="ghost"
                                                 size="icon"
-                                                className="h-7 w-7 rounded-full border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                                                className="h-6.5 w-6.5 rounded-full border border-slate-200 bg-[#f7f8f4] text-slate-600 hover:bg-white"
                                                 onClick={handleOpenComposerUpload}
                                                 disabled={!canAttachFiles}
                                             >
@@ -3535,8 +3520,8 @@ export function ReproductionLog({
                                     />
 
                                     <Select value={mode} onValueChange={(value) => setMode(value as Mode)}>
-                                        <SelectTrigger className="h-7 w-[92px] rounded-full border-slate-200 bg-white px-2.5 text-[11px] text-slate-700 shadow-none">
-                                            <Code className="mr-1 h-3 w-3" />
+                                        <SelectTrigger className="h-6.5 w-[82px] rounded-full border-slate-200 bg-[#f7f8f4] px-2 text-[10px] text-slate-600 shadow-none hover:bg-white">
+                                            <Code className="mr-1 h-2.5 w-2.5" />
                                             <SelectValue />
                                         </SelectTrigger>
                                         <SelectContent>
@@ -3557,8 +3542,8 @@ export function ReproductionLog({
                                             )
                                         }
                                     >
-                                        <SelectTrigger className="h-7 w-[128px] rounded-full border-slate-200 bg-white px-2.5 text-[11px] text-slate-700 shadow-none">
-                                            <Bot className="mr-1 h-3 w-3" />
+                                        <SelectTrigger className="h-6.5 w-[116px] rounded-full border-slate-200 bg-[#f7f8f4] px-2 text-[10px] text-slate-600 shadow-none hover:bg-white">
+                                            <Bot className="mr-1 h-2.5 w-2.5" />
                                             <SelectValue />
                                         </SelectTrigger>
                                         <SelectContent>
@@ -3575,7 +3560,7 @@ export function ReproductionLog({
 
                                 <Button
                                     size="icon"
-                                    className="h-9 w-9 shrink-0 rounded-full bg-slate-800 text-white shadow-sm hover:bg-slate-700"
+                                    className="h-8.5 w-8.5 shrink-0 rounded-full bg-slate-800 text-white shadow-sm hover:bg-slate-700"
                                     onClick={handleComposerSubmit}
                                     disabled={
                                         commandMode
@@ -3606,9 +3591,9 @@ export function ReproductionLog({
                                 </Button>
                             </div>
 
-                            <div className="mt-1.5 flex flex-wrap items-center justify-between gap-1.5 text-[10px] text-slate-500">
+                            <div className="mt-1 flex flex-wrap items-center justify-between gap-1.5 text-[9px] text-slate-500">
                                 <span className="min-w-0 flex-1 truncate">{composerHelperText}</span>
-                                <span className="rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-slate-500">
+                                <span className="rounded-full border border-slate-200 bg-[#f7f8f4] px-1.5 py-0.5 text-[8px] uppercase tracking-[0.12em] text-slate-500">
                                     {composerInteractionHint}
                                 </span>
                             </div>

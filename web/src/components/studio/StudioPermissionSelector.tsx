@@ -71,15 +71,15 @@ export function StudioPermissionSelector({
                         variant="ghost"
                         size="sm"
                         className={cn(
-                            "h-7 rounded-full border px-2 text-[10px] shadow-none",
+                            "h-6.5 rounded-full border bg-[#f7f8f4] px-2 text-[9px] shadow-none",
                             isFullAccess
                                 ? "border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100"
-                                : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50",
+                                : "border-slate-200 text-slate-600 hover:bg-white",
                         )}
                     >
-                        {isFullAccess ? <LockOpen className="h-3 w-3" /> : <Lock className="h-3 w-3" />}
+                        {isFullAccess ? <LockOpen className="h-2.5 w-2.5" /> : <Lock className="h-2.5 w-2.5" />}
                         <span>{isFullAccess ? "Full" : "Default"}</span>
-                        <ChevronDown className="h-3 w-3 opacity-60" />
+                        <ChevronDown className="h-2.5 w-2.5 opacity-60" />
                     </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="start" className="min-w-[180px] rounded-2xl border-slate-200 p-1.5">
