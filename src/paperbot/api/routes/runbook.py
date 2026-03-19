@@ -172,7 +172,7 @@ def _allowed_workdir(workdir: Path) -> bool:
     return False
 
 
-def _normalize_path_input(raw_path: str, field_name: str) -> Path:
+def _normalize_path_input(raw_path: str, field_name: str) -> str:
     raw = raw_path.strip()
     if not raw:
         raise HTTPException(status_code=400, detail=f"{field_name} cannot be empty")
@@ -184,25 +184,25 @@ def _normalize_path_input(raw_path: str, field_name: str) -> Path:
     if raw == "~":
         normalized = str(Path.home())
     elif raw.startswith("~/"):
-        normalized = str(Path.home() / raw[2:])
+        normalized = os.path.join(str(Path.home()), raw[2:])
     else:
         normalized = raw
 
     if not os.path.isabs(normalized):
-        normalized = str((Path.cwd() / normalized).resolve(strict=False))
-    return Path(os.path.realpath(normalized)).resolve(strict=False)
+        normalized = os.path.join(os.getcwd(), normalized)
+    return os.path.abspath(normalized)
 
 
-def _normalize_user_directory(raw_path: str, field_name: str) -> Path:
-    """
-    Normalize a user-supplied directory path and enforce allow-prefix policy.
-    """
-    resolved_input = _normalize_path_input(raw_path, field_name)
-    normalized_real = os.path.realpath(str(resolved_input))
-
-    for prefix in _allowed_workdir_prefixes():
-        prefix_str = str(prefix)
-        prefix_real = os.path.realpath(prefix_str)
+def _resolve_real_path_within_prefixes(
+    normalized_real: str,
+    prefixes: List[Path],
+    *,
+    field_name: str,
+    status_code: int = 403,
+    detail: Optional[str] = None,
+) -> Path:
+    for prefix in prefixes:
+        prefix_real = os.path.realpath(str(prefix))
         if normalized_real == prefix_real:
             return prefix
         if normalized_real.startswith(prefix_real + os.sep):
@@ -210,9 +210,24 @@ def _normalize_user_directory(raw_path: str, field_name: str) -> Path:
             candidate = (prefix / suffix).resolve(strict=False) if suffix else prefix
             if _is_under_prefix(candidate, prefix):
                 return candidate
-            raise HTTPException(status_code=403, detail=f"{field_name} is not allowed")
+            break
 
-    raise HTTPException(status_code=403, detail=f"{field_name} is not allowed")
+    raise HTTPException(
+        status_code=status_code,
+        detail=detail or f"{field_name} is not allowed",
+    )
+
+
+def _normalize_user_directory(raw_path: str, field_name: str) -> Path:
+    """
+    Normalize a user-supplied directory path and enforce allow-prefix policy.
+    """
+    normalized_real = _normalize_path_input(raw_path, field_name)
+    return _resolve_real_path_within_prefixes(
+        normalized_real,
+        _allowed_workdir_prefixes(),
+        field_name=field_name,
+    )
 
 
 def _allowlist_mutation_roots() -> List[Path]:
@@ -302,12 +317,13 @@ async def add_allowed_dir(body: AddAllowedDirRequest):
     if not raw or "\x00" in raw:
         raise HTTPException(status_code=400, detail="invalid directory path")
 
-    resolved = _normalize_path_input(raw, field_name="directory")
-    if not any(_is_under_prefix(resolved, root) for root in _allowlist_mutation_roots()):
-        raise HTTPException(
-            status_code=403,
-            detail="directory is outside the allowed mutation roots",
-        )
+    normalized_real = _normalize_path_input(raw, field_name="directory")
+    resolved = _resolve_real_path_within_prefixes(
+        normalized_real,
+        _allowlist_mutation_roots(),
+        field_name="directory",
+        detail="directory is outside the allowed mutation roots",
+    )
 
     denied_roots = {Path(denied).resolve() for denied in _DENIED_PATHS}
     if resolved in denied_roots:

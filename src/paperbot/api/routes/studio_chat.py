@@ -2729,6 +2729,23 @@ async def studio_chat(http_request: Request, request: StudioChatRequest):
     )
 
 
+def _studio_command_error_payload(
+    *,
+    command: List[str],
+    returncode: int,
+    stderr: str,
+    cwd: Optional[str],
+) -> Dict[str, Any]:
+    return {
+        "ok": False,
+        "command": command,
+        "returncode": returncode,
+        "stdout": "",
+        "stderr": stderr,
+        "cwd": cwd,
+    }
+
+
 @router.post("/studio/command")
 async def studio_command(request: StudioCommandRequest):
     """Run a non-chat Claude Code / OpenCode management command and return its output."""
@@ -2736,15 +2753,13 @@ async def studio_command(request: StudioCommandRequest):
         cmd = build_management_command(request)
         try:
             cwd = str(_resolve_cli_project_dir(request.project_dir))
-        except ValueError as exc:
-            return {
-                "ok": False,
-                "command": cmd,
-                "returncode": 1,
-                "stdout": "",
-                "stderr": str(exc),
-                "cwd": request.project_dir,
-            }
+        except ValueError:
+            return _studio_command_error_payload(
+                command=cmd,
+                returncode=1,
+                stderr="Invalid or disallowed project directory",
+                cwd=request.project_dir,
+            )
 
         timeout_seconds = max(1.0, min(request.timeout_ms / 1000.0, 60.0))
 
@@ -2768,23 +2783,19 @@ async def studio_command(request: StudioCommandRequest):
             "cwd": cwd,
         }
     except subprocess.TimeoutExpired:
-        return {
-            "ok": False,
-            "command": [],
-            "returncode": 124,
-            "stdout": "",
-            "stderr": "Command timed out",
-            "cwd": request.project_dir,
-        }
-    except ValueError as exc:
-        return {
-            "ok": False,
-            "command": [],
-            "returncode": 1,
-            "stdout": "",
-            "stderr": str(exc),
-            "cwd": request.project_dir,
-        }
+        return _studio_command_error_payload(
+            command=[],
+            returncode=124,
+            stderr="Command timed out",
+            cwd=request.project_dir,
+        )
+    except ValueError:
+        return _studio_command_error_payload(
+            command=[],
+            returncode=1,
+            stderr="Invalid management command request",
+            cwd=request.project_dir,
+        )
 
 
 @router.get("/studio/status")

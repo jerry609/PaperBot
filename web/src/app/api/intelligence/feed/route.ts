@@ -1,12 +1,12 @@
 export const runtime = "nodejs"
 
-import { apiBaseUrl, proxyJson } from "../../research/_base"
+import { apiBaseUrl, proxyJson } from "@/app/api/_utils/auth-json-proxy"
 
 export async function GET(req: Request) {
   const url = new URL(req.url)
-  return proxyJson(
-    req,
-    `${apiBaseUrl()}/api/intelligence/feed?${url.searchParams.toString()}`,
-    "GET",
-  )
+  const query = url.searchParams.toString()
+  const upstream = query
+    ? `${apiBaseUrl()}/api/intelligence/feed?${query}`
+    : `${apiBaseUrl()}/api/intelligence/feed`
+  return proxyJson(req, upstream, "GET")
 }
