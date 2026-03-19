@@ -391,6 +391,7 @@ class SavePaperRequest(BaseModel):
     """Request to save paper to library."""
 
     track_id: Optional[int] = Field(None, description="Associated track ID")
+    metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
 @router.post("/papers/{paper_id}/save")
@@ -412,11 +413,13 @@ def save_paper_to_library(
 
     # Use research store to record feedback
     research_store = _get_research_store()
-    feedback = research_store.record_paper_feedback(
+    feedback = research_store.add_paper_feedback(
         user_id=user_id,
         paper_id=str(paper_id),
         action="save",
         track_id=request.track_id,
+        metadata=dict(request.metadata or {}),
+        weight=0.0,
     )
 
     return {"success": True, "feedback": feedback}

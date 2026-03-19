@@ -1,26 +1,35 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import Link from "next/link"
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react"
 import {
+  ArrowRight,
   CheckCircle2,
   Eye,
   EyeOff,
   KeyRound,
   Loader2,
+  Mail,
+  Megaphone,
   Pencil,
   Plus,
+  RefreshCcw,
+  Send,
   Trash2,
   Wrench,
 } from "lucide-react"
 import { useSession, signOut } from "next-auth/react"
+import { useSearchParams } from "next/navigation"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { fetchJson, getErrorMessage } from "@/lib/fetch"
+import { useWorkflowStore } from "@/lib/stores/workflow-store"
 import {
   Dialog,
   DialogContent,
@@ -151,6 +160,11 @@ function statusDot(item: ModelEndpoint) {
   if (item.is_default) return "bg-green-500"
   if (!item.api_key_present) return "bg-red-500"
   return "bg-gray-400"
+}
+
+type SubscriberCounts = {
+  active: number
+  total: number
 }
 
 // ─── Account Section ──────────────────────────────────────────────────────────
@@ -439,6 +453,234 @@ function AccountSection() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </div>
+  )
+}
+
+function DailyBriefSection() {
+  const notifyEmail = useWorkflowStore((state) => state.notifyEmail)
+  const notifyEnabled = useWorkflowStore((state) => state.notifyEnabled)
+  const resendEnabled = useWorkflowStore((state) => state.resendEnabled)
+  const config = useWorkflowStore((state) => state.config)
+  const setNotifyEmail = useWorkflowStore((state) => state.setNotifyEmail)
+  const setNotifyEnabled = useWorkflowStore((state) => state.setNotifyEnabled)
+  const setResendEnabled = useWorkflowStore((state) => state.setResendEnabled)
+  const updateConfig = useWorkflowStore((state) => state.updateConfig)
+
+  const [subscriberCounts, setSubscriberCounts] = useState<SubscriberCounts>({ active: 0, total: 0 })
+  const [subscriberEmail, setSubscriberEmail] = useState("")
+  const [loadingSubscribers, setLoadingSubscribers] = useState(false)
+  const [submittingSubscriber, setSubmittingSubscriber] = useState(false)
+  const [subscriberMessage, setSubscriberMessage] = useState<{
+    type: "ok" | "err"
+    text: string
+  } | null>(null)
+
+  const loadSubscribers = useCallback(async () => {
+    setLoadingSubscribers(true)
+    try {
+      const response = await fetch("/api/newsletter/subscribers", { cache: "no-store" })
+      if (!response.ok) throw new Error(`${response.status} ${response.statusText}`)
+      const payload = (await response.json()) as Partial<SubscriberCounts>
+      setSubscriberCounts({
+        active: Number(payload.active || 0),
+        total: Number(payload.total || 0),
+      })
+    } catch {
+      setSubscriberCounts({ active: 0, total: 0 })
+    } finally {
+      setLoadingSubscribers(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    loadSubscribers().catch(() => {})
+  }, [loadSubscribers])
+
+  async function handleAddSubscriber() {
+    if (!subscriberEmail.trim()) return
+
+    setSubmittingSubscriber(true)
+    setSubscriberMessage(null)
+    try {
+      const response = await fetch("/api/newsletter/subscribe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: subscriberEmail.trim() }),
+      })
+
+      const payload = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        throw new Error(String((payload as { detail?: string }).detail || response.status))
+      }
+
+      setSubscriberEmail("")
+      setSubscriberMessage({ type: "ok", text: "Subscriber added to Daily Brief delivery." })
+      await loadSubscribers()
+    } catch (error) {
+      setSubscriberMessage({ type: "err", text: getErrorMessage(error) })
+    } finally {
+      setSubmittingSubscriber(false)
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Daily Brief Defaults</CardTitle>
+          <CardDescription>
+            These defaults are stored in this browser and picked up by DailyPaper runs.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-3 lg:grid-cols-2">
+            <div className="rounded-xl border px-4 py-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="flex items-center gap-2 text-sm font-medium text-slate-900">
+                    <Mail className="h-4 w-4 text-slate-600" />
+                    Email override
+                  </div>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Send the next digest to a specific address instead of just relying on the runtime input.
+                  </p>
+                </div>
+                <Switch checked={notifyEnabled} onCheckedChange={setNotifyEnabled} />
+              </div>
+              {notifyEnabled ? (
+                <div className="mt-3 space-y-1.5">
+                  <Label htmlFor="daily-brief-notify-email">Recipient</Label>
+                  <Input
+                    id="daily-brief-notify-email"
+                    value={notifyEmail}
+                    onChange={(event) => setNotifyEmail(event.target.value)}
+                    placeholder="reviewer@example.com"
+                  />
+                </div>
+              ) : null}
+            </div>
+
+            <div className="rounded-xl border px-4 py-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="flex items-center gap-2 text-sm font-medium text-slate-900">
+                    <Megaphone className="h-4 w-4 text-slate-600" />
+                    Newsletter broadcast
+                  </div>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Push the digest to active subscribers through the configured backend delivery channel.
+                  </p>
+                </div>
+                <Switch checked={resendEnabled} onCheckedChange={setResendEnabled} />
+              </div>
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <Badge variant="outline" className="rounded-full">
+                  {loadingSubscribers ? "Checking subscribers..." : `${subscriberCounts.active} active subscribers`}
+                </Badge>
+                <Badge variant="secondary" className="rounded-full">
+                  {subscriberCounts.total} total captured
+                </Badge>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid gap-3 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+            <div className="rounded-xl border px-4 py-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-medium text-slate-900">Artifact persistence</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Keep DailyPaper files on disk by default instead of generating preview-only output.
+                  </p>
+                </div>
+                <Switch
+                  checked={config.saveDaily}
+                  onCheckedChange={(checked) => updateConfig({ saveDaily: checked })}
+                />
+              </div>
+              <div className="mt-3 space-y-1.5">
+                <Label htmlFor="daily-brief-output-dir">Output directory</Label>
+                <Input
+                  id="daily-brief-output-dir"
+                  value={config.outputDir}
+                  onChange={(event) => updateConfig({ outputDir: event.target.value })}
+                  placeholder="./reports/dailypaper"
+                />
+              </div>
+            </div>
+
+            <div className="rounded-xl border bg-slate-50/70 px-4 py-4">
+              <p className="text-sm font-medium text-slate-900">Where the rest lives</p>
+              <p className="mt-2 text-sm leading-6 text-slate-600">
+                Search, DailyPaper generation, judge, and final delivery still run from the Research workbench.
+                Settings now owns the reusable delivery defaults and subscriber management.
+              </p>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <Button asChild size="sm" className="rounded-full bg-slate-900 hover:bg-slate-800">
+                  <Link href="/research">
+                    Open Research
+                    <ArrowRight className="h-4 w-4" />
+                  </Link>
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="rounded-full"
+                  onClick={() => loadSubscribers().catch(() => {})}
+                  disabled={loadingSubscribers}
+                >
+                  {loadingSubscribers ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
+                  Refresh counts
+                </Button>
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Newsletter Subscribers</CardTitle>
+          <CardDescription>
+            Add recipients for Daily Brief broadcasts. Unsubscribe links are still issued from the backend delivery flow.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant="outline" className="rounded-full">
+              {subscriberCounts.active} active
+            </Badge>
+            <Badge variant="secondary" className="rounded-full">
+              {subscriberCounts.total} total
+            </Badge>
+          </div>
+
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <Input
+              value={subscriberEmail}
+              onChange={(event) => setSubscriberEmail(event.target.value)}
+              placeholder="subscriber@example.com"
+              type="email"
+            />
+            <Button
+              type="button"
+              onClick={handleAddSubscriber}
+              disabled={submittingSubscriber || !subscriberEmail.trim()}
+            >
+              {submittingSubscriber ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+              Add subscriber
+            </Button>
+          </div>
+
+          {subscriberMessage ? (
+            <p className={`text-sm ${subscriberMessage.type === "ok" ? "text-green-600" : "text-destructive"}`}>
+              {subscriberMessage.text}
+            </p>
+          ) : null}
+        </CardContent>
+      </Card>
     </div>
   )
 }
@@ -769,19 +1011,38 @@ function ModelProvidersSection() {
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
-export default function SettingsPage() {
+function SettingsPageContent() {
+  const searchParams = useSearchParams()
+  const requestedTab = searchParams.get("tab")
+  const resolvedTab =
+    requestedTab === "daily-brief" || requestedTab === "models" || requestedTab === "account"
+      ? requestedTab
+      : "account"
+  const [activeTab, setActiveTab] = useState<"account" | "daily-brief" | "models">(
+    resolvedTab as "account" | "daily-brief" | "models",
+  )
+
+  useEffect(() => {
+    setActiveTab(resolvedTab as "account" | "daily-brief" | "models")
+  }, [resolvedTab])
+
   return (
-    <div className="flex-1 p-8 pt-6 max-w-3xl">
+    <div className="flex-1 max-w-5xl p-8 pt-6">
       <h2 className="text-2xl font-bold tracking-tight mb-6">Settings</h2>
 
-      <Tabs defaultValue="account">
+      <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as "account" | "daily-brief" | "models")}>
         <TabsList className="mb-6">
           <TabsTrigger value="account">Account</TabsTrigger>
+          <TabsTrigger value="daily-brief">Daily Brief</TabsTrigger>
           <TabsTrigger value="models">Model Providers</TabsTrigger>
         </TabsList>
 
         <TabsContent value="account">
           <AccountSection />
+        </TabsContent>
+
+        <TabsContent value="daily-brief">
+          <DailyBriefSection />
         </TabsContent>
 
         <TabsContent value="models">
@@ -794,5 +1055,13 @@ export default function SettingsPage() {
         </TabsContent>
       </Tabs>
     </div>
+  )
+}
+
+export default function SettingsPage() {
+  return (
+    <Suspense fallback={<div className="flex-1 max-w-5xl p-8 pt-6" />}>
+      <SettingsPageContent />
+    </Suspense>
   )
 }

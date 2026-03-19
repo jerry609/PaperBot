@@ -360,7 +360,7 @@ export default function WorkflowDockCard({
           </Link>
         </Button>
         <Button asChild variant="outline" className="rounded-full px-5">
-          <Link href="/settings">
+          <Link href="/settings?tab=daily-brief">
             <Settings2 className="h-4 w-4" />
             管理 Daily Brief
           </Link>

@@ -22,6 +22,7 @@ import {
   Sparkles,
   Settings,
   BookOpen,
+  BellDot,
   PanelLeftClose,
   PanelLeft,
   Rocket,
@@ -39,6 +40,7 @@ type SidebarProps = React.HTMLAttributes<HTMLDivElement> & {
 const routes = [
   { label: "Dashboard", icon: LayoutDashboard, href: "/dashboard" },
   { label: "Research", icon: FlaskConical, href: "/research" },
+  { label: "Signals", icon: BellDot, href: "/signals" },
   { label: "Scholars", icon: Users, href: "/scholars" },
   { label: "Papers", icon: FileText, href: "/papers" },
   { label: "Skills", icon: Sparkles, href: "/skills" },

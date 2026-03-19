@@ -16,6 +16,13 @@ export interface DashboardIntelligenceCard {
   timestamp?: string | null
 }
 
+export interface DashboardIntelligenceSummary {
+  totalCount: number
+  matchedCount: number
+  risingCount: number
+  sourceCount: number
+}
+
 function buildMetricLabel(item: IntelligenceFeedItem): string {
   const metricName = String(item.metric?.name || "").trim()
   const metricValue = Number(item.metric?.value || 0)
@@ -99,7 +106,7 @@ export function buildDashboardIntelligenceCards(
     ]
   }
 
-  return items.slice(0, 3).map((item) => {
+  return items.map((item) => {
     const href = buildSignalHref(item)
     const firstTrack = (item.matched_tracks || [])[0]
     return {
@@ -118,4 +125,22 @@ export function buildDashboardIntelligenceCards(
       timestamp: item.detected_at || item.published_at || null,
     }
   })
+}
+
+export function summarizeDashboardIntelligence(
+  items: IntelligenceFeedItem[],
+): DashboardIntelligenceSummary {
+  const totalCount = items.length
+  const matchedCount = items.filter((item) => (item.matched_tracks || []).length > 0).length
+  const risingCount = items.filter((item) => Number(item.metric?.delta || 0) > 0).length
+  const sourceCount = new Set(
+    items.map((item) => String(item.source_label || item.source || "").trim()).filter(Boolean),
+  ).size
+
+  return {
+    totalCount,
+    matchedCount,
+    risingCount,
+    sourceCount,
+  }
 }

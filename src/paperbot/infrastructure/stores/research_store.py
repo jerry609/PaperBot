@@ -83,6 +83,66 @@ def _parse_datetime(value: Any) -> Optional[datetime]:
         return None
 
 
+def _load_json_dict(raw: Any) -> Dict[str, Any]:
+    if isinstance(raw, dict):
+        return dict(raw)
+    if not raw:
+        return {}
+
+    try:
+        data = json.loads(raw if isinstance(raw, str) else str(raw))
+        if isinstance(data, dict):
+            return data
+    except Exception:
+        pass
+    return {}
+
+
+_SAVED_PAPER_PROVENANCE_LABELS: Dict[str, str] = {
+    "manual_save": "Saved manually",
+    "research_context": "Context pack",
+    "research_search": "Research search",
+    "discovery_graph": "Discovery graph",
+    "daily_brief": "Daily Brief",
+    "track_feed": "Track feed",
+    "reading_queue": "Reading queue",
+    "dashboard_recommendation": "Dashboard recommendation",
+    "signal": "Signal radar",
+    "intelligence_feed": "Signal radar",
+    "bibtex": "BibTeX import",
+    "zotero": "Zotero sync",
+    "personalized_routing": "Personalized routing",
+    "global_routing": "Global routing",
+}
+
+_WORKFLOW_PROVENANCE_KEYS = {
+    "research_context",
+    "research_search",
+    "discovery_graph",
+    "daily_brief",
+    "track_feed",
+    "reading_queue",
+    "dashboard_recommendation",
+    "signal",
+    "intelligence_feed",
+    "personalized_routing",
+    "global_routing",
+}
+
+
+def _normalize_saved_paper_provenance(value: Any) -> Optional[str]:
+    normalized = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+    return normalized or None
+
+
+def _label_saved_paper_provenance(value: str) -> str:
+    normalized = _normalize_saved_paper_provenance(value) or "manual_save"
+    return _SAVED_PAPER_PROVENANCE_LABELS.get(
+        normalized,
+        normalized.replace("_", " ").strip().title(),
+    )
+
+
 _FEEDBACK_ACTION_ALIASES: Dict[str, str] = {
     "not_relevant": "dislike",
     "not-relevant": "dislike",
@@ -765,6 +825,7 @@ class SqlAlchemyResearchStore(FeedbackPort):
         with self._provider.session() as session:
             saved_at_by_paper: Dict[int, datetime] = {}
             saved_track_membership: Dict[int, set[int]] = defaultdict(set)
+            latest_save_feedback_by_paper: Dict[int, PaperFeedbackModel] = {}
 
             status_rows = (
                 session.execute(
@@ -820,6 +881,8 @@ class SqlAlchemyResearchStore(FeedbackPort):
                 # Global latest save/unsave per paper (track-agnostic)
                 if pid not in latest_save_state:
                     latest_save_state[pid] = (normalized_action == "save", row.ts)
+                    if normalized_action == "save":
+                        latest_save_feedback_by_paper[pid] = row
 
             for pid, (is_saved, ts) in latest_save_state.items():
                 if not is_saved:
@@ -865,6 +928,32 @@ class SqlAlchemyResearchStore(FeedbackPort):
                 if not paper_ids:
                     return []
 
+            saved_track_ids = sorted(
+                {
+                    int(track_ref)
+                    for track_refs in saved_track_membership.values()
+                    for track_ref in track_refs
+                    if int(track_ref or 0) > 0
+                }
+            )
+            track_name_by_id: Dict[int, str] = {}
+            if saved_track_ids:
+                track_rows = (
+                    session.execute(
+                        select(ResearchTrackModel).where(
+                            ResearchTrackModel.user_id == user_id,
+                            ResearchTrackModel.id.in_(saved_track_ids),
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                track_name_by_id = {
+                    int(track_row.id): str(track_row.name or "").strip()
+                    for track_row in track_rows
+                    if int(track_row.id or 0) > 0
+                }
+
             papers = (
                 session.execute(select(PaperModel).where(PaperModel.id.in_(paper_ids)))
                 .scalars()
@@ -898,9 +987,19 @@ class SqlAlchemyResearchStore(FeedbackPort):
                 pid = int(paper.id)
                 status_row = status_by_paper.get(pid)
                 judge_row = latest_judge_by_paper.get(pid)
+                track_names = [
+                    track_name_by_id[track_ref]
+                    for track_ref in sorted(saved_track_membership.get(pid, set()))
+                    if track_name_by_id.get(track_ref)
+                ]
                 rows.append(
                     {
                         "paper": self._paper_to_dict(paper),
+                        "track_id": (
+                            min(saved_track_membership.get(pid, set()))
+                            if saved_track_membership.get(pid)
+                            else None
+                        ),
                         "saved_at": (
                             saved_at_by_paper.get(pid).isoformat()
                             if saved_at_by_paper.get(pid)
@@ -910,6 +1009,12 @@ class SqlAlchemyResearchStore(FeedbackPort):
                             self._reading_status_to_dict(status_row) if status_row else None
                         ),
                         "latest_judge": self._judge_score_to_dict(judge_row) if judge_row else None,
+                        "provenance": self._build_saved_paper_provenance(
+                            status_row=status_row,
+                            save_feedback_row=latest_save_feedback_by_paper.get(pid),
+                            judge_row=judge_row,
+                            track_names=track_names,
+                        ),
                     }
                 )
 
@@ -2070,6 +2175,64 @@ class SqlAlchemyResearchStore(FeedbackPort):
             "judge_cost_tier": row.judge_cost_tier,
             "scored_at": row.scored_at.isoformat() if row.scored_at else None,
             "metadata": metadata,
+        }
+
+    @classmethod
+    def _build_saved_paper_provenance(
+        cls,
+        *,
+        status_row: Optional[PaperReadingStatusModel],
+        save_feedback_row: Optional[PaperFeedbackModel],
+        judge_row: Optional[PaperJudgeScoreModel],
+        track_names: List[str],
+    ) -> Dict[str, Any]:
+        status_metadata = _load_json_dict(
+            getattr(status_row, "metadata_json", "{}") if status_row else "{}"
+        )
+        save_metadata = _load_json_dict(
+            getattr(save_feedback_row, "metadata_json", "{}") if save_feedback_row else "{}"
+        )
+        metadata = {**status_metadata, **save_metadata}
+
+        primary = _normalize_saved_paper_provenance(metadata.get("import_source"))
+        if not primary:
+            if metadata.get("context_run_id") is not None or metadata.get("context_rank") is not None:
+                primary = "research_context"
+            else:
+                retrieval_sources = metadata.get("retrieval_sources")
+                if isinstance(retrieval_sources, list) and any(
+                    str(source).strip() for source in retrieval_sources
+                ):
+                    primary = "research_search"
+                else:
+                    anchor_mode = _normalize_saved_paper_provenance(metadata.get("anchor_mode"))
+                    if anchor_mode in {"personalized", "global"}:
+                        primary = f"{anchor_mode}_routing"
+                    else:
+                        primary = "manual_save"
+
+        labels: List[str] = []
+        seen_labels: set[str] = set()
+
+        def push(label: str) -> None:
+            cleaned = str(label or "").strip()
+            if not cleaned or cleaned in seen_labels:
+                return
+            seen_labels.add(cleaned)
+            labels.append(cleaned)
+
+        push(_label_saved_paper_provenance(primary))
+        for track_name in track_names[:3]:
+            push(f"Track: {track_name}")
+        if judge_row is not None:
+            push("Workflow reviewed")
+
+        return {
+            "primary": primary,
+            "labels": labels,
+            "is_manual": primary == "manual_save",
+            "is_workflow": bool(judge_row is not None or primary in _WORKFLOW_PROVENANCE_KEYS),
+            "track_names": track_names,
         }
 
     @staticmethod
