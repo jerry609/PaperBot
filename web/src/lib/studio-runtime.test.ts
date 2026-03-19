@@ -39,6 +39,12 @@ describe("buildStudioRuntimeInfo", () => {
             scope: "project",
             tools: ["paper_search"],
             recommended_for: ["paper", "context_pack"],
+            ecosystems: ["claude_code", "opencode"],
+            primary_ecosystem: "claude_code",
+            paths: [
+              ".claude/skills/paper-reproduction",
+              ".opencode/skills/paper-reproduction",
+            ],
             manifest_source: "skill.json",
             path: ".claude/skills/paper-reproduction",
             prompt_hint: "Use the selected paper.",
@@ -77,6 +83,8 @@ describe("buildStudioRuntimeInfo", () => {
       id: "paper-reproduction",
       slashCommand: "/paper-reproduction",
       scope: "project",
+      ecosystems: ["claude_code", "opencode"],
+      primaryEcosystem: "claude_code",
     })
     expect(info.statusLabel).toBe("Managed chat · CLI print · CLI 2.1.76")
     expect(info.codeModeEnabled).toBe(true)

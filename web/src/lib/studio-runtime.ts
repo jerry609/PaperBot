@@ -36,6 +36,9 @@ export interface StudioSkillPayload {
   scope?: string | null
   tools?: string[] | null
   recommended_for?: string[] | null
+  ecosystems?: string[] | null
+  primary_ecosystem?: string | null
+  paths?: string[] | null
   manifest_source?: string | null
   path?: string | null
   prompt_hint?: string | null
@@ -63,6 +66,9 @@ export interface StudioSkillInfo {
   scope: string
   tools: string[]
   recommendedFor: string[]
+  ecosystems: string[]
+  primaryEcosystem: string | null
+  paths: string[]
   manifestSource: string | null
   path: string | null
   promptHint: string | null
@@ -124,6 +130,21 @@ function normalizeChatTransport(value: unknown): StudioChatTransport {
   return "unknown"
 }
 
+function cleanStringList(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+
+  const normalized: string[] = []
+  const seen = new Set<string>()
+  for (const item of value) {
+    if (typeof item !== "string") continue
+    const cleaned = item.trim()
+    if (!cleaned || seen.has(cleaned)) continue
+    seen.add(cleaned)
+    normalized.push(cleaned)
+  }
+  return normalized
+}
+
 function formatTransportLabel(transport: StudioChatTransport): string {
   if (transport === "claude_agent_sdk") return "Agent SDK"
   if (transport === "claude_cli_print") return "CLI print"
@@ -143,6 +164,9 @@ function normalizeStudioSkills(value: unknown): StudioSkillInfo[] {
     const id = cleanString(payload.id)
     const title = cleanString(payload.title)
     const slashCommand = cleanString(payload.slash_command)
+    const path = cleanString(payload.path)
+    const primaryEcosystem = cleanString(payload.primary_ecosystem)
+    const paths = cleanStringList(payload.paths)
     if (!id || !title || !slashCommand) continue
 
     const key = `${id}:${slashCommand}`
@@ -155,14 +179,13 @@ function normalizeStudioSkills(value: unknown): StudioSkillInfo[] {
       description: cleanString(payload.description) ?? "",
       slashCommand,
       scope: cleanString(payload.scope) ?? "project",
-      tools: Array.isArray(payload.tools)
-        ? payload.tools.filter((tool): tool is string => typeof tool === "string" && tool.trim().length > 0)
-        : [],
-      recommendedFor: Array.isArray(payload.recommended_for)
-        ? payload.recommended_for.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
-        : [],
+      tools: cleanStringList(payload.tools),
+      recommendedFor: cleanStringList(payload.recommended_for),
+      ecosystems: cleanStringList(payload.ecosystems),
+      primaryEcosystem,
+      paths: paths.length > 0 ? paths : path ? [path] : [],
       manifestSource: cleanString(payload.manifest_source),
-      path: cleanString(payload.path),
+      path,
       promptHint: cleanString(payload.prompt_hint),
     })
   }

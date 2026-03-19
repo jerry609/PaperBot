@@ -18,6 +18,9 @@ class StudioSkillSummary:
     scope: str
     tools: List[str] = field(default_factory=list)
     recommended_for: List[str] = field(default_factory=list)
+    ecosystems: List[str] = field(default_factory=list)
+    primary_ecosystem: Optional[str] = None
+    paths: List[str] = field(default_factory=list)
     manifest_source: str = "frontmatter"
     path: str = ""
     prompt_hint: Optional[str] = None
@@ -28,6 +31,11 @@ class StudioSkillSummary:
 
 _FRONTMATTER_PATTERN = re.compile(r"^---\s*\n(.*?)\n---\s*(?:\n|$)", re.DOTALL)
 _SLUG_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]*$", re.IGNORECASE)
+_SKILL_DISCOVERY_ROOTS = (
+    ("claude_code", ".claude/skills"),
+    ("opencode", ".opencode/skills"),
+    ("github_copilot", ".github/skills"),
+)
 
 
 def _repository_root() -> Path:
@@ -59,6 +67,19 @@ def _normalize_string_list(value: Any) -> List[str]:
         seen.add(cleaned)
         normalized.append(cleaned)
     return normalized
+
+
+def _merge_string_lists(*groups: List[str]) -> List[str]:
+    merged: List[str] = []
+    seen: set[str] = set()
+    for group in groups:
+        for item in group:
+            cleaned = _normalize_text(item)
+            if not cleaned or cleaned in seen:
+                continue
+            seen.add(cleaned)
+            merged.append(cleaned)
+    return merged
 
 
 def _humanize_skill_id(value: str) -> str:
@@ -160,7 +181,7 @@ def _resolve_skill_path(skill_dir: Path, repo_root: Path) -> str:
         return str(skill_dir)
 
 
-def _load_skill_summary(skill_dir: Path, repo_root: Path) -> Optional[StudioSkillSummary]:
+def _load_skill_summary(skill_dir: Path, repo_root: Path, ecosystem: str) -> Optional[StudioSkillSummary]:
     manifest = _read_skill_manifest(skill_dir / "skill.json")
     frontmatter = _read_frontmatter(skill_dir / "SKILL.md")
     if not manifest and not frontmatter:
@@ -175,22 +196,52 @@ def _load_skill_summary(skill_dir: Path, repo_root: Path) -> Optional[StudioSkil
         scope="project",
         tools=_normalize_string_list(manifest.get("tools")) or _normalize_string_list(frontmatter.get("tools")),
         recommended_for=_normalize_string_list(manifest.get("recommended_for")),
+        ecosystems=[ecosystem],
+        primary_ecosystem=ecosystem,
+        paths=[_resolve_skill_path(skill_dir, repo_root)],
         manifest_source="skill.json" if manifest else "frontmatter",
         path=_resolve_skill_path(skill_dir, repo_root),
         prompt_hint=_normalize_text(manifest.get("prompt_hint")),
     )
 
 
+def _merge_skill_summaries(existing: StudioSkillSummary, incoming: StudioSkillSummary) -> StudioSkillSummary:
+    return StudioSkillSummary(
+        id=existing.id,
+        title=existing.title or incoming.title,
+        description=existing.description or incoming.description,
+        slash_command=existing.slash_command or incoming.slash_command,
+        scope=existing.scope or incoming.scope,
+        tools=_merge_string_lists(existing.tools, incoming.tools),
+        recommended_for=_merge_string_lists(existing.recommended_for, incoming.recommended_for),
+        ecosystems=_merge_string_lists(existing.ecosystems, incoming.ecosystems),
+        primary_ecosystem=existing.primary_ecosystem or incoming.primary_ecosystem,
+        paths=_merge_string_lists(existing.paths, incoming.paths),
+        manifest_source=existing.manifest_source or incoming.manifest_source,
+        path=existing.path or incoming.path,
+        prompt_hint=existing.prompt_hint or incoming.prompt_hint,
+    )
+
+
 def discover_studio_skills(repo_root: Optional[Path] = None) -> List[StudioSkillSummary]:
     root = (repo_root or _repository_root()).resolve()
-    skills_root = root / ".claude" / "skills"
-    if not skills_root.is_dir():
-        return []
+    discovered_by_key: Dict[str, StudioSkillSummary] = {}
 
-    discovered: List[StudioSkillSummary] = []
-    for skill_dir in sorted(path for path in skills_root.iterdir() if path.is_dir()):
-        summary = _load_skill_summary(skill_dir, root)
-        if summary is not None:
-            discovered.append(summary)
+    for ecosystem, relative_root in _SKILL_DISCOVERY_ROOTS:
+        skills_root = root / relative_root
+        if not skills_root.is_dir():
+            continue
 
-    return discovered
+        for skill_dir in sorted(path for path in skills_root.iterdir() if path.is_dir()):
+            summary = _load_skill_summary(skill_dir, root, ecosystem)
+            if summary is None:
+                continue
+
+            key = summary.id.strip().lower()
+            existing = discovered_by_key.get(key)
+            if existing is None:
+                discovered_by_key[key] = summary
+            else:
+                discovered_by_key[key] = _merge_skill_summaries(existing, summary)
+
+    return sorted(discovered_by_key.values(), key=lambda skill: (skill.title.lower(), skill.id.lower()))

@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest"
 
-import { buildStudioSkillPrompt, parseStudioSkillSlashCommand } from "./studio-skills"
+import {
+  buildStudioSkillAvailabilityLabel,
+  buildStudioSkillPrompt,
+  formatStudioSkillEcosystemLabel,
+  parseStudioSkillSlashCommand,
+} from "./studio-skills"
 import type { StudioSkillInfo } from "./studio-runtime"
 
 const SAMPLE_SKILL: StudioSkillInfo = {
@@ -11,6 +16,9 @@ const SAMPLE_SKILL: StudioSkillInfo = {
   scope: "project",
   tools: ["paper_search", "paper_judge"],
   recommendedFor: ["paper", "context_pack"],
+  ecosystems: ["claude_code", "opencode"],
+  primaryEcosystem: "claude_code",
+  paths: [".claude/skills/paper-reproduction", ".opencode/skills/paper-reproduction"],
   manifestSource: "skill.json",
   path: ".claude/skills/paper-reproduction",
   promptHint: "Start with a concise plan.",
@@ -46,5 +54,16 @@ describe("buildStudioSkillPrompt", () => {
     expect(prompt).toContain("Workspace path: /tmp/paperbot-demo")
     expect(prompt).toContain("User request:")
     expect(prompt).toContain("implement the baseline")
+  })
+})
+
+describe("skill metadata helpers", () => {
+  it("formats supported skill ecosystems into product labels", () => {
+    expect(formatStudioSkillEcosystemLabel("claude_code")).toBe("Claude Code")
+    expect(formatStudioSkillEcosystemLabel("github_copilot")).toBe("GitHub Copilot")
+  })
+
+  it("builds a combined availability label for multi-product skills", () => {
+    expect(buildStudioSkillAvailabilityLabel(SAMPLE_SKILL)).toBe("Claude Code + OpenCode")
   })
 })

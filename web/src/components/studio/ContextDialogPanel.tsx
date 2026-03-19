@@ -1,26 +1,32 @@
 "use client"
 
-import { useMemo, useState, type ElementType, type ReactNode } from "react"
+import { useMemo, useState, type ReactNode } from "react"
 import {
   Activity,
   AlertCircle,
-  Bot,
+  Check,
   CheckCircle2,
   ChevronDown,
-  ChevronRight,
   ChevronUp,
+  Copy,
+  FileText,
+  FolderOpen,
   Loader2,
   Package,
   Play,
   Sparkles,
   Wrench,
 } from "lucide-react"
-import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { ContextPackPanel } from "./ContextPackPanel"
 import { cn } from "@/lib/utils"
 import type { StudioSkillInfo } from "@/lib/studio-runtime"
+import {
+  buildStudioSkillAvailabilityLabel,
+  formatStudioSkillEcosystemLabel,
+} from "@/lib/studio-skills"
 import type {
   ContextPackSession,
   GenerationStatus,
@@ -39,6 +45,12 @@ const STAGE_LABELS: Record<string, string> = {
 }
 
 const STAGE_ORDER = Object.keys(STAGE_LABELS)
+const SKILL_DIRECTORY_HINTS = [".claude/skills", ".opencode/skills", ".github/skills"]
+const RECOMMENDED_TARGET_LABELS: Record<string, string> = {
+  paper: "Paper",
+  context_pack: "Paper context",
+  workspace: "Workspace",
+}
 
 type PaperLite = {
   id: string
@@ -75,146 +87,249 @@ function stageRank(stage: string): number {
   return index === -1 ? 99 : index
 }
 
-function Actor({
-  icon: Icon,
-  tone = "assistant",
-}: {
-  icon: ElementType
-  tone?: "assistant" | "tool" | "success" | "error" | "muted"
-}) {
-  return (
-    <Avatar
-      className={cn(
-        "mt-0.5 h-7 w-7 border",
-        tone === "assistant" && "border-primary/20 bg-primary/10 text-primary",
-        tone === "tool" && "border-amber-200 bg-amber-50 text-amber-700",
-        tone === "success" && "border-emerald-200 bg-emerald-50 text-emerald-700",
-        tone === "error" && "border-red-200 bg-red-50 text-red-600",
-        tone === "muted" && "border-border bg-muted text-muted-foreground",
-      )}
-    >
-      <AvatarFallback className="bg-transparent">
-        <Icon className="h-3.5 w-3.5" />
-      </AvatarFallback>
-    </Avatar>
-  )
+function uniqueStrings(values: string[]): string[] {
+  return Array.from(new Set(values.filter((value) => value.trim().length > 0)))
 }
 
-function MessageShell({
-  icon,
-  actor,
-  badge,
-  tone = "assistant",
+function formatRecommendedTargets(skill: StudioSkillInfo): string[] {
+  return skill.recommendedFor.map((entry) => RECOMMENDED_TARGET_LABELS[entry] ?? entry)
+}
+
+function buildContextStatusLabel(
+  generationStatus: GenerationStatus,
+  contextPack: ReproContextPack | null,
+  contextPackLoading: boolean,
+  contextPackError: string | null,
+): { label: string; className: string } {
+  if (contextPackError) {
+    return {
+      label: "Needs attention",
+      className: "border-rose-200 bg-rose-50 text-rose-700",
+    }
+  }
+  if (generationStatus === "generating" || contextPackLoading) {
+    return {
+      label: "Generating",
+      className: "border-amber-200 bg-amber-50 text-amber-700",
+    }
+  }
+  if (contextPack) {
+    return {
+      label: "Ready",
+      className: "border-emerald-200 bg-emerald-50 text-emerald-700",
+    }
+  }
+  return {
+    label: "Optional",
+    className: "border-slate-200 bg-[#f7f8f4] text-slate-600",
+  }
+}
+
+function SectionCard({
+  eyebrow,
+  title,
+  description,
+  action,
   children,
 }: {
-  icon: ElementType
-  actor: string
-  badge?: string
-  tone?: "assistant" | "tool" | "success" | "error" | "muted"
+  eyebrow: string
+  title: string
+  description: string
+  action?: ReactNode
   children: ReactNode
 }) {
   return (
-    <div className="flex items-start gap-3">
-      <Actor icon={icon} tone={tone} />
-      <div className="min-w-0 flex-1">
-        <div className="mb-1 flex items-center gap-2 text-[11px] text-muted-foreground">
-          <span className="font-medium">{actor}</span>
-          {badge ? (
-            <Badge variant="outline" className="h-5 px-1.5 text-[10px]">
-              {badge}
-            </Badge>
-          ) : null}
+    <section className="rounded-[24px] border border-slate-200 bg-white/95 shadow-[0_16px_32px_rgba(15,23,42,0.04)]">
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-200 px-4 py-4">
+        <div className="min-w-0 flex-1">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">{eyebrow}</p>
+          <h2 className="mt-1 text-[18px] font-semibold tracking-[-0.02em] text-slate-950">{title}</h2>
+          <p className="mt-1 max-w-[48rem] text-sm leading-6 text-slate-600">{description}</p>
         </div>
-        {children}
+        {action ? <div className="shrink-0">{action}</div> : null}
       </div>
-    </div>
+      <div className="px-4 py-4">{children}</div>
+    </section>
   )
 }
 
-function TextCard({ children }: { children: ReactNode }) {
-  return (
-    <div className="rounded-xl border bg-card px-3.5 py-3 text-sm leading-6 text-foreground/90">
-      {children}
-    </div>
-  )
-}
-
-function ProgressFormCard({ event }: { event: StageProgressEvent }) {
+function ContextProgressCard({ event }: { event: StageProgressEvent }) {
   const pct = Math.round(event.progress * 100)
   const isDone = pct >= 100
+
   return (
-    <MessageShell
-      icon={isDone ? CheckCircle2 : Activity}
-      actor="Extractor"
-      badge={stageLabel(event.stage)}
-      tone={isDone ? "success" : "tool"}
-    >
-      <div className="overflow-hidden rounded-xl border bg-muted/20">
-        <div className="border-b bg-background/70 px-3 py-2 text-sm font-medium">
-          {isDone ? "Stage completed" : "Stage running"}
+    <div className="rounded-[20px] border border-slate-200 bg-[#fafaf7] px-3 py-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          {isDone ? (
+            <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+          ) : (
+            <Activity className="h-4 w-4 text-amber-600" />
+          )}
+          <p className="text-sm font-medium text-slate-900">{stageLabel(event.stage)}</p>
         </div>
-        <div className="px-3 py-2 text-sm text-foreground/90">
-          {event.message || "Running extraction..."}
+        <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-slate-500">
+          {isDone ? "Completed" : `${pct}%`}
+        </span>
+      </div>
+      <p className="mt-2 text-sm leading-6 text-slate-600">{event.message || "Running extraction..."}</p>
+      <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-slate-200">
+        <div
+          className={cn("h-full rounded-full transition-all", isDone ? "bg-emerald-500" : "bg-slate-900")}
+          style={{ width: `${Math.max(0, Math.min(100, pct))}%` }}
+        />
+      </div>
+    </div>
+  )
+}
+
+function ContextObservationCard({ event }: { event: StageObservationsEvent }) {
+  return (
+    <div className="rounded-[20px] border border-slate-200 bg-white px-3 py-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <Wrench className="h-4 w-4 text-slate-500" />
+          <p className="text-sm font-medium text-slate-900">{stageLabel(event.stage)}</p>
         </div>
-        <div className="px-3 pb-3">
-          <div className="mb-1 flex items-center justify-between text-xs text-muted-foreground">
-            <span>Progress</span>
-            <span>{pct}%</span>
-          </div>
-          <div className="h-1.5 overflow-hidden rounded-full bg-background/70">
+        <span className="rounded-full border border-slate-200 bg-[#f7f8f4] px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-slate-500">
+          {event.observations.length} findings
+        </span>
+      </div>
+      {event.observations.length === 0 ? (
+        <p className="mt-2 text-sm text-slate-500">No observations emitted yet.</p>
+      ) : (
+        <div className="mt-3 space-y-2">
+          {event.observations.slice(0, 5).map((observation) => (
             <div
-              className={cn("h-full rounded-full transition-all", isDone ? "bg-emerald-500" : "bg-primary")}
-              style={{ width: `${Math.max(0, Math.min(100, pct))}%` }}
-            />
-          </div>
+              key={observation.id}
+              className="flex items-center gap-2 rounded-[14px] border border-slate-200 bg-[#fafaf7] px-2.5 py-2"
+            >
+              <Badge variant="outline" className="text-[10px]">
+                {observation.type}
+              </Badge>
+              <span className="min-w-0 flex-1 truncate text-sm text-slate-700">{observation.title}</span>
+              <span className="text-[11px] text-slate-500">{Math.round(observation.confidence * 100)}%</span>
+            </div>
+          ))}
+          {event.observations.length > 5 ? (
+            <p className="text-xs text-slate-500">+{event.observations.length - 5} more findings</p>
+          ) : null}
         </div>
-      </div>
-    </MessageShell>
+      )}
+    </div>
   )
 }
 
-function ObservationFormCard({ event }: { event: StageObservationsEvent }) {
+function ContextSummaryCard({ stage, count }: { stage: string; count: number }) {
   return (
-    <MessageShell icon={Wrench} actor="Tool Result" badge={stageLabel(event.stage)} tone="assistant">
-      <div className="overflow-hidden rounded-xl border bg-muted/20">
-        <div className="border-b bg-background/70 px-3 py-2 text-sm font-medium">
-          Extracted findings ({event.observations.length})
-        </div>
-        {event.observations.length === 0 ? (
-          <div className="px-3 py-2 text-sm text-muted-foreground">No observations emitted yet.</div>
-        ) : (
-          <div className="divide-y">
-            {event.observations.slice(0, 6).map((obs) => (
-              <div key={obs.id} className="flex items-center gap-2 px-3 py-2 text-sm">
-                <span className="text-muted-foreground">•</span>
-                <Badge variant="outline" className="text-[10px]">
-                  {obs.type}
-                </Badge>
-                <span className="min-w-0 flex-1 truncate text-foreground/90">{obs.title}</span>
-                <span className="text-xs text-muted-foreground">{Math.round(obs.confidence * 100)}%</span>
-                <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
-              </div>
-            ))}
-            {event.observations.length > 6 ? (
-              <div className="px-3 py-2 text-xs text-muted-foreground">
-                +{event.observations.length - 6} more observations
-              </div>
+    <div className="rounded-[18px] border border-slate-200 bg-[#eef1ea] px-3 py-2.5 text-sm leading-6 text-slate-700">
+      {stageLabel(stage)} completed with {count} extracted signal{count === 1 ? "" : "s"}.
+    </div>
+  )
+}
+
+function SkillCard({
+  skill,
+  recommended,
+  copied,
+  onInsertSkill,
+  onCopySkill,
+}: {
+  skill: StudioSkillInfo
+  recommended: boolean
+  copied: boolean
+  onInsertSkill?: (slashCommand: string) => void
+  onCopySkill: (slashCommand: string, skillId: string) => void
+}) {
+  const ecosystems =
+    skill.ecosystems.length > 0
+      ? skill.ecosystems
+      : skill.primaryEcosystem
+        ? [skill.primaryEcosystem]
+        : []
+  const targets = formatRecommendedTargets(skill)
+  const availabilityLabel = buildStudioSkillAvailabilityLabel(skill)
+  const preferredPath = skill.path || skill.paths[0] || "Skill directory unavailable"
+
+  return (
+    <div className="rounded-[22px] border border-slate-200 bg-[#fafaf7] px-4 py-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-[15px] font-semibold text-slate-950">{skill.title}</p>
+            {recommended ? (
+              <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-emerald-700">
+                Suggested
+              </span>
             ) : null}
+            <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-slate-500">
+              {skill.scope}
+            </span>
           </div>
-        )}
+          <p className="mt-1.5 text-sm leading-6 text-slate-600">
+            {skill.description || "No description provided in this skill manifest."}
+          </p>
+        </div>
+        <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 font-mono text-[10px] text-slate-600">
+          {skill.slashCommand}
+        </span>
       </div>
-    </MessageShell>
-  )
-}
 
-function StageSummaryText({ stage, count }: { stage: string; count: number }) {
-  return (
-    <MessageShell icon={Bot} actor="DeepCode" badge="Summary" tone="muted">
-      <TextCard>
-        Completed {stageLabel(stage)} and extracted {count} observation{count === 1 ? "" : "s"}.
-        Next stage will continue refining reproducibility signals.
-      </TextCard>
-    </MessageShell>
+      <div className="mt-3 flex flex-wrap gap-1.5">
+        {ecosystems.map((ecosystem) => (
+          <Badge key={`${skill.id}:${ecosystem}`} variant="outline" className="h-5 text-[10px]">
+            {formatStudioSkillEcosystemLabel(ecosystem)}
+          </Badge>
+        ))}
+        {targets.map((target) => (
+          <Badge key={`${skill.id}:target:${target}`} variant="outline" className="h-5 text-[10px]">
+            {target}
+          </Badge>
+        ))}
+        {skill.tools.slice(0, 3).map((tool) => (
+          <Badge key={`${skill.id}:tool:${tool}`} variant="outline" className="h-5 text-[10px]">
+            {tool}
+          </Badge>
+        ))}
+        {skill.tools.length > 3 ? (
+          <Badge variant="outline" className="h-5 text-[10px]">
+            +{skill.tools.length - 3} tools
+          </Badge>
+        ) : null}
+      </div>
+
+      <div className="mt-3 grid gap-2 sm:grid-cols-2">
+        <div className="rounded-[16px] border border-slate-200 bg-white px-3 py-2">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Availability</p>
+          <p className="mt-1 text-[11px] text-slate-700">{availabilityLabel}</p>
+        </div>
+        <div className="rounded-[16px] border border-slate-200 bg-white px-3 py-2">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Source path</p>
+          <p className="mt-1 break-all font-mono text-[11px] text-slate-700">{preferredPath}</p>
+        </div>
+      </div>
+
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        {onInsertSkill ? (
+          <Button
+            type="button"
+            className="h-8 rounded-full bg-slate-900 px-3 text-[11px] text-white hover:bg-slate-800"
+            onClick={() => onInsertSkill(skill.slashCommand)}
+          >
+            Use in chat
+          </Button>
+        ) : null}
+        <Button
+          type="button"
+          variant="outline"
+          className="h-8 rounded-full border-slate-200 bg-white px-3 text-[11px] text-slate-700"
+          onClick={() => onCopySkill(skill.slashCommand, skill.id)}
+        >
+          {copied ? <Check className="mr-1.5 h-3.5 w-3.5" /> : <Copy className="mr-1.5 h-3.5 w-3.5" />}
+          {copied ? "Copied" : "Copy slash"}
+        </Button>
+      </div>
+    </div>
   )
 }
 
@@ -233,51 +348,52 @@ export function ContextDialogPanel({
   onDeployToBoard,
 }: Props) {
   const [showFullPack, setShowFullPack] = useState(false)
+  const [copiedSkillId, setCopiedSkillId] = useState<string | null>(null)
 
-  // When restoring from cache/refresh, generationProgress and liveObservations
-  // may be empty even though contextPack is available.  Reconstruct synthetic
-  // timeline entries from the pack so the progress section isn't blank.
   const { effectiveProgress, effectiveObservations } = useMemo(() => {
     if (generationProgress.length > 0 || liveObservations.length > 0 || !contextPack) {
       return { effectiveProgress: generationProgress, effectiveObservations: liveObservations }
     }
 
-    // Group observations by stage, preserving STAGE_ORDER
-    const obsByStage = new Map<string, StageObservationsEvent["observations"]>()
-    for (const obs of contextPack.observations) {
-      const list = obsByStage.get(obs.stage) ?? []
-      list.push({ id: obs.id, type: obs.type, title: obs.title, confidence: obs.confidence })
-      obsByStage.set(obs.stage, list)
+    const observationsByStage = new Map<string, StageObservationsEvent["observations"]>()
+    for (const observation of contextPack.observations) {
+      const list = observationsByStage.get(observation.stage) ?? []
+      list.push({
+        id: observation.id,
+        type: observation.type,
+        title: observation.title,
+        confidence: observation.confidence,
+      })
+      observationsByStage.set(observation.stage, list)
     }
 
     const syntheticProgress: StageProgressEvent[] = []
     const syntheticObservations: StageObservationsEvent[] = []
 
     for (const stage of STAGE_ORDER) {
-      const stageObs = obsByStage.get(stage)
-      if (!stageObs || stageObs.length === 0) continue
+      const stageObservations = observationsByStage.get(stage)
+      if (!stageObservations || stageObservations.length === 0) continue
       syntheticProgress.push({ stage, progress: 1, message: "Stage completed" })
-      syntheticObservations.push({ stage, observations: stageObs })
+      syntheticObservations.push({ stage, observations: stageObservations })
     }
 
-    // Include any stages not in STAGE_ORDER
-    for (const [stage, stageObs] of obsByStage) {
+    for (const [stage, stageObservations] of observationsByStage) {
       if (STAGE_ORDER.includes(stage)) continue
       syntheticProgress.push({ stage, progress: 1, message: "Stage completed" })
-      syntheticObservations.push({ stage, observations: stageObs })
+      syntheticObservations.push({ stage, observations: stageObservations })
     }
 
     return { effectiveProgress: syntheticProgress, effectiveObservations: syntheticObservations }
-  }, [generationProgress, liveObservations, contextPack])
+  }, [contextPack, generationProgress, liveObservations])
 
   const progressTimeline = useMemo(() => {
     const reduced: StageProgressEvent[] = []
     for (const event of effectiveProgress) {
-      const prev = reduced[reduced.length - 1]
-      const messageChanged = (event.message || "") !== (prev?.message || "")
-      const stageChanged = prev?.stage !== event.stage
-      const progressMoved = !prev || Math.abs(event.progress - prev.progress) >= 0.12
-      if (!prev || stageChanged || messageChanged || progressMoved) {
+      const previous = reduced[reduced.length - 1]
+      const messageChanged = (event.message || "") !== (previous?.message || "")
+      const stageChanged = previous?.stage !== event.stage
+      const progressMoved = !previous || Math.abs(event.progress - previous.progress) >= 0.12
+      if (!previous || stageChanged || messageChanged || progressMoved) {
         reduced.push(event)
       }
     }
@@ -285,13 +401,13 @@ export function ContextDialogPanel({
   }, [effectiveProgress])
 
   const sortedLiveObservations = useMemo(
-    () => [...effectiveObservations].sort((a, b) => stageRank(a.stage) - stageRank(b.stage)),
+    () => [...effectiveObservations].sort((left, right) => stageRank(left.stage) - stageRank(right.stage)),
     [effectiveObservations],
   )
 
   const timelineItems = useMemo<TimelineItem[]>(() => {
     const items: TimelineItem[] = []
-    const obsByStage = new Map(sortedLiveObservations.map((entry) => [entry.stage, entry]))
+    const observationsByStage = new Map(sortedLiveObservations.map((entry) => [entry.stage, entry]))
     const lastProgressIndexByStage = new Map<string, number>()
     const renderedObservationStages = new Set<string>()
 
@@ -301,7 +417,7 @@ export function ContextDialogPanel({
 
     progressTimeline.forEach((event, index) => {
       items.push({ kind: "progress", key: `progress-${event.stage}-${index}`, event })
-      const observationEvent = obsByStage.get(event.stage)
+      const observationEvent = observationsByStage.get(event.stage)
       if (observationEvent && lastProgressIndexByStage.get(event.stage) === index) {
         items.push({ kind: "observations", key: `obs-inline-${event.stage}`, event: observationEvent })
         items.push({
@@ -329,174 +445,293 @@ export function ContextDialogPanel({
     return items
   }, [progressTimeline, sortedLiveObservations])
 
+  const contextStatus = buildContextStatusLabel(
+    generationStatus,
+    contextPack,
+    contextPackLoading,
+    contextPackError,
+  )
+  const targetKinds = useMemo(() => (contextPack ? ["context_pack", "paper"] : ["paper"]), [contextPack])
+  const recommendedSkillIds = useMemo(() => {
+    return new Set(
+      skills
+        .filter((skill) => skill.recommendedFor.some((entry) => targetKinds.includes(entry)))
+        .map((skill) => skill.id),
+    )
+  }, [skills, targetKinds])
+
+  const orderedSkills = useMemo(() => {
+    return [...skills].sort((left, right) => {
+      const leftRecommended = recommendedSkillIds.has(left.id) ? 0 : 1
+      const rightRecommended = recommendedSkillIds.has(right.id) ? 0 : 1
+      if (leftRecommended !== rightRecommended) {
+        return leftRecommended - rightRecommended
+      }
+      return left.title.localeCompare(right.title)
+    })
+  }, [recommendedSkillIds, skills])
+
+  const ecosystemBadges = useMemo(
+    () =>
+      uniqueStrings(
+        orderedSkills.flatMap((skill) =>
+          skill.ecosystems.length > 0
+            ? skill.ecosystems
+            : skill.primaryEcosystem
+              ? [skill.primaryEcosystem]
+              : [],
+        ),
+      ),
+    [orderedSkills],
+  )
+
   const hasTimelineActivity =
     timelineItems.length > 0 || contextPackLoading || Boolean(contextPack) || Boolean(contextPackError)
-  const recommendedSkills = useMemo(() => {
-    if (skills.length === 0) return []
-    const targetKinds = contextPack ? ["context_pack", "paper"] : ["paper"]
-    const prioritized = skills.filter((skill) =>
-      skill.recommendedFor.some((entry) => targetKinds.includes(entry)),
-    )
-    return prioritized.length > 0 ? prioritized : skills
-  }, [contextPack, skills])
+
+  async function copySkillSlash(slashCommand: string, skillId: string) {
+    try {
+      await navigator.clipboard.writeText(slashCommand)
+      setCopiedSkillId(skillId)
+      window.setTimeout(() => {
+        setCopiedSkillId((current) => (current === skillId ? null : current))
+      }, 1500)
+    } catch {
+      setCopiedSkillId(null)
+    }
+  }
 
   return (
-    <div className="h-full overflow-auto bg-gradient-to-b from-muted/25 via-background to-background">
-      <div className="mx-auto flex w-full max-w-[860px] flex-col gap-4 px-3 py-4 md:px-4 md:py-5">
-        <MessageShell icon={Bot} actor="DeepCode" badge="Skill Context" tone="muted">
-          <TextCard>
-            Progress and skill context are now presented in a mixed format:
-            narrative text plus structured form cards.
-          </TextCard>
-        </MessageShell>
-
-        {!hasTimelineActivity ? (
-          <MessageShell icon={Sparkles} actor="DeepCode" badge="Action" tone="assistant">
-            <TextCard>
-              <div className="space-y-3">
-                <p>
-                  Build skill context for the selected paper. I will stream progress as form cards and add
-                  concise narrative summaries between steps.
-                </p>
-                {selectedPaper ? (
-                  <Button
-                    size="sm"
-                    onClick={() => onGenerate(selectedPaper)}
-                    disabled={generationStatus === "generating"}
-                  >
-                    {generationStatus === "generating" ? (
-                      <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
-                    ) : (
-                      <Play className="mr-1.5 h-4 w-4" />
-                    )}
-                    Build Skill Context
-                  </Button>
-                ) : (
-                  <p>Select a paper to begin.</p>
-                )}
-              </div>
-            </TextCard>
-          </MessageShell>
-        ) : null}
-
-        {timelineItems.map((item) => {
-          if (item.kind === "progress") return <ProgressFormCard key={item.key} event={item.event} />
-          if (item.kind === "observations") return <ObservationFormCard key={item.key} event={item.event} />
-          return <StageSummaryText key={item.key} stage={item.stage} count={item.count} />
-        })}
-
-        {contextPackLoading ? (
-          <MessageShell icon={Loader2} actor="DeepCode" badge="Finalizing" tone="assistant">
-            <TextCard>
-              <span className="inline-flex items-center gap-2">
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                Finalizing skill context payload and actions...
+    <div className="h-full overflow-auto bg-[#f5f5f2]">
+      <div className="mx-auto flex w-full max-w-[900px] flex-col gap-4 px-3 py-4 md:px-4 md:py-5">
+        <SectionCard
+          eyebrow="Skills"
+          title="Project skills"
+          description="Auto-discovered project skills should be the primary entry point here. They match the standard skill-directory model used by Claude Code, OpenCode, and compatible agent surfaces."
+          action={
+            <div className="flex flex-wrap justify-end gap-1.5">
+              <span className="rounded-full border border-slate-200 bg-[#f7f8f4] px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-slate-500">
+                {orderedSkills.length} skill{orderedSkills.length === 1 ? "" : "s"}
               </span>
-            </TextCard>
-          </MessageShell>
-        ) : null}
-
-        {contextPackError ? (
-          <MessageShell icon={AlertCircle} actor="System" badge="Error" tone="error">
-            <TextCard>{contextPackError}</TextCard>
-          </MessageShell>
-        ) : null}
-
-        {contextPack ? (
-          <>
-            <MessageShell icon={Package} actor="DeepCode" badge="Skill Context" tone="success">
-              <TextCard>
-                <div className="space-y-2">
-                  <p>{contextPack.paper.title}</p>
-                  <div className="flex flex-wrap gap-2">
-                    <Badge variant="outline">
-                      Confidence {Math.round(contextPack.confidence.overall * 100)}%
-                    </Badge>
-                    <Badge variant="outline">{contextPack.observations.length} observations</Badge>
-                    <Badge variant="outline">{contextPack.task_roadmap.length} roadmap steps</Badge>
-                  </div>
-                  <div className="pt-1">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => setShowFullPack((value) => !value)}
-                    >
-                      {showFullPack ? (
-                        <ChevronUp className="mr-1.5 h-4 w-4" />
-                      ) : (
-                        <ChevronDown className="mr-1.5 h-4 w-4" />
-                      )}
-                      {showFullPack ? "Hide skill context" : "Open skill context"}
-                    </Button>
-                  </div>
-                </div>
-              </TextCard>
-            </MessageShell>
-
-            {recommendedSkills.length > 0 ? (
-              <MessageShell icon={Sparkles} actor="DeepCode" badge="Project Skills" tone="assistant">
-                <div className="rounded-xl border bg-card px-3.5 py-3">
-                  <div className="mb-3">
-                    <p className="text-sm font-medium text-foreground">Apply a project skill to this paper</p>
-                    <p className="mt-1 text-sm leading-6 text-foreground/70">
-                      Studio can insert project skills into chat as slash commands and compile them into the managed Claude flow.
-                    </p>
-                  </div>
-                  <div className="space-y-2">
-                    {recommendedSkills.map((skill) => (
-                      <div
-                        key={`${skill.scope}:${skill.id}`}
-                        className="rounded-xl border bg-background/70 px-3 py-3"
-                      >
-                        <div className="flex flex-wrap items-start justify-between gap-3">
-                          <div className="min-w-0 flex-1">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <p className="text-sm font-medium text-foreground">{skill.title}</p>
-                              <Badge variant="outline" className="text-[10px]">
-                                {skill.scope}
-                              </Badge>
-                              <Badge variant="outline" className="font-mono text-[10px]">
-                                {skill.slashCommand}
-                              </Badge>
-                            </div>
-                            {skill.description ? (
-                              <p className="mt-1 text-sm leading-6 text-foreground/70">{skill.description}</p>
-                            ) : null}
-                            {skill.tools.length > 0 ? (
-                              <p className="mt-2 text-xs text-muted-foreground">
-                                Tools: {skill.tools.join(", ")}
-                              </p>
-                            ) : null}
-                          </div>
-                          {onInsertSkill ? (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => onInsertSkill(skill.slashCommand)}
-                            >
-                              Insert
-                            </Button>
-                          ) : null}
-                        </div>
-                      </div>
+              {ecosystemBadges.map((ecosystem) => (
+                <span
+                  key={ecosystem}
+                  className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-slate-500"
+                >
+                  {formatStudioSkillEcosystemLabel(ecosystem)}
+                </span>
+              ))}
+            </div>
+          }
+        >
+          {orderedSkills.length === 0 ? (
+            <div className="rounded-[20px] border border-dashed border-slate-300 bg-[#fafaf7] px-4 py-4">
+              <div className="flex items-start gap-3">
+                <Sparkles className="mt-0.5 h-5 w-5 text-slate-400" />
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-slate-900">No compatible skills discovered</p>
+                  <p className="mt-1 text-sm leading-6 text-slate-600">
+                    Studio now looks for standard skill folders instead of treating paper context as the skill surface.
+                  </p>
+                  <div className="mt-3 flex flex-wrap gap-1.5">
+                    {SKILL_DIRECTORY_HINTS.map((hint) => (
+                      <Badge key={hint} variant="outline" className="font-mono text-[10px]">
+                        {hint}
+                      </Badge>
                     ))}
                   </div>
                 </div>
-              </MessageShell>
-            ) : null}
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {selectedPaper ? (
+                <div className="rounded-[18px] border border-slate-200 bg-[#eef1ea] px-3 py-2.5 text-sm text-slate-700">
+                  Suggested skills are prioritized for <span className="font-medium text-slate-900">{selectedPaper.title}</span>.
+                </div>
+              ) : null}
+              <div className="grid gap-3 lg:grid-cols-2">
+                {orderedSkills.map((skill) => (
+                  <SkillCard
+                    key={`${skill.scope}:${skill.id}`}
+                    skill={skill}
+                    recommended={recommendedSkillIds.has(skill.id)}
+                    copied={copiedSkillId === skill.id}
+                    onInsertSkill={onInsertSkill}
+                    onCopySkill={copySkillSlash}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+        </SectionCard>
 
-            {showFullPack ? (
-              <div className="rounded-2xl border bg-card/70">
-                <ContextPackPanel
-                  pack={contextPack}
-                  onSessionCreated={onSessionCreated}
-                  onDeployToBoard={onDeployToBoard}
-                  className="h-auto overflow-visible p-4"
-                />
+        <SectionCard
+          eyebrow="Paper Context"
+          title="Paper context"
+          description="Paper context is secondary. Generate it when a skill or chat turn needs extracted roadmap steps, environment details, and reproducibility signals for the selected paper."
+          action={
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <span
+                className={cn(
+                  "rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-[0.12em]",
+                  contextStatus.className,
+                )}
+              >
+                {contextStatus.label}
+              </span>
+              <Button
+                type="button"
+                size="sm"
+                className="h-8 rounded-full bg-slate-900 px-3 text-[11px] text-white hover:bg-slate-800"
+                onClick={() => selectedPaper && onGenerate(selectedPaper)}
+                disabled={!selectedPaper || generationStatus === "generating"}
+              >
+                {generationStatus === "generating" ? (
+                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Play className="mr-1.5 h-3.5 w-3.5" />
+                )}
+                {contextPack ? "Refresh context" : "Build context"}
+              </Button>
+            </div>
+          }
+        >
+          <div className="space-y-3">
+            <div className="flex flex-wrap gap-1.5">
+              <Badge variant="outline" className="h-5 text-[10px]">
+                {selectedPaper ? selectedPaper.title : "No paper selected"}
+              </Badge>
+              {contextPack ? (
+                <>
+                  <Badge variant="outline" className="h-5 text-[10px]">
+                    {contextPack.observations.length} findings
+                  </Badge>
+                  <Badge variant="outline" className="h-5 text-[10px]">
+                    {contextPack.task_roadmap.length} roadmap steps
+                  </Badge>
+                  <Badge variant="outline" className="h-5 text-[10px]">
+                    Confidence {Math.round(contextPack.confidence.overall * 100)}%
+                  </Badge>
+                </>
+              ) : null}
+            </div>
+
+            {!selectedPaper ? (
+              <div className="rounded-[18px] border border-dashed border-slate-300 bg-[#fafaf7] px-4 py-4 text-sm leading-6 text-slate-600">
+                Select a paper first. Skills can still be inspected now, but paper context needs a selected paper.
               </div>
             ) : null}
-          </>
-        ) : null}
+
+            {!hasTimelineActivity && selectedPaper ? (
+              <div className="rounded-[18px] border border-slate-200 bg-[#fafaf7] px-4 py-4">
+                <div className="flex items-start gap-3">
+                  <FileText className="mt-0.5 h-5 w-5 text-slate-400" />
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-slate-900">No paper context yet</p>
+                    <p className="mt-1 text-sm leading-6 text-slate-600">
+                      Build it only when the current skill or Claude turn needs paper-specific extraction beyond the abstract and title.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
+            {timelineItems.length > 0 ? (
+              <div className="space-y-2.5">
+                {timelineItems.map((item) => {
+                  if (item.kind === "progress") {
+                    return <ContextProgressCard key={item.key} event={item.event} />
+                  }
+                  if (item.kind === "observations") {
+                    return <ContextObservationCard key={item.key} event={item.event} />
+                  }
+                  return <ContextSummaryCard key={item.key} stage={item.stage} count={item.count} />
+                })}
+              </div>
+            ) : null}
+
+            {contextPackLoading ? (
+              <div className="rounded-[18px] border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
+                <span className="inline-flex items-center gap-2">
+                  <Loader2 className="h-4 w-4 animate-spin text-slate-500" />
+                  Finalizing the paper context payload...
+                </span>
+              </div>
+            ) : null}
+
+            {contextPackError ? (
+              <div className="rounded-[18px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                <span className="inline-flex items-center gap-2">
+                  <AlertCircle className="h-4 w-4" />
+                  {contextPackError}
+                </span>
+              </div>
+            ) : null}
+
+            {contextPack ? (
+              <>
+                <div className="rounded-[20px] border border-slate-200 bg-[#fafaf7] px-4 py-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <Package className="h-4 w-4 text-slate-500" />
+                        <p className="text-sm font-medium text-slate-900">Compiled paper context</p>
+                      </div>
+                      <p className="mt-1 text-sm leading-6 text-slate-600">
+                        Use this when the skill needs extracted findings, roadmap steps, or board deployment.
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-8 rounded-full border-slate-200 bg-white px-3 text-[11px] text-slate-700"
+                      onClick={() => setShowFullPack((value) => !value)}
+                    >
+                      {showFullPack ? (
+                        <ChevronUp className="mr-1.5 h-3.5 w-3.5" />
+                      ) : (
+                        <ChevronDown className="mr-1.5 h-3.5 w-3.5" />
+                      )}
+                      {showFullPack ? "Hide full context" : "Open full context"}
+                    </Button>
+                  </div>
+                </div>
+
+                {showFullPack ? (
+                  <div className="overflow-hidden rounded-[22px] border border-slate-200 bg-white">
+                    <ContextPackPanel
+                      pack={contextPack}
+                      onSessionCreated={onSessionCreated}
+                      onDeployToBoard={onDeployToBoard}
+                      className="h-auto overflow-visible p-4"
+                    />
+                  </div>
+                ) : null}
+              </>
+            ) : null}
+
+            {contextPack && onDeployToBoard ? (
+              <div className="rounded-[18px] border border-slate-200 bg-[#eef1ea] px-4 py-3">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex items-start gap-2">
+                    <FolderOpen className="mt-0.5 h-4 w-4 text-slate-500" />
+                    <p className="text-sm leading-6 text-slate-700">
+                      Once this context is ready, you can keep chat focused and move execution detail into Monitor.
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-8 rounded-full border-slate-200 bg-white px-3 text-[11px] text-slate-700"
+                    onClick={onDeployToBoard}
+                  >
+                    Open Monitor
+                  </Button>
+                </div>
+              </div>
+            ) : null}
+          </div>
+        </SectionCard>
       </div>
     </div>
   )

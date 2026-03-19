@@ -1,5 +1,11 @@
 import type { StudioSkillInfo } from "@/lib/studio-runtime"
 
+const STUDIO_SKILL_ECOSYSTEM_LABELS: Record<string, string> = {
+  claude_code: "Claude Code",
+  opencode: "OpenCode",
+  github_copilot: "GitHub Copilot",
+}
+
 export type ParsedStudioSkillCommand = {
   skill: StudioSkillInfo
   args: string
@@ -77,4 +83,16 @@ export function buildStudioSkillPrompt(
   ].filter((line) => line.trim().length > 0)
 
   return lines.join("\n")
+}
+
+export function formatStudioSkillEcosystemLabel(ecosystem: string): string {
+  return STUDIO_SKILL_ECOSYSTEM_LABELS[ecosystem] ?? ecosystem
+}
+
+export function buildStudioSkillAvailabilityLabel(skill: StudioSkillInfo): string {
+  const ecosystems = skill.ecosystems.length > 0 ? skill.ecosystems : skill.primaryEcosystem ? [skill.primaryEcosystem] : []
+  if (ecosystems.length === 0) {
+    return "Project skill"
+  }
+  return ecosystems.map((entry) => formatStudioSkillEcosystemLabel(entry)).join(" + ")
 }
