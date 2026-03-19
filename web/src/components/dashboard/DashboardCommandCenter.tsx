@@ -3,9 +3,9 @@ import {
   ArrowRight,
   BookOpen,
   CalendarClock,
+  Code2,
   FlaskConical,
   Settings2,
-  Workflow,
   type LucideIcon,
 } from "lucide-react"
 
@@ -60,11 +60,11 @@ export function DashboardCommandCenter({
       tone: "text-emerald-600 bg-emerald-500/10",
     },
     {
-      title: "Workflows",
-      description: "Open the full Search, DailyPaper and analysis workbench",
-      href: "/workflows",
-      icon: Workflow,
-      metric: `${runningPipelines} running`,
+      title: "Studio",
+      description: "Claude chat, attached skills, and live monitor in one surface",
+      href: "/studio",
+      icon: Code2,
+      metric: `${runningPipelines} active runs`,
       tone: "text-violet-600 bg-violet-500/10",
     },
     {

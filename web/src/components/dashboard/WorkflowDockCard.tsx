@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useState } from "react"
 import {
   ArrowRight,
   BookOpen,
@@ -11,8 +11,8 @@ import {
   Mail,
   Megaphone,
   Search,
+  Settings2,
   Sparkles,
-  Workflow,
 } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
@@ -157,12 +157,6 @@ export default function WorkflowDockCard({
     }
   }, [resendEnabled])
 
-  const workflowHref = useMemo(() => {
-    if (!initialQueries?.length) return "/workflows"
-    const params = new URLSearchParams({ query: initialQueries.join(",") })
-    return `/workflows?${params.toString()}`
-  }, [initialQueries])
-
   const queryCount = initialQueries?.length || dailyResult?.report?.stats?.query_count || 0
   const candidateCount =
     searchResult?.summary?.unique_items ?? dailyResult?.report?.stats?.unique_items ?? 0
@@ -181,25 +175,25 @@ export default function WorkflowDockCard({
   const visibleSubscriberCount = resendEnabled ? subscriberCount : null
   const nextStep =
     !hasSearchData
-      ? "先去 Workflows 跑一次 Search，建立今天的候选池。"
+      ? "先在 Research 里跑一次 Search，建立今天的候选池。"
       : !hasReportData
-        ? "下一步生成 DailyPaper，把候选压缩成可交付的 digest。"
+        ? "下一步生成今日 digest，把候选压缩成可交付的 daily brief。"
         : !hasAnalysisData
-          ? "接着跑 Analyze，补齐 Judge 评分与 insight，再决定要不要推送。"
-          : "结果已经成形，适合回到 Workflows 复核后直接交付。"
+          ? "接着补齐 Judge 评分与 insight，再决定要不要推送。"
+          : "结果已经成形，适合回到 Research 或 Papers 复核后直接交付。"
 
   return (
     <article className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
       <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
         <div className="max-w-2xl">
           <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-indigo-600">
-            Workflow Snapshot
+            Daily Brief Snapshot
           </p>
           <h3 className="mt-2 text-2xl font-bold tracking-tight text-slate-900">
-            把完整 Workbench 留给 /workflows，首页只保留一次运行的快照。
+            首页保留研究运行快照与每日订阅状态，不再单独暴露 workflow 页面。
           </h3>
           <p className="mt-3 text-sm leading-6 text-slate-600">
-            这里汇总当前 workflow 的阶段、交付模式和 daily dispatch 状态，让 Dashboard 继续做总览，而不是再嵌一个完整操作台。
+            这里汇总当前检索、digest 和交付状态，让 Dashboard 只承担总览，不再嵌一个完整操作台。
           </p>
         </div>
 
@@ -288,7 +282,7 @@ export default function WorkflowDockCard({
                 Daily Dispatch
               </p>
               <h4 className="mt-2 text-base font-semibold text-slate-900">
-                Workflow 的交付层
+                每日订阅与交付层
               </h4>
             </div>
             <Badge
@@ -323,7 +317,7 @@ export default function WorkflowDockCard({
                 {resendEnabled
                   ? visibleSubscriberCount !== null
                     ? `会把 digest 广播给 ${visibleSubscriberCount} 个 active subscribers。`
-                    : "已启用 newsletter 广播，订阅数会在进入 Workflows 后继续校验。"
+                    : "已启用 newsletter 广播，订阅数会在进入 Settings 后继续校验。"
                   : "当前没有打开面向订阅者的每日推送。"}
               </p>
             </div>
@@ -360,15 +354,15 @@ export default function WorkflowDockCard({
 
       <div className="mt-5 flex flex-wrap gap-3">
         <Button asChild className="rounded-full px-5">
-          <Link href={workflowHref}>
-            <Workflow className="h-4 w-4" />
-            打开 Workflow Workbench
+          <Link href={activeTrackHref}>
+            <Layers3 className="h-4 w-4" />
+            打开 Research Workspace
           </Link>
         </Button>
         <Button asChild variant="outline" className="rounded-full px-5">
-          <Link href={activeTrackHref}>
-            <Layers3 className="h-4 w-4" />
-            回到 Focus Research
+          <Link href="/settings">
+            <Settings2 className="h-4 w-4" />
+            管理 Daily Brief
           </Link>
         </Button>
         <Button asChild variant="ghost" className="rounded-full px-4 text-slate-700">
@@ -398,7 +392,7 @@ export default function WorkflowDockCard({
             Dispatch Rhythm
           </p>
           <p className="mt-2 text-sm leading-6 text-slate-600">
-            现在仍然是“在运行时决定是否推送”的模式。调度与每日广播留在完整 Workflows 中配置。
+            现在仍然是“在运行时决定是否推送”的模式。调度与每日广播统一在 Settings 中配置。
           </p>
         </div>
         <div className="rounded-2xl border border-slate-200 bg-slate-50/70 px-4 py-3">

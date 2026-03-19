@@ -129,7 +129,7 @@ function buildMetric(item: DailyReportItem): string {
 function buildHref(item: DailyReportItem): string {
   const candidates = [item.external_url, item.url, item.pdf_url]
   const href = candidates.find((value) => typeof value === "string" && value.trim())
-  return href?.trim() || "/workflows"
+  return href?.trim() || "/research"
 }
 
 function inferPaperSource(item: DailyReportItem): "arxiv" | "semantic_scholar" | "openalex" | null {

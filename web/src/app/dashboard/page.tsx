@@ -214,7 +214,7 @@ function buildReadingQueueCards(args: {
   } = args
 
   if (recommendations.length > 0) {
-    const sourceLabel = latestBriefSource ? `${latestBriefSource} brief` : "Workflow brief"
+    const sourceLabel = latestBriefSource ? `${latestBriefSource} brief` : "Daily brief"
     const timeLabel = formatRelativeTime(latestBriefTime)
 
     return recommendations.slice(0, 3).map((item, index) => ({
@@ -594,17 +594,17 @@ export default async function DashboardPage() {
 
               <div className="flex flex-wrap gap-2">
                 <Link
-                  href="/workflows"
+                  href={activeTrack ? `/research?track_id=${activeTrack.id}` : "/research"}
                   className="inline-flex min-h-11 items-center gap-2 rounded-full bg-slate-900 px-5 text-sm font-semibold text-white transition-colors hover:bg-slate-800"
                 >
-                  Open Workflows
+                  Open Research
                   <ArrowRight className="size-4" />
                 </Link>
                 <Link
-                  href={activeTrack ? `/research?track_id=${activeTrack.id}` : "/research"}
+                  href="/settings"
                   className="inline-flex min-h-11 items-center gap-2 rounded-full border border-slate-200 bg-white px-5 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50"
                 >
-                  Open Research
+                  Open Settings
                   <ArrowRight className="size-4" />
                 </Link>
               </div>
@@ -705,8 +705,8 @@ export default async function DashboardPage() {
           <section>
             <SectionHeader
               title="Deadlines"
-              actionLabel="Open workflows"
-              actionHref="/workflows"
+              actionLabel="Open research"
+              actionHref={activeTrack ? `/research?track_id=${activeTrack.id}` : "/research"}
             />
             <div className="grid gap-4 lg:grid-cols-3">
               {deadlines.length > 0 ? (
@@ -730,10 +730,10 @@ export default async function DashboardPage() {
                 </div>
                 <div className="flex items-center gap-2">
                   <Link
-                    href="/workflows"
+                    href="/settings"
                     className="inline-flex items-center gap-1 text-sm font-medium text-indigo-600 transition-colors hover:text-indigo-700"
                   >
-                    Run DailyPaper
+                    Manage daily brief
                     <ArrowRight className="size-4" />
                   </Link>
                 </div>
