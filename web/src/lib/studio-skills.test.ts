@@ -56,7 +56,7 @@ describe("buildStudioSkillPrompt", () => {
     const prompt = buildStudioSkillPrompt(SAMPLE_SKILL, "implement the baseline", {
       paperTitle: "Attention Is All You Need",
       contextPackId: "cp-123",
-      workspacePath: "/tmp/paperbot-demo",
+      workspacePath: "/workspace/paperbot-demo",
     })
 
     expect(prompt).toContain("Use the available Studio skill `paper-reproduction`")
@@ -67,7 +67,7 @@ describe("buildStudioSkillPrompt", () => {
     expect(prompt).toContain("Requested context modules: paper_brief, roadmap")
     expect(prompt).toContain("Selected paper: Attention Is All You Need")
     expect(prompt).toContain("Current context pack id: cp-123")
-    expect(prompt).toContain("Workspace path: /tmp/paperbot-demo")
+    expect(prompt).toContain("Workspace path: /workspace/paperbot-demo")
     expect(prompt).toContain("User request:")
     expect(prompt).toContain("implement the baseline")
   })

@@ -18,6 +18,8 @@ from paperbot.api.routes.studio_chat import (
     _make_studio_session_init_event,
 )
 
+_TEST_WORKSPACE_DIR = "/workspace/project"
+
 
 def test_detect_claude_default_model_prefers_workspace_local_then_workspace_then_user(
     monkeypatch,
@@ -61,6 +63,21 @@ def test_studio_chat_request_defaults_model_from_detected_claude_settings(monkey
     request = StudioChatRequest(message="Ship it", mode="Code")
 
     assert request.model == "opus"
+
+
+def test_detect_claude_default_model_details_ignores_disallowed_project_dir(monkeypatch, tmp_path: Path):
+    home_dir = tmp_path / "home"
+    fallback_cwd = tmp_path / "cwd"
+    fallback_cwd.mkdir()
+    (home_dir / ".claude").mkdir(parents=True)
+    (home_dir / ".claude" / "settings.json").write_text('{"model":"opus"}', encoding="utf-8")
+    monkeypatch.setenv("HOME", str(home_dir))
+    monkeypatch.chdir(fallback_cwd)
+
+    detection = studio_chat.detect_claude_default_model_details("/etc")
+
+    assert detection.model == "opus"
+    assert detection.source == "user"
 
 
 def test_build_claude_cli_command_args_includes_print_mode_flags_and_effective_mode():
@@ -198,7 +215,10 @@ def test_build_prompt_with_context_includes_attached_workspace_files():
         paper=None,
         mode="Code",
         attached_files=["src/app.ts", "docs/spec.md", "src/app.ts"],
-        uploaded_files=["report.pdf -> /tmp/upload/report.pdf", "diagram.png -> /tmp/upload/diagram.png"],
+        uploaded_files=[
+            "report.pdf -> /workspace/upload/report.pdf",
+            "diagram.png -> /workspace/upload/diagram.png",
+        ],
     )
 
     assert "# Attached Workspace Files" in prompt
@@ -206,7 +226,7 @@ def test_build_prompt_with_context_includes_attached_workspace_files():
     assert "- docs/spec.md" in prompt
     assert prompt.count("- src/app.ts") == 1
     assert "# Uploaded Files" in prompt
-    assert "report.pdf -> /tmp/upload/report.pdf" in prompt
+    assert "report.pdf -> /workspace/upload/report.pdf" in prompt
     assert "Please inspect the attached file(s)." in prompt
 
 
@@ -259,7 +279,7 @@ def test_make_studio_session_init_event_exposes_managed_session_metadata():
         request=request,
         effective_mode="Plan",
         transport="claude_cli_print",
-        cwd="/tmp/project",
+        cwd=_TEST_WORKSPACE_DIR,
     )
 
     assert event.type == "status"
@@ -273,7 +293,7 @@ def test_make_studio_session_init_event_exposes_managed_session_metadata():
     assert event.data["requested_mode"] == "Code"
     assert event.data["permission_profile"] == "default"
     assert event.data["permission_mode"] == "plan"
-    assert event.data["cwd"] == "/tmp/project"
+    assert event.data["cwd"] == _TEST_WORKSPACE_DIR
     assert "doctor" in event.data["slash_commands"]
     assert "full_access" in event.data["permission_profiles"]
     assert "mcp" in event.data["runtime_commands"]

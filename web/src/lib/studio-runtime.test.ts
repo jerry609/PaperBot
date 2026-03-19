@@ -8,7 +8,7 @@ import {
 
 describe("formatRuntimePath", () => {
   it("keeps short paths readable", () => {
-    expect(formatRuntimePath("/tmp/work")).toBe("/tmp/work")
+    expect(formatRuntimePath("/workspace/work")).toBe("/workspace/work")
   })
 
   it("compresses deep paths to the trailing segments", () => {
@@ -72,7 +72,7 @@ describe("buildStudioRuntimeInfo", () => {
         opencode_version: "1.2.26",
       },
       {
-        cwd: "/home/master1/Projects/PaperBot",
+        cwd: "/workspace/Projects/PaperBot",
       },
     )
 

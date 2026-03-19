@@ -43,7 +43,11 @@ async function readErrorDetail(res: Response, fallback: string): Promise<string>
 function trimTrailingSlashes(directory: string): string {
     const trimmed = directory.trim()
     if (!trimmed) return ""
-    const normalized = trimmed.replace(/\/+$/g, "")
+    let end = trimmed.length
+    while (end > 1 && trimmed[end - 1] === "/") {
+        end -= 1
+    }
+    const normalized = trimmed.slice(0, end)
     return normalized || "/"
 }
 

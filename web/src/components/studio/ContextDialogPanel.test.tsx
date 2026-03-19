@@ -1,11 +1,18 @@
+import type { ComponentPropsWithoutRef, ReactNode } from "react"
 import { describe, expect, it, vi } from "vitest"
 import { render, screen } from "@testing-library/react"
 
 import { ContextDialogPanel } from "./ContextDialogPanel"
 import type { StudioAttachedSkill } from "@/lib/store/studio-store"
 
+const TEST_PROJECT_DIR = "/workspace/healthcare-rag"
+type MockLinkProps = Omit<ComponentPropsWithoutRef<"a">, "href"> & {
+  children?: ReactNode
+  href?: string | null
+}
+
 vi.mock("next/link", () => ({
-  default: ({ children, href, ...props }: any) => (
+  default: ({ children, href, ...props }: MockLinkProps) => (
     <a href={typeof href === "string" ? href : "#"} {...props}>
       {children}
     </a>
@@ -41,13 +48,13 @@ function makeAttachedSkill(overrides: Partial<StudioAttachedSkill> = {}): Studio
 describe("ContextDialogPanel", () => {
   it("derives fallback context modules from recommended targets", () => {
     render(
-      <ContextDialogPanel
+        <ContextDialogPanel
         selectedPaper={{
           id: "paper-1",
           title: "Healthcare RAG",
           abstract: "A systematic review.",
         }}
-        projectDir="/tmp/healthcare-rag"
+        projectDir={TEST_PROJECT_DIR}
         generationStatus="idle"
         generationProgress={[]}
         liveObservations={[]}
@@ -91,13 +98,13 @@ describe("ContextDialogPanel", () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
 
     render(
-      <ContextDialogPanel
+        <ContextDialogPanel
         selectedPaper={{
           id: "paper-1",
           title: "Healthcare RAG",
           abstract: "A systematic review.",
         }}
-        projectDir="/tmp/healthcare-rag"
+        projectDir={TEST_PROJECT_DIR}
         generationStatus="generating"
         generationProgress={[
           {

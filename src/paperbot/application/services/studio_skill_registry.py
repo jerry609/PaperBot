@@ -36,7 +36,6 @@ class StudioSkillSummary:
         return asdict(self)
 
 
-_FRONTMATTER_PATTERN = re.compile(r"^---\s*\n(.*?)\n---\s*(?:\n|$)", re.DOTALL)
 _SLUG_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]*$", re.IGNORECASE)
 _SKILL_DISCOVERY_ROOTS = (
     ("claude_code", ".claude/skills"),
@@ -122,12 +121,25 @@ def _read_frontmatter(skill_path: Path) -> Dict[str, Any]:
     except OSError:
         return {}
 
-    match = _FRONTMATTER_PATTERN.match(content)
-    if not match:
+    lines = content.splitlines()
+    if not lines or lines[0].strip() != "---":
+        return {}
+
+    closing_index: Optional[int] = None
+    for index, line in enumerate(lines[1:], start=1):
+        if line.strip() == "---":
+            closing_index = index
+            break
+
+    if closing_index is None:
+        return {}
+
+    frontmatter_text = "\n".join(lines[1:closing_index]).strip()
+    if not frontmatter_text:
         return {}
 
     try:
-        payload = yaml.safe_load(match.group(1))
+        payload = yaml.safe_load(frontmatter_text)
     except yaml.YAMLError:
         return {}
 

@@ -11,6 +11,8 @@ from paperbot.api.routes import agent_board as agent_board_route
 from paperbot.infrastructure.swarm import CodexDispatcher, CodexResult, ReviewResult
 from paperbot.repro.execution_result import ExecutionResult
 
+_TEST_WORKSPACE_DIR = "/workspace/paperbot-workspace"
+
 
 @pytest.fixture(autouse=True)
 def _isolated_board_store(monkeypatch, tmp_path):
@@ -38,7 +40,7 @@ def _make_session_with_task(*, status: str = "human_review"):
         session_id="board-test-session",
         paper_id="paper-1",
         context_pack_id="cp-1",
-        workspace_dir="/tmp/paperbot-workspace",
+        workspace_dir=_TEST_WORKSPACE_DIR,
     )
     task = agent_board_route.AgentTask(
         id="task-1",
@@ -132,7 +134,7 @@ def test_get_session_endpoint_returns_persisted_snapshot():
         session_id="board-session-get",
         paper_id="paper-get-1",
         context_pack_id="cp-get-1",
-        workspace_dir="/tmp/paperbot-workspace",
+        workspace_dir=_TEST_WORKSPACE_DIR,
         user_id="user-get",
     )
     session.tasks.append(
@@ -173,7 +175,7 @@ def test_create_task_endpoint_persists_studio_ad_hoc_task():
         session_id="board-session-create-task",
         paper_id="paper-create-task",
         context_pack_id="cp-create-task",
-        workspace_dir="/tmp/paperbot-workspace",
+        workspace_dir=_TEST_WORKSPACE_DIR,
         user_id="user-create-task",
     )
     agent_board_route._persist_session(session, checkpoint="created", status="running")
@@ -210,7 +212,7 @@ def test_create_task_endpoint_rejects_opencode_runtime():
         session_id="board-session-opencode",
         paper_id="paper-opencode",
         context_pack_id="cp-opencode",
-        workspace_dir="/tmp/paperbot-workspace",
+        workspace_dir=_TEST_WORKSPACE_DIR,
         user_id="user-opencode",
     )
     agent_board_route._persist_session(session, checkpoint="created", status="running")
@@ -234,21 +236,21 @@ def test_get_latest_session_by_paper_returns_latest_match():
         session_id="board-session-latest-1",
         paper_id="paper-latest",
         context_pack_id="cp-latest-1",
-        workspace_dir="/tmp/paperbot-workspace",
+        workspace_dir=_TEST_WORKSPACE_DIR,
         user_id="user-latest",
     )
     second = agent_board_route.BoardSession(
         session_id="board-session-latest-2",
         paper_id="paper-latest",
         context_pack_id="cp-latest-2",
-        workspace_dir="/tmp/paperbot-workspace",
+        workspace_dir=_TEST_WORKSPACE_DIR,
         user_id="user-latest",
     )
     other = agent_board_route.BoardSession(
         session_id="board-session-other-paper",
         paper_id="paper-other",
         context_pack_id="cp-other",
-        workspace_dir="/tmp/paperbot-workspace",
+        workspace_dir=_TEST_WORKSPACE_DIR,
         user_id="user-latest",
     )
     agent_board_route._persist_session(first, checkpoint="created", status="running")
@@ -294,7 +296,7 @@ def test_get_session_sandbox_sets_sandbox_id(monkeypatch):
         session_id="board-sbx-test",
         paper_id="paper-1",
         context_pack_id="cp-1",
-        workspace_dir="/tmp/paperbot-workspace",
+        workspace_dir=_TEST_WORKSPACE_DIR,
         user_id="u1",
     )
 
@@ -333,7 +335,7 @@ def test_get_session_sandbox_endpoint_returns_metadata(monkeypatch):
         session_id="board-sandbox-endpoint",
         paper_id="paper-1",
         context_pack_id="cp-1",
-        workspace_dir="/tmp/paperbot-workspace",
+        workspace_dir=_TEST_WORKSPACE_DIR,
         user_id="u1",
     )
     agent_board_route._persist_session(session, checkpoint="seed", status="running")
@@ -360,7 +362,7 @@ def test_list_sandbox_tree_endpoint_returns_recursive_files(monkeypatch):
         session_id="board-sandbox-tree",
         paper_id="paper-1",
         context_pack_id="cp-1",
-        workspace_dir="/tmp/paperbot-workspace",
+        workspace_dir=_TEST_WORKSPACE_DIR,
         user_id="u-tree",
     )
     agent_board_route._persist_session(session, checkpoint="seed", status="running")
@@ -412,7 +414,7 @@ def test_release_session_sandbox_clears_all_user_sessions(monkeypatch):
         session_id="board-release-1",
         paper_id="paper-1",
         context_pack_id="cp-1",
-        workspace_dir="/tmp/paperbot-workspace",
+        workspace_dir=_TEST_WORKSPACE_DIR,
         user_id="user-a",
         sandbox_id="sbx-user",
         sandbox_executor="E2BExecutor",
@@ -421,7 +423,7 @@ def test_release_session_sandbox_clears_all_user_sessions(monkeypatch):
         session_id="board-release-2",
         paper_id="paper-2",
         context_pack_id="cp-2",
-        workspace_dir="/tmp/paperbot-workspace",
+        workspace_dir=_TEST_WORKSPACE_DIR,
         user_id="user-a",
         sandbox_id="sbx-user",
         sandbox_executor="E2BExecutor",
@@ -472,7 +474,7 @@ def test_archive_session_with_release_marks_completed(monkeypatch):
         session_id="board-archive-1",
         paper_id="paper-1",
         context_pack_id="cp-1",
-        workspace_dir="/tmp/paperbot-workspace",
+        workspace_dir=_TEST_WORKSPACE_DIR,
         user_id="user-archive",
         sandbox_id="sbx-archive",
         sandbox_executor="E2BExecutor",
@@ -542,7 +544,7 @@ def test_session_survives_store_reinitialization():
     assert tasks_resp.json() == []
 
 
-def test_run_stream_emits_execution_logs(monkeypatch):
+def test_run_stream_emits_execution_logs(monkeypatch, tmp_path):
     monkeypatch.setenv("PAPERBOT_SANDBOX_WORKSPACE", "false")
 
     class _FakeCommander:
@@ -564,11 +566,14 @@ def test_run_stream_emits_execution_logs(monkeypatch):
                 files_generated=["src/train.py"],
             )
 
+    workspace_dir = tmp_path / "workspace"
+    workspace_dir.mkdir()
+
     session = agent_board_route.BoardSession(
         session_id="board-run-test",
         paper_id="paper-1",
         context_pack_id="cp-1",
-        workspace_dir="/tmp/paperbot-workspace",
+        workspace_dir=str(workspace_dir),
     )
     session.tasks.append(
         agent_board_route.AgentTask(

@@ -405,6 +405,16 @@ def _clean_optional_text(value: Optional[str]) -> Optional[str]:
     return cleaned or None
 
 
+def _resolve_model_detection_workspace_dir(project_dir: Optional[str]) -> Path:
+    if not project_dir:
+        return Path(os.getcwd()).resolve()
+
+    try:
+        return _resolve_cli_project_dir(project_dir)
+    except ValueError:
+        return Path(os.getcwd()).resolve()
+
+
 def _normalize_requested_model(
     model: Optional[str],
     *,
@@ -468,7 +478,7 @@ def detect_claude_default_model_details(project_dir: Optional[str] = None) -> St
                 source=f"env:{env_key}",
             )
 
-    workspace_dir = Path(project_dir).resolve() if project_dir else Path(os.getcwd()).resolve()
+    workspace_dir = _resolve_model_detection_workspace_dir(project_dir)
 
     local_settings = _find_nearest_claude_settings_file(workspace_dir, "settings.local.json")
     if local_settings is not None:
