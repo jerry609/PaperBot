@@ -27,10 +27,15 @@ export default async function SignalsPage() {
         watch_repos: [],
         subreddits: [],
       }
+  const initialNowMs = Date.now()
 
   return (
     <div className="flex-1 bg-stone-50/60">
-      <SignalsWorkspace initialFeed={initialFeed} initialTracks={tracks} />
+      <SignalsWorkspace
+        initialFeed={initialFeed}
+        initialTracks={tracks}
+        initialNowMs={initialNowMs}
+      />
     </div>
   )
 }

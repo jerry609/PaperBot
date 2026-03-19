@@ -39,6 +39,7 @@ import type {
 type SignalsWorkspaceProps = {
   initialFeed: IntelligenceFeedResponse
   initialTracks: ResearchTrackSummary[]
+  initialNowMs: number
 }
 
 type SignalSort = "delta" | "score" | "freshness" | "published_at"
@@ -50,13 +51,21 @@ const SORT_OPTIONS: Array<{ value: SignalSort; label: string }> = [
   { value: "published_at", label: "Published date" },
 ]
 
-function formatRelativeTime(value?: string | null): string {
+function formatCalendarDate(value: Date): string {
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  }).format(value)
+}
+
+function formatRelativeTime(value: string | null | undefined, nowMs: number): string {
   if (!value) return "Recently"
 
   const parsed = new Date(value)
   if (Number.isNaN(parsed.getTime())) return "Recently"
 
-  const diffMs = Date.now() - parsed.getTime()
+  const diffMs = Math.max(0, nowMs - parsed.getTime())
   const diffMinutes = Math.max(1, Math.floor(diffMs / 60_000))
   const diffHours = Math.floor(diffMinutes / 60)
   const diffDays = Math.floor(diffHours / 24)
@@ -65,7 +74,7 @@ function formatRelativeTime(value?: string | null): string {
   if (diffHours < 24) return `${diffHours}h ago`
   if (diffDays < 7) return `${diffDays}d ago`
 
-  return parsed.toLocaleDateString("en-US", { month: "short", day: "numeric" })
+  return formatCalendarDate(parsed)
 }
 
 function SignalStat({
@@ -134,20 +143,22 @@ function SignalListRow({
   card,
   active,
   onSelect,
+  nowMs,
 }: {
   card: DashboardIntelligenceCard
   active: boolean
   onSelect: () => void
+  nowMs: number
 }) {
   return (
     <button
       type="button"
       onClick={onSelect}
       className={cn(
-        "relative w-full rounded-[18px] border px-4 py-3 text-left transition-[background-color,border-color,box-shadow]",
+        "relative w-full rounded-[14px] border px-3 py-2.5 text-left transition-[background-color,border-color,box-shadow]",
         active
-          ? "border-indigo-200 bg-white shadow-[0_10px_24px_rgba(15,23,42,0.06)]"
-          : "border-transparent bg-transparent hover:border-slate-200 hover:bg-white/90",
+          ? "border-slate-200 bg-slate-50 shadow-[0_1px_2px_rgba(15,23,42,0.04)]"
+          : "border-transparent bg-transparent hover:bg-slate-50/85",
       )}
     >
       <span
@@ -161,15 +172,15 @@ function SignalListRow({
         <span className="inline-flex rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-medium text-slate-600">
           {card.sourceLabel}
         </span>
-        <span className="text-[11px] text-slate-400">{formatRelativeTime(card.timestamp)}</span>
+        <span className="text-[11px] text-slate-400">{formatRelativeTime(card.timestamp, nowMs)}</span>
       </div>
 
-      <h3 className="mt-2 line-clamp-1 text-sm font-semibold leading-6 text-slate-900">
+      <h3 className="mt-1.5 line-clamp-1 text-sm font-semibold leading-6 text-slate-900">
         {card.title}
       </h3>
-      <p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-600">{card.summary}</p>
+      <p className="mt-0.5 line-clamp-2 text-xs leading-5 text-slate-600">{card.summary}</p>
 
-      <div className="mt-2.5 flex flex-wrap gap-1.5">
+      <div className="mt-2 flex flex-wrap gap-1.5">
         <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-medium text-slate-600">
           {card.metricLabel}
         </span>
@@ -209,8 +220,10 @@ function SignalDetailSection({
 export default function SignalsWorkspace({
   initialFeed,
   initialTracks,
+  initialNowMs,
 }: SignalsWorkspaceProps) {
   const [feed, setFeed] = useState<IntelligenceFeedResponse>(initialFeed)
+  const [nowMs, setNowMs] = useState(initialNowMs)
   const [selectedSource, setSelectedSource] = useState<string>("all")
   const [selectedTrackId, setSelectedTrackId] = useState<string>("all")
   const [sortBy, setSortBy] = useState<SignalSort>("delta")
@@ -240,6 +253,14 @@ export default function SignalsWorkspace({
 
   const cards = useMemo(() => buildDashboardIntelligenceCards(filteredItems), [filteredItems])
   const summary = useMemo(() => summarizeDashboardIntelligence(filteredItems), [filteredItems])
+
+  useEffect(() => {
+    setNowMs(Date.now())
+    const timer = window.setInterval(() => {
+      setNowMs(Date.now())
+    }, 60_000)
+    return () => window.clearInterval(timer)
+  }, [])
 
   useEffect(() => {
     if (cards.length === 0) {
@@ -377,7 +398,7 @@ export default function SignalsWorkspace({
               <SignalStat
                 label="Sources"
                 value={summary.sourceCount}
-                detail={`Updated ${formatRelativeTime(feed.refreshed_at)}`}
+                detail={`Updated ${formatRelativeTime(feed.refreshed_at, nowMs)}`}
                 icon={Sparkles}
               />
             </div>
@@ -464,8 +485,8 @@ export default function SignalsWorkspace({
             <WatchList title="Subreddits" items={feed.subreddits || []} />
           </aside>
 
-          <section className="min-h-[720px] rounded-3xl border border-slate-200 bg-white shadow-sm">
-            <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
+          <section className="min-h-[640px] rounded-3xl border border-slate-200 bg-white shadow-sm">
+            <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3.5">
               <div>
                 <h2 className="text-base font-semibold text-slate-900">Signal queue</h2>
                 <p className="text-sm text-slate-500">
@@ -477,24 +498,23 @@ export default function SignalsWorkspace({
               </Badge>
             </div>
 
-            <ScrollArea className="h-[640px]">
-              <div className="p-3 pr-2">
+            <ScrollArea className="h-[552px]">
+              <div className="pb-0.5 pl-2 pr-1 pt-2">
                 {error ? (
                   <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
                     {error}
                   </div>
                 ) : cards.length > 0 ? (
-                  <div className="rounded-[22px] border border-slate-200 bg-slate-50/80 p-2">
-                    <div className="space-y-1.5">
-                      {cards.map((card) => (
-                        <SignalListRow
-                          key={card.id}
-                          card={card}
-                          active={card.id === selectedCard?.id}
-                          onSelect={() => setSelectedSignalId(card.id)}
-                        />
-                      ))}
-                    </div>
+                  <div className="space-y-1">
+                    {cards.map((card) => (
+                      <SignalListRow
+                        key={card.id}
+                        card={card}
+                        active={card.id === selectedCard?.id}
+                        onSelect={() => setSelectedSignalId(card.id)}
+                        nowMs={nowMs}
+                      />
+                    ))}
                   </div>
                 ) : (
                   <div className="rounded-3xl border border-dashed border-slate-300 bg-slate-50 px-5 py-10 text-center">
@@ -508,8 +528,8 @@ export default function SignalsWorkspace({
             </ScrollArea>
           </section>
 
-          <section className="min-h-[720px] rounded-3xl border border-slate-200 bg-white shadow-sm">
-            <div className="border-b border-slate-200 px-5 py-4">
+          <section className="min-h-[640px] rounded-3xl border border-slate-200 bg-white shadow-sm">
+            <div className="border-b border-slate-200 px-5 py-3.5">
               <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-indigo-600">
                 Selected signal
               </p>
@@ -517,11 +537,13 @@ export default function SignalsWorkspace({
                 {selectedCard?.title || "Choose a signal"}
               </h2>
               <p className="mt-1.5 text-sm text-slate-500">
-                {selectedCard ? formatRelativeTime(selectedCard.timestamp) : "Pick a row from the queue to inspect the handoff."}
+                {selectedCard
+                  ? formatRelativeTime(selectedCard.timestamp, nowMs)
+                  : "Pick a row from the queue to inspect the handoff."}
               </p>
             </div>
 
-            <ScrollArea className="h-[640px]">
+            <ScrollArea className="h-[552px]">
               <div className="p-4">
                 {selectedCard ? (
                   <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white divide-y divide-slate-100">
