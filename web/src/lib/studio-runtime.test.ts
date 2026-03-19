@@ -30,6 +30,20 @@ describe("buildStudioRuntimeInfo", () => {
         slash_commands: ["help", "status", "plan", "model", "agents", "mcp", "auth", "doctor"],
         permission_profiles: ["default", "full_access"],
         runtime_commands: ["agents", "auth", "doctor", "mcp"],
+        skills: [
+          {
+            id: "paper-reproduction",
+            title: "Paper Reproduction",
+            description: "Reproduce a paper in Studio.",
+            slash_command: "/paper-reproduction",
+            scope: "project",
+            tools: ["paper_search"],
+            recommended_for: ["paper", "context_pack"],
+            manifest_source: "skill.json",
+            path: ".claude/skills/paper-reproduction",
+            prompt_hint: "Use the selected paper.",
+          },
+        ],
         code_mode_enabled: true,
         known_model_aliases: ["sonnet", "opus"],
         detected_default_model: "opus",
@@ -59,6 +73,11 @@ describe("buildStudioRuntimeInfo", () => {
     expect(info.supportedSlashCommands).toContain("doctor")
     expect(info.supportedPermissionProfiles).toEqual(["default", "full_access"])
     expect(info.runtimeCommands).toContain("mcp")
+    expect(info.skills[0]).toMatchObject({
+      id: "paper-reproduction",
+      slashCommand: "/paper-reproduction",
+      scope: "project",
+    })
     expect(info.statusLabel).toBe("Managed chat · CLI print · CLI 2.1.76")
     expect(info.codeModeEnabled).toBe(true)
     expect(info.knownModelAliases).toEqual(["sonnet", "opus"])
@@ -86,6 +105,7 @@ describe("buildStudioRuntimeInfo", () => {
         slash_commands: ["help", "status", "plan", "model", "agents", "mcp", "auth", "doctor"],
         permission_profiles: ["default", "full_access"],
         runtime_commands: ["agents", "auth", "doctor", "mcp"],
+        skills: [],
         fallback: "anthropic_api",
         error: "Failed to check Claude CLI status",
         code_mode_enabled: false,
@@ -111,6 +131,7 @@ describe("buildStudioRuntimeInfo", () => {
     expect(info.supportedSlashCommands).toContain("plan")
     expect(info.supportedPermissionProfiles).toEqual(["default", "full_access"])
     expect(info.statusLabel).toBe("Managed chat · API fallback")
+    expect(info.skills).toEqual([])
     expect(info.codeModeEnabled).toBe(false)
     expect(info.knownModelAliases).toEqual(["sonnet", "opus"])
     expect(info.detectedDefaultModel).toBe("claude-opus-4-6")

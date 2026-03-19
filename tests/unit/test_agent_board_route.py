@@ -263,6 +263,19 @@ def test_get_latest_session_by_paper_returns_latest_match():
     assert payload["session_id"] == "board-session-latest-2"
     assert payload["paper_id"] == "paper-latest"
     assert payload["context_pack_id"] == "cp-latest-2"
+    assert payload["found"] is True
+
+
+def test_get_latest_session_by_paper_returns_empty_payload_when_absent():
+    with TestClient(api_main.app) as client:
+        resp = client.get("/api/agent-board/sessions/latest/by-paper", params={"paper_id": "paper-missing"})
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["found"] is False
+    assert payload["session_id"] is None
+    assert payload["paper_id"] == "paper-missing"
+    assert payload["tasks"] == []
 
 
 def test_get_session_sandbox_sets_sandbox_id(monkeypatch):

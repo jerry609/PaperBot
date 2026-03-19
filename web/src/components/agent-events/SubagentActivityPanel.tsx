@@ -940,7 +940,11 @@ function WorkerDetail({
   )
 }
 
-export function SubagentActivityPanel() {
+export function SubagentActivityPanel({
+  onOpenRelatedThreadTask,
+}: {
+  onOpenRelatedThreadTask?: (taskId: string, paperId: string | null) => void
+} = {}) {
   const codexDelegations = useAgentEventStore((state) => state.codexDelegations)
   const toolCalls = useAgentEventStore((state) => state.toolCalls)
   const feed = useAgentEventStore((state) => state.feed)
@@ -1034,6 +1038,7 @@ export function SubagentActivityPanel() {
     if (!relatedThread) return
     setActiveTask(relatedThread.task.id)
     requestWorkspaceSurface("log")
+    onOpenRelatedThreadTask?.(relatedThread.task.id, selectedPaperId)
   }
 
   if (selectedGroup) {

@@ -20,6 +20,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { ContextPackPanel } from "./ContextPackPanel"
 import { cn } from "@/lib/utils"
+import type { StudioSkillInfo } from "@/lib/studio-runtime"
 import type {
   ContextPackSession,
   GenerationStatus,
@@ -58,7 +59,9 @@ interface Props {
   contextPack: ReproContextPack | null
   contextPackLoading: boolean
   contextPackError: string | null
+  skills: StudioSkillInfo[]
   onGenerate: (paper: PaperLite) => void
+  onInsertSkill?: (slashCommand: string) => void
   onSessionCreated?: (session: ContextPackSession) => void
   onDeployToBoard?: () => void
 }
@@ -223,7 +226,9 @@ export function ContextDialogPanel({
   contextPack,
   contextPackLoading,
   contextPackError,
+  skills,
   onGenerate,
+  onInsertSkill,
   onSessionCreated,
   onDeployToBoard,
 }: Props) {
@@ -326,13 +331,21 @@ export function ContextDialogPanel({
 
   const hasTimelineActivity =
     timelineItems.length > 0 || contextPackLoading || Boolean(contextPack) || Boolean(contextPackError)
+  const recommendedSkills = useMemo(() => {
+    if (skills.length === 0) return []
+    const targetKinds = contextPack ? ["context_pack", "paper"] : ["paper"]
+    const prioritized = skills.filter((skill) =>
+      skill.recommendedFor.some((entry) => targetKinds.includes(entry)),
+    )
+    return prioritized.length > 0 ? prioritized : skills
+  }, [contextPack, skills])
 
   return (
     <div className="h-full overflow-auto bg-gradient-to-b from-muted/25 via-background to-background">
       <div className="mx-auto flex w-full max-w-[860px] flex-col gap-4 px-3 py-4 md:px-4 md:py-5">
-        <MessageShell icon={Bot} actor="DeepCode" badge="Context Pipeline" tone="muted">
+        <MessageShell icon={Bot} actor="DeepCode" badge="Skill Context" tone="muted">
           <TextCard>
-            Progress and context pack are now presented in a mixed format:
+            Progress and skill context are now presented in a mixed format:
             narrative text plus structured form cards.
           </TextCard>
         </MessageShell>
@@ -342,7 +355,7 @@ export function ContextDialogPanel({
             <TextCard>
               <div className="space-y-3">
                 <p>
-                  Start extraction for the selected paper. I will stream progress as form cards and add
+                  Build skill context for the selected paper. I will stream progress as form cards and add
                   concise narrative summaries between steps.
                 </p>
                 {selectedPaper ? (
@@ -356,7 +369,7 @@ export function ContextDialogPanel({
                     ) : (
                       <Play className="mr-1.5 h-4 w-4" />
                     )}
-                    Generate Context Pack
+                    Build Skill Context
                   </Button>
                 ) : (
                   <p>Select a paper to begin.</p>
@@ -377,7 +390,7 @@ export function ContextDialogPanel({
             <TextCard>
               <span className="inline-flex items-center gap-2">
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                Finalizing context pack payload and actions...
+                Finalizing skill context payload and actions...
               </span>
             </TextCard>
           </MessageShell>
@@ -391,7 +404,7 @@ export function ContextDialogPanel({
 
         {contextPack ? (
           <>
-            <MessageShell icon={Package} actor="DeepCode" badge="Result" tone="success">
+            <MessageShell icon={Package} actor="DeepCode" badge="Skill Context" tone="success">
               <TextCard>
                 <div className="space-y-2">
                   <p>{contextPack.paper.title}</p>
@@ -413,12 +426,64 @@ export function ContextDialogPanel({
                       ) : (
                         <ChevronDown className="mr-1.5 h-4 w-4" />
                       )}
-                      {showFullPack ? "Hide full context pack" : "Open full context pack"}
+                      {showFullPack ? "Hide skill context" : "Open skill context"}
                     </Button>
                   </div>
                 </div>
               </TextCard>
             </MessageShell>
+
+            {recommendedSkills.length > 0 ? (
+              <MessageShell icon={Sparkles} actor="DeepCode" badge="Project Skills" tone="assistant">
+                <div className="rounded-xl border bg-card px-3.5 py-3">
+                  <div className="mb-3">
+                    <p className="text-sm font-medium text-foreground">Apply a project skill to this paper</p>
+                    <p className="mt-1 text-sm leading-6 text-foreground/70">
+                      Studio can insert project skills into chat as slash commands and compile them into the managed Claude flow.
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    {recommendedSkills.map((skill) => (
+                      <div
+                        key={`${skill.scope}:${skill.id}`}
+                        className="rounded-xl border bg-background/70 px-3 py-3"
+                      >
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <p className="text-sm font-medium text-foreground">{skill.title}</p>
+                              <Badge variant="outline" className="text-[10px]">
+                                {skill.scope}
+                              </Badge>
+                              <Badge variant="outline" className="font-mono text-[10px]">
+                                {skill.slashCommand}
+                              </Badge>
+                            </div>
+                            {skill.description ? (
+                              <p className="mt-1 text-sm leading-6 text-foreground/70">{skill.description}</p>
+                            ) : null}
+                            {skill.tools.length > 0 ? (
+                              <p className="mt-2 text-xs text-muted-foreground">
+                                Tools: {skill.tools.join(", ")}
+                              </p>
+                            ) : null}
+                          </div>
+                          {onInsertSkill ? (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => onInsertSkill(skill.slashCommand)}
+                            >
+                              Insert
+                            </Button>
+                          ) : null}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </MessageShell>
+            ) : null}
 
             {showFullPack ? (
               <div className="rounded-2xl border bg-card/70">

@@ -128,6 +128,7 @@ function clampPanelWidths(
 }
 
 function normalizeCenterView(value: string | null | undefined, fallback: CenterView = "log"): CenterView {
+  if (value === "skills") return "context"
   if (value === "context" || value === "board" || value === "log" || value === "commands") return value
   return fallback
 }
@@ -166,6 +167,30 @@ function compactMonitorMetric(value: string): string {
   return value.trim()
 }
 
+function runtimeStatusSummary(
+  runtimeInfo: StudioRuntimeInfo,
+  runtimeLoading: boolean,
+  runtimeRefreshing: boolean,
+): string {
+  if (runtimeLoading) return "Checking Claude Code..."
+  if (runtimeInfo.error) {
+    return runtimeRefreshing ? "Reconnecting to Studio backend..." : "Studio backend disconnected"
+  }
+  return runtimeInfo.statusLabel
+}
+
+function runtimeBadgeSummary(
+  runtimeInfo: StudioRuntimeInfo,
+  runtimeLoading: boolean,
+  runtimeRefreshing: boolean,
+): string {
+  if (runtimeLoading) return "Checking runtime"
+  if (runtimeInfo.error) {
+    return runtimeRefreshing ? "Reconnecting" : "Disconnected"
+  }
+  return compactMonitorMetric(runtimeInfo.label)
+}
+
 function formatWorkspaceLabel(outputDir: string | null | undefined): string {
   if (!outputDir) return "Workspace not configured"
   const segments = outputDir.split("/").filter(Boolean)
@@ -199,7 +224,7 @@ function EmptyWorkspace({ onBack }: { onBack: () => void }) {
       <div className="max-w-md px-6 text-center">
         <h2 className="text-lg font-semibold text-slate-900">DeepCode Studio</h2>
         <p className="mt-2 text-sm text-slate-500">
-          Monitor now lives inside Studio. Open a paper first, then switch to the Monitor view.
+          Open a paper first, then launch the standalone Monitor surface.
         </p>
         <Button className="mt-5" onClick={onBack}>
           Back to Studio
@@ -274,6 +299,7 @@ function LeftRail({
   projectDir,
   contextLabel,
   onOpenInVSCode,
+  onOpenMonitor,
   tasks,
   activeView,
   onViewChange,
@@ -284,6 +310,7 @@ function LeftRail({
   projectDir: string | null
   contextLabel: string
   onOpenInVSCode: () => void
+  onOpenMonitor: () => void
   tasks: AgentTask[]
   activeView: LeftRailView
   onViewChange: (value: LeftRailView) => void
@@ -318,7 +345,7 @@ function LeftRail({
                 {formatWorkspaceLabel(projectDir)}
               </span>
               <span className="rounded-full border border-slate-200 bg-white px-1.5 py-0.5">
-                Context {contextLabel}
+                Skills {contextLabel}
               </span>
             </div>
           </div>
@@ -334,6 +361,15 @@ function LeftRail({
             <ExternalLink className="h-3 w-3" />
           </Button>
         </div>
+        <Button
+          type="button"
+          size="sm"
+          className="mt-2 h-7 w-full rounded-full bg-slate-900 text-[11px] text-white hover:bg-slate-800"
+          onClick={onOpenMonitor}
+        >
+          <GitBranch className="mr-1.5 h-3.5 w-3.5" />
+          Open Monitor
+        </Button>
       </div>
 
       <Tabs
@@ -379,6 +415,7 @@ function RightInspector({
   subagentEvents,
   runtimeInfo,
   runtimeLoading,
+  runtimeRefreshing,
   activeView,
   onViewChange,
   selectedWorkerTitle,
@@ -390,6 +427,7 @@ function RightInspector({
   subagentEvents: number
   runtimeInfo: StudioRuntimeInfo
   runtimeLoading: boolean
+  runtimeRefreshing: boolean
   activeView: AgentInspectorView
   onViewChange: (value: AgentInspectorView) => void
   selectedWorkerTitle: string | null
@@ -407,7 +445,7 @@ function RightInspector({
             </p>
             <h2 className="mt-0.5 text-sm font-semibold text-slate-900">Runtime Activity</h2>
             <p className="mt-0.5 text-[11px] text-slate-500">
-              {runtimeLoading ? "Checking Claude Code..." : runtimeInfo.statusLabel}
+              {runtimeStatusSummary(runtimeInfo, runtimeLoading, runtimeRefreshing)}
             </p>
           </div>
           <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-slate-500">
@@ -417,7 +455,7 @@ function RightInspector({
 
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
           <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-slate-500">
-            {runtimeLoading ? "Checking runtime" : compactMonitorMetric(runtimeInfo.label)}
+            {runtimeBadgeSummary(runtimeInfo, runtimeLoading, runtimeRefreshing)}
           </span>
           <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-slate-500">
             {activeAgents} agents
@@ -532,15 +570,19 @@ function RightInspector({
 function CenterSurface({
   activeView,
   onViewChange,
+  onOpenMonitorPage,
   runtimeInfo,
   runtimeLoading,
+  runtimeRefreshing,
 }: {
   activeView: CenterView
   onViewChange: (value: CenterView) => void
+  onOpenMonitorPage: () => void
   runtimeInfo: StudioRuntimeInfo
   runtimeLoading: boolean
+  runtimeRefreshing: boolean
 }) {
-  const visibleView = activeView === "commands" ? "log" : activeView
+  const visibleView = activeView === "commands" || activeView === "board" ? "log" : activeView
   const contentView: "log" | "context" | "commands" = activeView === "board" ? "log" : activeView
 
   return (
@@ -562,18 +604,6 @@ function CenterSurface({
             </button>
             <button
               type="button"
-              onClick={() => onViewChange("board")}
-              className={`inline-flex items-center gap-1.5 rounded-[12px] border px-2.5 py-1.5 text-[11px] font-medium transition-colors ${
-                visibleView === "board"
-                  ? "border-slate-200 bg-[#eef1ea] text-slate-900 shadow-sm"
-                  : "border-transparent bg-transparent text-slate-500 hover:text-slate-700"
-              }`}
-            >
-              <GitBranch className="h-3.5 w-3.5" />
-              Monitor
-            </button>
-            <button
-              type="button"
               onClick={() => onViewChange("context")}
               className={`inline-flex items-center gap-1.5 rounded-[12px] border px-2.5 py-1.5 text-[11px] font-medium transition-colors ${
                 visibleView === "context"
@@ -582,9 +612,20 @@ function CenterSurface({
               }`}
             >
               <Sparkles className="h-3.5 w-3.5" />
-              Context
+              Skills
             </button>
           </div>
+
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-8 rounded-full border-slate-200 bg-white px-3 text-[11px] text-slate-700"
+            onClick={onOpenMonitorPage}
+          >
+            <GitBranch className="mr-1.5 h-3.5 w-3.5" />
+            Open Monitor
+          </Button>
         </div>
       </div>
 
@@ -594,9 +635,10 @@ function CenterSurface({
             viewMode={contentView}
             onViewModeChange={onViewChange}
             hideNavigation
-            onOpenBoardWorkspace={() => onViewChange("board")}
+            onOpenBoardWorkspace={onOpenMonitorPage}
             runtimeInfo={runtimeInfo}
             runtimeLoading={runtimeLoading}
+            runtimeRefreshing={runtimeRefreshing}
           />
         </div>
       </div>
@@ -629,7 +671,7 @@ export function AgentWorkspace({
   onBackToStudio,
 }: AgentWorkspaceProps) {
   useAgentEvents()
-  const { info: runtimeInfo, loading: runtimeLoading } = useStudioRuntime()
+  const { info: runtimeInfo, loading: runtimeLoading, refreshing: runtimeRefreshing } = useStudioRuntime()
 
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -676,6 +718,7 @@ export function AgentWorkspace({
   const [localCenterView, setLocalCenterView] = useState<CenterView>(requestedSurface)
   const [mobilePinnedView, setMobilePinnedView] = useState<"threads" | null>(null)
   const centerView: CenterView = requestedWorkspaceSurface ?? localCenterView
+  const skillsToggleActive = centerView === "context"
 
   useEffect(() => {
     loadPapers()
@@ -691,6 +734,15 @@ export function AgentWorkspace({
   function updateCenterView(value: CenterView) {
     clearWorkspaceSurfaceRequest()
     setLocalCenterView(value)
+  }
+
+  function openMonitorPage() {
+    const params = new URLSearchParams()
+    if (selectedPaperId) {
+      params.set("paperId", selectedPaperId)
+    }
+    const query = params.toString()
+    router.push(query ? `/studio/agent-board?${query}` : "/studio/agent-board")
   }
 
   const selectedPaper = useMemo(
@@ -721,7 +773,7 @@ export function AgentWorkspace({
   )
   const activeThreadLabel = activeChatTask?.name || "New thread"
   const projectDir = selectedPaper?.outputDir || selectedPaper?.lastGenCodeResult?.outputDir || null
-  const showMonitorInspector = centerView === "board"
+  const showMonitorInspector = false
   const mobileView: MobileView =
     mobilePinnedView === "threads" ? "threads" : centerViewToMobileView(centerView)
   const workerGroups = useMemo(
@@ -875,19 +927,40 @@ export function AgentWorkspace({
             </Badge>
             {showMonitorInspector ? (
               <span className="hidden text-[10px] text-slate-500 xl:inline">
-                {runtimeLoading ? "Checking runtime" : runtimeInfo.label}
+                {runtimeStatusSummary(runtimeInfo, runtimeLoading, runtimeRefreshing)}
               </span>
             ) : null}
           </div>
 
           <div className="ml-auto flex items-center gap-2 overflow-hidden">
-            {showMonitorInspector ? (
-              <span
-                className="rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-slate-500"
-              >
-                {activeAgents} active
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-7 rounded-full border-slate-200 bg-white px-2.5 text-[11px] text-slate-700"
+              onClick={() => updateCenterView(skillsToggleActive ? "log" : "context")}
+            >
+              {skillsToggleActive ? (
+                <MessageSquare className="mr-1.5 h-3.5 w-3.5" />
+              ) : (
+                <Sparkles className="mr-1.5 h-3.5 w-3.5" />
+              )}
+              <span className="hidden sm:inline">
+                {skillsToggleActive ? "Back to chat" : "Skills"}
               </span>
-            ) : null}
+              <span className="sm:hidden">
+                {skillsToggleActive ? "Chat" : "Skills"}
+              </span>
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              className="h-7 rounded-full bg-slate-900 px-3 text-[11px] text-white hover:bg-slate-800"
+              onClick={openMonitorPage}
+            >
+              <GitBranch className="mr-1.5 h-3.5 w-3.5" />
+              Open Monitor
+            </Button>
           </div>
         </div>
 
@@ -910,6 +983,7 @@ export function AgentWorkspace({
                   window.open(`vscode://file${projectDir}`, "_blank")
                 }
               }}
+              onOpenMonitor={openMonitorPage}
               tasks={boardTasks}
               activeView={leftRailView}
               onViewChange={setLeftRailView}
@@ -922,8 +996,10 @@ export function AgentWorkspace({
             <CenterSurface
               activeView={centerView}
               onViewChange={updateCenterView}
+              onOpenMonitorPage={openMonitorPage}
               runtimeInfo={runtimeInfo}
               runtimeLoading={runtimeLoading}
+              runtimeRefreshing={runtimeRefreshing}
             />
           </div>
 
@@ -940,6 +1016,7 @@ export function AgentWorkspace({
                   subagentEvents={codexDelegations.length}
                   runtimeInfo={runtimeInfo}
                   runtimeLoading={runtimeLoading}
+                  runtimeRefreshing={runtimeRefreshing}
                   activeView={inspectorView}
                   onViewChange={setInspectorView}
                   selectedWorkerTitle={selectedWorkerGroup?.taskTitle ?? null}
@@ -965,7 +1042,7 @@ export function AgentWorkspace({
 
             setMobilePinnedView(null)
             if (nextView === "monitor") {
-              updateCenterView("board")
+              openMonitorPage()
               return
             }
             if (nextView === "console" && centerView === "board") {
@@ -992,6 +1069,7 @@ export function AgentWorkspace({
                   window.open(`vscode://file${projectDir}`, "_blank")
                 }
               }}
+              onOpenMonitor={openMonitorPage}
               tasks={boardTasks}
               activeView="threads"
               onViewChange={() => {}}
@@ -1005,13 +1083,11 @@ export function AgentWorkspace({
                 updateCenterView(value)
                 setMobilePinnedView(null)
               }}
-              hideNavigation={false}
-              onOpenBoardWorkspace={() => {
-                updateCenterView("board")
-                setMobilePinnedView(null)
-              }}
+              hideNavigation
+              onOpenBoardWorkspace={openMonitorPage}
               runtimeInfo={runtimeInfo}
               runtimeLoading={runtimeLoading}
+              runtimeRefreshing={runtimeRefreshing}
             />
           </TabsContent>
 
@@ -1021,6 +1097,7 @@ export function AgentWorkspace({
               subagentEvents={codexDelegations.length}
               runtimeInfo={runtimeInfo}
               runtimeLoading={runtimeLoading}
+              runtimeRefreshing={runtimeRefreshing}
               activeView={inspectorView}
               onViewChange={setInspectorView}
               selectedWorkerTitle={selectedWorkerGroup?.taskTitle ?? null}

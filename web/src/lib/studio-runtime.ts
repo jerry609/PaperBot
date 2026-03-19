@@ -9,6 +9,7 @@ export interface StudioRuntimeStatusResponse {
   slash_commands?: string[] | null
   permission_profiles?: string[] | null
   runtime_commands?: string[] | null
+  skills?: StudioSkillPayload[] | null
   code_mode_enabled?: boolean
   known_model_aliases?: string[] | null
   detected_default_model?: string | null
@@ -27,6 +28,19 @@ export interface StudioRuntimeStatusResponse {
   error?: string | null
 }
 
+export interface StudioSkillPayload {
+  id?: string | null
+  title?: string | null
+  description?: string | null
+  slash_command?: string | null
+  scope?: string | null
+  tools?: string[] | null
+  recommended_for?: string[] | null
+  manifest_source?: string | null
+  path?: string | null
+  prompt_hint?: string | null
+}
+
 export interface StudioRuntimeCwdResponse {
   cwd?: string | null
   actual_cwd?: string | null
@@ -41,6 +55,19 @@ export type StudioRuntimeSource = "unknown" | "claude_code" | "anthropic_api"
 export type StudioChatSurface = "managed_session" | "unknown"
 export type StudioChatTransport = "claude_agent_sdk" | "claude_cli_print" | "anthropic_api" | "unknown"
 
+export interface StudioSkillInfo {
+  id: string
+  title: string
+  description: string
+  slashCommand: string
+  scope: string
+  tools: string[]
+  recommendedFor: string[]
+  manifestSource: string | null
+  path: string | null
+  promptHint: string | null
+}
+
 export interface StudioRuntimeInfo {
   source: StudioRuntimeSource
   chatSurface: StudioChatSurface
@@ -50,6 +77,7 @@ export interface StudioRuntimeInfo {
   supportedSlashCommands: string[]
   supportedPermissionProfiles: string[]
   runtimeCommands: string[]
+  skills: StudioSkillInfo[]
   label: string
   statusLabel: string
   detail: string
@@ -103,6 +131,45 @@ function formatTransportLabel(transport: StudioChatTransport): string {
   return "Managed transport"
 }
 
+function normalizeStudioSkills(value: unknown): StudioSkillInfo[] {
+  if (!Array.isArray(value)) return []
+
+  const normalized: StudioSkillInfo[] = []
+  const seen = new Set<string>()
+
+  for (const item of value) {
+    if (!item || typeof item !== "object") continue
+    const payload = item as StudioSkillPayload
+    const id = cleanString(payload.id)
+    const title = cleanString(payload.title)
+    const slashCommand = cleanString(payload.slash_command)
+    if (!id || !title || !slashCommand) continue
+
+    const key = `${id}:${slashCommand}`
+    if (seen.has(key)) continue
+    seen.add(key)
+
+    normalized.push({
+      id,
+      title,
+      description: cleanString(payload.description) ?? "",
+      slashCommand,
+      scope: cleanString(payload.scope) ?? "project",
+      tools: Array.isArray(payload.tools)
+        ? payload.tools.filter((tool): tool is string => typeof tool === "string" && tool.trim().length > 0)
+        : [],
+      recommendedFor: Array.isArray(payload.recommended_for)
+        ? payload.recommended_for.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
+        : [],
+      manifestSource: cleanString(payload.manifest_source),
+      path: cleanString(payload.path),
+      promptHint: cleanString(payload.prompt_hint),
+    })
+  }
+
+  return normalized
+}
+
 export function formatRuntimePath(path: string | null | undefined): string {
   const normalized = cleanString(path)
   if (!normalized) return "Workspace pending"
@@ -145,6 +212,7 @@ export function buildStudioRuntimeInfo(
   const runtimeCommands = Array.isArray(status?.runtime_commands)
     ? status.runtime_commands.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
     : []
+  const skills = normalizeStudioSkills(status?.skills)
   const codeModeEnabled = typeof status?.code_mode_enabled === "boolean" ? status.code_mode_enabled : null
   const knownModelAliases = Array.isArray(status?.known_model_aliases)
     ? status!.known_model_aliases.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
@@ -190,6 +258,7 @@ export function buildStudioRuntimeInfo(
       supportedSlashCommands,
       supportedPermissionProfiles,
       runtimeCommands,
+      skills,
       label: "Claude Code",
       statusLabel: version
         ? `Managed chat · ${currentTransportLabel} · CLI ${version}`
@@ -228,6 +297,7 @@ export function buildStudioRuntimeInfo(
       supportedSlashCommands,
       supportedPermissionProfiles,
       runtimeCommands,
+      skills,
       label: "Managed chat fallback",
       statusLabel: `Managed chat · ${currentTransportLabel}`,
       detail:
@@ -267,6 +337,7 @@ export function buildStudioRuntimeInfo(
     supportedSlashCommands: [],
     supportedPermissionProfiles: ["default", "full_access"],
     runtimeCommands: [],
+    skills: [],
     label: "Checking runtime",
     statusLabel: "Resolving Claude Code status",
     detail: "Fetching Studio runtime metadata...",

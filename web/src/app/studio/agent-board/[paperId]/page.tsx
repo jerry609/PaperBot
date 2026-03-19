@@ -30,8 +30,8 @@ export default function AgentBoardFocusPage() {
         onBack={() => {
           router.push(
             paperId
-              ? `/studio?paperId=${encodeURIComponent(paperId)}&surface=board`
-              : "/studio?surface=board",
+              ? `/studio/agent-board?paperId=${encodeURIComponent(paperId)}`
+              : "/studio/agent-board",
           )
         }}
       />

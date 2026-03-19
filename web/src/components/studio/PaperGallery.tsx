@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useMemo, useEffect, type CSSProperties } from "react"
+import { useRouter } from "next/navigation"
 import { useStudioStore, type StudioPaper } from "@/lib/store/studio-store"
 import { NewPaperModal } from "./NewPaperModal"
 import { deleteProjectFiles } from "@/lib/runbook/deleteProjectFiles"
@@ -149,11 +150,11 @@ function buildPaperStageBadges(paper: StudioPaper): Array<{
             },
         paper.contextPackId
             ? {
-                label: "context ready",
+                label: "skills ready",
                 className: "border-emerald-200 bg-emerald-50 text-emerald-700",
             }
             : {
-                label: "context pending",
+                label: "skills pending",
                 className: "border-slate-200 bg-[#f7f8f4] text-slate-600",
             },
     ]
@@ -168,7 +169,12 @@ function buildPaperStageBadges(paper: StudioPaper): Array<{
     return badges
 }
 
+function hasMonitorEntry(paper: StudioPaper): boolean {
+    return Boolean(paper.boardSessionId || (paper.taskIds?.length ?? 0) > 0)
+}
+
 export function PaperGallery() {
+    const router = useRouter()
     const { papers, selectPaper, deletePaper, updatePaper } = useStudioStore()
     const [query, setQuery] = useState("")
     const [activeFilter, setActiveFilter] = useState<"all" | "draft" | "running" | "completed">("all")
@@ -297,8 +303,13 @@ export function PaperGallery() {
     const runningCount = papers.filter((paper) => paper.status === "running").length
     const completedCount = papers.filter((paper) => paper.status === "completed").length
     const featuredPaper =
-        !query.trim() && activeFilter === "all" && sortedPapers.length > 0 ? sortedPapers[0] : null
+        !query.trim() && activeFilter === "all" && sortedPapers.length > 1 ? sortedPapers[0] : null
     const remainingPapers = featuredPaper ? sortedPapers.slice(1) : sortedPapers
+    const latestMonitorPaper = useMemo(
+        () =>
+            sortedPapers.find((paper) => hasMonitorEntry(paper)) ?? null,
+        [sortedPapers],
+    )
 
     const handleDeleteClick = (
         e: React.MouseEvent,
@@ -387,6 +398,19 @@ export function PaperGallery() {
                         </div>
                     </div>
                     <div className="flex items-center gap-2">
+                        {latestMonitorPaper ? (
+                            <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="h-10 rounded-full border-zinc-300 bg-white px-4 text-zinc-700"
+                                onClick={() =>
+                                    router.push(`/studio/agent-board?paperId=${encodeURIComponent(latestMonitorPaper.id)}`)
+                                }
+                            >
+                                Monitor latest
+                            </Button>
+                        ) : null}
                         <Button onClick={() => setNewPaperOpen(true)} size="sm" className="h-10 rounded-full px-4">
                             <Plus className="mr-1.5 h-4 w-4" />
                             Add Paper
@@ -595,20 +619,61 @@ export function PaperGallery() {
                                             </div>
                                         </div>
 
-                                        <div className="rounded-[24px] border border-zinc-300 bg-[#fafaf7] px-4 py-4">
-                                            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
-                                                Next Studio move
-                                            </p>
-                                            <p className="mt-2 text-sm font-medium text-zinc-900">
+                                        <div className="flex h-full flex-col rounded-[24px] border border-zinc-300 bg-[linear-gradient(180deg,#fafaf7_0%,#f4f5ef_100%)] px-4 py-4">
+                                            <div className="flex items-start justify-between gap-3">
+                                                <div>
+                                                    <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                                                        Next Studio move
+                                                    </p>
+                                                    <p className="mt-1 text-[18px] font-semibold tracking-[-0.02em] text-zinc-950">
+                                                        Continue in Studio
+                                                    </p>
+                                                </div>
+                                                <span className="shrink-0 rounded-full border border-zinc-300 bg-white px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-zinc-500">
+                                                    Workspace first
+                                                </span>
+                                            </div>
+                                            <p className="mt-2 text-sm leading-6 text-zinc-700">
                                                 Review workspace, then continue in Claude Code chat.
                                             </p>
-                                            <p className="mt-2 text-[12px] leading-5 text-zinc-500">
-                                                Updated {formatRelativeTime(featuredPaper.updatedAt)}
-                                            </p>
-                                            <div className="mt-4 flex items-center gap-2">
+                                            <div className="mt-3 grid gap-2">
+                                                <div className="rounded-[16px] border border-zinc-300/80 bg-white/80 px-3 py-2">
+                                                    <div className="flex items-center gap-2">
+                                                        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-zinc-300 bg-[#f7f8f4] text-[10px] font-semibold text-zinc-600">
+                                                            1
+                                                        </span>
+                                                        <FolderOpen className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
+                                                        <p className="text-[11px] font-medium text-zinc-900">Review workspace</p>
+                                                    </div>
+                                                    <p className="mt-1 pl-7 text-[10px] leading-5 text-zinc-500">
+                                                        Confirm where generated code should live before the next run.
+                                                    </p>
+                                                </div>
+                                                <div className="rounded-[16px] border border-zinc-300/80 bg-white/80 px-3 py-2">
+                                                    <div className="flex items-center gap-2">
+                                                        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-zinc-300 bg-[#f7f8f4] text-[10px] font-semibold text-zinc-600">
+                                                            2
+                                                        </span>
+                                                        <MessageSquare className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
+                                                        <p className="text-[11px] font-medium text-zinc-900">Continue in chat</p>
+                                                    </div>
+                                                    <p className="mt-1 pl-7 text-[10px] leading-5 text-zinc-500">
+                                                        Keep Monitor secondary unless you need worker or tool detail.
+                                                    </p>
+                                                </div>
+                                            </div>
+                                            <div className="mt-auto border-t border-zinc-300 pt-3">
+                                                <div className="flex flex-wrap items-center justify-between gap-2 text-[12px] text-zinc-500">
+                                                    <span>Updated {formatRelativeTime(featuredPaper.updatedAt)}</span>
+                                                    {hasMonitorEntry(featuredPaper) ? (
+                                                        <span className="rounded-full border border-zinc-300 bg-white px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-zinc-500">
+                                                            Monitor ready
+                                                        </span>
+                                                    ) : null}
+                                                </div>
                                                 <Button
                                                     type="button"
-                                                    className="h-9 rounded-full px-4"
+                                                    className="mt-3 h-10 w-full rounded-full px-4"
                                                     onClick={(event) => {
                                                         event.stopPropagation()
                                                         selectPaper(featuredPaper.id)
@@ -617,13 +682,30 @@ export function PaperGallery() {
                                                     Continue in Studio
                                                     <ArrowRight className="ml-1.5 h-4 w-4" />
                                                 </Button>
-                                                <button
-                                                    type="button"
-                                                    onClick={(event) => handleDeleteClick(event, featuredPaper)}
-                                                    className="rounded-full border border-zinc-300 bg-white px-3 py-2 text-[12px] text-zinc-600 transition-colors hover:border-rose-200 hover:text-rose-600"
-                                                >
-                                                    Delete
-                                                </button>
+                                                <div className="mt-2 flex flex-wrap items-center gap-2">
+                                                    {hasMonitorEntry(featuredPaper) ? (
+                                                        <Button
+                                                            type="button"
+                                                            variant="outline"
+                                                            className="h-9 rounded-full border-zinc-300 bg-white px-4 text-zinc-700"
+                                                            onClick={(event) => {
+                                                                event.stopPropagation()
+                                                                router.push(`/studio/agent-board?paperId=${encodeURIComponent(featuredPaper.id)}`)
+                                                            }}
+                                                        >
+                                                            Monitor
+                                                        </Button>
+                                                    ) : null}
+                                                    <button
+                                                        type="button"
+                                                        onClick={(event) => handleDeleteClick(event, featuredPaper)}
+                                                        className="ml-auto inline-flex h-9 w-9 items-center justify-center rounded-full text-zinc-500 transition-colors hover:bg-white hover:text-rose-600"
+                                                        title="Delete paper"
+                                                        aria-label="Delete paper"
+                                                    >
+                                                        <Trash2 className="h-3.5 w-3.5" />
+                                                    </button>
+                                                </div>
                                             </div>
                                         </div>
                                     </div>
@@ -703,27 +785,48 @@ export function PaperGallery() {
                                                     </div>
                                                 </div>
 
-                                                <div className="flex shrink-0 items-center gap-2">
+                                                <div className="flex min-w-[220px] shrink-0 flex-col gap-2">
+                                                    <div className="flex items-center justify-between gap-2 text-[11px] text-zinc-500">
+                                                        <span>Next Studio move</span>
+                                                        <span className="rounded-full border border-zinc-300 bg-[#f7f8f4] px-2 py-0.5 text-[9px] uppercase tracking-[0.12em] text-zinc-500">
+                                                            {paper.outputDir ? "Chat ready" : "Workspace first"}
+                                                        </span>
+                                                    </div>
                                                     <Button
                                                         type="button"
-                                                        variant="outline"
-                                                        className="h-9 rounded-full border-zinc-300 bg-white px-4 text-zinc-700"
+                                                        className="h-9 rounded-full px-4"
                                                         onClick={(event) => {
                                                             event.stopPropagation()
                                                             selectPaper(paper.id)
                                                         }}
                                                     >
-                                                        Continue
+                                                        Continue in Studio
                                                         <ArrowRight className="ml-1.5 h-4 w-4" />
                                                     </Button>
-                                                    <button
-                                                        type="button"
-                                                        onClick={(event) => handleDeleteClick(event, paper)}
-                                                        className="rounded-full border border-zinc-300 bg-white p-2.5 text-zinc-500 transition-colors hover:border-rose-200 hover:text-rose-600"
-                                                        title="Delete paper"
-                                                    >
-                                                        <Trash2 className="h-3.5 w-3.5" />
-                                                    </button>
+                                                    <div className="flex items-center gap-2">
+                                                        {hasMonitorEntry(paper) ? (
+                                                            <Button
+                                                                type="button"
+                                                                variant="outline"
+                                                                className="h-9 rounded-full border-zinc-300 bg-white px-4 text-zinc-700"
+                                                                onClick={(event) => {
+                                                                    event.stopPropagation()
+                                                                    router.push(`/studio/agent-board?paperId=${encodeURIComponent(paper.id)}`)
+                                                                }}
+                                                            >
+                                                                Monitor
+                                                            </Button>
+                                                        ) : null}
+                                                        <button
+                                                            type="button"
+                                                            onClick={(event) => handleDeleteClick(event, paper)}
+                                                            className="ml-auto inline-flex h-9 w-9 items-center justify-center rounded-full text-zinc-500 transition-colors hover:bg-white hover:text-rose-600"
+                                                            title="Delete paper"
+                                                            aria-label="Delete paper"
+                                                        >
+                                                            <Trash2 className="h-3.5 w-3.5" />
+                                                        </button>
+                                                    </div>
                                                 </div>
                                             </div>
                                         </article>

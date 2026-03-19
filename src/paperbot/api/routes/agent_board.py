@@ -507,6 +507,7 @@ async def get_latest_session(paper_id: Optional[str] = None):
             continue
         ctrl = _run_controls.get(session.session_id)
         return {
+            "found": True,
             "session_id": session.session_id,
             "paper_id": session.paper_id,
             "context_pack_id": session.context_pack_id,
@@ -523,7 +524,23 @@ async def get_latest_session(paper_id: Optional[str] = None):
             "session": session.to_dict(),
         }
 
-    raise HTTPException(status_code=404, detail="Session not found")
+    return {
+        "found": False,
+        "session_id": None,
+        "paper_id": paper_id,
+        "context_pack_id": None,
+        "workspace_dir": None,
+        "user_id": None,
+        "sandbox_id": None,
+        "sandbox_executor": None,
+        "paper_slug_name": None,
+        "tasks": [],
+        "status": "idle",
+        "checkpoint": "",
+        "updated_at": None,
+        "control_state": None,
+        "session": None,
+    }
 
 
 @router.post("/sessions/{session_id}/plan")

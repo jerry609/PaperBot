@@ -44,6 +44,15 @@ import {
     resolveDetectedModelSelection,
     type StudioRuntimeInfo,
 } from "@/lib/studio-runtime"
+import {
+    normalizeStudioTransportError,
+    presentStudioError,
+    readStudioErrorDetail,
+} from "@/lib/studio-errors"
+import {
+    buildStudioSkillPrompt,
+    parseStudioSkillSlashCommand,
+} from "@/lib/studio-skills"
 import { useAgentEventStore } from "@/lib/agent-events/store"
 import { buildSubagentActivityGroups } from "@/lib/agent-events/subagent-groups"
 import { cn } from "@/lib/utils"
@@ -70,6 +79,7 @@ import {
     Paperclip,
     Copy,
     Check,
+    Sparkles,
 } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import Editor from "@monaco-editor/react"
@@ -87,6 +97,7 @@ interface ReproductionLogProps {
     onOpenBoardWorkspace?: () => void
     runtimeInfo: StudioRuntimeInfo
     runtimeLoading: boolean
+    runtimeRefreshing?: boolean
 }
 
 function buildChatThreadTitle(message: string, attachmentNames: string[] = []): string {
@@ -183,7 +194,7 @@ type SlashCommandItem = {
     command: string
     label: string
     description: string
-    group: "Claude Code" | "Runtime" | "Session"
+    group: "Claude Code" | "Skills" | "Runtime" | "Session"
     requiresRuntimeSupport?: boolean
     keywords: string[]
     icon: React.ElementType
@@ -354,16 +365,6 @@ function mergeUploadedFiles(
     }
 
     return next
-}
-
-async function readResponseDetail(res: Response, fallback: string): Promise<string> {
-    const text = await res.text()
-    try {
-        const payload = JSON.parse(text) as { detail?: string }
-        return payload.detail || fallback
-    } catch {
-        return text || fallback
-    }
 }
 
 function buildVisibleActions(actions: AgentAction[]): AgentAction[] {
@@ -1276,6 +1277,7 @@ export function ReproductionLog({
     onOpenBoardWorkspace,
     runtimeInfo,
     runtimeLoading,
+    runtimeRefreshing = false,
 }: ReproductionLogProps) {
     const router = useRouter()
     const {
@@ -1332,6 +1334,8 @@ export function ReproductionLog({
     const [runningCliCommand, setRunningCliCommand] = useState(false)
     const [runningApprovalActionId, setRunningApprovalActionId] = useState<string | null>(null)
     const [slashSelectedIndex, setSlashSelectedIndex] = useState(0)
+    const [slashPaletteSuppressed, setSlashPaletteSuppressed] = useState(false)
+    const [showRuntimeControls, setShowRuntimeControls] = useState(false)
     const [showWorkspaceSetup, setShowWorkspaceSetup] = useState(false)
     const [continueLast, setContinueLast] = useState(false)
     const [resumeSession, setResumeSession] = useState("")
@@ -1438,6 +1442,7 @@ export function ReproductionLog({
     }, [codexDelegations, toolCalls])
     const projectDir = selectedPaper?.outputDir || lastGenCodeResult?.outputDir || null
     const isBusy = status === "running"
+    const runtimeTransportError = normalizeStudioTransportError(runtimeInfo.error)
     const runtimeLabel = runtimeLoading
         ? "Studio runtime"
         : `${runtimeInfo.label} · ${runtimeInfo.statusLabel}`
@@ -1459,6 +1464,10 @@ export function ReproductionLog({
         : false
     const messagePlaceholder = runtimeLoading
         ? "Message Studio runtime..."
+        : runtimeTransportError
+            ? runtimeRefreshing
+                ? "Studio backend reconnecting..."
+                : "Studio backend disconnected. Waiting to reconnect..."
         : runtimeInfo.source === "anthropic_api"
             ? "Message managed fallback..."
             : "Message Claude Code shell..."
@@ -1516,7 +1525,7 @@ export function ReproductionLog({
         })
 
         if (!res.ok) {
-            throw new Error(await readResponseDetail(res, `Directory is not available (${res.status})`))
+            throw new Error(await readStudioErrorDetail(res, `Directory is not available (${res.status})`))
         }
 
         const data = await res.json() as { project_dir?: string }
@@ -1641,7 +1650,8 @@ export function ReproductionLog({
             })
 
             if (!res.ok || !res.body) {
-                throw new Error(`Failed to send message (${res.status})`)
+                const detail = await readStudioErrorDetail(res, `Failed to send message (${res.status})`)
+                throw new Error(presentStudioError(detail, `Failed to send message (${res.status})`))
             }
 
             let lastActionIsText = false
@@ -1871,19 +1881,20 @@ export function ReproductionLog({
                     updateTaskStatus(taskId, "completed")
                     setStatus("success")
                 } else if (evt?.type === "error") {
+                    const streamError = presentStudioError(evt.message || "Chat failed", "Chat failed")
                     if (assistantResponse.trim() && !assistantHistoryCommitted) {
                         appendTaskHistory(taskId, { role: "assistant", content: assistantResponse })
                         assistantHistoryCommitted = true
                     }
-                    addAction(taskId, { type: "error", content: evt.message || "Chat failed" })
+                    addAction(taskId, { type: "error", content: streamError })
                     updateTaskStatus(taskId, "error")
-                    setLastError(evt.message || "Chat failed")
+                    setLastError(streamError)
                     setStatus("error")
                     return
                 }
             }
         } catch (e) {
-            const msg = e instanceof Error ? e.message : String(e)
+            const msg = presentStudioError(e instanceof Error ? e.message : String(e), "Chat failed")
             if (assistantResponse.trim() && !assistantHistoryCommitted) {
                 appendTaskHistory(taskId, { role: "assistant", content: assistantResponse })
             }
@@ -1898,12 +1909,25 @@ export function ReproductionLog({
         message: string,
         targetDir?: string,
         selectedUploadedFiles: ComposerUploadedFile[] = [],
+        options?: {
+            effectiveMessageOverride?: string
+            threadTitleOverride?: string
+        },
     ) => {
         const outgoingMode = mode
 
         if (outgoingMode === "Code" && runtimeInfo.codeModeEnabled === false) {
             setMode("Plan")
             setLastError("Code mode is disabled in this Studio runtime. Studio switched back to Plan.")
+            return
+        }
+
+        if (outgoingMode === "Code" && !targetDir) {
+            if (!selectedPaper) {
+                setLastError("Select or create a paper first.")
+                return
+            }
+            setShowWorkspaceSetup(true)
             return
         }
 
@@ -1926,11 +1950,26 @@ export function ReproductionLog({
         setMessageInput("")
         setUploadedFiles([])
 
-        const effectiveMessage = message.trim() || "Please inspect the attached files."
-        const threadTitle = buildChatThreadTitle(
-            message,
-            selectedUploadedFiles.map((file) => file.name),
-        )
+        const parsedSkillCommand = parseStudioSkillSlashCommand(message, runtimeInfo.skills)
+        const effectiveMessage =
+            options?.effectiveMessageOverride?.trim() ||
+            (parsedSkillCommand
+                ? buildStudioSkillPrompt(parsedSkillCommand.skill, parsedSkillCommand.args, {
+                    paperTitle: selectedPaper?.title ?? null,
+                    contextPackId: contextPack?.context_pack_id ?? null,
+                    workspacePath: preparedProjectDir ?? null,
+                })
+                : message.trim() || "Please inspect the attached files.")
+        const threadTitle =
+            options?.threadTitleOverride?.trim() ||
+            (parsedSkillCommand
+                ? parsedSkillCommand.args.trim()
+                    ? `${parsedSkillCommand.skill.title}: ${parsedSkillCommand.args.trim()}`
+                    : parsedSkillCommand.skill.title
+                : buildChatThreadTitle(
+                    message,
+                    selectedUploadedFiles.map((file) => file.name),
+                ))
         const existingHistory = activeChatTask?.history ?? []
         const taskId =
             activeChatTask?.id ??
@@ -2193,13 +2232,31 @@ export function ReproductionLog({
         }
     }
 
-    const setSlashScaffold = (command: string, value = "") => {
+    const setSlashScaffold = useCallback((command: string, value = "") => {
         const nextValue = value.trim() ? `/${command} ${value.trim()}` : `/${command} `
         setMessageInput(nextValue)
         setLastError(null)
-    }
+    }, [])
 
     const handleSlashSubmit = async (): Promise<boolean> => {
+        const parsedSkill = parseStudioSkillSlashCommand(messageInput, runtimeInfo.skills)
+        if (parsedSkill) {
+            const pendingUploadedFiles = [...uploadedFiles]
+            const effectiveMessage = buildStudioSkillPrompt(parsedSkill.skill, parsedSkill.args, {
+                paperTitle: selectedPaper?.title ?? null,
+                contextPackId: contextPack?.context_pack_id ?? null,
+                workspacePath: projectDir ?? null,
+            })
+
+            await handleSendMessageWithDir(parsedSkill.slashInput, projectDir || undefined, pendingUploadedFiles, {
+                effectiveMessageOverride: effectiveMessage,
+                threadTitleOverride: parsedSkill.args.trim()
+                    ? `${parsedSkill.skill.title}: ${parsedSkill.args.trim()}`
+                    : parsedSkill.skill.title,
+            })
+            return true
+        }
+
         const parsed = parseStudioSlashCommand(messageInput, knownModelAliases)
         if (!parsed) return false
 
@@ -2297,7 +2354,7 @@ export function ReproductionLog({
 
     const normalizedComposerCursor = Math.min(composerCursor, messageInput.length)
     const activeSlashMatch = useMemo<SlashTriggerMatch | null>(() => {
-        if (commandMode) return null
+        if (commandMode || slashPaletteSuppressed) return null
         const beforeCursor = messageInput.slice(0, normalizedComposerCursor)
         const match = beforeCursor.match(/(^|\s)\/([^\s/]*)$/)
         if (!match) return null
@@ -2309,7 +2366,7 @@ export function ReproductionLog({
             start: normalizedComposerCursor - token.length - 1,
             end: normalizedComposerCursor,
         }
-    }, [commandMode, messageInput, normalizedComposerCursor])
+    }, [commandMode, messageInput, normalizedComposerCursor, slashPaletteSuppressed])
     const slashPaletteActive = Boolean(activeSlashMatch)
     const slashQuery = activeSlashMatch?.query ?? ""
     const slashToken = activeSlashMatch?.token ?? ""
@@ -2363,11 +2420,13 @@ export function ReproductionLog({
         focusComposerAt(nextCursor)
     }, [focusComposerAt, messageInput.length])
 
-    const seedComposerDraft = useCallback((nextValue: string) => {
-        setMessageInput(nextValue)
-        setLastError(null)
-        focusComposerAt(nextValue.length)
-    }, [focusComposerAt])
+    const handleInsertStudioSkill = useCallback((slashCommand: string) => {
+        const normalized = slashCommand.startsWith("/") ? slashCommand.slice(1) : slashCommand
+        setSlashPaletteSuppressed(true)
+        setSlashScaffold(normalized)
+        onViewModeChange("log")
+        focusComposerToEnd()
+    }, [focusComposerToEnd, onViewModeChange, setSlashScaffold])
 
     const handleComposerFileSelection = useCallback(
         async (event: ChangeEvent<HTMLInputElement>) => {
@@ -2408,6 +2467,7 @@ export function ReproductionLog({
             setChatDraftBeforeUtility("")
         }
 
+        setSlashPaletteSuppressed(false)
         setMessageInput(nextDraft.value)
         setLastError(null)
         focusComposerAt(nextDraft.cursor)
@@ -2432,12 +2492,9 @@ export function ReproductionLog({
         focusComposerToEnd()
     }, [focusComposerToEnd, selectedPaper, workspaceRequired])
 
-    const handleSeedStarterPrompt = useCallback(() => {
-        const starterPrompt = selectedPaper
-            ? `Summarize the reproduction approach for "${selectedPaper.title}" and identify the first concrete steps we should take in this workspace.`
-            : "Summarize the reproduction approach and identify the first concrete implementation steps."
-        seedComposerDraft(starterPrompt)
-    }, [seedComposerDraft, selectedPaper])
+    const handleOpenSkillsPanel = useCallback(() => {
+        onViewModeChange("context")
+    }, [onViewModeChange])
 
     function openAgentBoardWorkspace(delegationTaskId?: string) {
         const workerRunId = delegationTaskId
@@ -2450,11 +2507,15 @@ export function ReproductionLog({
             onOpenBoardWorkspace()
             return
         }
+        const params = new URLSearchParams()
         if (selectedPaperId) {
-            router.push(`/studio?paperId=${encodeURIComponent(selectedPaperId)}&surface=board`)
-            return
+            params.set("paperId", selectedPaperId)
         }
-        router.push("/studio?surface=board")
+        if (workerRunId) {
+            params.set("workerRunId", workerRunId)
+        }
+        const query = params.toString()
+        router.push(query ? `/studio/agent-board?${query}` : "/studio/agent-board")
     }
 
     const claudeCommandPresets = useMemo(() => {
@@ -2487,17 +2548,43 @@ export function ReproductionLog({
             ? commands
             : ["help", "status", "new", "clear", "plan", "model", "agents", "mcp", "auth", "doctor"]
     }, [runtimeInfo.supportedSlashCommands])
+    const studioSkillSlashCommands = useMemo<SlashCommandItem[]>(
+        () =>
+            runtimeInfo.skills.map((skill) => ({
+                id: `skill:${skill.id}`,
+                command: skill.slashCommand.replace(/^\//, ""),
+                label: skill.title,
+                description:
+                    skill.description ||
+                    `Insert ${skill.slashCommand} to invoke the ${skill.title} workflow in Studio chat.`,
+                group: "Skills",
+                requiresRuntimeSupport: false,
+                keywords: [skill.id, skill.scope, ...skill.tools, ...skill.recommendedFor],
+                icon: Sparkles,
+                onSelect: (remainder) => setSlashScaffold(skill.slashCommand.replace(/^\//, ""), remainder),
+            })),
+        [runtimeInfo.skills, setSlashScaffold],
+    )
     const buildSlashHelpMarkdown = useCallback(() => {
         const commandLines = supportedSlashCommands.map((command) => `- \`/${command}\``)
+        const skillLines = runtimeInfo.skills.map((skill) => `- \`${skill.slashCommand}\` — ${skill.title}`)
         return [
             "## Supported Studio slash commands",
             "",
             ...commandLines,
+            ...(skillLines.length > 0
+                ? [
+                    "",
+                    "## Project skills",
+                    "",
+                    ...skillLines,
+                ]
+                : []),
             "",
             "Claude Code chat turns stream directly into this thread.",
             "Runtime utilities still run through the Claude CLI path and mirror into Monitor.",
         ].join("\n")
-    }, [supportedSlashCommands])
+    }, [runtimeInfo.skills, supportedSlashCommands])
     const buildStatusMarkdown = useCallback(() => {
         const claudeCliStatus = runtimeLoading
             ? "Checking"
@@ -2559,6 +2646,13 @@ export function ReproductionLog({
             { label: "Permission", value: permissionProfile },
             { label: "Model", value: requestedModel || "Pending" },
             {
+                label: "Project skills",
+                value:
+                    runtimeInfo.skills.length > 0
+                        ? `${runtimeInfo.skills.length} detected`
+                        : "None detected",
+            },
+            {
                 label: "Detected default",
                 value:
                     runtimeInfo.detectedDefaultModel
@@ -2598,6 +2692,7 @@ export function ReproductionLog({
         runtimeInfo.codexWorkerAvailable,
         runtimeInfo.codexWorkerName,
         runtimeInfo.error,
+        runtimeInfo.skills,
         runtimeInfo.opencodeAvailable,
         runtimeInfo.opencodeVersion,
         runtimeInfo.opencodeWorkerAvailable,
@@ -2759,7 +2854,7 @@ export function ReproductionLog({
         },
     ]
 
-    const availableSlashCommands = slashCommands.filter((item) => {
+    const availableSlashCommands = [...slashCommands, ...studioSkillSlashCommands].filter((item) => {
         if (item.requiresRuntimeSupport === false) {
             return true
         }
@@ -2778,7 +2873,7 @@ export function ReproductionLog({
     })
     const slashCommandGroups = useMemo(
         () =>
-            (["Claude Code", "Session", "Runtime"] as const)
+            (["Claude Code", "Skills", "Session", "Runtime"] as const)
                 .map((group) => ({
                     group,
                     items: filteredSlashCommands
@@ -2809,6 +2904,7 @@ export function ReproductionLog({
     }, [slashPaletteActive, slashSelectedIndex])
 
     const handleApplySlashCommand = useCallback((command: SlashCommandItem) => {
+        setSlashPaletteSuppressed(true)
         command.onSelect(replaceActiveSlashToken())
         setSlashSelectedIndex(0)
         focusComposerToEnd()
@@ -2816,6 +2912,10 @@ export function ReproductionLog({
 
     const composerHelperText = commandMode
         ? "Command selected. Enter runs it."
+        : runtimeTransportError
+            ? runtimeRefreshing
+                ? "Studio backend reconnecting automatically."
+                : "Studio backend disconnected. Studio retries automatically."
         : runtimeInfo.codeModeEnabled === false && mode === "Plan"
             ? "Code mode is unavailable in this runtime."
         : uploadedFiles.length > 0
@@ -2824,10 +2924,12 @@ export function ReproductionLog({
             ? "Enter a full Claude Code model name."
         : ""
     const activeModeLabel = mode
+    const permissionControlLabel = permissionProfile === "full_access" ? "Full access" : "Default"
     const activeModelLabel =
         modelOption === "custom"
             ? requestedModel || "Custom model"
             : requestedModel
+    const runtimeControlSummary = `${permissionControlLabel} · ${activeModeLabel} · ${activeModelLabel}`
     const launchStatusLabel = workspaceRequired ? "Workspace needed" : "Launch ready"
     const launchStatusClassName = workspaceRequired
         ? "border-amber-200 bg-amber-50 text-amber-700"
@@ -2837,7 +2939,7 @@ export function ReproductionLog({
         : "Launch a focused Claude Code thread"
     const emptyStateDescription = workspaceRequired
         ? "Code mode needs a writable directory before the first turn."
-        : "Start in chat. Open Monitor only when you need the raw runtime trace."
+        : "Start in chat. Open the standalone Monitor only when you need raw runtime trace."
     const advancedComposerOverrideCount = [
         parsedTools.length > 0,
         parsedAllowedTools.length > 0,
@@ -2944,6 +3046,14 @@ export function ReproductionLog({
 
     const consoleMode = viewMode === "log" || viewMode === "commands"
     const activeNavigationView = viewMode === "commands" ? "log" : viewMode
+    const showRuntimeConnectionBanner =
+        !runtimeLoading && !lastError && !contextPackError && Boolean(runtimeTransportError)
+
+    useEffect(() => {
+        if (commandMode && showRuntimeControls) {
+            setShowRuntimeControls(false)
+        }
+    }, [commandMode, showRuntimeControls])
 
     return (
         <div className="flex h-full min-h-0 w-full flex-1 flex-col bg-[#f5f5f2]">
@@ -2951,7 +3061,7 @@ export function ReproductionLog({
             {!hideNavigation && (
                 <div className="flex shrink-0 items-center border-b border-slate-200 bg-[#eef0ea] px-2">
                     {([
-                        { key: "context" as const, label: "Context", icon: Activity },
+                        { key: "context" as const, label: "Skills", icon: Sparkles },
                         { key: "log" as const, label: "Chat", icon: MessageSquare },
                         { key: "board" as const, label: "Monitor", icon: LayoutDashboard },
                     ]).map(({ key, label, icon: TabIcon }) => (
@@ -2988,6 +3098,23 @@ export function ReproductionLog({
                     <span className="text-xs">{contextPackError || lastError}</span>
                 </div>
             )}
+            {showRuntimeConnectionBanner && (
+                <div className="flex shrink-0 items-start gap-2 border-b border-amber-200 bg-amber-50 px-4 py-2 text-amber-800">
+                    <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                    <div className="min-w-0">
+                        <div className="text-xs font-medium">
+                            {runtimeRefreshing
+                                ? "Reconnecting to the Studio backend..."
+                                : runtimeTransportError}
+                        </div>
+                        <div className="mt-0.5 text-[11px] leading-5 text-amber-700">
+                            {runtimeRefreshing
+                                ? "Chat, skill context generation, and runtime commands will resume when the backend is back."
+                                : "Studio retries automatically every 15 seconds and when the tab regains focus."}
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Main content area */}
             <div className="flex-1 min-h-0 overflow-hidden">
@@ -3008,6 +3135,7 @@ export function ReproductionLog({
                         contextPack={contextPack}
                         contextPackLoading={contextPackLoading}
                         contextPackError={contextPackError}
+                        skills={runtimeInfo.skills}
                         onGenerate={(paper) =>
                             generateContextPack({
                                 paperId: paper.id,
@@ -3015,6 +3143,7 @@ export function ReproductionLog({
                                 abstract: paper.abstract,
                             })
                         }
+                        onInsertSkill={handleInsertStudioSkill}
                         onSessionCreated={handleSessionCreated}
                         onDeployToBoard={openAgentBoardWorkspace}
                     />
@@ -3073,7 +3202,7 @@ export function ReproductionLog({
                         <div className="px-2.5 py-2">
                             {!visibleTask || visibleActions.length === 0 ? (
                                 <div className="flex min-h-full items-center justify-center py-10 text-slate-500">
-                                    <div className="w-full max-w-[580px] rounded-[24px] border border-slate-200 bg-white/88 px-4 py-3.5 shadow-[0_14px_30px_rgba(15,23,42,0.05)] backdrop-blur-sm">
+                                    <div className="w-full max-w-[760px] rounded-[26px] border border-slate-200 bg-white/90 px-4 py-4 shadow-[0_16px_36px_rgba(15,23,42,0.06)] backdrop-blur-sm">
                                         <div className="flex flex-wrap items-start justify-between gap-3">
                                             <div className="flex min-w-0 items-center gap-3">
                                                 <div className="flex h-9 w-9 items-center justify-center rounded-[18px] border border-slate-200 bg-[#eceee8]">
@@ -3102,92 +3231,123 @@ export function ReproductionLog({
                                             {emptyStateDescription}
                                         </p>
 
-                                        <div className="mt-3 grid gap-2 sm:grid-cols-3">
-                                            <div className="rounded-[18px] border border-slate-200 bg-[#f8faf5] px-3 py-2">
-                                                <div className="flex items-center gap-2">
-                                                    <FileText className="h-4 w-4 text-slate-500" />
-                                                    <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-                                                        Paper
-                                                    </p>
+                                        <div className="mt-3 grid gap-3 lg:grid-cols-[minmax(0,1fr)_250px]">
+                                            <div className="space-y-3">
+                                                <div className="flex flex-wrap gap-1.5">
+                                                    <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-[#f7f8f4] px-2 py-0.5 text-[10px] text-slate-700">
+                                                        <FileText className="h-3 w-3 text-slate-500" />
+                                                        <span className="max-w-[18rem] truncate">
+                                                            {selectedPaper?.title ?? "No paper selected"}
+                                                        </span>
+                                                    </span>
+                                                    <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-[#f7f8f4] px-2 py-0.5 text-[10px] text-slate-700">
+                                                        <FolderOpen className="h-3 w-3 text-slate-500" />
+                                                        <span className="max-w-[15rem] truncate font-mono">
+                                                            {projectDir
+                                                                ? projectDir.split("/").filter(Boolean).slice(-2).join("/") || projectDir
+                                                                : "workspace pending"}
+                                                        </span>
+                                                    </span>
+                                                    <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-[#f7f8f4] px-2 py-0.5 text-[10px] text-slate-700">
+                                                        <Bot className="h-3 w-3 text-slate-500" />
+                                                        <span>{activeModeLabel} · {activeModelLabel}</span>
+                                                    </span>
+                                                    <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-[#f7f8f4] px-2 py-0.5 text-[10px] text-slate-700">
+                                                        <Sparkles className="h-3 w-3 text-slate-500" />
+                                                        <span>{runtimeInfo.skills.length} skill{runtimeInfo.skills.length === 1 ? "" : "s"}</span>
+                                                    </span>
                                                 </div>
-                                                <p className="mt-1.5 line-clamp-2 text-[12px] font-medium text-slate-900">
-                                                    {selectedPaper?.title ?? "No paper selected"}
-                                                </p>
+
+                                                <div className="rounded-[20px] border border-slate-200 bg-[#f8faf5] px-3 py-3">
+                                                    <div className="flex items-start gap-2">
+                                                        <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white text-[10px] font-semibold text-slate-600">
+                                                            1
+                                                        </div>
+                                                        <div className="min-w-0">
+                                                            <div className="text-[11px] font-medium text-slate-900">
+                                                                {workspaceRequired ? "Review workspace" : "Start in chat"}
+                                                            </div>
+                                                            <div className="mt-0.5 text-[10px] leading-5 text-slate-500">
+                                                                {workspaceRequired
+                                                                    ? "Code mode needs a writable directory before the first turn."
+                                                                    : "Launch the thread here, then keep Monitor for worker and tool detail only."}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    <div className="mt-2 flex items-start gap-2">
+                                                        <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white text-[10px] font-semibold text-slate-600">
+                                                            2
+                                                        </div>
+                                                        <div className="min-w-0 text-[10px] leading-5 text-slate-500">
+                                                            Use slash commands, skills, uploads, or Monitor only when they are needed.
+                                                        </div>
+                                                    </div>
+                                                </div>
                                             </div>
 
-                                            <div className="rounded-[18px] border border-slate-200 bg-[#f8faf5] px-3 py-2">
-                                                <div className="flex items-center gap-2">
-                                                    <FolderOpen className="h-4 w-4 text-slate-500" />
-                                                    <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-                                                        Workspace
-                                                    </p>
+                                            <div className="rounded-[20px] border border-slate-200 bg-[linear-gradient(180deg,#fafaf7_0%,#f2f4ee_100%)] px-3 py-3">
+                                                <div className="flex items-center justify-between gap-2">
+                                                    <div>
+                                                        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                                                            Quick Launch
+                                                        </p>
+                                                        <p className="mt-1 text-[13px] font-semibold text-slate-900">
+                                                            {workspaceRequired ? "Prepare workspace" : "Continue in chat"}
+                                                        </p>
+                                                    </div>
+                                                    <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[9px] uppercase tracking-[0.12em] text-slate-500">
+                                                        {permissionProfile.replace("_", " ")}
+                                                    </span>
                                                 </div>
-                                                <p className="mt-1.5 break-all font-mono text-[10px] leading-4 text-slate-700">
-                                                    {projectDir ?? "Review in launch step"}
+
+                                                <Button
+                                                    type="button"
+                                                    className="mt-3 h-9 w-full rounded-full bg-slate-900 px-3 text-[11px] font-medium text-white hover:bg-slate-800"
+                                                    onClick={handleEmptyStatePrimaryAction}
+                                                >
+                                                    {workspaceRequired ? "Review workspace" : "Start in chat"}
+                                                </Button>
+
+                                                <div className="mt-2 grid grid-cols-2 gap-2">
+                                                    <Button
+                                                        type="button"
+                                                        variant="outline"
+                                                        className="h-8 rounded-full border-slate-200 bg-white px-3 text-[10px] text-slate-700"
+                                                        onClick={handleInsertSlashCommand}
+                                                    >
+                                                        Slash
+                                                    </Button>
+                                                    <Button
+                                                        type="button"
+                                                        variant="outline"
+                                                        className="h-8 rounded-full border-slate-200 bg-white px-3 text-[10px] text-slate-700"
+                                                        onClick={handleOpenSkillsPanel}
+                                                    >
+                                                        Skills
+                                                    </Button>
+                                                    <Button
+                                                        type="button"
+                                                        variant="outline"
+                                                        className="h-8 rounded-full border-slate-200 bg-white px-3 text-[10px] text-slate-700"
+                                                        onClick={handleOpenComposerUpload}
+                                                        disabled={!canAttachFiles}
+                                                    >
+                                                        Attach file
+                                                    </Button>
+                                                    <Button
+                                                        type="button"
+                                                        variant="outline"
+                                                        className="h-8 rounded-full border-slate-200 bg-white px-3 text-[10px] text-slate-700"
+                                                        onClick={() => openAgentBoardWorkspace()}
+                                                    >
+                                                        Monitor
+                                                    </Button>
+                                                </div>
+
+                                                <p className="mt-2 text-[10px] leading-5 text-slate-500">
+                                                    Runtime {runtimeLabel}. {runtimeInfo.codeModeEnabled === false ? "Code mode unavailable in this runtime." : "Ready for a Claude Code turn."}
                                                 </p>
                                             </div>
-
-                                            <div className="rounded-[18px] border border-slate-200 bg-[#f8faf5] px-3 py-2">
-                                                <div className="flex items-center gap-2">
-                                                    <Bot className="h-4 w-4 text-slate-500" />
-                                                    <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-                                                        Runtime
-                                                    </p>
-                                                </div>
-                                                <p className="mt-1.5 text-[12px] font-medium text-slate-900">
-                                                    {activeModeLabel} · {activeModelLabel}
-                                                </p>
-                                                <p className="mt-1 text-[10px] leading-4 text-slate-500">
-                                                    Permission {permissionProfile.replace("_", " ")}.
-                                                </p>
-                                            </div>
-                                        </div>
-
-                                        <div className="mt-3 flex flex-wrap items-center gap-1.5">
-                                            <Button
-                                                type="button"
-                                                className="h-7.5 rounded-full bg-slate-900 px-3 text-[10px] font-medium text-white hover:bg-slate-800"
-                                                onClick={handleEmptyStatePrimaryAction}
-                                            >
-                                                {workspaceRequired ? "Review workspace" : "Start in chat"}
-                                            </Button>
-                                            <Button
-                                                type="button"
-                                                variant="outline"
-                                                className="h-7.5 rounded-full border-slate-200 bg-white px-3 text-[10px] text-slate-700"
-                                                onClick={handleInsertSlashCommand}
-                                            >
-                                                Insert slash command
-                                            </Button>
-                                            <Button
-                                                type="button"
-                                                variant="outline"
-                                                className="h-7.5 rounded-full border-slate-200 bg-white px-3 text-[10px] text-slate-700"
-                                                onClick={handleSeedStarterPrompt}
-                                            >
-                                                Use starter prompt
-                                            </Button>
-                                            <Button
-                                                type="button"
-                                                variant="outline"
-                                                className="h-7.5 rounded-full border-slate-200 bg-white px-3 text-[10px] text-slate-700"
-                                                onClick={handleOpenComposerUpload}
-                                                disabled={!canAttachFiles}
-                                            >
-                                                Attach file
-                                            </Button>
-                                        </div>
-
-                                        <div className="mt-2.5 flex flex-wrap gap-1">
-                                            <span className="rounded-full border border-slate-200 bg-[#f7f8f4] px-2 py-0.5 text-[10px] text-slate-600">
-                                                1. Review workspace
-                                            </span>
-                                            <span className="rounded-full border border-slate-200 bg-[#f7f8f4] px-2 py-0.5 text-[10px] text-slate-600">
-                                                2. Ask Claude Code
-                                            </span>
-                                            <span className="rounded-full border border-slate-200 bg-[#f7f8f4] px-2 py-0.5 text-[10px] text-slate-600">
-                                                3. Inspect Monitor only when needed
-                                            </span>
                                         </div>
                                     </div>
                                 </div>
@@ -3394,6 +3554,7 @@ export function ReproductionLog({
                                     ref={composerTextareaRef}
                                     value={messageInput}
                                     onChange={(e) => {
+                                        setSlashPaletteSuppressed(false)
                                         setMessageInput(e.target.value)
                                         syncComposerCursor(e.target)
                                     }}
@@ -3422,6 +3583,7 @@ export function ReproductionLog({
 
                                             if (e.key === "Escape") {
                                                 e.preventDefault()
+                                                setSlashPaletteSuppressed(false)
                                                 setMessageInput(replaceActiveSlashToken())
                                                 setSlashSelectedIndex(0)
                                                 return
@@ -3489,6 +3651,8 @@ export function ReproductionLog({
                                                 className="h-6 w-6 rounded-full border border-slate-200 bg-[#f7f8f4] text-slate-600 hover:bg-white"
                                                 onClick={handleOpenComposerUpload}
                                                 disabled={!canAttachFiles}
+                                                title="Attach file"
+                                                aria-label="Attach file"
                                             >
                                                 <Paperclip className="h-3 w-3" />
                                             </Button>
@@ -3496,52 +3660,28 @@ export function ReproductionLog({
                                         <TooltipContent>
                                             {commandMode
                                                 ? "Return to chat mode before uploading files"
-                                                : "Upload files"}
+                                                : "Attach file"}
                                         </TooltipContent>
                                     </Tooltip>
 
-                                    <StudioPermissionSelector
-                                        permissionProfile={permissionProfile}
-                                        onPermissionChange={setPermissionProfile}
-                                        supportedProfiles={supportedPermissionProfiles}
-                                    />
-
-                                    <Select value={mode} onValueChange={(value) => setMode(value as Mode)}>
-                                        <SelectTrigger className="h-6 w-[78px] rounded-full border-slate-200 bg-[#f7f8f4] px-2 text-[10px] text-slate-600 shadow-none hover:bg-white">
-                                            <Code className="mr-1 h-2.5 w-2.5" />
-                                            <SelectValue />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            <SelectItem value="Code" disabled={runtimeInfo.codeModeEnabled === false}>
-                                                {runtimeInfo.codeModeEnabled === false ? "Code (disabled)" : "Code"}
-                                            </SelectItem>
-                                            <SelectItem value="Plan">Plan</SelectItem>
-                                            <SelectItem value="Ask">Ask</SelectItem>
-                                        </SelectContent>
-                                    </Select>
-
-                                    <Select
-                                        value={modelOption}
-                                        onValueChange={(value) =>
-                                            applyModelSelection(
-                                                value,
-                                                value === "custom" ? customModel : "",
-                                            )
-                                        }
-                                    >
-                                        <SelectTrigger className="h-6 w-[108px] rounded-full border-slate-200 bg-[#f7f8f4] px-2 text-[10px] text-slate-600 shadow-none hover:bg-white">
-                                            <Bot className="mr-1 h-2.5 w-2.5" />
-                                            <SelectValue />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            {knownModelAliases.map((alias) => (
-                                                <SelectItem key={alias} value={alias}>
-                                                    {alias}
-                                                </SelectItem>
-                                            ))}
-                                            <SelectItem value="custom">Custom model…</SelectItem>
-                                        </SelectContent>
-                                    </Select>
+                                    {!commandMode ? (
+                                        <Button
+                                            type="button"
+                                            variant="ghost"
+                                            className="h-6 rounded-full border border-slate-200 bg-[#f7f8f4] px-2.5 text-[10px] text-slate-600 hover:bg-white"
+                                            onClick={() => setShowRuntimeControls((current) => !current)}
+                                            title="Session controls"
+                                            aria-label="Session controls"
+                                        >
+                                            <Settings2 className="mr-1.5 h-2.5 w-2.5" />
+                                            <span className="max-w-[12rem] truncate">{runtimeControlSummary}</span>
+                                            {showRuntimeControls ? (
+                                                <ChevronDown className="ml-1.5 h-3 w-3" />
+                                            ) : (
+                                                <ChevronRight className="ml-1.5 h-3 w-3" />
+                                            )}
+                                        </Button>
+                                    ) : null}
 
                                 </div>
 
@@ -3586,6 +3726,70 @@ export function ReproductionLog({
                                     {composerInteractionHint}
                                 </span>
                             </div>
+
+                            {!commandMode && showRuntimeControls ? (
+                                <div className="mt-1.5 rounded-[16px] border border-slate-200 bg-[#eef1ea] p-2">
+                                    <div className="grid gap-2 sm:grid-cols-3">
+                                        <div className="rounded-[14px] border border-slate-200 bg-white px-2 py-2">
+                                            <div className="mb-1 text-[9px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                Permission
+                                            </div>
+                                            <StudioPermissionSelector
+                                                permissionProfile={permissionProfile}
+                                                onPermissionChange={setPermissionProfile}
+                                                supportedProfiles={supportedPermissionProfiles}
+                                            />
+                                        </div>
+
+                                        <div className="rounded-[14px] border border-slate-200 bg-white px-2 py-2">
+                                            <div className="mb-1 text-[9px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                Mode
+                                            </div>
+                                            <Select value={mode} onValueChange={(value) => setMode(value as Mode)}>
+                                                <SelectTrigger className="h-7 w-full rounded-full border-slate-200 bg-[#f7f8f4] px-2 text-[10px] text-slate-600 shadow-none hover:bg-white">
+                                                    <Code className="mr-1 h-2.5 w-2.5" />
+                                                    <SelectValue />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="Code" disabled={runtimeInfo.codeModeEnabled === false}>
+                                                        {runtimeInfo.codeModeEnabled === false ? "Code (disabled)" : "Code"}
+                                                    </SelectItem>
+                                                    <SelectItem value="Plan">Plan</SelectItem>
+                                                    <SelectItem value="Ask">Ask</SelectItem>
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+
+                                        <div className="rounded-[14px] border border-slate-200 bg-white px-2 py-2">
+                                            <div className="mb-1 text-[9px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                Model
+                                            </div>
+                                            <Select
+                                                value={modelOption}
+                                                onValueChange={(value) =>
+                                                    applyModelSelection(
+                                                        value,
+                                                        value === "custom" ? customModel : "",
+                                                    )
+                                                }
+                                            >
+                                                <SelectTrigger className="h-7 w-full rounded-full border-slate-200 bg-[#f7f8f4] px-2 text-[10px] text-slate-600 shadow-none hover:bg-white">
+                                                    <Bot className="mr-1 h-2.5 w-2.5" />
+                                                    <SelectValue />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    {knownModelAliases.map((alias) => (
+                                                        <SelectItem key={alias} value={alias}>
+                                                            {alias}
+                                                        </SelectItem>
+                                                    ))}
+                                                    <SelectItem value="custom">Custom model…</SelectItem>
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+                                    </div>
+                                </div>
+                            ) : null}
                         </div>
                         </div>
                     </div>

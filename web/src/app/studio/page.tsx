@@ -27,6 +27,8 @@ function StudioContent() {
     const { generate } = useContextPackGeneration()
     const searchParams = useSearchParams()
     const router = useRouter()
+    const requestedSurface = searchParams.get("surface")
+    const requestedPaperId = searchParams.get("paperId") || searchParams.get("paper_id")
     const hasProcessedParams = useRef(false)
     const latestContextLookupRef = useRef<Set<string>>(new Set())
     const contextFetchInFlightRef = useRef(false)
@@ -36,6 +38,18 @@ function StudioContent() {
         loadPapers()
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [])
+
+    useEffect(() => {
+        if (requestedSurface !== "board") return
+
+        const params = new URLSearchParams()
+        const targetPaperId = requestedPaperId || selectedPaperId
+        if (targetPaperId) {
+            params.set("paperId", targetPaperId)
+        }
+        const query = params.toString()
+        router.replace(query ? `/studio/agent-board?${query}` : "/studio/agent-board", { scroll: false })
+    }, [requestedPaperId, requestedSurface, router, selectedPaperId])
 
     // Handle URL params from the Papers detail entry point and context pack deep links
     useEffect(() => {
@@ -155,10 +169,12 @@ function StudioContent() {
                 )
                 if (!latestResp.ok) return
                 const latestPayload = (await latestResp.json()) as {
+                    found?: unknown
                     session_id?: unknown
                     context_pack_id?: unknown
                 }
                 if (cancelled) return
+                if (latestPayload.found === false) return
 
                 const latestContextPackId =
                     typeof latestPayload.context_pack_id === "string"
@@ -207,19 +223,24 @@ function StudioContent() {
         updatePaper,
     ])
 
+    const defaultCenterView =
+        requestedSurface === "context" ||
+        requestedSurface === "skills" ||
+        requestedSurface === "log" ||
+        requestedSurface === "commands"
+            ? requestedSurface === "skills"
+                ? "context"
+                : requestedSurface
+            : "log"
+
+    if (requestedSurface === "board") {
+        return null
+    }
+
     // Gallery view — no paper selected
     if (!selectedPaperId) {
         return <PaperGallery />
     }
-
-    const requestedSurface = searchParams.get("surface")
-    const defaultCenterView =
-        requestedSurface === "board" ||
-        requestedSurface === "context" ||
-        requestedSurface === "log" ||
-        requestedSurface === "commands"
-            ? requestedSurface
-            : "log"
 
     return (
         <AgentWorkspace

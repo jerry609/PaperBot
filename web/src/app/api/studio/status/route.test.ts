@@ -48,6 +48,7 @@ describe("studio status route", () => {
       slash_commands: ["help", "status", "new", "clear", "plan", "model", "agents", "mcp", "auth", "doctor"],
       permission_profiles: ["default", "full_access"],
       runtime_commands: ["agents", "auth", "doctor", "mcp"],
+      skills: [],
       project_agents: [],
       project_agent_count: 0,
       claude_agents_error: null,

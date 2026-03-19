@@ -6,7 +6,7 @@ import { useAgentEventStore } from "./store"
 import { parseActivityItem, parseAgentStatus, parseToolCall, parseFileTouched, parseCodexDelegation, parseScoreEdge } from "./parsers"
 import type { AgentEventEnvelopeRaw } from "./types"
 
-const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"
+const EVENTS_STREAM_PATH = "/api/events/stream"
 
 export function useAgentEvents() {
   const { setConnected, addFeedItem, updateAgentStatus, addToolCall, addFileTouched, addCodexDelegation, addScoreEdge } = useAgentEventStore()
@@ -18,7 +18,7 @@ export function useAgentEvents() {
 
     async function connect() {
       try {
-        const res = await fetch(`${BACKEND_URL}/api/events/stream`, {
+        const res = await fetch(EVENTS_STREAM_PATH, {
           signal: controller.signal,
           headers: { Accept: "text/event-stream" },
         })
@@ -48,6 +48,9 @@ export function useAgentEvents() {
           if (scoreEdge) addScoreEdge(scoreEdge)
         }
       } catch (err) {
+        if (controller.signal.aborted || abortRef.current?.signal.aborted) {
+          return
+        }
         if ((err as Error)?.name !== "AbortError") {
           console.warn("[useAgentEvents] disconnected, will retry in 3s", err)
           setTimeout(connect, 3000)

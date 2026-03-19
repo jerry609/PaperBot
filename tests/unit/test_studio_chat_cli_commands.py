@@ -344,6 +344,27 @@ def test_studio_status_reports_detected_default_model(monkeypatch):
     monkeypatch.setattr(studio_chat, "find_claude_cli", lambda: "/usr/local/bin/claude")
     monkeypatch.setattr(studio_chat, "find_opencode_cli", lambda: None)
     monkeypatch.setattr(studio_chat, "has_claude_agent_sdk", lambda: False)
+
+    class _DummySkill:
+        def to_payload(self):
+            return {
+                "id": "paper-reproduction",
+                "title": "Paper Reproduction",
+                "description": "Reproduce a paper in Studio.",
+                "slash_command": "/paper-reproduction",
+                "scope": "project",
+                "tools": ["paper_search"],
+                "recommended_for": ["paper"],
+                "manifest_source": "skill.json",
+                "path": ".claude/skills/paper-reproduction",
+                "prompt_hint": "Use the current paper.",
+            }
+
+    monkeypatch.setattr(
+        studio_chat,
+        "discover_studio_skills",
+        lambda: [_DummySkill()],
+    )
     monkeypatch.setattr(
         studio_chat,
         "detect_claude_default_model_details",
@@ -384,6 +405,8 @@ def test_studio_status_reports_detected_default_model(monkeypatch):
     assert payload["detected_default_model_source"] == "user"
     assert payload["project_agents"] == ["codex-worker", "reviewer"]
     assert payload["project_agent_count"] == 2
+    assert payload["skills"][0]["id"] == "paper-reproduction"
+    assert payload["skills"][0]["slash_command"] == "/paper-reproduction"
     assert payload["codex_worker_available"] is True
     assert payload["codex_worker_name"] == "codex-worker"
     assert payload["opencode_worker_available"] is False

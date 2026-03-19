@@ -29,6 +29,7 @@ const streamRouteCases: StreamRouteCase[] = [
     path: "/api/studio/chat",
     expectedOptions: {
       auth: true,
+      onError: expect.any(Function),
       responseContentType: "text/event-stream",
     },
   },
@@ -113,6 +114,31 @@ describe("stream route contracts", () => {
     await expect(fallback?.json()).resolves.toEqual({
       detail: "Upstream API unreachable",
       error: "offline",
+    })
+  })
+
+  it("returns a Studio-specific chat fallback when the backend is offline", async () => {
+    const req = new Request("http://localhost/api/studio/chat", {
+      method: "POST",
+    })
+    proxyStreamMock.mockResolvedValueOnce(new Response("data: ping\n\n"))
+
+    await studioChatPost(req)
+
+    const calls = vi.mocked(proxyStreamMock).mock.calls as unknown[][]
+    const options = calls[0]?.[3] as
+      | { onError?: (context: { error: unknown; isTimeout: boolean; upstreamUrl: string }) => Response }
+      | undefined
+    const fallback = options?.onError?.({
+      error: new Error("offline"),
+      isTimeout: false,
+      upstreamUrl: "http://backend.example.com/api/studio/chat",
+    })
+
+    expect(fallback).toBeInstanceOf(Response)
+    expect(fallback?.status).toBe(502)
+    await expect(fallback?.json()).resolves.toEqual({
+      detail: "Studio backend is unreachable (http://backend.example.com/api/studio/chat): offline",
     })
   })
 })

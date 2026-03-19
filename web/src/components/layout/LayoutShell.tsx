@@ -8,7 +8,8 @@ import { Sidebar } from "./Sidebar"
 export function LayoutShell({ children }: { children: React.ReactNode }) {
   const [collapsed, setCollapsed] = useState(true)
   const pathname = usePathname()
-  const isAgentBoardFocusPage = pathname.startsWith("/studio/agent-board/")
+  const isAgentBoardFocusPage =
+    pathname === "/studio/agent-board" || pathname.startsWith("/studio/agent-board/")
   const isAuthPage =
     pathname === "/login" ||
     pathname === "/register" ||

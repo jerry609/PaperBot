@@ -643,10 +643,14 @@ export function AgentBoard({
           backendUrl(`/api/agent-board/sessions/latest/by-paper?paper_id=${encodeURIComponent(paperId)}`),
         )
         if (!latestResp.ok) return
-        const latestPayload = (await latestResp.json()) as SessionSnapshotPayload
+        const latestPayload = (await latestResp.json()) as SessionSnapshotPayload & {
+          found?: unknown
+        }
         if (cancelled) return
+        if (latestPayload.found === false) return
         const latestSessionId =
           typeof latestPayload.session_id === "string" ? latestPayload.session_id.trim() : null
+        if (!latestSessionId) return
         hydrateFromSnapshot(latestPayload, latestSessionId)
       } catch {
         // Ignore session rehydrate errors; live SSE updates can still drive UI.
