@@ -362,7 +362,7 @@ def test_studio_status_reports_detected_default_model(monkeypatch):
 
     monkeypatch.setattr(
         studio_chat,
-        "discover_studio_skills",
+        "list_available_studio_skills",
         lambda: [_DummySkill()],
     )
     monkeypatch.setattr(

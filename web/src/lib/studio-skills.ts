@@ -6,10 +6,47 @@ const STUDIO_SKILL_ECOSYSTEM_LABELS: Record<string, string> = {
   github_copilot: "GitHub Copilot",
 }
 
+const GENERATED_CONTEXT_MODULES = new Set([
+  "literature",
+  "environment",
+  "spec",
+  "roadmap",
+  "success_criteria",
+])
+
 export type ParsedStudioSkillCommand = {
   skill: StudioSkillInfo
   args: string
   slashInput: string
+}
+
+function cleanString(value: unknown): string | null {
+  if (typeof value !== "string") return null
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : null
+}
+
+function cleanStringList(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+
+  const normalized: string[] = []
+  const seen = new Set<string>()
+  for (const item of value) {
+    const cleaned = cleanString(item)
+    if (!cleaned || seen.has(cleaned)) continue
+    seen.add(cleaned)
+    normalized.push(cleaned)
+  }
+  return normalized
+}
+
+type StudioSkillLike = Partial<StudioSkillInfo>
+
+type SkillPromptSkill = StudioSkillLike & {
+  id: string
+  title: string
+  description: string
+  slashCommand: string
 }
 
 function splitSlashInput(input: string): { command: string; args: string; slashInput: string } | null {
@@ -53,7 +90,7 @@ export function parseStudioSkillSlashCommand(
 }
 
 export function buildStudioSkillPrompt(
-  skill: StudioSkillInfo,
+  skill: SkillPromptSkill,
   args: string,
   options: {
     paperTitle?: string | null
@@ -61,6 +98,11 @@ export function buildStudioSkillPrompt(
     workspacePath?: string | null
   } = {},
 ): string {
+  const tools = getStudioSkillTools(skill)
+  const paths = getStudioSkillPaths(skill)
+  const contextModules = cleanStringList(skill.contextModules)
+  const repoLabel = cleanString(skill.repoLabel)
+  const repoUrl = cleanString(skill.repoUrl)
   const userRequest =
     args.trim() ||
     (options.paperTitle
@@ -68,9 +110,13 @@ export function buildStudioSkillPrompt(
       : "Apply this skill to the current Studio context.")
 
   const lines = [
-    `Use the available project skill \`${skill.id}\` if it is present in this repository.`,
+    `Use the available Studio skill \`${skill.id}\` if it is present in this repository.`,
     skill.description ? `Skill description: ${skill.description}` : "",
-    skill.tools.length > 0 ? `Preferred tools from the skill: ${skill.tools.join(", ")}` : "",
+    repoLabel ? `Skill source: ${repoLabel}` : "",
+    repoUrl ? `Git source: ${repoUrl}` : "",
+    paths.length > 0 ? `Skill paths: ${paths.join(", ")}` : "",
+    tools.length > 0 ? `Preferred tools from the skill: ${tools.join(", ")}` : "",
+    contextModules.length > 0 ? `Requested context modules: ${contextModules.join(", ")}` : "",
     skill.promptHint ? `Studio hint: ${skill.promptHint}` : "",
     options.paperTitle ? `Selected paper: ${options.paperTitle}` : "",
     options.contextPackId ? `Current context pack id: ${options.contextPackId}` : "",
@@ -90,9 +136,47 @@ export function formatStudioSkillEcosystemLabel(ecosystem: string): string {
 }
 
 export function buildStudioSkillAvailabilityLabel(skill: StudioSkillInfo): string {
-  const ecosystems = skill.ecosystems.length > 0 ? skill.ecosystems : skill.primaryEcosystem ? [skill.primaryEcosystem] : []
+  const ecosystems = getStudioSkillEcosystems(skill)
   if (ecosystems.length === 0) {
     return "Project skill"
   }
   return ecosystems.map((entry) => formatStudioSkillEcosystemLabel(entry)).join(" + ")
+}
+
+export function getStudioSkillTools(skill: StudioSkillLike): string[] {
+  return cleanStringList(skill.tools)
+}
+
+export function getStudioSkillRecommendedFor(skill: StudioSkillLike): string[] {
+  return cleanStringList(skill.recommendedFor)
+}
+
+export function getStudioSkillEcosystems(skill: StudioSkillLike): string[] {
+  const ecosystems = cleanStringList(skill.ecosystems)
+  if (ecosystems.length > 0) return ecosystems
+
+  const primary = cleanString(skill.primaryEcosystem)
+  return primary ? [primary] : []
+}
+
+export function getStudioSkillPaths(skill: StudioSkillLike): string[] {
+  const paths = cleanStringList(skill.paths)
+  if (paths.length > 0) return paths
+
+  const primaryPath = cleanString(skill.path)
+  return primaryPath ? [primaryPath] : []
+}
+
+export function skillNeedsGeneratedContext(input: StudioSkillLike | string[]): boolean {
+  const modules = Array.isArray(input) ? cleanStringList(input) : cleanStringList(input.contextModules)
+  return modules.some((module) => GENERATED_CONTEXT_MODULES.has(module))
+}
+
+export function skillNeedsWorkspace(
+  input: StudioSkillLike | string[],
+  options: { requiresWorkspaceHint?: boolean } = {},
+): boolean {
+  if (options.requiresWorkspaceHint) return true
+  const modules = Array.isArray(input) ? cleanStringList(input) : cleanStringList(input.contextModules)
+  return modules.includes("workspace")
 }

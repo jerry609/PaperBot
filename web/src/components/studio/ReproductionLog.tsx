@@ -51,6 +51,8 @@ import {
 } from "@/lib/studio-errors"
 import {
     buildStudioSkillPrompt,
+    getStudioSkillRecommendedFor,
+    getStudioSkillTools,
     parseStudioSkillSlashCommand,
 } from "@/lib/studio-skills"
 import { useAgentEventStore } from "@/lib/agent-events/store"
@@ -194,7 +196,7 @@ type SlashCommandItem = {
     command: string
     label: string
     description: string
-    group: "Claude Code" | "Skills" | "Runtime" | "Session"
+    group: "Claude Code" | "Project Skill" | "Runtime" | "Session"
     requiresRuntimeSupport?: boolean
     keywords: string[]
     icon: React.ElementType
@@ -1285,6 +1287,7 @@ export function ReproductionLog({
         tasks,
         activeTaskId,
         selectedPaperId,
+        attachedSkill,
         lastGenCodeResult,
         contextPack,
         contextPackLoading,
@@ -1301,6 +1304,7 @@ export function ReproductionLog({
         updateTaskStatus,
         updatePaper,
         setActiveTask,
+        setAttachedSkill,
     } = useStudioStore()
 
     const { generate: generateContextPack, status: genStatus } = useContextPackGeneration()
@@ -1951,10 +1955,13 @@ export function ReproductionLog({
         setUploadedFiles([])
 
         const parsedSkillCommand = parseStudioSkillSlashCommand(message, runtimeInfo.skills)
+        const canApplyAttachedSkill = Boolean(attachedSkill) && !message.trim().startsWith("/")
+        const effectiveSkill = parsedSkillCommand?.skill ?? (canApplyAttachedSkill ? attachedSkill : null)
+        const effectiveSkillArgs = parsedSkillCommand?.args ?? (canApplyAttachedSkill ? message.trim() : "")
         const effectiveMessage =
             options?.effectiveMessageOverride?.trim() ||
-            (parsedSkillCommand
-                ? buildStudioSkillPrompt(parsedSkillCommand.skill, parsedSkillCommand.args, {
+            (effectiveSkill
+                ? buildStudioSkillPrompt(effectiveSkill, effectiveSkillArgs, {
                     paperTitle: selectedPaper?.title ?? null,
                     contextPackId: contextPack?.context_pack_id ?? null,
                     workspacePath: preparedProjectDir ?? null,
@@ -1962,10 +1969,10 @@ export function ReproductionLog({
                 : message.trim() || "Please inspect the attached files.")
         const threadTitle =
             options?.threadTitleOverride?.trim() ||
-            (parsedSkillCommand
-                ? parsedSkillCommand.args.trim()
-                    ? `${parsedSkillCommand.skill.title}: ${parsedSkillCommand.args.trim()}`
-                    : parsedSkillCommand.skill.title
+            (effectiveSkill
+                ? effectiveSkillArgs.trim()
+                    ? `${effectiveSkill.title}: ${effectiveSkillArgs.trim()}`
+                    : effectiveSkill.title
                 : buildChatThreadTitle(
                     message,
                     selectedUploadedFiles.map((file) => file.name),
@@ -1977,6 +1984,9 @@ export function ReproductionLog({
 
         if (activeChatTask && activeChatTask.history.length === 0 && activeChatTask.actions.length === 0) {
             renameTask(taskId, threadTitle)
+        }
+        if (parsedSkillCommand?.skill) {
+            setAttachedSkill(parsedSkillCommand.skill)
         }
 
         await streamChatTurn({
@@ -2493,8 +2503,12 @@ export function ReproductionLog({
     }, [focusComposerToEnd, selectedPaper, workspaceRequired])
 
     const handleOpenSkillsPanel = useCallback(() => {
-        onViewModeChange("context")
-    }, [onViewModeChange])
+        const params = new URLSearchParams()
+        if (selectedPaperId) {
+            params.set("paperId", selectedPaperId)
+        }
+        router.push(params.toString() ? `/skills?${params.toString()}` : "/skills")
+    }, [router, selectedPaperId])
 
     function openAgentBoardWorkspace(delegationTaskId?: string) {
         const workerRunId = delegationTaskId
@@ -2557,9 +2571,9 @@ export function ReproductionLog({
                 description:
                     skill.description ||
                     `Insert ${skill.slashCommand} to invoke the ${skill.title} workflow in Studio chat.`,
-                group: "Skills",
+                group: "Project Skill",
                 requiresRuntimeSupport: false,
-                keywords: [skill.id, skill.scope, ...skill.tools, ...skill.recommendedFor],
+                keywords: [skill.id, skill.scope, ...getStudioSkillTools(skill), ...getStudioSkillRecommendedFor(skill)],
                 icon: Sparkles,
                 onSelect: (remainder) => setSlashScaffold(skill.slashCommand.replace(/^\//, ""), remainder),
             })),
@@ -2664,6 +2678,7 @@ export function ReproductionLog({
             { label: "Workspace", value: projectDir ?? "Not set" },
             { label: "Uploaded files", value: String(uploadedFiles.length) },
             { label: "Paper", value: selectedPaper?.title ?? "None" },
+            { label: "Attached skill", value: attachedSkill?.title ?? "None" },
             { label: "Session", value: activeChatTask?.name ?? "New thread" },
             ...(runtimeInfo.claudeAgentsError
                 ? [{ label: "Agent probe", value: runtimeInfo.claudeAgentsError }]
@@ -2703,6 +2718,7 @@ export function ReproductionLog({
         runtimeInfo.version,
         runtimeLabel,
         runtimeLoading,
+        attachedSkill?.title,
         selectedPaper?.title,
         uploadedFiles.length,
     ])
@@ -2873,7 +2889,7 @@ export function ReproductionLog({
     })
     const slashCommandGroups = useMemo(
         () =>
-            (["Claude Code", "Skills", "Session", "Runtime"] as const)
+            (["Claude Code", "Project Skill", "Session", "Runtime"] as const)
                 .map((group) => ({
                     group,
                     items: filteredSlashCommands
@@ -2918,6 +2934,8 @@ export function ReproductionLog({
                 : "Studio backend disconnected. Studio retries automatically."
         : runtimeInfo.codeModeEnabled === false && mode === "Plan"
             ? "Code mode is unavailable in this runtime."
+        : attachedSkill
+            ? `${attachedSkill.title} is attached to this thread.`
         : uploadedFiles.length > 0
             ? `${uploadedFiles.length} uploaded file${uploadedFiles.length === 1 ? "" : "s"} ready.`
         : missingCustomModel
@@ -2936,9 +2954,13 @@ export function ReproductionLog({
         : "border-emerald-200 bg-emerald-50 text-emerald-700"
     const emptyStateTitle = workspaceRequired
         ? "Review the workspace before starting"
+        : attachedSkill
+            ? `Continue with ${attachedSkill.title}`
         : "Launch a focused Claude Code thread"
     const emptyStateDescription = workspaceRequired
         ? "Code mode needs a writable directory before the first turn."
+        : attachedSkill
+            ? `${attachedSkill.title} is already attached to this thread. Start in chat directly or change the skill from the top-level Skills page.`
         : "Start in chat. Open the standalone Monitor only when you need raw runtime trace."
     const advancedComposerOverrideCount = [
         parsedTools.length > 0,
@@ -2948,6 +2970,16 @@ export function ReproductionLog({
         settingsText.trim().length > 0,
     ].filter(Boolean).length
     const composerBadges = [
+        attachedSkill
+            ? {
+                id: `skill:${attachedSkill.key}`,
+                label: attachedSkill.title,
+                meta: attachedSkill.scope,
+                tone: "success" as const,
+                icon: Sparkles,
+                onRemove: () => setAttachedSkill(null),
+            }
+            : null,
         ...uploadedFiles.map((file) => ({
             id: `file:${file.id}`,
             label: file.name,
@@ -3061,7 +3093,7 @@ export function ReproductionLog({
             {!hideNavigation && (
                 <div className="flex shrink-0 items-center border-b border-slate-200 bg-[#eef0ea] px-2">
                     {([
-                        { key: "context" as const, label: "Skills", icon: Sparkles },
+                        { key: "context" as const, label: "Context", icon: Sparkles },
                         { key: "log" as const, label: "Chat", icon: MessageSquare },
                         { key: "board" as const, label: "Monitor", icon: LayoutDashboard },
                     ]).map(({ key, label, icon: TabIcon }) => (
@@ -3129,13 +3161,14 @@ export function ReproductionLog({
                                 }
                                 : null
                         }
+                        projectDir={projectDir}
                         generationStatus={genStatus}
                         generationProgress={generationProgress}
                         liveObservations={liveObservations}
                         contextPack={contextPack}
                         contextPackLoading={contextPackLoading}
                         contextPackError={contextPackError}
-                        skills={runtimeInfo.skills}
+                        attachedSkill={attachedSkill}
                         onGenerate={(paper) =>
                             generateContextPack({
                                 paperId: paper.id,
@@ -3144,6 +3177,7 @@ export function ReproductionLog({
                             })
                         }
                         onInsertSkill={handleInsertStudioSkill}
+                        onClearSkill={() => setAttachedSkill(null)}
                         onSessionCreated={handleSessionCreated}
                         onDeployToBoard={openAgentBoardWorkspace}
                     />
@@ -3252,10 +3286,17 @@ export function ReproductionLog({
                                                         <Bot className="h-3 w-3 text-slate-500" />
                                                         <span>{activeModeLabel} · {activeModelLabel}</span>
                                                     </span>
-                                                    <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-[#f7f8f4] px-2 py-0.5 text-[10px] text-slate-700">
-                                                        <Sparkles className="h-3 w-3 text-slate-500" />
-                                                        <span>{runtimeInfo.skills.length} skill{runtimeInfo.skills.length === 1 ? "" : "s"}</span>
-                                                    </span>
+                                                    {attachedSkill ? (
+                                                        <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] text-emerald-800">
+                                                            <Sparkles className="h-3 w-3 text-emerald-700" />
+                                                            <span className="max-w-[16rem] truncate">{attachedSkill.title}</span>
+                                                        </span>
+                                                    ) : (
+                                                        <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-[#f7f8f4] px-2 py-0.5 text-[10px] text-slate-700">
+                                                            <Sparkles className="h-3 w-3 text-slate-500" />
+                                                            <span>Browse Skills to attach one</span>
+                                                        </span>
+                                                    )}
                                                 </div>
 
                                                 <div className="rounded-[20px] border border-slate-200 bg-[#f8faf5] px-3 py-3">
@@ -3279,7 +3320,7 @@ export function ReproductionLog({
                                                             2
                                                         </div>
                                                         <div className="min-w-0 text-[10px] leading-5 text-slate-500">
-                                                            Use slash commands, skills, uploads, or Monitor only when they are needed.
+                                                            Use slash, attached-skill context, uploads, or Monitor only when they are needed.
                                                         </div>
                                                     </div>
                                                 </div>
@@ -3323,7 +3364,7 @@ export function ReproductionLog({
                                                         className="h-8 rounded-full border-slate-200 bg-white px-3 text-[10px] text-slate-700"
                                                         onClick={handleOpenSkillsPanel}
                                                     >
-                                                        Skills
+                                                        Browse Skills
                                                     </Button>
                                                     <Button
                                                         type="button"

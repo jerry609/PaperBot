@@ -54,7 +54,9 @@ tools:
     assert review_skill.title == "Literature Review"
     assert review_skill.description == "Survey the literature on a topic."
     assert review_skill.slash_command == "/literature-review"
+    assert review_skill.key == "project--literature-review"
     assert review_skill.tools == ["paper_search", "paper_summarize"]
+    assert review_skill.context_modules == []
     assert review_skill.ecosystems == ["claude_code"]
     assert review_skill.primary_ecosystem == "claude_code"
     assert review_skill.paths == [".claude/skills/literature-review"]
@@ -65,8 +67,17 @@ tools:
     assert paper_skill.title == "Paper Reproduction"
     assert paper_skill.description == "Reproduce a paper with the PaperBot workflow."
     assert paper_skill.slash_command == "/paper-reproduction"
+    assert paper_skill.key == "project--paper-reproduction"
     assert paper_skill.tools == ["paper_search", "paper_judge"]
     assert paper_skill.recommended_for == ["paper", "context_pack"]
+    assert paper_skill.context_modules == [
+        "paper_brief",
+        "literature",
+        "environment",
+        "spec",
+        "roadmap",
+        "success_criteria",
+    ]
     assert paper_skill.ecosystems == ["claude_code"]
     assert paper_skill.primary_ecosystem == "claude_code"
     assert paper_skill.paths == [".claude/skills/paper-reproduction"]
@@ -109,6 +120,7 @@ tools:
     assert len(discovered) == 1
     skill = discovered[0]
     assert skill.id == "paper-reproduction"
+    assert skill.key == "project--paper-reproduction"
     assert skill.primary_ecosystem == "claude_code"
     assert skill.ecosystems == ["claude_code", "github_copilot"]
     assert skill.paths == [

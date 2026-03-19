@@ -560,7 +560,7 @@ export function StudioMonitorWorkspace({
                             <span className="font-medium text-slate-900">{runtimeInfo.chatTransport}</span>
                           </div>
                           <div className="flex items-center justify-between gap-2">
-                            <span>Skills</span>
+                            <span>Project skills</span>
                             <span className="font-medium text-slate-900">{runtimeInfo.skills.length}</span>
                           </div>
                           <div className="flex items-center justify-between gap-2">

@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type { ReproContextPack, StageObservationsEvent, StageProgressEvent } from '@/lib/types/p2c'
 import type { StudioBridgeResult } from '@/lib/studio-bridge-result'
+import type { StudioSkillInfo } from '@/lib/studio-runtime'
 
 // Agent Action Types
 export type ActionType = 'thinking' | 'file_change' | 'function_call' | 'mcp_call' | 'activity_summary' | 'approval_request' | 'error' | 'complete' | 'text' | 'user'
@@ -205,6 +206,30 @@ export interface StudioPaper {
     taskIds: string[]
 }
 
+export type StudioAttachedSkill = Pick<
+    StudioSkillInfo,
+    | 'key'
+    | 'id'
+    | 'title'
+    | 'description'
+    | 'slashCommand'
+    | 'scope'
+    | 'tools'
+    | 'recommendedFor'
+    | 'ecosystems'
+    | 'primaryEcosystem'
+    | 'paths'
+    | 'manifestSource'
+    | 'path'
+    | 'promptHint'
+    | 'repoSlug'
+    | 'repoUrl'
+    | 'repoLabel'
+    | 'repoRef'
+    | 'repoCommit'
+    | 'contextModules'
+>
+
 const STORAGE_KEY = 'paperbot-studio-papers'
 const RUNTIME_STORAGE_KEY = 'paperbot-studio-runtime'
 const RUNTIME_STORAGE_VERSION = 2
@@ -243,6 +268,7 @@ interface PerPaperCache {
     generationProgress: StageProgressEvent[]
     liveObservations: StageObservationsEvent[]
     activeTaskId: string | null
+    attachedSkill: StudioAttachedSkill | null
 }
 
 interface PersistedRuntimeState {
@@ -286,6 +312,10 @@ function _normalizePaperCache(cache: unknown): Record<string, PerPaperCache> {
             generationProgress: Array.isArray(entry.generationProgress) ? entry.generationProgress : [],
             liveObservations: Array.isArray(entry.liveObservations) ? entry.liveObservations : [],
             activeTaskId: typeof entry.activeTaskId === 'string' ? entry.activeTaskId : null,
+            attachedSkill:
+                entry.attachedSkill && typeof entry.attachedSkill === 'object'
+                    ? (entry.attachedSkill as StudioAttachedSkill)
+                    : null,
         }
     }
     return normalized
@@ -461,6 +491,7 @@ interface StudioState {
     // Task management (scoped to selected paper)
     tasks: Task[]
     activeTaskId: string | null
+    attachedSkill: StudioAttachedSkill | null
     selectedFileForDiff: string | null
     paperDraft: PaperDraft
     lastGenCodeResult: GenCodeResult | null
@@ -516,6 +547,7 @@ interface StudioState {
     appendToLastAction: (taskId: string, text: string) => void
     appendTaskHistory: (taskId: string, message: TaskMessage) => void
     setActiveTask: (taskId: string | null) => void
+    setAttachedSkill: (skill: StudioAttachedSkill | null) => void
     setSelectedFileForDiff: (filename: string | null) => void
     setPaperDraft: (partial: Partial<PaperDraft>) => void
     setLastGenCodeResult: (result: GenCodeResult | null) => void
@@ -540,6 +572,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     // Task state
     tasks: [],
     activeTaskId: null,
+    attachedSkill: null,
     selectedFileForDiff: null,
     paperDraft: { title: "", abstract: "", methodSection: "" },
     lastGenCodeResult: null,
@@ -674,6 +707,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
                     generationProgress: state.generationProgress,
                     liveObservations: state.liveObservations,
                     activeTaskId: state.activeTaskId,
+                    attachedSkill: state.attachedSkill,
                 }
             }
             savePapersToStorage(newPapers)
@@ -690,6 +724,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
                 lastGenCodeResult: null,
                 workspaceSnapshotId: null,
                 activeTaskId: null,
+                attachedSkill: null,
                 contextPack: null,
                 contextPackLoading: false,
                 contextPackError: null,
@@ -742,6 +777,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
                 // Clear draft if deleted paper was selected
                 ...(state.selectedPaperId === paperId ? {
                     activeTaskId: null,
+                    attachedSkill: null,
                     paperDraft: { title: '', abstract: '', methodSection: '' },
                     lastGenCodeResult: null,
                     contextPack: null,
@@ -767,6 +803,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
                 generationProgress: state.generationProgress,
                 liveObservations: state.liveObservations,
                 activeTaskId: state.activeTaskId,
+                attachedSkill: state.attachedSkill,
             }
         }
 
@@ -785,6 +822,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
             workspaceSnapshotId: null,
             // Restore cached per-paper state, or defaults
             activeTaskId: _resolveActiveTaskId(cached?.activeTaskId ?? null, state.tasks, paperId),
+            attachedSkill: cached?.attachedSkill ?? null,
             contextPack: cached?.contextPack ?? null,
             contextPackLoading: cached?.contextPackLoading ?? false,
             contextPackError: cached?.contextPackError ?? null,
@@ -838,6 +876,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
             lastGenCodeResult: selectedPaper?.lastGenCodeResult || null,
             workspaceSnapshotId: null,
             activeTaskId: _resolveActiveTaskId(cached?.activeTaskId ?? null, runtime.tasks, selectedPaperId),
+            attachedSkill: cached?.attachedSkill ?? null,
             contextPack: cached?.contextPack ?? null,
             contextPackLoading: false,
             contextPackError: cached?.contextPackError ?? null,
@@ -1094,6 +1133,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     },
 
     setActiveTask: (taskId) => set({ activeTaskId: taskId }),
+    setAttachedSkill: (skill) => set({ attachedSkill: skill }),
     setSelectedFileForDiff: (filename) => set({ selectedFileForDiff: filename }),
 
     setPaperDraft: (partial) => set((state) => ({
@@ -1172,6 +1212,7 @@ function _snapshotRuntimeState(state: StudioState): PersistedRuntimeState {
             generationProgress: state.generationProgress,
             liveObservations: state.liveObservations,
             activeTaskId: state.activeTaskId,
+            attachedSkill: state.attachedSkill,
         }
     }
 

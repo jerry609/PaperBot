@@ -122,6 +122,44 @@ describe("studio-store", () => {
     expect(task?.actions[0].content).toBe("Thinking...")
   })
 
+  it("caches the attached skill per paper when switching papers", () => {
+    const { addPaper, selectPaper, setAttachedSkill } = useStudioStore.getState()
+
+    const firstId = addPaper({ title: "Paper Skill A", abstract: "A" })
+    const secondId = addPaper({ title: "Paper Skill B", abstract: "B" })
+
+    selectPaper(firstId)
+    setAttachedSkill({
+      key: "project--paper-reproduction",
+      id: "paper-reproduction",
+      title: "Paper Reproduction",
+      description: "Skill A",
+      slashCommand: "/paper-reproduction",
+      scope: "project",
+      tools: ["paper_search"],
+      recommendedFor: ["paper"],
+      ecosystems: ["claude_code"],
+      primaryEcosystem: "claude_code",
+      paths: [".claude/skills/paper-reproduction"],
+      manifestSource: "skill.json",
+      path: ".claude/skills/paper-reproduction",
+      promptHint: "Use the current paper.",
+      repoSlug: null,
+      repoUrl: null,
+      repoLabel: null,
+      repoRef: null,
+      repoCommit: null,
+      contextModules: ["paper_brief"],
+    })
+
+    selectPaper(secondId)
+    expect(useStudioStore.getState().attachedSkill).toBeNull()
+
+    selectPaper(firstId)
+    expect(useStudioStore.getState().attachedSkill?.title).toBe("Paper Reproduction")
+    expect(useStudioStore.getState().attachedSkill?.contextModules).toEqual(["paper_brief"])
+  })
+
   it("stores chat history on the active thread and updates the latest activity time", () => {
     const { addPaper, addTask, addAction, appendTaskHistory } = useStudioStore.getState()
 

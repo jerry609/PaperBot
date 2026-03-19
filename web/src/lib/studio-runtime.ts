@@ -29,6 +29,7 @@ export interface StudioRuntimeStatusResponse {
 }
 
 export interface StudioSkillPayload {
+  key?: string | null
   id?: string | null
   title?: string | null
   description?: string | null
@@ -42,6 +43,12 @@ export interface StudioSkillPayload {
   manifest_source?: string | null
   path?: string | null
   prompt_hint?: string | null
+  repo_slug?: string | null
+  repo_url?: string | null
+  repo_label?: string | null
+  repo_ref?: string | null
+  repo_commit?: string | null
+  context_modules?: string[] | null
 }
 
 export interface StudioRuntimeCwdResponse {
@@ -59,6 +66,7 @@ export type StudioChatSurface = "managed_session" | "unknown"
 export type StudioChatTransport = "claude_agent_sdk" | "claude_cli_print" | "anthropic_api" | "unknown"
 
 export interface StudioSkillInfo {
+  key: string
   id: string
   title: string
   description: string
@@ -72,6 +80,12 @@ export interface StudioSkillInfo {
   manifestSource: string | null
   path: string | null
   promptHint: string | null
+  repoSlug: string | null
+  repoUrl: string | null
+  repoLabel: string | null
+  repoRef: string | null
+  repoCommit: string | null
+  contextModules: string[]
 }
 
 export interface StudioRuntimeInfo {
@@ -161,6 +175,7 @@ function normalizeStudioSkills(value: unknown): StudioSkillInfo[] {
   for (const item of value) {
     if (!item || typeof item !== "object") continue
     const payload = item as StudioSkillPayload
+    const key = cleanString(payload.key)
     const id = cleanString(payload.id)
     const title = cleanString(payload.title)
     const slashCommand = cleanString(payload.slash_command)
@@ -169,11 +184,12 @@ function normalizeStudioSkills(value: unknown): StudioSkillInfo[] {
     const paths = cleanStringList(payload.paths)
     if (!id || !title || !slashCommand) continue
 
-    const key = `${id}:${slashCommand}`
-    if (seen.has(key)) continue
-    seen.add(key)
+    const dedupeKey = key ?? `${cleanString(payload.scope) ?? "project"}:${id}:${slashCommand}`
+    if (seen.has(dedupeKey)) continue
+    seen.add(dedupeKey)
 
     normalized.push({
+      key: key ?? dedupeKey.replace(/[^\w:-]+/g, "-"),
       id,
       title,
       description: cleanString(payload.description) ?? "",
@@ -187,6 +203,12 @@ function normalizeStudioSkills(value: unknown): StudioSkillInfo[] {
       manifestSource: cleanString(payload.manifest_source),
       path,
       promptHint: cleanString(payload.prompt_hint),
+      repoSlug: cleanString(payload.repo_slug),
+      repoUrl: cleanString(payload.repo_url),
+      repoLabel: cleanString(payload.repo_label),
+      repoRef: cleanString(payload.repo_ref),
+      repoCommit: cleanString(payload.repo_commit),
+      contextModules: cleanStringList(payload.context_modules),
     })
   }
 

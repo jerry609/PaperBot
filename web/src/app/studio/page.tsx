@@ -40,6 +40,25 @@ function StudioContent() {
     }, [])
 
     useEffect(() => {
+        if (!requestedPaperId) return
+        if (selectedPaperId === requestedPaperId) return
+        if (!papers.some((paper) => paper.id === requestedPaperId)) return
+        selectPaper(requestedPaperId)
+    }, [papers, requestedPaperId, selectPaper, selectedPaperId])
+
+    useEffect(() => {
+        if (requestedSurface !== "skills") return
+
+        const params = new URLSearchParams()
+        const targetPaperId = requestedPaperId || selectedPaperId
+        if (targetPaperId) {
+            params.set("paperId", targetPaperId)
+        }
+        const query = params.toString()
+        router.replace(query ? `/skills?${query}` : "/skills", { scroll: false })
+    }, [requestedPaperId, requestedSurface, router, selectedPaperId])
+
+    useEffect(() => {
         if (requestedSurface !== "board") return
 
         const params = new URLSearchParams()

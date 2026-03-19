@@ -27,7 +27,7 @@ from pydantic import BaseModel, Field
 
 from paperbot.application.collaboration.agent_events import make_lifecycle_event
 from paperbot.application.collaboration.message_schema import EventType, make_event, new_run_id, new_trace_id
-from paperbot.application.services.studio_skill_registry import discover_studio_skills
+from paperbot.application.services.studio_skill_catalog import list_available_studio_skills
 
 from ..streaming import StreamEvent, sse_response
 
@@ -2757,7 +2757,7 @@ async def studio_status():
     chat_transport = current_studio_chat_transport(claude_path=claude_path)
     preferred_transport = preferred_studio_chat_transport()
     detected_model = detect_claude_default_model_details()
-    skills = [skill.to_payload() for skill in discover_studio_skills()]
+    skills = [skill.to_payload() for skill in list_available_studio_skills()]
     opencode_path = find_opencode_cli()
     opencode_available, opencode_version = _probe_cli_version(opencode_path)
     claude_available, version = _probe_cli_version(claude_path)

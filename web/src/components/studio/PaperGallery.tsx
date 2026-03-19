@@ -150,11 +150,11 @@ function buildPaperStageBadges(paper: StudioPaper): Array<{
             },
         paper.contextPackId
             ? {
-                label: "skills ready",
+                label: "context ready",
                 className: "border-emerald-200 bg-emerald-50 text-emerald-700",
             }
             : {
-                label: "skills pending",
+                label: "context pending",
                 className: "border-slate-200 bg-[#f7f8f4] text-slate-600",
             },
     ]

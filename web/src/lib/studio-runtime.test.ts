@@ -32,6 +32,7 @@ describe("buildStudioRuntimeInfo", () => {
         runtime_commands: ["agents", "auth", "doctor", "mcp"],
         skills: [
           {
+            key: "project--paper-reproduction",
             id: "paper-reproduction",
             title: "Paper Reproduction",
             description: "Reproduce a paper in Studio.",
@@ -48,6 +49,11 @@ describe("buildStudioRuntimeInfo", () => {
             manifest_source: "skill.json",
             path: ".claude/skills/paper-reproduction",
             prompt_hint: "Use the selected paper.",
+            repo_label: "PaperBot",
+            repo_url: "https://example.com/paperbot.git",
+            repo_ref: "main",
+            repo_commit: "abc12345",
+            context_modules: ["paper_brief", "roadmap"],
           },
         ],
         code_mode_enabled: true,
@@ -80,11 +86,17 @@ describe("buildStudioRuntimeInfo", () => {
     expect(info.supportedPermissionProfiles).toEqual(["default", "full_access"])
     expect(info.runtimeCommands).toContain("mcp")
     expect(info.skills[0]).toMatchObject({
+      key: "project--paper-reproduction",
       id: "paper-reproduction",
       slashCommand: "/paper-reproduction",
       scope: "project",
       ecosystems: ["claude_code", "opencode"],
       primaryEcosystem: "claude_code",
+      repoLabel: "PaperBot",
+      repoUrl: "https://example.com/paperbot.git",
+      repoRef: "main",
+      repoCommit: "abc12345",
+      contextModules: ["paper_brief", "roadmap"],
     })
     expect(info.statusLabel).toBe("Managed chat · CLI print · CLI 2.1.76")
     expect(info.codeModeEnabled).toBe(true)

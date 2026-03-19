@@ -345,7 +345,7 @@ function LeftRail({
                 {formatWorkspaceLabel(projectDir)}
               </span>
               <span className="rounded-full border border-slate-200 bg-white px-1.5 py-0.5">
-                Skills {contextLabel}
+                Context {contextLabel}
               </span>
             </div>
           </div>
@@ -612,7 +612,7 @@ function CenterSurface({
               }`}
             >
               <Sparkles className="h-3.5 w-3.5" />
-              Skills
+              Context
             </button>
           </div>
 
@@ -718,7 +718,7 @@ export function AgentWorkspace({
   const [localCenterView, setLocalCenterView] = useState<CenterView>(requestedSurface)
   const [mobilePinnedView, setMobilePinnedView] = useState<"threads" | null>(null)
   const centerView: CenterView = requestedWorkspaceSurface ?? localCenterView
-  const skillsToggleActive = centerView === "context"
+  const contextToggleActive = centerView === "context"
 
   useEffect(() => {
     loadPapers()
@@ -938,19 +938,29 @@ export function AgentWorkspace({
               variant="outline"
               size="sm"
               className="h-7 rounded-full border-slate-200 bg-white px-2.5 text-[11px] text-slate-700"
-              onClick={() => updateCenterView(skillsToggleActive ? "log" : "context")}
+              onClick={() => updateCenterView(contextToggleActive ? "log" : "context")}
             >
-              {skillsToggleActive ? (
+              {contextToggleActive ? (
                 <MessageSquare className="mr-1.5 h-3.5 w-3.5" />
               ) : (
                 <Sparkles className="mr-1.5 h-3.5 w-3.5" />
               )}
               <span className="hidden sm:inline">
-                {skillsToggleActive ? "Back to chat" : "Skills"}
+                {contextToggleActive ? "Back to chat" : "Context"}
               </span>
               <span className="sm:hidden">
-                {skillsToggleActive ? "Chat" : "Skills"}
+                {contextToggleActive ? "Chat" : "Context"}
               </span>
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-7 rounded-full border-slate-200 bg-white px-2.5 text-[11px] text-slate-700"
+              onClick={() => router.push("/skills")}
+            >
+              <Sparkles className="mr-1.5 h-3.5 w-3.5" />
+              Browse Skills
             </Button>
             <Button
               type="button"

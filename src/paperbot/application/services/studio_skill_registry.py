@@ -11,6 +11,7 @@ import yaml
 
 @dataclass(frozen=True)
 class StudioSkillSummary:
+    key: str
     id: str
     title: str
     description: str
@@ -24,6 +25,12 @@ class StudioSkillSummary:
     manifest_source: str = "frontmatter"
     path: str = ""
     prompt_hint: Optional[str] = None
+    repo_slug: Optional[str] = None
+    repo_url: Optional[str] = None
+    repo_label: Optional[str] = None
+    repo_ref: Optional[str] = None
+    repo_commit: Optional[str] = None
+    context_modules: List[str] = field(default_factory=list)
 
     def to_payload(self) -> Dict[str, Any]:
         return asdict(self)
@@ -36,6 +43,11 @@ _SKILL_DISCOVERY_ROOTS = (
     ("opencode", ".opencode/skills"),
     ("github_copilot", ".github/skills"),
 )
+_DEFAULT_CONTEXT_MODULES_BY_TARGET = {
+    "paper": ["paper_brief"],
+    "context_pack": ["literature", "environment", "spec", "roadmap", "success_criteria"],
+    "workspace": ["workspace"],
+}
 
 
 def _repository_root() -> Path:
@@ -87,6 +99,18 @@ def _humanize_skill_id(value: str) -> str:
     if not words:
         return "Skill"
     return " ".join(word[:1].upper() + word[1:] for word in words)
+
+
+def _slugify(value: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", value.strip().lower()).strip("-")
+    return slug or "skill"
+
+
+def _build_skill_key(skill_id: str, scope: str, repo_slug: Optional[str] = None) -> str:
+    base = _slugify(skill_id)
+    if scope == "installed" and repo_slug:
+        return f"installed--{_slugify(repo_slug)}--{base}"
+    return f"{_slugify(scope)}--{base}"
 
 
 def _read_frontmatter(skill_path: Path) -> Dict[str, Any]:
@@ -181,32 +205,63 @@ def _resolve_skill_path(skill_dir: Path, repo_root: Path) -> str:
         return str(skill_dir)
 
 
-def _load_skill_summary(skill_dir: Path, repo_root: Path, ecosystem: str) -> Optional[StudioSkillSummary]:
+def _resolve_context_modules(manifest: Dict[str, Any], recommended_for: List[str]) -> List[str]:
+    explicit = _normalize_string_list(manifest.get("context_modules"))
+    if explicit:
+        return explicit
+
+    inferred: List[str] = []
+    for target in recommended_for:
+        inferred.extend(_DEFAULT_CONTEXT_MODULES_BY_TARGET.get(target, []))
+    return _merge_string_lists(inferred)
+
+
+def _load_skill_summary(
+    skill_dir: Path,
+    repo_root: Path,
+    ecosystem: str,
+    *,
+    scope: str = "project",
+    repo_slug: Optional[str] = None,
+    repo_url: Optional[str] = None,
+    repo_label: Optional[str] = None,
+    repo_ref: Optional[str] = None,
+    repo_commit: Optional[str] = None,
+) -> Optional[StudioSkillSummary]:
     manifest = _read_skill_manifest(skill_dir / "skill.json")
     frontmatter = _read_frontmatter(skill_dir / "SKILL.md")
     if not manifest and not frontmatter:
         return None
 
     skill_id = _resolve_skill_id(skill_dir, manifest, frontmatter)
+    recommended_for = _normalize_string_list(manifest.get("recommended_for"))
     return StudioSkillSummary(
+        key=_build_skill_key(skill_id, scope, repo_slug=repo_slug),
         id=skill_id,
         title=_resolve_skill_title(skill_id, manifest, frontmatter),
         description=_resolve_skill_description(manifest, frontmatter),
         slash_command=_resolve_slash_command(skill_id, manifest),
-        scope="project",
+        scope=scope,
         tools=_normalize_string_list(manifest.get("tools")) or _normalize_string_list(frontmatter.get("tools")),
-        recommended_for=_normalize_string_list(manifest.get("recommended_for")),
+        recommended_for=recommended_for,
         ecosystems=[ecosystem],
         primary_ecosystem=ecosystem,
         paths=[_resolve_skill_path(skill_dir, repo_root)],
         manifest_source="skill.json" if manifest else "frontmatter",
         path=_resolve_skill_path(skill_dir, repo_root),
         prompt_hint=_normalize_text(manifest.get("prompt_hint")),
+        repo_slug=repo_slug,
+        repo_url=_normalize_text(repo_url),
+        repo_label=_normalize_text(repo_label),
+        repo_ref=_normalize_text(repo_ref),
+        repo_commit=_normalize_text(repo_commit),
+        context_modules=_resolve_context_modules(manifest, recommended_for),
     )
 
 
 def _merge_skill_summaries(existing: StudioSkillSummary, incoming: StudioSkillSummary) -> StudioSkillSummary:
     return StudioSkillSummary(
+        key=existing.key,
         id=existing.id,
         title=existing.title or incoming.title,
         description=existing.description or incoming.description,
@@ -220,24 +275,51 @@ def _merge_skill_summaries(existing: StudioSkillSummary, incoming: StudioSkillSu
         manifest_source=existing.manifest_source or incoming.manifest_source,
         path=existing.path or incoming.path,
         prompt_hint=existing.prompt_hint or incoming.prompt_hint,
+        repo_slug=existing.repo_slug or incoming.repo_slug,
+        repo_url=existing.repo_url or incoming.repo_url,
+        repo_label=existing.repo_label or incoming.repo_label,
+        repo_ref=existing.repo_ref or incoming.repo_ref,
+        repo_commit=existing.repo_commit or incoming.repo_commit,
+        context_modules=_merge_string_lists(existing.context_modules, incoming.context_modules),
     )
 
 
-def discover_studio_skills(repo_root: Optional[Path] = None) -> List[StudioSkillSummary]:
+def discover_studio_skills_in_root(
+    skills_owner_root: Path,
+    *,
+    repo_root: Optional[Path] = None,
+    scope: str = "project",
+    repo_slug: Optional[str] = None,
+    repo_url: Optional[str] = None,
+    repo_label: Optional[str] = None,
+    repo_ref: Optional[str] = None,
+    repo_commit: Optional[str] = None,
+) -> List[StudioSkillSummary]:
     root = (repo_root or _repository_root()).resolve()
+    scan_root = skills_owner_root.resolve()
     discovered_by_key: Dict[str, StudioSkillSummary] = {}
 
     for ecosystem, relative_root in _SKILL_DISCOVERY_ROOTS:
-        skills_root = root / relative_root
+        skills_root = scan_root / relative_root
         if not skills_root.is_dir():
             continue
 
         for skill_dir in sorted(path for path in skills_root.iterdir() if path.is_dir()):
-            summary = _load_skill_summary(skill_dir, root, ecosystem)
+            summary = _load_skill_summary(
+                skill_dir,
+                root,
+                ecosystem,
+                scope=scope,
+                repo_slug=repo_slug,
+                repo_url=repo_url,
+                repo_label=repo_label,
+                repo_ref=repo_ref,
+                repo_commit=repo_commit,
+            )
             if summary is None:
                 continue
 
-            key = summary.id.strip().lower()
+            key = summary.key.strip().lower()
             existing = discovered_by_key.get(key)
             if existing is None:
                 discovered_by_key[key] = summary
@@ -245,3 +327,8 @@ def discover_studio_skills(repo_root: Optional[Path] = None) -> List[StudioSkill
                 discovered_by_key[key] = _merge_skill_summaries(existing, summary)
 
     return sorted(discovered_by_key.values(), key=lambda skill: (skill.title.lower(), skill.id.lower()))
+
+
+def discover_studio_skills(repo_root: Optional[Path] = None) -> List[StudioSkillSummary]:
+    root = (repo_root or _repository_root()).resolve()
+    return discover_studio_skills_in_root(root, repo_root=root, scope="project")
