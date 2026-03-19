@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { LayoutShell } from "@/components/layout/LayoutShell";
 import { SessionProvider } from "next-auth/react";
+import { TooltipProvider } from "@/components/ui/tooltip";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -30,7 +31,9 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
         <SessionProvider>
-          <LayoutShell>{children}</LayoutShell>
+          <TooltipProvider delayDuration={120}>
+            <LayoutShell>{children}</LayoutShell>
+          </TooltipProvider>
         </SessionProvider>
       </body>
     </html>

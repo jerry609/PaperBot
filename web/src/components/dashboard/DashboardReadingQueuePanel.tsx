@@ -78,6 +78,22 @@ function extractQueueDetail(detailPayload: unknown, cardPayload: unknown): Queue
   }
 }
 
+function buildQueueSaveMetadata(item: DashboardReadingQueueItem): Record<string, unknown> {
+  const normalizedSource = String(item.sourceLabel || "").trim().toLowerCase()
+
+  if (normalizedSource.includes("brief")) {
+    return { import_source: "daily_brief" }
+  }
+  if (normalizedSource.includes("feed")) {
+    return { import_source: "track_feed" }
+  }
+  if (normalizedSource.includes("queue")) {
+    return { import_source: "reading_queue" }
+  }
+
+  return { import_source: "dashboard_recommendation" }
+}
+
 function QueueCard({
   item,
   activeTrackId,
@@ -136,12 +152,14 @@ function QueueCard({
     setLoadingSave(true)
     setError(null)
     try {
+      const metadata = buildQueueSaveMetadata(item)
       if (item.internalPaperId !== null) {
         const res = await fetch(`/api/papers/${item.internalPaperId}/save`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             track_id: activeTrackId,
+            metadata,
           }),
         })
         if (!res.ok) {
@@ -156,6 +174,7 @@ function QueueCard({
             track_id: activeTrackId,
             paper_id: item.paperRef,
             action: "save",
+            metadata,
             paper_title: item.title,
             paper_authors: item.authors || [],
             paper_year: item.year,

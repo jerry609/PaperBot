@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   Dialog,
   DialogContent,
@@ -10,61 +10,39 @@ import {
 } from "@/components/ui/dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Textarea } from "@/components/ui/textarea"
 import {
-  AlertCircle,
   ArrowDown,
   ArrowUp,
+  Brain,
   Bot,
   CheckCircle2,
+  ChevronDown,
   ChevronRight,
   Clock,
   Cpu,
-  FileCode,
   FolderOpen,
+  Info,
   Loader2,
   Pin,
   PinOff,
-  RotateCcw,
-  ThumbsUp,
-  XCircle,
+  Wrench,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
-import type { AgentTask, AgentTaskLog, BlockType } from "@/lib/store/studio-store"
+import { getAgentPresentation, isCommanderAssignee } from "@/lib/agent-runtime"
+import type { AgentTask, AgentTaskLog } from "@/lib/store/studio-store"
+import {
+  buildTaskTimelineEntries,
+  filterTaskLogs,
+  inferTaskLogBlockType,
+  type TaskTimelineDisplayMode,
+  type TaskTimelineEntry,
+  type TaskTimelineFilterMode,
+} from "@/lib/studio-task-log-groups"
 import { InfoBlock, ThinkBlock, ToolBlock, DiffBlock, ResultBlock } from "./blocks"
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function inferBlockType(log: AgentTaskLog): BlockType {
-  // Handle both camelCase (frontend) and snake_case (backend) field names
-  const bt = log.blockType ?? (log as unknown as Record<string, unknown>)["block_type"] as BlockType | undefined
-  if (bt) return bt
-  if (log.event === "thinking" || log.event === "reasoning") return "think"
-  if (log.event === "file_write" || log.event === "file_edit") return "diff"
-  if (
-    log.event === "verify_result" ||
-    log.event === "review_result" ||
-    log.event === "executor_finished" ||
-    log.event === "task_done" ||
-    log.event === "human_approved" ||
-    log.event === "human_rejected" ||
-    log.event === "human_requested_changes"
-  )
-    return "result"
-  if (
-    log.event === "tool_call" ||
-    log.event === "shell_exec" ||
-    log.event === "run_command"
-  ) {
-    // Check if it's actually a file write disguised as tool_call
-    const tool = log.details?.tool as string | undefined
-    if (tool === "write_file") return "diff"
-    return "tool"
-  }
-  return "info"
-}
 
 function statusBadge(status: AgentTask["status"]) {
   const config = {
@@ -100,7 +78,7 @@ function computeWorkspaceStats(logs: AgentTaskLog[]) {
   const seenFiles = new Set<string>()
 
   for (const log of logs) {
-    const bt = inferBlockType(log)
+    const bt = inferTaskLogBlockType(log)
     if (bt === "diff") {
       const fp = log.details?.file_path as string | undefined
       if (fp && !seenFiles.has(fp)) {
@@ -113,131 +91,118 @@ function computeWorkspaceStats(logs: AgentTaskLog[]) {
   return { filesChanged, linesAdded, fileNames: Array.from(seenFiles) }
 }
 
-// ---------------------------------------------------------------------------
-// Human Review Section
-// ---------------------------------------------------------------------------
+function renderTimelineLog(log: AgentTaskLog, onFileClick?: (path: string) => void) {
+  const bt = inferTaskLogBlockType(log)
+  switch (bt) {
+    case "think":
+      return <ThinkBlock key={log.id} log={log} />
+    case "tool":
+      return <ToolBlock key={log.id} log={log} />
+    case "diff":
+      return <DiffBlock key={log.id} log={log} onFileClick={onFileClick} />
+    case "result":
+      return <ResultBlock key={log.id} log={log} />
+    default:
+      return <InfoBlock key={log.id} log={log} />
+  }
+}
 
-function HumanReviewSection({ task }: { task: AgentTask }) {
-  const [notes, setNotes] = useState("")
-  const [submitting, setSubmitting] = useState(false)
-  const [lastResult, setLastResult] = useState<{ ok: boolean; msg: string } | null>(null)
+function groupAppearance(entry: Extract<TaskTimelineEntry, { kind: "group" }>) {
+  if (entry.blockType === "think") {
+    return {
+      icon: Brain,
+      panelClass: "border-indigo-200 bg-indigo-50/70",
+      iconClass: "text-indigo-600",
+      titleClass: "text-indigo-900",
+      metaClass: "text-indigo-600",
+    }
+  }
+  if (entry.blockType === "tool") {
+    return {
+      icon: Wrench,
+      panelClass:
+        entry.status === "error"
+          ? "border-rose-200 bg-rose-50/70"
+          : "border-slate-200 bg-[#f8faf6]",
+      iconClass: entry.status === "error" ? "text-rose-600" : "text-slate-600",
+      titleClass: entry.status === "error" ? "text-rose-900" : "text-slate-900",
+      metaClass: entry.status === "error" ? "text-rose-600" : "text-slate-500",
+    }
+  }
+  return {
+    icon: Info,
+    panelClass: "border-slate-200 bg-white",
+    iconClass: "text-slate-500",
+    titleClass: "text-slate-900",
+    metaClass: "text-slate-500",
+  }
+}
 
-  const submit = useCallback(
-    async (decision: "approve" | "request_changes") => {
-      setSubmitting(true)
-      setLastResult(null)
-      try {
-        const res = await fetch(`/api/agent-board/tasks/${task.id}/human-review`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ decision, notes: notes.trim() || null }),
-        })
-        if (!res.ok) {
-          const body = await res.text()
-          setLastResult({ ok: false, msg: body || `Error ${res.status}` })
-        } else {
-          setLastResult({
-            ok: true,
-            msg: decision === "approve" ? "Task approved" : "Changes requested — task moved back to planning",
-          })
-          setNotes("")
-        }
-      } catch (err) {
-        setLastResult({ ok: false, msg: String(err) })
-      } finally {
-        setSubmitting(false)
-      }
-    },
-    [task.id, notes],
-  )
-
-  const pastReviews = task.humanReviews ?? []
+function GroupedTimelineEntry({
+  entry,
+  onFileClick,
+}: {
+  entry: Extract<TaskTimelineEntry, { kind: "group" }>
+  onFileClick?: (path: string) => void
+}) {
+  const [expanded, setExpanded] = useState(false)
+  const appearance = groupAppearance(entry)
+  const Icon = appearance.icon
 
   return (
-    <section>
-      <h3 className="text-xs font-medium text-zinc-500 uppercase tracking-wider mb-2">
-        Human Review
-      </h3>
-      <div className="rounded-lg border border-zinc-200 bg-white p-4 space-y-3">
-        {/* Past reviews */}
-        {pastReviews.length > 0 && (
-          <div className="space-y-2 pb-2 border-b border-zinc-100">
-            {pastReviews.map((r) => (
-              <div key={r.id} className="flex items-start gap-2 text-xs">
-                {r.decision === "approve" ? (
-                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 mt-0.5 shrink-0" />
-                ) : (
-                  <RotateCcw className="h-3.5 w-3.5 text-amber-500 mt-0.5 shrink-0" />
-                )}
-                <div>
-                  <span className="font-medium text-zinc-700">
-                    {r.decision === "approve" ? "Approved" : "Requested Changes"}
-                  </span>
-                  {r.notes && (
-                    <p className="text-zinc-500 mt-0.5">{r.notes}</p>
-                  )}
-                  <p className="text-zinc-300 text-[10px] mt-0.5">
-                    {new Date(r.timestamp).toLocaleString()}
+    <div className="px-3 py-2">
+      <div className={cn("overflow-hidden rounded-2xl border shadow-[0_1px_0_rgba(255,255,255,0.75)_inset]", appearance.panelClass)}>
+        <button
+          type="button"
+          className="flex w-full items-start gap-3 px-3 py-3 text-left"
+          onClick={() => setExpanded((current) => !current)}
+        >
+          <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-2xl border border-white/70 bg-white/80">
+            <Icon className={cn("h-4 w-4", appearance.iconClass)} />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <span className={cn("text-[12px] font-semibold", appearance.titleClass)}>{entry.title}</span>
+              <span className={cn("rounded-full border border-current/15 px-1.5 py-0.5 text-[10px] uppercase tracking-[0.12em]", appearance.metaClass)}>
+                {entry.logs.length}
+              </span>
+            </div>
+            {entry.preview.length > 0 ? (
+              <div className="mt-1 space-y-1">
+                {entry.preview.map((line) => (
+                  <p key={line} className="text-[11px] leading-4 text-slate-600">
+                    {line}
                   </p>
-                </div>
+                ))}
               </div>
-            ))}
+            ) : null}
+            {entry.toolNames.length > 0 ? (
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {entry.toolNames.slice(0, 4).map((toolName) => (
+                  <span
+                    key={toolName}
+                    className="rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] font-medium text-slate-600"
+                  >
+                    {toolName}
+                  </span>
+                ))}
+              </div>
+            ) : null}
           </div>
-        )}
-
-        {/* Comments input */}
-        <Textarea
-          placeholder="Add comments (optional)..."
-          className="min-h-[60px] text-sm resize-none"
-          value={notes}
-          onChange={(e) => setNotes(e.target.value)}
-          disabled={submitting}
-        />
-
-        {/* Action buttons */}
-        <div className="flex items-center gap-2">
-          <Button
-            size="sm"
-            className="h-8 text-xs gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white"
-            onClick={() => submit("approve")}
-            disabled={submitting}
-          >
-            <ThumbsUp className="h-3.5 w-3.5" />
-            Approve
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-8 text-xs gap-1.5 border-amber-300 text-amber-700 hover:bg-amber-50"
-            onClick={() => submit("request_changes")}
-            disabled={submitting}
-          >
-            <RotateCcw className="h-3.5 w-3.5" />
-            Request Changes
-          </Button>
-          {submitting && <Loader2 className="h-3.5 w-3.5 animate-spin text-zinc-400" />}
-        </div>
-
-        {/* Result feedback */}
-        {lastResult && (
-          <div
-            className={cn(
-              "text-xs flex items-center gap-1.5 px-2 py-1.5 rounded-md",
-              lastResult.ok
-                ? "bg-emerald-50 text-emerald-700"
-                : "bg-red-50 text-red-700",
-            )}
-          >
-            {lastResult.ok ? (
-              <CheckCircle2 className="h-3 w-3 shrink-0" />
-            ) : (
-              <AlertCircle className="h-3 w-3 shrink-0" />
-            )}
-            {lastResult.msg}
+          <div className="shrink-0 rounded-full border border-slate-200 bg-white/80 p-1 text-slate-500">
+            {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
           </div>
-        )}
+        </button>
+
+        {expanded ? (
+          <div className="border-t border-slate-200/70 bg-white/75">
+            <div className="divide-y divide-slate-100">
+              {entry.logs.map((log) => renderTimelineLog(log, onFileClick))}
+            </div>
+          </div>
+        ) : null}
       </div>
-    </section>
+    </div>
   )
 }
 
@@ -327,7 +292,7 @@ function TaskOverview({
                 </div>
                 <p className="text-[11px] text-zinc-400 mt-0.5">
                   {logs.length > 0
-                    ? `${logs.length} execution steps · Click to view thinking process`
+                    ? `${logs.length} execution steps · Click to review the summary timeline`
                     : "No execution steps yet"}
                 </p>
               </div>
@@ -371,68 +336,40 @@ function TaskOverview({
 // Layer 2: Workspace / Thinking Process View
 // ---------------------------------------------------------------------------
 
-type FilterMode = "all" | "diffs" | "thinking"
-
 function ThinkingTimeline({
   logs,
   filter,
+  displayMode,
   onFileClick,
 }: {
   logs: AgentTaskLog[]
-  filter: FilterMode
+  filter: TaskTimelineFilterMode
+  displayMode: TaskTimelineDisplayMode
   onFileClick?: (path: string) => void
 }) {
-  const scrollRef = useRef<HTMLDivElement>(null)
-  const [autoScroll, setAutoScroll] = useState(true)
-  const prevLengthRef = useRef(logs.length)
-
-  // Auto-scroll when new logs arrive
-  useEffect(() => {
-    if (autoScroll && logs.length > prevLengthRef.current && scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight
-    }
-    prevLengthRef.current = logs.length
-  }, [logs.length, autoScroll])
-
-  const filtered = logs.filter((log) => {
-    if (filter === "all") return true
-    const bt = inferBlockType(log)
-    if (filter === "diffs") return bt === "diff"
-    if (filter === "thinking") return bt === "think"
-    return true
-  })
+  const filtered = useMemo(() => filterTaskLogs(logs, filter), [logs, filter])
+  const entries = useMemo(
+    () => (displayMode === "summary" ? buildTaskTimelineEntries(filtered) : []),
+    [displayMode, filtered],
+  )
 
   return (
-    <div
-      ref={scrollRef}
-      className="flex-1 overflow-y-auto"
-      onScroll={(e) => {
-        const el = e.currentTarget
-        const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40
-        setAutoScroll(atBottom)
-      }}
-    >
+    <div>
       <div className="divide-y divide-zinc-100">
         {filtered.length === 0 && (
           <div className="py-12 text-center text-sm text-zinc-400">
             {logs.length === 0 ? "No execution steps yet." : "No matching blocks."}
           </div>
         )}
-        {filtered.map((log) => {
-          const bt = inferBlockType(log)
-          switch (bt) {
-            case "think":
-              return <ThinkBlock key={log.id} log={log} />
-            case "tool":
-              return <ToolBlock key={log.id} log={log} />
-            case "diff":
-              return <DiffBlock key={log.id} log={log} onFileClick={onFileClick} />
-            case "result":
-              return <ResultBlock key={log.id} log={log} />
-            default:
-              return <InfoBlock key={log.id} log={log} />
-          }
-        })}
+        {displayMode === "summary"
+          ? entries.map((entry) =>
+              entry.kind === "group" ? (
+                <GroupedTimelineEntry key={entry.id} entry={entry} onFileClick={onFileClick} />
+              ) : (
+                renderTimelineLog(entry.log, onFileClick)
+              ),
+            )
+          : filtered.map((log) => renderTimelineLog(log, onFileClick))}
       </div>
     </div>
   )
@@ -447,11 +384,14 @@ function WorkspaceView({
   onBack: () => void
   onFileClick?: (path: string) => void
 }) {
-  const [filter, setFilter] = useState<FilterMode>("all")
+  const [filter, setFilter] = useState<TaskTimelineFilterMode>("all")
+  const [displayMode, setDisplayMode] = useState<TaskTimelineDisplayMode>("summary")
   const [autoScroll, setAutoScroll] = useState(true)
-  const logs = task.executionLog ?? []
+  const logs = useMemo(() => task.executionLog ?? [], [task.executionLog])
   const scrollRef = useRef<HTMLDivElement>(null)
   const prevLogCount = useRef(logs.length)
+  const filteredLogs = useMemo(() => filterTaskLogs(logs, filter), [logs, filter])
+  const summaryEntries = useMemo(() => buildTaskTimelineEntries(filteredLogs), [filteredLogs])
 
   const scrollToTop = useCallback(() => {
     scrollRef.current?.scrollTo({ top: 0, behavior: "smooth" })
@@ -472,7 +412,7 @@ function WorkspaceView({
   // Block counts for status bar
   const blockCounts = logs.reduce(
     (acc, log) => {
-      const bt = inferBlockType(log)
+      const bt = inferTaskLogBlockType(log)
       acc[bt] = (acc[bt] || 0) + 1
       return acc
     },
@@ -494,6 +434,22 @@ function WorkspaceView({
         <span className="text-xs font-medium text-zinc-600 truncate">Workspace</span>
 
         <div className="ml-auto flex items-center gap-1.5">
+          <div className="inline-flex items-center rounded-md border border-zinc-200 bg-white p-0.5">
+            {(["summary", "raw"] as const).map((mode) => (
+              <button
+                key={mode}
+                onClick={() => setDisplayMode(mode)}
+                className={cn(
+                  "rounded px-2 py-1 text-[10px] font-medium uppercase tracking-[0.12em] transition-colors",
+                  displayMode === mode
+                    ? "bg-zinc-900 text-white"
+                    : "text-zinc-500 hover:bg-zinc-100 hover:text-zinc-700",
+                )}
+              >
+                {mode}
+              </button>
+            ))}
+          </div>
           {(["all", "diffs", "thinking"] as const).map((f) => (
             <button
               key={f}
@@ -521,7 +477,7 @@ function WorkspaceView({
           if (atBottom !== autoScroll) setAutoScroll(atBottom)
         }}
       >
-        <ThinkingTimeline logs={logs} filter={filter} onFileClick={onFileClick} />
+        <ThinkingTimeline logs={logs} filter={filter} displayMode={displayMode} onFileClick={onFileClick} />
       </div>
 
       {/* Bottom action bar */}
@@ -558,6 +514,11 @@ function WorkspaceView({
 
         {/* Block type counts */}
         <div className="flex items-center gap-3 text-[10px] text-zinc-400">
+          {displayMode === "summary" ? (
+            <span title="Summary entries">{summaryEntries.length} entries</span>
+          ) : (
+            <span title="Raw blocks">{filteredLogs.length} blocks</span>
+          )}
           {blockCounts.think ? (
             <span title="Thinking blocks">{blockCounts.think} think</span>
           ) : null}
@@ -603,6 +564,8 @@ export function TaskDetailPanel({
 
   if (!task) return null
 
+  const assigneePresentation = getAgentPresentation(task.assignee)
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="w-[97vw] max-w-[97vw] sm:max-w-5xl h-[88vh] p-0 overflow-hidden !gap-0">
@@ -616,12 +579,12 @@ export function TaskDetailPanel({
                 </DialogTitle>
                 <DialogDescription className="text-xs flex items-center gap-2">
                   <span className="flex items-center gap-1">
-                    {task.assignee === "claude" ? (
+                    {isCommanderAssignee(task.assignee) ? (
                       <Bot className="h-3 w-3" />
                     ) : (
                       <Cpu className="h-3 w-3" />
                     )}
-                    {task.assignee}
+                    <span title={task.assignee}>{assigneePresentation.label}</span>
                   </span>
                   <span className="text-zinc-300">·</span>
                   <span>{task.progress}%</span>

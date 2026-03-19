@@ -122,6 +122,45 @@ class AgentEventEnvelope:
         return json.dumps(self.to_dict(), ensure_ascii=False, separators=(",", ":"))
 
 
+class EventType:
+    """String constants for AgentEventEnvelope.type.
+
+    Using a plain class (not enum) so constants can be used directly as strings
+    wherever a ``str`` is expected, with no extra .value unwrapping.
+
+    Lifecycle constants (agent lifecycle events):
+    """
+
+    # --- Lifecycle ---
+    AGENT_STARTED: str = "agent_started"
+    AGENT_WORKING: str = "agent_working"
+    AGENT_COMPLETED: str = "agent_completed"
+    AGENT_ERROR: str = "agent_error"
+
+    # --- Tool calls (MCP) ---
+    TOOL_CALL: str = "tool_call"
+    TOOL_RESULT: str = "tool_result"
+    TOOL_ERROR: str = "tool_error"
+
+    # --- File change events ---
+    FILE_CHANGE: str = "file_change"
+
+    # --- Codex delegation events (Phase 10 / CDX-03) ---
+    CODEX_DISPATCHED: str = "codex_dispatched"
+    CODEX_ACCEPTED: str = "codex_accepted"
+    CODEX_COMPLETED: str = "codex_completed"
+    CODEX_FAILED: str = "codex_failed"
+
+    # --- Existing types (documented for discoverability; callers should migrate gradually) ---
+    JOB_START: str = "job_start"
+    JOB_RESULT: str = "job_result"
+    JOB_ENQUEUE: str = "job_enqueue"
+    STAGE_EVENT: str = "stage_event"
+    SOURCE_RECORD: str = "source_record"
+    SCORE_UPDATE: str = "score_update"
+    INSIGHT: str = "insight"
+
+
 def make_event(
     *,
     run_id: str,

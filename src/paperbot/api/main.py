@@ -36,6 +36,7 @@ from .routes import (
     agent_board,
     wiki,
     auth,
+    studio_skills,
 )
 from .routes import events as events_route
 from paperbot.api.error_handling import install_api_error_handling
@@ -91,6 +92,7 @@ app.include_router(harvest.router, prefix="/api", tags=["Harvest"])
 app.include_router(model_endpoints.router, prefix="/api", tags=["Model Endpoints"])
 app.include_router(embedding_settings.router, prefix="/api", tags=["Embedding Settings"])
 app.include_router(studio_chat.router, prefix="/api", tags=["Studio Chat"])
+app.include_router(studio_skills.router, prefix="/api", tags=["Studio Skills"])
 app.include_router(repro_context.router, prefix="/api/research/repro/context", tags=["P2C"])
 app.include_router(feed.router, prefix="/api", tags=["Feed"])
 app.include_router(intelligence.router, prefix="/api", tags=["Intelligence"])

@@ -3,7 +3,7 @@
 import Link from "next/link"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Search, FlaskConical, Library, Settings } from "lucide-react"
+import { Library, Search, Settings, Sparkles } from "lucide-react"
 
 export function QuickActions() {
     return (
@@ -19,9 +19,9 @@ export function QuickActions() {
                     </Link>
                 </Button>
                 <Button asChild variant="outline" size="sm" className="h-auto py-2 flex-col gap-0.5 text-xs">
-                    <Link href="/workflows">
-                        <FlaskConical className="h-3.5 w-3.5" />
-                        <span className="text-[10px]">Workflows</span>
+                    <Link href="/skills">
+                        <Sparkles className="h-3.5 w-3.5" />
+                        <span className="text-[10px]">Skills</span>
                     </Link>
                 </Button>
                 <Button asChild variant="outline" size="sm" className="h-auto py-2 flex-col gap-0.5 text-xs">

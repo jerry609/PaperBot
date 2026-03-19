@@ -724,7 +724,7 @@ export function ScholarsWatchlist({ scholars }: ScholarsWatchlistProps) {
 
           <div className="flex items-center justify-between rounded-xl border bg-muted/20 p-3">
             <p className="text-xs text-muted-foreground">
-              Scholar watchlist drives Research feed prioritization and workflow automation.
+              Scholar watchlist drives Research feed prioritization and daily digest automation.
             </p>
             <Button asChild size="sm" variant="ghost">
               <Link href="/settings">
@@ -757,15 +757,15 @@ export function ScholarsWatchlist({ scholars }: ScholarsWatchlistProps) {
         <Card>
           <CardContent className="flex items-center justify-between p-4">
             <div>
-              <p className="text-sm font-medium">Automation Linkage</p>
+              <p className="text-sm font-medium">Digest Linkage</p>
               <p className="text-xs text-muted-foreground">
-                Trigger periodic digest and signal refresh from workflow orchestration.
+                Manage periodic digest delivery and signal refresh from settings.
               </p>
             </div>
             <Button asChild size="sm" variant="outline">
-              <Link href="/workflows">
-                <Workflow className="mr-1 h-3.5 w-3.5" />
-                Open Workflows
+              <Link href="/settings">
+                <BellRing className="mr-1 h-3.5 w-3.5" />
+                Manage Delivery
               </Link>
             </Button>
           </CardContent>
@@ -777,7 +777,7 @@ export function ScholarsWatchlist({ scholars }: ScholarsWatchlistProps) {
           <DialogHeader>
             <DialogTitle>Add Scholar</DialogTitle>
             <DialogDescription>
-              Add a scholar to watchlist. This updates scholar subscriptions used by tracking workflows.
+              Add a scholar to watchlist. This updates scholar subscriptions used by tracking and digest delivery.
             </DialogDescription>
           </DialogHeader>
 

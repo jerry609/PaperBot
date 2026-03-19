@@ -502,15 +502,6 @@ export default function ResearchPageNew() {
     return qs ? `/dashboard?${qs}` : "/dashboard"
   }, [query, activeTrack, activeTrackId])
 
-  const workflowHref = useMemo(() => {
-    const params = new URLSearchParams()
-    if (query.trim()) {
-      params.set("query", query.trim())
-    }
-    const qs = params.toString()
-    return qs ? `/workflows?${qs}` : "/workflows"
-  }, [query])
-
   return (
     <div
       className={cn(
@@ -714,8 +705,8 @@ export default function ResearchPageNew() {
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
                     <Button asChild size="sm" variant="outline" className="gap-1.5">
-                      <Link href={workflowHref}>
-                        Open Workflows
+                      <Link href="/papers">
+                        Open Papers Library
                         <ArrowRight className="h-4 w-4" />
                       </Link>
                     </Button>
@@ -735,10 +726,10 @@ export default function ResearchPageNew() {
                 </div>
                 <div className="rounded-xl border border-border/60 bg-background/80 px-3 py-2.5 text-sm">
                   <p className="font-medium text-foreground">
-                    Research is for fast context search. Workflow is for batch topics, DailyPaper, and Judge.
+                    Research is the primary workspace for fast context search, track memory, and ranked paper review.
                   </p>
                   <p className="mt-1 text-muted-foreground">
-                    这里更适合单问题探索和即时反馈；需要把多个主题整理成 digest、评分和交付链路时，直接切到 Workflows。
+                    这里负责即时探索；更广的信号总览去 Dashboard，交付和订阅节奏统一放到 Settings。
                   </p>
                 </div>
               </CardContent>

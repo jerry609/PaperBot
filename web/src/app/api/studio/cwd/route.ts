@@ -7,7 +7,11 @@ export async function GET(req: Request) {
     onError: () =>
       Response.json(
         {
-          cwd: process.env.HOME || "/tmp",
+          cwd: process.cwd(),
+          actual_cwd: process.cwd(),
+          home: process.env.HOME || "/tmp",
+          allowed_prefixes: [process.cwd(), "/tmp"],
+          allowlist_mutation_enabled: false,
           source: "fallback",
           error: "Failed to get working directory from backend",
         },

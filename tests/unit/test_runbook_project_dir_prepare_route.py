@@ -40,6 +40,30 @@ def test_prepare_project_dir_rejects_path_outside_allowed_prefixes(tmp_path: Pat
     assert "not allowed" in resp.json()["detail"]
 
 
+def test_prepare_project_dir_accepts_path_under_home_documents_by_default(tmp_path: Path, monkeypatch):
+    home_dir = tmp_path / "home"
+    workspace_dir = tmp_path / "workspace"
+    target = home_dir / "Documents" / "paper-a"
+    home_dir.mkdir(parents=True, exist_ok=True)
+    workspace_dir.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setenv("HOME", str(home_dir))
+    monkeypatch.chdir(workspace_dir)
+
+    with TestClient(api_main.app) as client:
+        resp = client.post(
+            "/api/runbook/project-dir/prepare",
+            json={"project_dir": str(target), "create_if_missing": True},
+        )
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["project_dir"] == str(target.resolve())
+    assert payload["created"] is True
+    assert target.is_dir()
+    assert str((home_dir / "Documents").resolve()) in payload["allowed_prefixes"]
+
+
 def test_prepare_project_dir_rejects_file_path(tmp_path: Path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     file_path = tmp_path / "not-a-directory.txt"
@@ -71,6 +95,27 @@ def test_add_allowed_dir_accepts_existing_directory_under_cwd(tmp_path: Path, mo
     assert payload["directory"] == str(target.resolve())
 
 
+def test_add_allowed_dir_accepts_existing_directory_under_home_when_mutation_enabled(tmp_path: Path, monkeypatch):
+    home_dir = tmp_path / "home"
+    home_dir.mkdir(parents=True, exist_ok=True)
+    target = home_dir / "Documents"
+    target.mkdir(parents=True, exist_ok=True)
+    workspace_dir = tmp_path / "workspace"
+    workspace_dir.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.chdir(workspace_dir)
+    monkeypatch.setenv("HOME", str(home_dir))
+    monkeypatch.setenv("PAPERBOT_RUNBOOK_ALLOWLIST_MUTATION", "true")
+
+    with TestClient(api_main.app) as client:
+        resp = client.post("/api/runbook/allowed-dirs", json={"directory": str(target)})
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["ok"] is True
+    assert payload["directory"] == str(target.resolve())
+
+
 def test_add_allowed_dir_rejects_outside_allowed_prefixes(tmp_path: Path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("PAPERBOT_RUNBOOK_ALLOWLIST_MUTATION", "true")
@@ -81,7 +126,7 @@ def test_add_allowed_dir_rejects_outside_allowed_prefixes(tmp_path: Path, monkey
         resp = client.post("/api/runbook/allowed-dirs", json={"directory": str(outside)})
 
     assert resp.status_code == 403
-    assert "not allowed" in resp.json()["detail"]
+    assert "outside the allowed mutation roots" in resp.json()["detail"]
 
 
 def test_create_snapshot_bootstraps_sqlite_schema(tmp_path: Path, monkeypatch):

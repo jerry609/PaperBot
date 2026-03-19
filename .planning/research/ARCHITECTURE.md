@@ -1,722 +1,581 @@
-# Architecture Patterns: v2.0 PostgreSQL Migration & Async Data Layer
+# Architecture Patterns: v1.2 Agent-Agnostic Dashboard
 
-**Domain:** Database migration + async refactoring for existing PaperBot app
-**Researched:** 2026-03-14
-**Milestone:** v2.0 PostgreSQL Migration & Data Layer Refactoring
-
----
-
-## Current Architecture Snapshot
-
-### SessionProvider and the Engine-Per-Instance Problem
-
-Every store, service, and event log creates its own `SessionProvider(db_url)`, which in turn
-calls `create_engine()`. With 17+ store classes plus services and the event log, the process
-holds 20+ distinct connection pools at runtime. On SQLite this is tolerable (file-based). On
-PostgreSQL, each `create_engine()` call opens a separate `asyncpg` connection pool, wasting
-connections and preventing any cross-pool transaction semantics.
-
-```
-# Current pattern (17+ instances of this):
-class PaperStore:
-    def __init__(self, db_url=None):
-        self._provider = SessionProvider(db_url)  # creates engine + pool
-
-class SqlAlchemyEventLog:
-    def __init__(self, db_url=None):
-        self._provider = SessionProvider(db_url)  # another engine + pool
-```
-
-### Session Context Manager Usage
-
-All stores use `with self._provider.session() as session:` — a synchronous context manager
-returning a sync `Session`. The `sessionmaker` returns the session; stores call
-`session.commit()` / `session.add()` directly. There is no async session anywhere today.
-
-### FTS5 Virtual Tables (SQLite-Only)
-
-Two stores create SQLite FTS5 virtual tables at startup via raw DDL:
-
-- `SqlAlchemyMemoryStore._ensure_fts5()` creates `memory_items_fts` + 3 triggers
-- `DocumentIndexStore._ensure_fts5()` creates `document_chunks_fts` + triggers
-
-These are outside Alembic metadata. The `_search_fts5()` method explicitly checks
-`if not db_url.startswith("sqlite"): return None` — it degrades silently on PostgreSQL.
-
-### sqlite-vec Embedding Storage
-
-`MemoryItemModel` stores embeddings as `LargeBinary` bytes packed as `struct.pack("...f", *vec)`.
-On SQLite, `SqlAlchemyMemoryStore._ensure_vec_table()` creates a `vec_items` virtual table.
-On PostgreSQL, there is no equivalent; vector search falls back to keyword-only (FTS5 path
-returns None, vec path returns empty). This is the biggest functional gap in the migration.
-
-### Alembic: Already Dual-DB Aware
-
-`alembic/env.py` already detects PG URLs and applies `prepare_threshold: 0` for PgBouncer
-compatibility. `ensure_tables()` on `SessionProvider` skips table creation for PostgreSQL —
-it relies on Alembic exclusively. This is correct architecture already.
-
-### MCP Tool Pattern: anyio.to_thread.run_sync()
-
-All MCP tools that call sync stores wrap with `anyio.to_thread.run_sync(lambda: ...)`. This
-is the current async/sync boundary. It is correct and safe for the interim period, but adds
-thread overhead. Once stores become async, this bridge can be removed.
-
-### FastAPI Routes: Sync Store Calls in Async Handlers
-
-Route handlers are `async def` but call stores synchronously. Example from `runs.py`:
-```python
-async def list_runs(request: Request):
-    return {"runs": event_log.list_runs(limit=limit)}  # sync call in async handler
-```
-This blocks the event loop. On SQLite with typical loads it is hidden. On PostgreSQL under
-concurrent load it will degrade. Converting stores to async eliminates this.
-
-### ARQ Worker: Sync Event Log in Async Jobs
-
-ARQ job functions are `async def` but use `SqlAlchemyEventLog.append()` which is synchronous.
-The worker module holds a module-level `_EVENT_LOG` singleton. This is a concurrency hazard
-if tasks run concurrently (ARQ parallelism > 1) because the same sync session factory is
-used across tasks. With async stores, each ARQ task should get its own `AsyncSession`.
-
-### DI Container: Synchronous Factory Registry
-
-`Container.register(interface, factory, singleton=True)` stores callable factories. There is
-no concept of async factories or async initialization. The container must gain support for
-async-initialized singletons (specifically: the shared async engine).
+**Domain:** Agent-agnostic proxy/dashboard — multi-agent code agent integration
+**Researched:** 2026-03-15
+**Confidence:** HIGH
 
 ---
 
-## Integration Architecture for v2.0
+## Standard Architecture
 
-### Core Principle: Single Shared Async Engine
-
-Replace the N-engine-per-store pattern with one shared `AsyncEngine` created at process
-startup and injected via the DI container. All stores receive an `async_sessionmaker` from
-this shared engine.
+### System Overview
 
 ```
-# v2.0 target: one engine, many session factories sharing the pool
-AsyncEngine (created once at startup)
-  |
-  +-- async_sessionmaker (one factory)
-        |
-        +-- PaperStore (receives factory)
-        +-- ResearchStore (receives factory)
-        +-- MemoryStore (receives factory)
-        +-- SqlAlchemyEventLog (receives factory)
-        +-- (all 17+ stores)
+┌──────────────────────────────────────────────────────────────────────┐
+│                        AGENT LAYER (external)                        │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐                  │
+│  │ Claude Code │  │  Codex CLI  │  │  OpenCode   │  ← CLI processes  │
+│  │ (NDJSON via │  │ (JSONL via  │  │ (HTTP API + │                   │
+│  │ stream-json)│  │   --json)   │  │  ACP stdio) │                   │
+│  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘                  │
+│         │ stdout/stdin   │                 │                         │
+└─────────┼────────────────┼─────────────────┼─────────────────────────┘
+          │                │                 │ subprocess / HTTP
+┌─────────▼────────────────▼─────────────────▼─────────────────────────┐
+│                     ADAPTER LAYER (new)                               │
+│  ┌────────────────────────────────────────────────────────────────┐   │
+│  │                   AgentAdapterRegistry                          │   │
+│  │  ┌──────────────────┐ ┌──────────────────┐ ┌────────────────┐  │   │
+│  │  │ClaudeCodeAdapter │ │  CodexAdapter    │ │OpenCodeAdapter │  │   │
+│  │  │ (subprocess +    │ │ (subprocess +    │ │ (HTTP client)  │  │   │
+│  │  │  NDJSON parser)  │ │  JSONL parser)   │ │                │  │   │
+│  │  └────────┬─────────┘ └────────┬─────────┘ └───────┬────────┘  │   │
+│  └───────────┼────────────────────┼────────────────────┼───────────┘   │
+│              └────────────────────┼────────────────────┘               │
+│  ┌─────────────────────────────────▼────────────────────────────────┐  │
+│  │             AgentAdapter (unified interface)                      │  │
+│  │  send_message(msg) -> AsyncIterator[AgentEventEnvelope]           │  │
+│  │  send_control(cmd: ControlCommand) -> None                        │  │
+│  │  get_status() -> AgentStatus                                      │  │
+│  │  stop() -> None                                                   │  │
+│  └─────────────────────────────────────────────────────────────────┘  │
+└──────────────────────────────────────────────────────────────────────┘
+          │ normalized AgentEventEnvelope stream
+┌─────────▼─────────────────────────────────────────────────────────────┐
+│                  APPLICATION LAYER (existing + extended)              │
+│  ┌──────────────────────────────────────────────────────────────────┐ │
+│  │               AgentProxyService (new)                            │ │
+│  │  - Owns active adapter instance per session                      │ │
+│  │  - Routes normalized events to EventBusEventLog                  │ │
+│  │  - Handles lifecycle (start, stop, crash-recover, reconnect)     │ │
+│  │  - Persists session registry in DB                               │ │
+│  └──────────────────────────┬───────────────────────────────────────┘ │
+│                             │ event_log.append()                      │
+│  ┌──────────────────────────▼───────────────────────────────────────┐ │
+│  │    EventBusEventLog (Phase 7 - existing, unmodified)             │ │
+│  │    CompositeEventLog + asyncio.Queue fan-out                     │ │
+│  └──────────────────────────┬───────────────────────────────────────┘ │
+└─────────────────────────────┼─────────────────────────────────────────┘
+                              │ GET /api/events/stream (SSE)
+┌─────────────────────────────▼─────────────────────────────────────────┐
+│                     API LAYER (FastAPI - extended)                    │
+│  ┌──────────────┐ ┌──────────────┐ ┌─────────────────┐ ┌───────────┐ │
+│  │POST /api/    │ │POST /api/    │ │GET /api/agents/ │ │GET /api/  │ │
+│  │agent/chat    │ │agent/control │ │{id}/status      │ │events/    │ │
+│  │(proxy chat   │ │(stop/restart │ │(current state)  │ │stream     │ │
+│  │ to adapter)  │ │ /send-task)  │ │                 │ │(existing) │ │
+│  └──────────────┘ └──────────────┘ └─────────────────┘ └───────────┘ │
+└─────────────────────────────┬─────────────────────────────────────────┘
+                              │ SSE stream (text/event-stream)
+┌─────────────────────────────▼─────────────────────────────────────────┐
+│                     FRONTEND LAYER (Next.js - extended)               │
+│  ┌─────────────────────────────────────────────────────────────────┐  │
+│  │            useAgentEvents (Phase 8 - existing hook)              │  │
+│  │            Zustand: useAgentEventStore (extended)                │  │
+│  └──────────────────────────┬──────────────────────────────────────┘  │
+│           ┌──────────────────┼──────────────────────┐                 │
+│  ┌────────▼─────┐  ┌────────▼──────────┐  ┌────────▼────────────┐    │
+│  │  AgentChat   │  │  TeamDAGPanel     │  │  FileChangePanel    │    │
+│  │  Panel       │  │  (@xyflow/react)  │  │  (Monaco diff)      │    │
+│  └──────────────┘  └───────────────────┘  └─────────────────────┘    │
+└────────────────────────────────────────────────────────────────────────┘
 ```
 
-### New Component: AsyncSessionProvider
+### Component Responsibilities
 
-`AsyncSessionProvider` replaces `SessionProvider`. It accepts an `async_sessionmaker` rather
-than creating its own engine. The store's `__init__` no longer calls `create_engine()`.
+| Component | Responsibility | Location |
+|-----------|----------------|----------|
+| `AgentAdapter` (abstract) | Unified interface: send message, stream events, control, status | `infrastructure/adapters/agent/base.py` (new) |
+| `ClaudeCodeAdapter` | Spawn `claude -p --output-format stream-json`, parse NDJSON, normalize to `AgentEventEnvelope` | `infrastructure/adapters/agent/claude_code.py` (new) |
+| `CodexAdapter` | Spawn `codex exec --json`, parse JSONL, normalize events | `infrastructure/adapters/agent/codex.py` (new) |
+| `OpenCodeAdapter` | Connect to OpenCode HTTP API or ACP subprocess, normalize events | `infrastructure/adapters/agent/opencode.py` (new) |
+| `AgentAdapterRegistry` | Resolve correct adapter type from user config; registered in DI container | `infrastructure/adapters/agent/registry.py` (new) |
+| `AgentProxyService` | Manage adapter lifecycle per session; route normalized events to EventBusEventLog; handle reconnect | `application/services/agent_proxy_service.py` (new) |
+| `EventBusEventLog` | Fan-out asyncio.Queue — Phase 7, zero changes required | `infrastructure/event_log/event_bus_event_log.py` (existing) |
+| `/api/agent/chat` | Accept user chat message, forward to active adapter, emit events via EventBus | `api/routes/agent_proxy.py` (new) |
+| `/api/agent/control` | Accept control commands (stop, restart, send-task), dispatch to `AgentProxyService` | `api/routes/agent_proxy.py` (new) |
+| `/api/agents/{id}/status` | Return current agent status (connected/working/idle/crashed) | `api/routes/agent_proxy.py` (new) |
+| `/api/events/stream` | Existing SSE bus — no changes; all events flow through it | `api/routes/events.py` (existing) |
+| `useAgentEvents` | Existing SSE consumer hook — no changes; subscribes to event bus | `web/src/lib/agent-events/useAgentEvents.ts` (existing) |
+| `AgentChatPanel` | Chat input + message history; posts to `/api/agent/chat` | `web/src/components/agent-events/AgentChatPanel.tsx` (new) |
+| `TeamDAGPanel` | Renders agent-initiated team decomposition as interactive DAG using `@xyflow/react` | `web/src/components/agent-events/TeamDAGPanel.tsx` (new) |
+| `FileChangePanel` | Shows file diffs from `FILE_CHANGED` events — Monaco diff view | `web/src/components/agent-events/FileChangePanel.tsx` (new) |
+
+---
+
+## Recommended Project Structure
+
+```
+src/paperbot/
+├── infrastructure/
+│   └── adapters/
+│       └── agent/                        # NEW: agent adapter layer
+│           ├── base.py                   # AgentAdapter ABC, ControlCommand, AgentStatus
+│           ├── registry.py               # AgentAdapterRegistry (resolve by name)
+│           ├── claude_code.py            # ClaudeCodeAdapter (subprocess + NDJSON)
+│           ├── codex.py                  # CodexAdapter (subprocess + JSONL)
+│           └── opencode.py               # OpenCodeAdapter (HTTP or ACP stdio)
+├── application/
+│   └── services/
+│       └── agent_proxy_service.py        # NEW: lifecycle manager, event routing
+├── api/
+│   └── routes/
+│       └── agent_proxy.py               # NEW: /api/agent/chat, /api/agent/control, /api/agents/{id}/status
+└── ...
+
+web/src/
+├── lib/
+│   ├── agent-events/                     # Phase 8 - extended (not replaced)
+│   │   ├── types.ts                      # EXTENDED: add TEAM_UPDATE, FILE_CHANGED, TASK_UPDATE, CHAT_DELTA, CHAT_DONE
+│   │   ├── store.ts                      # EXTENDED: add teamNodes, teamEdges, fileChanges, taskList state
+│   │   ├── parsers.ts                    # EXTENDED: parseTeamUpdate, parseFileChange, parseTask, parseChatDelta
+│   │   └── useAgentEvents.ts             # unchanged
+│   └── store/
+│       └── agent-proxy-store.ts          # NEW: chatHistory, selectedAgent, proxyStatus
+├── components/
+│   └── agent-events/
+│       ├── ActivityFeed.tsx              # Phase 8 - unchanged
+│       ├── AgentStatusPanel.tsx          # Phase 8 - unchanged
+│       ├── ToolCallTimeline.tsx          # Phase 8 - unchanged
+│       ├── TeamDAGPanel.tsx              # NEW: @xyflow/react DAG of agent teams
+│       ├── FileChangePanel.tsx           # NEW: Monaco diff of recent file changes
+│       └── AgentChatPanel.tsx            # NEW: chat input + message history
+└── app/
+    └── studio/
+        └── page.tsx                      # MODIFIED: three-panel layout integrating above components
+```
+
+### Structure Rationale
+
+- **`infrastructure/adapters/agent/`**: All agent-specific I/O and protocol differences isolated here. The application layer never sees Claude Code vs. Codex differences — it only speaks `AgentAdapter`.
+- **`application/services/agent_proxy_service.py`**: Owns stateful concerns (process PID, session ID, reconnect timer) without touching transport. Keeps it testable.
+- **`api/routes/agent_proxy.py`**: New routes consolidated in one file; easy to find and test independently from existing routes.
+- **`web/src/lib/agent-events/`**: Existing types/store/parsers extended, not replaced. New event types follow the same `EventType` constant pattern from Phase 8.
+- **`web/src/components/agent-events/`**: New components live alongside Phase 8 components in a coherent namespace.
+
+---
+
+## Architectural Patterns
+
+### Pattern 1: Adapter Interface — Normalize Agent Differences at the Boundary
+
+**What:** Each CLI agent has a different subprocess invocation, output format (NDJSON, JSONL, HTTP SSE), and event vocabulary. The `AgentAdapter` base class defines the contract all adapters satisfy. Everything above the adapter layer sees only `AgentEventEnvelope` objects.
+
+**When to use:** Every time a new agent type is added, create a new adapter. Never leak agent-specific parsing into `AgentProxyService` or higher.
+
+**Trade-offs:** One extra class per agent type. Worth it because the dashboard, proxy service, and API routes never change when a new agent is added.
+
+**Interface:**
 
 ```python
-# infrastructure/stores/async_db.py (NEW)
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine, AsyncEngine
-
-def create_async_db_engine(db_url: str | None = None) -> AsyncEngine:
-    url = _coerce_to_async_url(db_url or get_db_url())
-    connect_args = {}
-    if "postgresql" in url:
-        connect_args = {"prepare_threshold": 0}  # PgBouncer compat
-    return create_async_engine(
-        url,
-        pool_size=20,
-        max_overflow=10,
-        pool_pre_ping=True,
-        pool_recycle=3600,
-        connect_args=connect_args,
-    )
-
-def create_async_session_factory(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
-    return async_sessionmaker(engine, autoflush=False, expire_on_commit=False)
-
-class AsyncSessionProvider:
-    """Thin wrapper: accepts an injected async_sessionmaker. Does NOT create an engine."""
-    def __init__(self, factory: async_sessionmaker[AsyncSession]):
-        self._factory = factory
-
-    def session(self) -> AsyncSession:
-        return self._factory()
-```
-
-Key difference from `SessionProvider`: `expire_on_commit=False` is mandatory. In async
-contexts, accessing expired attributes after commit raises `MissingGreenlet`. Setting
-`expire_on_commit=False` means attribute access post-commit is safe.
-
-### URL Coercion Helper
-
-asyncpg requires `postgresql+asyncpg://` scheme. The helper converts existing env var URLs:
-
-```python
-def _coerce_to_async_url(url: str) -> str:
-    """Convert postgresql:// or postgres:// to postgresql+asyncpg://"""
-    if url.startswith("postgresql://") or url.startswith("postgres://"):
-        return url.replace("://", "+asyncpg://", 1)
-    if url.startswith("sqlite:"):
-        return url.replace("sqlite:", "sqlite+aiosqlite:", 1)
-    return url
-```
-
-The `PAPERBOT_DB_URL` env var does not need to change format. The coercion happens
-transparently in `create_async_db_engine()`.
-
-### Modified Component: DI Container
-
-Add an `AsyncEngine` registration slot to `bootstrap_dependencies`. The engine is created
-once and registered as a singleton. All stores resolve it.
-
-```python
-# core/di/bootstrap.py additions
-async def bootstrap_async_db(container: Container, db_url: str | None = None) -> None:
-    """Call once at app startup (inside async startup event)."""
-    from paperbot.infrastructure.stores.async_db import (
-        create_async_db_engine, create_async_session_factory
-    )
-    engine = create_async_db_engine(db_url)
-    factory = create_async_session_factory(engine)
-    container.register(AsyncEngine, lambda: engine, singleton=True)
-    container.register(async_sessionmaker, lambda: factory, singleton=True)
-```
-
-FastAPI startup hook wires this:
-```python
-@app.on_event("startup")
-async def _startup_db():
-    await bootstrap_async_db(Container.instance())
-```
-
-### Modified Pattern: Store Constructor
-
-Stores change from creating their own `SessionProvider` to receiving an injected factory:
-
-```python
-# Before
-class PaperStore:
-    def __init__(self, db_url=None):
-        self.db_url = db_url or get_db_url()
-        self._provider = SessionProvider(self.db_url)
-
-# After
-class PaperStore:
-    def __init__(self, factory: async_sessionmaker | None = None):
-        resolved = factory or Container.instance().resolve(async_sessionmaker)
-        self._provider = AsyncSessionProvider(resolved)
-```
-
-### Modified Pattern: Store Methods
-
-All store methods become `async def` using `async with` session context:
-
-```python
-# Before
-def get_paper(self, paper_id: int) -> PaperModel | None:
-    with self._provider.session() as session:
-        return session.get(PaperModel, paper_id)
-
-# After
-async def get_paper(self, paper_id: int) -> PaperModel | None:
-    async with self._provider.session() as session:
-        result = await session.get(PaperModel, paper_id)
-        return result
-```
-
-For relationship access, use `selectinload` / `joinedload` eagerly. Lazy loading raises
-`MissingGreenlet` in async context:
-
-```python
-# Relationships must be eagerly loaded
-from sqlalchemy.orm import selectinload
-
-async def get_paper_with_authors(self, paper_id: int):
-    async with self._provider.session() as session:
-        stmt = (
-            select(PaperModel)
-            .where(PaperModel.id == paper_id)
-            .options(selectinload(PaperModel.author_links))
-        )
-        result = await session.execute(stmt)
-        return result.scalar_one_or_none()
-```
-
-### Modified Pattern: FastAPI Route Handlers
-
-After stores become async, route handlers call `await store.method()` directly. The
-`anyio.to_thread.run_sync()` wrapper in MCP tools is also removed:
-
-```python
-# Before (MCP tools)
-result = await anyio.to_thread.run_sync(lambda: store.add_memories(...))
-
-# After (MCP tools, stores async)
-result = await store.add_memories(...)
-```
-
-Route handlers already use `async def`. After the store conversion they simply `await`:
-
-```python
-# FastAPI route handler - no change to signature
-@router.get("/runs")
-async def list_runs(request: Request):
-    return {"runs": await event_log.list_runs(limit=limit)}  # now truly async
-```
-
-### Modified Pattern: ARQ Worker
-
-ARQ job functions are already `async def`. The module-level `_EVENT_LOG` singleton is
-replaced with a per-process `DatabaseConnectionManager` (started in ARQ's `startup` hook):
-
-```python
-# infrastructure/queue/arq_worker.py changes
-from contextvars import ContextVar
-
-_db_session_context: ContextVar[str | None] = ContextVar("arq_session_ctx", default=None)
-_db_manager: DatabaseConnectionManager | None = None
-
-async def startup(ctx) -> None:
-    global _db_manager
-    _db_manager = DatabaseConnectionManager(get_db_url())
-    await _db_manager.connect()
-    ctx["db_manager"] = _db_manager
-
-async def shutdown(ctx) -> None:
-    if _db_manager:
-        await _db_manager.disconnect()
-
-async def on_job_start(ctx, cid=None) -> None:
-    _db_session_context.set(ctx.get("job_id", ""))
-
-# Each task receives a fresh AsyncSession via scoped session
-async def cron_track_subscriptions(ctx) -> dict:
-    async with _db_manager.get_session() as session:
-        elog = AsyncSqlAlchemyEventLog(session)
-        # ... rest of job
-```
-
-This ensures each ARQ task has its own `AsyncSession` (scoped by `job_id` ContextVar),
-preventing session sharing across concurrent tasks.
-
-### Modified Component: Alembic env.py
-
-Alembic's `run_migrations_online()` must use an async-aware runner for asyncpg. The standard
-pattern for async Alembic:
-
-```python
-# alembic/env.py additions for async support
+# src/paperbot/infrastructure/adapters/agent/base.py
+from __future__ import annotations
 import asyncio
-from sqlalchemy.ext.asyncio import create_async_engine
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from enum import Enum
+from typing import AsyncIterator
 
-def run_migrations_online_async() -> None:
-    url = _get_db_url()
-    if not (url.startswith("postgresql") or url.startswith("postgres")):
-        # SQLite still uses sync path during dev/test
-        run_migrations_online_sync()
-        return
+from paperbot.application.collaboration.message_schema import AgentEventEnvelope
 
-    async_url = _coerce_to_async_url(url)
-    connectable = create_async_engine(async_url, poolclass=pool.NullPool)
 
-    async def _run():
-        async with connectable.connect() as connection:
-            await connection.run_sync(
-                lambda sync_conn: context.configure(
-                    connection=sync_conn,
-                    target_metadata=target_metadata,
-                    compare_type=True,
-                    render_as_batch=False,  # PG supports native ALTER
-                )
-            )
-            async with connection.begin():
-                await connection.run_sync(context.run_migrations)
+class AgentStatus(str, Enum):
+    IDLE = "idle"
+    WORKING = "working"
+    CONNECTED = "connected"
+    CRASHED = "crashed"
+    STOPPED = "stopped"
 
-    asyncio.run(_run())
+
+@dataclass
+class ControlCommand:
+    type: str          # "stop" | "restart" | "send_task" | "interrupt"
+    payload: dict
+
+
+class AgentAdapter(ABC):
+    """
+    Unified interface for all code agent types.
+
+    Normalized event types (new EventType constants to add in message_schema.py):
+      FILE_CHANGED  - agent wrote or modified a file
+      TASK_UPDATE   - agent updated a task or subtask status
+      TEAM_UPDATE   - agent spawned or described a subagent team
+      CHAT_DELTA    - streaming assistant text token
+      CHAT_DONE     - assistant turn complete (with cost_usd, duration_ms in metrics)
+    """
+
+    @abstractmethod
+    async def send_message(
+        self,
+        message: str,
+        *,
+        session_id: str,
+        run_id: str,
+        trace_id: str,
+    ) -> AsyncIterator[AgentEventEnvelope]:
+        """Send a user message. Yields normalized events as the agent responds."""
+        ...
+
+    @abstractmethod
+    async def send_control(self, command: ControlCommand) -> None:
+        """Send a control command to the running agent."""
+        ...
+
+    @abstractmethod
+    def get_status(self) -> AgentStatus:
+        """Return current adapter status (non-blocking)."""
+        ...
+
+    @abstractmethod
+    async def stop(self) -> None:
+        """Gracefully stop the agent process/connection."""
+        ...
 ```
 
-SQLite batch migrations remain on the sync path. PostgreSQL uses native ALTER TABLE, so
-`render_as_batch=False` is correct.
+### Pattern 2: Subprocess Adapter — NDJSON/JSONL Process Bridge
 
----
+**What:** `ClaudeCodeAdapter` and `CodexAdapter` both spawn a subprocess using `asyncio.create_subprocess_exec`, read stdout line-by-line as NDJSON/JSONL, and convert each line to `AgentEventEnvelope`. This is the same pattern already used in `studio_chat.py` (`stream_claude_cli`), generalized into an adapter.
 
-## PostgreSQL-Native Feature Integration
+**When to use:** Any CLI agent that supports machine-readable JSON output (`--output-format stream-json` for Claude Code, `--json` for Codex).
 
-### FTS5 → tsvector
-
-The two FTS5 tables (`memory_items_fts`, `document_chunks_fts`) are replaced by PostgreSQL
-tsvector columns and GIN indexes. This is a pure Alembic migration — no store code change
-beyond swapping the SQL query.
-
-```sql
--- Migration: add tsvector column to memory_items
-ALTER TABLE memory_items ADD COLUMN content_tsv tsvector;
-UPDATE memory_items SET content_tsv = to_tsvector('english', coalesce(content, ''));
-CREATE INDEX idx_memory_items_content_tsv ON memory_items USING GIN (content_tsv);
-
--- Auto-update trigger
-CREATE TRIGGER memory_items_tsv_update
-BEFORE INSERT OR UPDATE ON memory_items
-FOR EACH ROW EXECUTE FUNCTION
-  tsvector_update_trigger(content_tsv, 'pg_catalog.english', content);
-```
-
-The `_search_fts5()` method becomes `_search_tsvector()` with a dialect check:
+**Key implementation sketch:**
 
 ```python
-def _search_tsvector(self, tokens: list[str], **scope):
-    """PostgreSQL tsvector FTS. Returns None on SQLite (use keyword fallback)."""
-    if self._is_sqlite:
-        return None
-    query = " & ".join(tokens)
-    stmt = (
-        select(MemoryItemModel)
-        .where(MemoryItemModel.content_tsv.match(query))
-        .order_by(func.ts_rank(MemoryItemModel.content_tsv, func.plainto_tsquery(query)).desc())
-        .limit(limit)
+# ClaudeCodeAdapter — the core subprocess + NDJSON loop
+async def send_message(self, message, *, session_id, run_id, trace_id):
+    cmd = [
+        "claude", "-p", message,
+        "--output-format", "stream-json",
+        "--verbose",
+    ]
+    process = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        cwd=self._working_dir,
     )
+    async for line in self._read_lines(process.stdout):
+        envelope = self._parse_ndjson_line(line, run_id=run_id, trace_id=trace_id)
+        if envelope:
+            yield envelope
+    await process.wait()
 ```
 
-### sqlite-vec → pgvector
+**Claude Code NDJSON event mapping to `AgentEventEnvelope.type`:**
 
-Replace `LargeBinary` embedding storage with `pgvector`'s `VECTOR(1536)` column type:
+| CLI Event | Maps To |
+|-----------|---------|
+| `{"type": "assistant", "message": {"content": [{"type": "text"}]}}` | `CHAT_DELTA` |
+| `{"type": "assistant", "message": {"content": [{"type": "tool_use"}]}}` | `TOOL_CALL` |
+| `{"type": "tool_result"}` | `TOOL_RESULT` |
+| `{"type": "result", "subtype": "success"}` | `CHAT_DONE` (cost_usd, duration_ms → metrics) |
+| `{"type": "system"}` | ignored |
 
-```python
-# models.py: swap LargeBinary for pgvector
-from pgvector.sqlalchemy import Vector
+**Codex JSONL event mapping:**
 
-class MemoryItemModel(Base):
-    # Before: embedding: Mapped[Optional[bytes]] = mapped_column(LargeBinary, nullable=True)
-    embedding: Mapped[Optional[list[float]]] = mapped_column(Vector(1536), nullable=True)
+| CLI Event | Maps To |
+|-----------|---------|
+| `{"type": "item.file_change"}` | `FILE_CHANGED` |
+| `{"type": "item.plan_update"}` | `TASK_UPDATE` |
+| `{"type": "turn.completed"}` | `CHAT_DONE` |
+| `{"type": "thread.started"}` | `AGENT_STARTED` |
+| `{"type": "error"}` | `AGENT_ERROR` |
+
+**Trade-offs:** Subprocess output is unstructured if the agent does not support machine-readable mode — parsing ANSI escape sequences from raw terminal output is fragile. Only build adapters for agents with documented JSON output modes.
+
+### Pattern 3: Event Routing Through Existing EventBusEventLog
+
+**What:** `AgentProxyService` does not create its own fan-out mechanism. It calls `event_log.append(envelope)` on the existing `CompositeEventLog`, which fans out through `EventBusEventLog` to all SSE subscribers.
+
+**Why:** The Phase 7 EventBus already delivers events to the dashboard via `/api/events/stream`. Routing agent proxy events through it means the existing `useAgentEvents` hook and Zustand store receive them automatically. No new SSE endpoint is needed.
+
+**Full data flow:**
+
+```
+ClaudeCodeAdapter.send_message()
+    yields AgentEventEnvelope
+        AgentProxyService receives
+            event_log.append(envelope)
+                EventBusEventLog._fan_out()
+                    asyncio.Queue per SSE client
+                        GET /api/events/stream
+                            useAgentEvents hook
+                                Zustand store
+                                    React components re-render
 ```
 
-Alembic migration: drop the `LargeBinary` column, add `VECTOR(1536)`, create HNSW index:
+**Trade-offs:** High-frequency `CHAT_DELTA` events (40 tokens/sec from Claude Code) may saturate the ring buffer (`maxlen=200`). Consider filtering `CHAT_DELTA` events from ring buffer storage while still fanning them out live. Address in the phase design, not architecture.
 
-```sql
-ALTER TABLE memory_items DROP COLUMN embedding;
-ALTER TABLE memory_items ADD COLUMN embedding vector(1536);
-CREATE INDEX idx_memory_items_embedding ON memory_items USING hnsw (embedding vector_cosine_ops);
+### Pattern 4: Dashboard Control Surface — Bidirectional Command Flow
+
+**What:** The dashboard sends commands back to running agents via `POST /api/agent/control`, which dispatches to `AgentProxyService.send_control()`.
+
+**Reverse data flow:**
+
+```
+User clicks "Stop" in AgentChatPanel
+    POST /api/agent/control {type: "stop", session_id: "..."}
+        AgentProxyService.send_control(ControlCommand(type="stop"))
+            adapter.stop()
+                process.terminate()  (subprocess adapters)
+            emits AgentEventEnvelope(type=AGENT_STOPPED)
+                EventBusEventLog fan-out
+                    dashboard status badge updates
 ```
 
-The `pgvector` Python package (`pip install pgvector`) provides the `Vector` type for SQLAlchemy.
-This is MEDIUM confidence — pgvector is well-established but requires the PostgreSQL extension
-to be enabled in the server (`CREATE EXTENSION IF NOT EXISTS vector`). Docker image and migration
-must handle this.
+**Why REST POST (not WebSocket):** Control commands are infrequent and do not need real-time streaming semantics. REST POST returns a synchronous acknowledgment; the actual status change appears asynchronously via the SSE event bus. This keeps the control channel simple.
 
-### JSON Text Columns → JSONB
+### Pattern 5: Agent Lifecycle Management — Background Task per Session
 
-All `*_json` columns (e.g., `authors_json`, `keywords_json`, `payload_json`) currently store
-Python-serialized strings with manual `json.loads()` / `json.dumps()` helpers. On PostgreSQL
-these can become native `JSONB`:
+**What:** `AgentProxyService` manages each adapter's subprocess in a background asyncio task. The API route returns immediately; events stream back through the EventBus asynchronously. Crash recovery uses exponential backoff (3s, 9s, 27s).
 
-```python
-from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy import JSON
+**Why:** Never block an async FastAPI handler waiting for an agent to complete (agent execution can take minutes). Blocking blocks the event loop and prevents other requests.
 
-# Use JSON (generic) in model; let dialect map to JSONB on PG, TEXT on SQLite
-class PaperModel(Base):
-    keywords: Mapped[dict | list] = mapped_column(JSON, default=list)
+**Crash recovery flow:**
+
+```
+Subprocess exits unexpectedly (returncode != 0)
+    ClaudeCodeAdapter detects via process.wait()
+    Emits AgentEventEnvelope(type=AGENT_ERROR, payload={reason, returncode})
+    AgentProxyService: status -> CRASHED
+    Schedules reconnect after backoff (asyncio.create_task + asyncio.sleep)
+    On reconnect: status -> CONNECTED, emits AGENT_STARTED
+    Dashboard badge updates automatically via SSE
 ```
 
-Using `sqlalchemy.JSON` (not `postgresql.JSONB`) keeps models dialect-neutral. SQLAlchemy
-maps `JSON` to `jsonb` on PostgreSQL and `TEXT` with serialization on SQLite. All the
-manual `get_keywords()` / `set_keywords()` helpers become unnecessary once models use `JSON`.
+### Pattern 6: Hybrid Activity Discovery
 
-**Caution:** Migrating existing `*_json TEXT` columns to `JSONB` requires a data migration.
-Alembic can use `ALTER COLUMN ... TYPE jsonb USING column::jsonb` but only if existing data
-is valid JSON. Rows with empty strings or malformed JSON must be cleaned first.
+**What:** Agent events arrive via two paths:
+1. **Push path**: Adapter parses subprocess stdout, normalizes to `AgentEventEnvelope`, routes through EventBus.
+2. **Pull/discovery path**: Optional file system watching (via `watchfiles`) for agents that do not emit reliable file change events.
+
+**Why hybrid:** Claude Code and Codex both emit file change events in their JSON output, but these may be incomplete for bulk file operations. File system watching provides a fallback for `FileChangePanel` accuracy.
+
+**Rule:** Push path is the default. File system watching is opt-in per adapter, defaults off. Never poll if the adapter reliably emits `FILE_CHANGED` events.
 
 ---
 
-## Data Model Refactoring Plan
+## Data Flow
 
-### Normalization Targets
-
-| Current Pattern | Problem | PostgreSQL Target |
-|----------------|---------|-------------------|
-| `authors_json TEXT` (JSON string in every `papers` row) | No FK to `authors` table; denormalized | `paper_authors` join table + `authors` table (already exists, link properly) |
-| `keywords_json TEXT` | No indexing, full string match only | `JSONB` column with `@>` containment queries |
-| `sources_json TEXT` | Ad-hoc string; no enum validation | `JSONB` + `CHECK (sources_json @> '[]')` |
-| `metadata_json TEXT` (on 20+ models) | Catch-all dump; poor queryability | Keep as `JSONB`; add specific columns for frequently queried fields |
-| `status` strings (no constraint) | Any string accepted | `VARCHAR(32)` + `CHECK (status IN (...))` |
-| Nullable `created_at` (many models) | Inconsistent audit trail | `NOT NULL DEFAULT now()` |
-
-### Models with PG-Native Upgrade Opportunity
-
-| Model | Current | v2.0 |
-|-------|---------|-------|
-| `MemoryItemModel` | `embedding: LargeBinary`, `content: Text`, FTS via virtual table | `embedding: VECTOR(1536)`, `content_tsv: TSVECTOR`, tsvector trigger |
-| `PaperModel` | `keywords_json: Text`, `authors_json: Text` | `keywords: JSONB`, `authors: JSONB` |
-| `AgentEventModel` | `payload_json: Text`, `metrics_json: Text`, `tags_json: Text` | `payload: JSONB`, `metrics: JSONB`, `tags: JSONB` |
-| `AgentRunModel` | `metadata_json: Text` | `metadata: JSONB` |
-| `ResearchTrackModel` | `keywords_json: Text`, `venues_json: Text`, `methods_json: Text` | `keywords: JSONB`, `venues: JSONB`, `methods: JSONB` |
-
-### Constraint Hardening
-
-Add to PostgreSQL-specific Alembic migrations:
-- `CHECK (status IN ('pending', 'running', 'completed', 'failed'))` on status columns
-- `CHECK (confidence BETWEEN 0.0 AND 1.0)` on `MemoryItemModel.confidence`
-- `NOT NULL DEFAULT NOW()` on all `created_at` columns that are currently nullable
-- `CHECK (pii_risk IN (0, 1, 2))` on `MemoryItemModel.pii_risk`
-
----
-
-## What Is Preserved vs. Must Change
-
-### Preserved (Zero Changes)
-
-| Component | Why Preserved |
-|-----------|--------------|
-| `Base(DeclarativeBase)` | No change; add JSONB/VECTOR types incrementally |
-| All model `__tablename__` values | Schema names do not change |
-| `alembic/versions/` directory | Existing migrations remain valid history |
-| `Container` class interface | `register()` / `resolve()` API unchanged |
-| `AgentEventEnvelope` schema | Event envelope structure unchanged |
-| All port interfaces (`EventLogPort`, `RegistryPort`, etc.) | Contracts preserved; implementations change internally |
-| MCP server registration pattern | `register(mcp)` pattern unchanged |
-| ARQ `WorkerSettings.functions` | Function names unchanged; internals refactored |
-| FastAPI route signatures | `async def` already; `await` additions only |
-
-### Must Change
-
-| Component | Change Required | Risk |
-|-----------|-----------------|------|
-| `sqlalchemy_db.py` — `SessionProvider` | Add `AsyncSessionProvider`; keep `SessionProvider` for backward compat during transition | Low |
-| All 17+ store `__init__` | Accept injected `async_sessionmaker` instead of creating engine | Medium (mechanical but many files) |
-| All store methods | Convert `def` to `async def`, `with` to `async with` | High (pervasive change) |
-| `sqlalchemy_event_log.py` | Convert `append()`, `stream()`, `list_runs()`, `list_events()` to async | Medium |
-| `bootstrap.py` | Add `bootstrap_async_db()` async factory | Low |
-| `arq_worker.py` | Add `startup/shutdown/on_job_start` hooks; per-task session management | Medium |
-| `alembic/env.py` | Add async migration path for PostgreSQL | Low |
-| All MCP tools using `anyio.to_thread` | Remove wrapper after stores go async | Low (cleanup) |
-| `memory_store.py` `_ensure_fts5()` / `_ensure_vec_table()` | Replace with tsvector + pgvector; keep SQLite fallback in `_search_*` methods | High |
-| `document_index_store.py` `_ensure_fts5()` | Replace with tsvector | Medium |
-| JSON helper methods (`get_keywords`, `set_keywords`, etc.) | Remove after JSON column type switch; direct attribute access | Medium |
-| `models.py` JSON columns (`*_json: Text`) | Rename + change type to `JSON`/`JSONB` per model | High (requires data migration) |
-| `models.py` embedding column | Change `LargeBinary` to `Vector(1536)` | High (data migration + pgvector extension) |
-
----
-
-## Backward Compatibility Strategy
-
-### Phase Approach: Sync-First, Then Async
-
-Do NOT attempt a big-bang sync-to-async conversion. The risk of breaking 40+ test files and
-all CI gates is too high. Use a two-phase approach:
-
-**Phase A — PostgreSQL + Schema (sync stays):**
-- Set up PostgreSQL + Docker dev environment
-- Add `asyncpg` + `aiosqlite` to dependencies
-- Create new Alembic migrations for PG-native columns (JSONB, tsvector, pgvector)
-- Run all existing tests against PostgreSQL — sync stores still work on PG
-- Fix any PostgreSQL-incompatible DDL (FTS5 virtual tables, sqlite-vec)
-- Deliver: PG works with existing sync stores
-
-**Phase B — Async Data Layer:**
-- Add `AsyncSessionProvider` to `sqlalchemy_db.py` alongside `SessionProvider`
-- Convert stores one domain at a time (memory, papers, research, event log, etc.)
-- For each converted store: update tests to use `pytest-anyio` / `asyncio` fixtures
-- Update MCP tools to drop `anyio.to_thread.run_sync()` wrapper
-- Update FastAPI routes to `await` store calls
-- Update ARQ worker with lifecycle hooks
-- Deliver: full async data layer
-
-**Phase C — Model Refactoring:**
-- Convert `*_json TEXT` columns to `JSON`/`JSONB` with data migration scripts
-- Add constraint checks
-- Remove JSON helper methods from models; use direct attribute access
-- Clean up dead code
-
-### Keeping SQLite Dev Support
-
-During Phase A and B, SQLite continues to work for local `pytest`. The `AsyncSessionProvider`
-with `aiosqlite` makes this possible. Only Phase C features (tsvector, pgvector, JSONB
-operators) are PostgreSQL-only. Tests that exercise FTS or vector search can be marked
-`@pytest.mark.skipif(is_sqlite, reason="PG-only")`.
-
----
-
-## Component Boundaries
-
-| Component | Responsibility | Communicates With |
-|-----------|---------------|-------------------|
-| `async_db.py` (NEW) | Create and own the single shared `AsyncEngine`; provide `AsyncSessionProvider` | DI container (receives engine), all stores (receive factory) |
-| `AsyncSessionProvider` (NEW) | Thin wrapper: yields `AsyncSession` from injected factory | Store methods (`async with`) |
-| `SessionProvider` (KEEP) | Sync wrapper for test fixtures and migration scripts | Alembic env, unit tests |
-| `bootstrap_async_db()` (NEW) | One-time startup: create engine, register in DI | FastAPI `startup` event, ARQ `startup` hook |
-| Each store (MODIFIED) | Same domain logic, now with `async def` methods | `AsyncSessionProvider`, SQLAlchemy ORM |
-| `SqlAlchemyEventLog` (MODIFIED) | Async `append()` + `list_runs()` | ARQ worker, FastAPI startup, CompositeEventLog |
-| `alembic/env.py` (MODIFIED) | Dual path: async PG migrations, sync SQLite migrations | Alembic CLI |
-| MCP tools (MODIFIED) | Remove `anyio.to_thread`; directly `await` store methods | Async stores |
-
----
-
-## Data Flow Changes
-
-### Before (sync everywhere)
+### Chat Message Flow (User → Agent → Dashboard)
 
 ```
-FastAPI async handler
-  |
-  v (blocking call — blocks event loop)
-Store.sync_method()
-  |
-  v
-SessionProvider.session() — sync context manager
-  |
-  v
-SQLAlchemy sync Session
-  |
-  v
-psycopg2 / sqlite3 driver (blocking I/O)
+[User types in AgentChatPanel]
+    POST /api/agent/chat {message, session_id}
+        AgentProxyService.route_message()
+            adapter.send_message() -> AsyncIterator[AgentEventEnvelope]
+                for each envelope: event_log.append(envelope)
+                    EventBusEventLog._fan_out(dict)
+                        asyncio.Queue (one per SSE client)
+                            GET /api/events/stream yields data: {...}
+                                useAgentEvents reads, dispatches to Zustand
+                                    addFeedItem, addToolCall, addChatDelta, updateAgentStatus
+                                        React components re-render
 ```
 
-### After (async throughout)
+### Control Command Flow (Dashboard → Agent)
 
 ```
-FastAPI async handler
-  |
-  v (non-blocking await)
-await Store.async_method()
-  |
-  v
-AsyncSessionProvider.session() — async context manager
-  |
-  v
-SQLAlchemy AsyncSession
-  |
-  v
-asyncpg / aiosqlite driver (non-blocking I/O)
+[User clicks "Send Task" in dashboard]
+    POST /api/agent/control {type: "send_task", payload: {task: "..."}}
+        AgentProxyService.send_control(ControlCommand)
+            adapter.send_control()
+                writes to agent stdin (subprocess adapters)
+                    or HTTP POST (OpenCode adapter)
+                agent executes, emits TASK_UPDATE / AGENT_WORKING events
+                    flows back through push path above
 ```
 
-### MCP Tools Before/After
+### Team Decomposition Flow (Agent → Dashboard)
 
 ```
-# Before
-async def _save_to_memory_impl(...):
-    store = _get_store()
-    result = await anyio.to_thread.run_sync(
-        lambda: store.add_memories(user_id, [candidate])
-    )
+[Agent spawns subagent, emits structured event]
+    ClaudeCodeAdapter parses agent output containing subagent info
+    Emits AgentEventEnvelope(type=TEAM_UPDATE, payload={nodes, edges})
+        Zustand: updateTeamNodes(nodes, edges)
+            TeamDAGPanel (@xyflow/react): re-renders DAG
+```
 
-# After
-async def _save_to_memory_impl(...):
-    store = _get_store()
-    result = await store.add_memories(user_id, [candidate])
+Team decomposition is agent-initiated. PaperBot visualizes what the agent reports. The adapter extracts team structure from agent-specific output formats. PaperBot does not decide how to split tasks.
+
+### Frontend State Management
+
+```
+Zustand: useAgentEventStore (Phase 8, extended)
+    feed: ActivityFeedItem[]          (capped at 200, unchanged)
+    agentStatuses: Map<name, entry>   (unchanged)
+    toolCalls: ToolCallEntry[]        (capped at 100, unchanged)
+    teamNodes: Node[]                 (NEW: @xyflow nodes)
+    teamEdges: Edge[]                 (NEW: @xyflow edges)
+    fileChanges: FileChangeEntry[]    (NEW: recent file diffs)
+    taskList: TaskEntry[]             (NEW: agent task board)
+
+Zustand: useAgentProxyStore (NEW)
+    selectedAgent: "claude-code" | "codex" | "opencode" | null
+    sessionId: string | null
+    chatHistory: ChatMessage[]
+    proxyStatus: "idle" | "connected" | "working" | "crashed"
 ```
 
 ---
 
-## Scalability Considerations
+## Integration Points with Existing PaperBot Architecture
 
-| Concern | Phase A (PG, sync stores) | Phase B (PG, async stores) | Phase C (full refactor) |
-|---------|--------------------------|---------------------------|------------------------|
-| Concurrent API requests | Event loop blocks on sync DB calls | Non-blocking; connection pool shared | Same as Phase B |
-| Connection pool exhaustion | 20+ independent pools | Single pool, configurable size | Same as Phase B |
-| FTS search | Sync tsvector queries (still blocks) | Async tsvector queries | Same as Phase B |
-| Vector search | Sync pgvector queries | Async pgvector queries | Same as Phase B |
-| ARQ job concurrency | Per-task sync sessions (risk of contention) | Per-task async sessions (safe) | Same as Phase B |
+### Internal Boundaries
 
----
+| Boundary | Communication | Notes |
+|----------|---------------|-------|
+| `AgentAdapter` to `EventBusEventLog` | `event_log.append(AgentEventEnvelope)` — synchronous | Existing pattern used by all producers; adapter calls via `AgentProxyService` |
+| `AgentProxyService` to DI Container | `Container.instance().resolve(EventLogPort)` | Same pattern as `_audit.py`; service registered in DI at startup |
+| `EventBusEventLog` to SSE clients | `asyncio.Queue` fan-out via `subscribe()` — Phase 7 | Existing `/api/events/stream` delivers all agent events; no changes |
+| `useAgentEvents` to Zustand store | TypeScript Zustand actions — Phase 8, extended | New types follow same pattern: extend `EventType` constants, extend store state, extend parsers |
+| `/api/agent/chat` to `AgentProxyService` | Direct Python call within FastAPI handler | In-process; no new infrastructure |
+| `studio_chat.py` to new adapter | `studio_chat.py` pattern migrates into `ClaudeCodeAdapter` | Existing `StudioChatRequest` logic is superseded; studio_chat.py can be deprecated |
 
-## Anti-Patterns to Avoid
+### Relationship with Existing `codex_dispatcher.py` and `claude_commander.py`
 
-### Anti-Pattern 1: Converting All Stores in One PR
-**What goes wrong:** 17+ stores, all tests fail simultaneously, CI blocked for days.
-**Prevention:** Convert one domain group at a time. Each group has its own PR + test pass.
-**Domain groups:** (1) event log, (2) memory store, (3) paper store + research store, (4) remaining 13 stores.
+These files in `infrastructure/swarm/` implement Claude as a commander and Codex as a Popen API worker for the Paper2Code pipeline. The new adapter layer addresses the dashboard use case only:
 
-### Anti-Pattern 2: Lazy-Loading Relationships in Async Context
-**What goes wrong:** `session.get(Model, id)` succeeds; `model.relationship_attr` raises
-`MissingGreenlet` after session closes.
-**Prevention:** Add `selectinload()` / `joinedload()` to every query that accesses relationships.
-Set `expire_on_commit=False` on the session factory (already noted above).
+- `ClaudeCodeAdapter` replaces the subprocess-spawn-and-stream pattern from `studio_chat.py` for the dashboard
+- `CodexAdapter` is a new subprocess adapter; it does not replace `codex_dispatcher.py` for Paper2Code
+- `codex_dispatcher.py` and `claude_commander.py` remain unchanged for the Paper2Code pipeline
 
-### Anti-Pattern 3: Running Alembic Autogenerate on Mixed Schema
-**What goes wrong:** Alembic sees FTS5 virtual tables in SQLite metadata as "extra tables" and
-generates `DROP TABLE memory_items_fts` migrations that break SQLite.
-**Prevention:** FTS5 tables are created outside `Base.metadata`; Alembic autogenerate does not
-see them. Do not change this. PostgreSQL tsvector columns go in regular models and ARE seen by
-autogenerate — which is correct.
+The constraint from PROJECT.md is clear: swarm files stay for Paper2Code. The dashboard and Paper2Code are distinct consumers of different subsystems.
 
-### Anti-Pattern 4: Using `create_all()` on PostgreSQL
-**What goes wrong:** `metadata.create_all(engine)` on PostgreSQL bypasses Alembic; migration
-history becomes inconsistent.
-**Prevention:** `ensure_tables()` on `SessionProvider` already skips PostgreSQL (`startswith("sqlite")`).
-Keep this guard. Never call `create_all()` on a PostgreSQL URL.
+### Relationship with MCP Server
 
-### Anti-Pattern 5: Sharing AsyncSession Across Concurrent ARQ Tasks
-**What goes wrong:** `AsyncSession` is not thread-safe or task-safe. Multiple concurrent ARQ
-tasks using the same session cause data corruption or connection errors.
-**Prevention:** Use `async_scoped_session` with a `ContextVar` scoped to the ARQ job ID, as
-documented by the ARQ + SQLAlchemy pattern. One session per task, always.
+The MCP server is the tool-surface code agents consume. It is orthogonal to the dashboard adapter layer:
 
-### Anti-Pattern 6: Migrating JSON Columns Without Data Cleanup
-**What goes wrong:** `ALTER COLUMN keywords_json TYPE jsonb USING keywords_json::jsonb` fails
-if any row contains `""` (empty string) or malformed JSON.
-**Prevention:** Run a cleanup query before the type migration:
-`UPDATE papers SET keywords_json = '[]' WHERE keywords_json = '' OR keywords_json IS NULL`.
-Do this in the Alembic `upgrade()` before the `ALTER COLUMN`.
+- Claude Code calls PaperBot MCP tools during its work
+- Those MCP calls emit `TOOL_CALL` / `TOOL_RESULT` events via `_audit.py`
+- These events flow through EventBus to the dashboard automatically
+- `ToolCallTimeline` (Phase 8) already renders them
+
+The MCP prerequisite: agents need a functional MCP server before meaningful tool calls appear in the dashboard. Dashboard infrastructure can be built without MCP live, but end-to-end tool call visualization requires it.
+
+### External Services
+
+| Service | Integration Pattern | Notes |
+|---------|---------------------|-------|
+| Claude Code CLI | `asyncio.create_subprocess_exec` + NDJSON stdout | `find_claude_cli()` pattern from `studio_chat.py` reusable; `--output-format stream-json` required |
+| Codex CLI | `asyncio.create_subprocess_exec` + JSONL stdout via `--json` flag | `codex exec --json` (Rust CLI, must be on PATH); emits `thread.started`, `item.*`, `turn.*` event types |
+| OpenCode | HTTP API (`@opencode-ai/sdk`) or ACP stdin/stdout subprocess | HTTP mode via `opencode` local server is simpler; ACP is stdin/stdout nd-JSON with JSON-RPC 2.0 |
 
 ---
 
-## Build Order (Dependency-Driven)
+## Suggested Build Order
 
-1. **Docker + PostgreSQL dev environment** — Nothing works without a PG target.
-   - Blocks: all subsequent phases
+Dependencies determine sequencing. Build in this order:
 
-2. **Alembic dual-path env.py + async deps** — `asyncpg`, `aiosqlite`, `pgvector` in
-   `pyproject.toml`; Alembic async runner for PG.
-   - Depends on: Docker PG
-   - Blocks: all migrations
+1. **`AgentAdapter` base + `EventType` constants extension** — defines interface contract and new event type strings; no external dependencies. Extend `EventType` in `message_schema.py` with `FILE_CHANGED`, `TEAM_UPDATE`, `TASK_UPDATE`, `CHAT_DELTA`, `CHAT_DONE`.
 
-3. **Schema migrations (PostgreSQL-compatible models)** — Convert FTS5 → tsvector, sqlite-vec
-   → pgvector column, JSON text → JSONB columns. Write new Alembic migrations (0020+).
-   - Depends on: Alembic async env
-   - Blocks: PG-native feature usage
+2. **`ClaudeCodeAdapter`** — highest priority; migrates existing `studio_chat.py` logic into the adapter pattern. Proven subprocess + NDJSON parsing already works in production.
 
-4. **AsyncSessionProvider + bootstrap_async_db** — New `async_db.py`, DI registration.
-   - Depends on: nothing (new file)
-   - Blocks: async store conversion
+3. **`AgentProxyService`** — wires adapter to EventBus; depends on #1 and existing EventBusEventLog. No frontend dependency.
 
-5. **Data migration scripts** — pgloader or custom Python to move SQLite → PostgreSQL data.
-   - Depends on: schema migrations
-   - Blocks: production cutover
+4. **`/api/agent/chat` + `/api/agent/control` routes** — depends on #3. Registers in `api/main.py`.
 
-6. **Store-by-store async conversion** — Four domain groups, one at a time. Start with
-   `SqlAlchemyEventLog` (smallest, most impactful for ARQ) then memory, then papers/research,
-   then remaining stores.
-   - Depends on: AsyncSessionProvider
-   - Blocks: MCP tool cleanup, route cleanup
+5. **Extend Zustand store + parsers + TypeScript types** — add new state slices and parse functions; no backend dependency. Can be done in parallel with #2-4.
 
-7. **ARQ worker async lifecycle** — `startup/shutdown/on_job_start` hooks; per-task sessions.
-   - Depends on: async event log (step 6, group 1)
-   - Blocks: safe concurrent ARQ execution
+6. **`AgentChatPanel` + `TeamDAGPanel` + `FileChangePanel`** — depends on #5; needs the extended store.
 
-8. **MCP tool cleanup** — Remove `anyio.to_thread.run_sync()` wrappers.
-   - Depends on: all stores async (step 6 complete)
-   - Blocks: nothing (cleanup)
+7. **Three-panel studio page layout** — integrates #6 into the page; depends on #4 for API calls. Dashboard is functional for Claude Code after this step.
 
-9. **Model refactoring** — Remove JSON helper methods; add constraints; normalize authors.
-   - Depends on: JSONB migrations (step 3)
-   - Blocks: nothing (cleanup + hardening)
+8. **`CodexAdapter`** — adds second agent type; follows the same subprocess + JSONL pattern as `ClaudeCodeAdapter`.
+
+9. **`OpenCodeAdapter`** — adds third agent type; HTTP variant differs from subprocess pattern. Lower priority; Claude Code coverage is sufficient for v1.2.
+
+The dashboard delivers real value (Claude Code proxying) after step 7, without waiting for all three adapters.
+
+---
+
+## Scaling Considerations
+
+| Scale | Architecture Adjustments |
+|-------|--------------------------|
+| 1 user, 1 agent | Current design sufficient; all in-process |
+| 1 user, 3+ parallel agent sessions | `AgentProxyService` manages a map of `session_id → adapter`; one EventBus queue per SSE client is fine |
+| Multiple users | EventBus has no user scoping — all events go to all connected SSE clients. For multi-user, add `session_id` filtering in the front-end Zustand store (filter by active session). Not needed for current single-user architecture. |
+| High token throughput (streaming) | `CHAT_DELTA` at 40 tok/sec saturates the 200-item ring buffer in ~5 seconds. Fix: exclude `CHAT_DELTA` from ring buffer storage (fan-out live only, no catch-up); ring buffer should hold structural events (lifecycle, tool calls, file changes). |
+
+### Scaling Priorities
+
+1. **First bottleneck:** Ring buffer saturation by streaming tokens. Fix is a one-line filter in `EventBusEventLog.append()` or in the adapter itself — do not store `CHAT_DELTA` in the ring, only fan-out.
+2. **Second bottleneck:** Multiple concurrent agent sessions in a multi-user scenario. Fix: add `session_id` tag to all proxy events; frontend filters on active session only.
+
+---
+
+## Anti-Patterns
+
+### Anti-Pattern 1: Parsing Agent Output Above the Adapter Layer
+
+**What people do:** Add Claude-Code-specific NDJSON parsing logic in `AgentProxyService` or an API route.
+**Why it's wrong:** Adding a second agent (Codex) requires touching `AgentProxyService` and the route again. The adapter pattern collapses.
+**Do this instead:** All parsing is encapsulated in the adapter. `AgentProxyService` only receives `AgentEventEnvelope` objects. The adapter is the only place that knows about agent-specific output formats.
+
+### Anti-Pattern 2: Creating a Parallel Event Schema for Proxy Events
+
+**What people do:** Define new Python dataclasses or TypeScript types specific to the proxy dashboard (`ProxyEvent`, `AgentMessage`).
+**Why it's wrong:** Creates a second event vocabulary diverging from `AgentEventEnvelope`. The existing `useAgentEvents` hook, Zustand store, `ActivityFeed`, and `ToolCallTimeline` stop working for proxy events without modification.
+**Do this instead:** All proxy events use `AgentEventEnvelope` with new `EventType` constants (`FILE_CHANGED`, `TEAM_UPDATE`, `TASK_UPDATE`, `CHAT_DELTA`, `CHAT_DONE`). Extend `EventType` in `message_schema.py`. Extend TypeScript types in `types.ts`. Parsers in `parsers.ts` handle the new types.
+
+### Anti-Pattern 3: Adding Orchestration Logic to PaperBot
+
+**What people do:** Have `AgentProxyService` decide how to split a task between Claude Code and Codex based on workload or complexity.
+**Why it's wrong:** Violates the "no orchestration logic" constraint from PROJECT.md. PaperBot visualizes what the agent reports; it does not direct the agent's internal decisions.
+**Do this instead:** Pass the user's task to the configured agent verbatim. Let the agent decompose and delegate. Visualize what the agent reports via `TEAM_UPDATE` events.
+
+### Anti-Pattern 4: One SSE Connection Per Panel Component
+
+**What people do:** `TeamDAGPanel`, `FileChangePanel`, and `AgentChatPanel` each mount their own `useAgentEvents` hook instance.
+**Why it's wrong:** Three SSE connections create three `asyncio.Queue` instances in `EventBusEventLog`. Every event is triplicated. This is the "multiple mounts" pitfall documented in Phase 8 research.
+**Do this instead:** Mount `useAgentEvents` exactly once at the page or layout root. All panels read from the shared Zustand store.
+
+### Anti-Pattern 5: Blocking the Event Loop on Subprocess Management
+
+**What people do:** `await process.wait()` directly in a FastAPI request handler before returning a response.
+**Why it's wrong:** Blocks the uvicorn event loop for the entire duration of the agent run (potentially minutes). No other requests can be served.
+**Do this instead:** `AgentProxyService` manages subprocess lifecycle in a background asyncio task. The API route returns immediately after handing off to the service. Events stream back through the EventBus asynchronously.
+
+### Anti-Pattern 6: Storing High-Frequency CHAT_DELTA in the Ring Buffer
+
+**What people do:** Route all agent events, including token-by-token `CHAT_DELTA` events, through the ring buffer.
+**Why it's wrong:** At 40 tokens/sec, the 200-item ring buffer saturates in 5 seconds. Structural events (file changes, lifecycle, tool calls) are evicted from the catch-up buffer before a new SSE client can receive them.
+**Do this instead:** Tag `CHAT_DELTA` events for live fan-out only (not ring buffer storage). Either filter in the adapter before calling `event_log.append()`, or extend `EventBusEventLog` with a `no_buffer` flag for high-frequency event types.
 
 ---
 
 ## Sources
 
-- Codebase inspection: `src/paperbot/infrastructure/stores/sqlalchemy_db.py` (SessionProvider)
-- Codebase inspection: `src/paperbot/infrastructure/stores/models.py` (46 models, LargeBinary embedding, JSON text columns)
-- Codebase inspection: `src/paperbot/infrastructure/stores/memory_store.py` (FTS5 + sqlite-vec patterns)
-- Codebase inspection: `src/paperbot/infrastructure/stores/document_index_store.py` (FTS5 pattern)
-- Codebase inspection: `src/paperbot/infrastructure/event_log/sqlalchemy_event_log.py` (sync event log)
-- Codebase inspection: `src/paperbot/infrastructure/queue/arq_worker.py` (module-level singleton, async jobs)
-- Codebase inspection: `src/paperbot/mcp/tools/save_to_memory.py` (anyio.to_thread pattern)
-- Codebase inspection: `alembic/env.py` (dual-DB detection already present)
-- Codebase inspection: `pyproject.toml` (`psycopg[binary]>=3.2.0` already a dependency)
-- [SQLAlchemy 2.0 Asyncio Documentation](https://docs.sqlalchemy.org/en/20/orm/extensions/asyncio.html) — HIGH confidence
-- [ARQ + SQLAlchemy Done Right](https://wazaari.dev/blog/arq-sqlalchemy-done-right) — MEDIUM confidence (async_scoped_session + ContextVar pattern)
-- [FastAPI SQLAlchemy 2.0 Modern Async Patterns](https://dev-faizan.medium.com/fastapi-sqlalchemy-2-0-modern-async-database-patterns-7879d39b6843) — MEDIUM confidence
-- [Alembic Batch Migrations for SQLite](https://alembic.sqlalchemy.org/en/latest/batch.html) — HIGH confidence
-- [pgvector GitHub](https://github.com/pgvector/pgvector) — HIGH confidence
-- Project context: `.planning/PROJECT.md` (v2.0 milestone definition)
+### Primary (HIGH confidence — direct codebase inspection)
+
+- `src/paperbot/api/routes/studio_chat.py` — existing Claude CLI subprocess pattern: `asyncio.create_subprocess_exec`, NDJSON parsing, `--output-format stream-json`, `find_claude_cli()`
+- `src/paperbot/infrastructure/swarm/codex_dispatcher.py` — existing Codex API integration (to be superseded for dashboard path)
+- `src/paperbot/infrastructure/swarm/claude_commander.py` — existing commander orchestration (Paper2Code, not dashboard)
+- `src/paperbot/application/collaboration/message_schema.py` — `AgentEventEnvelope` schema, `EventType` constants, `make_event()`
+- `src/paperbot/infrastructure/event_log/event_bus_event_log.py` — Phase 7 fan-out design, `subscribe()`/`unsubscribe()`/`_fan_out()`
+- `src/paperbot/api/routes/events.py` — existing `/api/events/stream` SSE endpoint; confirmed working
+- `src/paperbot/mcp/tools/_audit.py` — `log_tool_call()` pattern; demonstrates event routing via `event_log.append()`
+- `web/src/lib/sse.ts` — `readSSE()` async generator; existing SSE consumption pattern
+- `web/src/lib/agent-events/` — Phase 8 types, store, parsers, hook
+- `.planning/phases/07-eventbus-sse-foundation/07-RESEARCH.md` — Phase 7 design decisions and constraints
+- `.planning/phases/08-agent-event-vocabulary/08-RESEARCH.md` — Phase 8 event vocabulary, Zustand patterns, anti-patterns
+- `.planning/PROJECT.md` — constraints: no orchestration logic, agent-agnostic, reuse EventBus, extend AgentEventEnvelope
+
+### Primary (HIGH confidence — official documentation)
+
+- [Claude Code headless docs](https://code.claude.com/docs/en/headless) — `--output-format stream-json` NDJSON format, `-p` flag, event types: `assistant`, `tool_result`, `result`
+- [Codex CLI non-interactive mode](https://developers.openai.com/codex/noninteractive/) — `codex exec --json` JSONL format; event types: `thread.started`, `item.file_change`, `item.plan_update`, `turn.completed`, `error`
+
+### Secondary (MEDIUM confidence)
+
+- [OpenCode CLI docs](https://opencode.ai/docs/cli/) — `opencode -p --output-format json`, local HTTP API
+- [OpenCode DeepWiki SDK](https://deepwiki.com/sst/opencode/7-command-line-interface-(cli)) — ACP stdin/stdout nd-JSON, HTTP API spec
+- [Agent Client Protocol architecture](https://agentclientprotocol.com/overview/architecture) — JSON-RPC 2.0 over stdin/stdout as emerging standard for agent-agnostic CLI interfaces
+- [Claude Code GitHub issue: Agent Hierarchy Dashboard](https://github.com/anthropics/claude-code/issues/24537) — confirms real-world demand for agent hierarchy + team visualization dashboards
+
+---
+
+*Architecture research for: agent-agnostic proxy/dashboard (v1.2 DeepCode Agent Dashboard)*
+*Researched: 2026-03-15*

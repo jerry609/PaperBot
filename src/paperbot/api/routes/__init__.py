@@ -23,6 +23,7 @@ from . import (
     push_commands,
     agent_board,
     wiki,
+    studio_skills,
 )
 
 __all__ = [
@@ -48,4 +49,5 @@ __all__ = [
     "push_commands",
     "agent_board",
     "wiki",
+    "studio_skills",
 ]

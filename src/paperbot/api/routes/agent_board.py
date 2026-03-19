@@ -50,6 +50,82 @@ from ..streaming import StreamEvent, sse_response
 router = APIRouter(prefix="/api/agent-board")
 log = logging.getLogger(__name__)
 
+
+# ---------------------------------------------------------------------------
+# Codex delegation event helpers (Phase 10 / CDX-03)
+# ---------------------------------------------------------------------------
+
+
+def _get_event_log_from_container():
+    """Lazily retrieve the event_log from the DI Container.
+
+    Lazy import inside function body prevents circular imports at module load
+    time. Returns None if the container is not configured or has no event_log.
+    """
+    try:
+        from paperbot.core.di import Container  # noqa: PLC0415
+
+        return Container.instance().event_log
+    except Exception:
+        return None
+
+
+async def _emit_codex_event(
+    event_type: str,
+    task,
+    session,
+    extra: dict,
+) -> None:
+    """Emit a Codex delegation lifecycle event into the event bus.
+
+    Silently returns if the event log is unavailable (None) or if any
+    exception occurs. Never raises to callers.
+
+    Args:
+        event_type: One of EventType.CODEX_* constants.
+        task: The AgentTask being delegated (must have .id, .title, .assignee).
+        session: The BoardSession (must have .session_id), or None.
+        extra: Additional payload dict merged into the base payload.
+    """
+    try:
+        el = _get_event_log_from_container()
+        if el is None:
+            return
+
+        from paperbot.application.collaboration.message_schema import (  # noqa: PLC0415
+            make_event,
+            new_run_id,
+            new_trace_id,
+        )
+
+        payload = {
+            "task_id": task.id,
+            "task_title": task.title,
+            "session_id": session.session_id if session is not None else None,
+            "worker_run_id": task.id,
+            "runtime": "codex",
+            "control_mode": "managed",
+            "interruptible": True,
+            "assignee": getattr(task, "assignee", "codex"),
+        }
+        payload.update(extra)
+
+        env = make_event(
+            run_id=new_run_id(),
+            trace_id=new_trace_id(),
+            workflow="agent_board",
+            stage="delegation",
+            attempt=0,
+            agent_name=getattr(task, "assignee", "codex"),
+            role="worker",
+            type=event_type,
+            payload=payload,
+        )
+        el.append(env)
+    except Exception as exc:  # pragma: no cover
+        log.debug("_emit_codex_event failed silently: %s", exc)
+
+
 # ---------------------------------------------------------------------------
 # Persistent session store
 # ---------------------------------------------------------------------------
@@ -323,6 +399,14 @@ class TaskUpdateRequest(BaseModel):
     assignee: Optional[str] = None
 
 
+class CreateTaskRequest(BaseModel):
+    title: str
+    description: str
+    workspace_dir: Optional[str] = None
+    assignee: Literal["codex", "opencode"] = "codex"
+    tags: List[str] = Field(default_factory=list)
+
+
 class RunAllRequest(BaseModel):
     workspace_dir: Optional[str] = None
     reset_cancelled: bool = False
@@ -423,6 +507,7 @@ async def get_latest_session(paper_id: Optional[str] = None):
             continue
         ctrl = _run_controls.get(session.session_id)
         return {
+            "found": True,
             "session_id": session.session_id,
             "paper_id": session.paper_id,
             "context_pack_id": session.context_pack_id,
@@ -439,7 +524,23 @@ async def get_latest_session(paper_id: Optional[str] = None):
             "session": session.to_dict(),
         }
 
-    raise HTTPException(status_code=404, detail="Session not found")
+    return {
+        "found": False,
+        "session_id": None,
+        "paper_id": paper_id,
+        "context_pack_id": None,
+        "workspace_dir": None,
+        "user_id": None,
+        "sandbox_id": None,
+        "sandbox_executor": None,
+        "paper_slug_name": None,
+        "tasks": [],
+        "status": "idle",
+        "checkpoint": "",
+        "updated_at": None,
+        "control_state": None,
+        "session": None,
+    }
 
 
 @router.post("/sessions/{session_id}/plan")
@@ -564,6 +665,61 @@ async def list_tasks(session_id: str):
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     return [task.model_dump() for task in session.tasks]
+
+
+@router.post("/sessions/{session_id}/tasks")
+async def create_task(session_id: str, request: CreateTaskRequest):
+    """Create an ad-hoc task in an existing session for Studio-triggered delegation."""
+    session = _load_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    title = request.title.strip()
+    description = request.description.strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="title is required")
+    if not description:
+        raise HTTPException(status_code=400, detail="description is required")
+    if request.assignee != "codex":
+        raise HTTPException(
+            status_code=400,
+            detail="Only Codex delegation is wired right now; OpenCode runtime is not available yet.",
+        )
+
+    if request.workspace_dir and request.workspace_dir.strip():
+        session.workspace_dir = str(_sanitize_workspace_dir(request.workspace_dir))
+
+    tags = [tag.strip() for tag in request.tags if isinstance(tag, str) and tag.strip()]
+    if "studio" not in tags:
+        tags.append("studio")
+    if "ad_hoc" not in tags:
+        tags.append("ad_hoc")
+
+    task = AgentTask(
+        id=f"task-{uuid.uuid4().hex[:12]}",
+        title=title,
+        description=description,
+        status="planning",
+        assignee="claude",
+        progress=0,
+        tags=tags,
+        paper_id=session.paper_id or None,
+    )
+    session.tasks.append(task)
+    _append_session_event(
+        session,
+        event="task_created",
+        level="info",
+        message="Studio created an ad-hoc subagent task.",
+        details={
+            "task_id": task.id,
+            "source": "studio_console",
+            "assignee_preference": request.assignee,
+            "workspace_dir": session.workspace_dir,
+        },
+    )
+    _persist_session(session, checkpoint="task_created", status="running")
+    return task.model_dump()
 
 
 @router.get("/sessions/{session_id}/sandbox")
@@ -754,6 +910,12 @@ async def dispatch_task(task_id: str):
     task.status = "in_progress"
     task.assignee = f"codex-{uuid.uuid4().hex[:4]}"
     task.updated_at = datetime.utcnow().isoformat()
+    await _emit_codex_event(
+        "codex_dispatched",
+        task,
+        session,
+        {"assignee": task.assignee},
+    )
     _persist_session(session, checkpoint="task_dispatched", status="running")
 
     return task.model_dump()
@@ -2350,6 +2512,13 @@ async def _execute_task_stream(
     if session:
         _persist_session(session, checkpoint="task_dispatched", status="running")
 
+    await _emit_codex_event(
+        "codex_dispatched",
+        task,
+        session,
+        {"assignee": task.assignee},
+    )
+
     yield StreamEvent(
         type="progress",
         data={"event": "task_dispatched", "task": task.model_dump()},
@@ -2361,6 +2530,12 @@ async def _execute_task_stream(
         "acceptance_criteria": [s["title"] for s in task.subtasks],
         "subtasks": [dict(subtask) for subtask in task.subtasks],
     }
+    await _emit_codex_event(
+        "codex_accepted",
+        task,
+        session,
+        {"assignee": task.assignee, "model": "codex"},
+    )
     prompt = await commander.build_codex_prompt(task_dict, workspace)
     result, step_events = await _dispatch_with_step_events(
         dispatcher=dispatcher,
@@ -2409,6 +2584,16 @@ async def _execute_task_stream(
             message=failure_message,
             details=failure_details or None,
         )
+        await _emit_codex_event(
+            "codex_failed",
+            task,
+            session,
+            {
+                "assignee": task.assignee,
+                "reason_code": result.diagnostics.get("reason_code", "unknown"),
+                "error": str(result.error or ""),
+            },
+        )
         yield StreamEvent(
             type="progress",
             data={
@@ -2432,6 +2617,17 @@ async def _execute_task_stream(
             message=f"Wrote {len(task.generated_files)} file(s) to workspace.",
             details={"files": task.generated_files},
         )
+
+    await _emit_codex_event(
+        "codex_completed",
+        task,
+        session,
+        {
+            "assignee": task.assignee,
+            "files_generated": task.generated_files,
+            "output_preview": (result.output or "")[:200],
+        },
+    )
 
     # Review
     task.status = "ai_review"

@@ -41,7 +41,22 @@ describe("studio status route", () => {
     expect(fallback?.status).toBe(500)
     await expect(fallback?.json()).resolves.toEqual({
       claude_cli: false,
-      error: "Failed to check Claude CLI status",
+      claude_agent_sdk: false,
+      chat_surface: "managed_session",
+      chat_transport: "anthropic_api",
+      preferred_chat_transport: "claude_agent_sdk",
+      slash_commands: ["help", "status", "new", "clear", "plan", "model", "agents", "mcp", "auth", "doctor"],
+      permission_profiles: ["default", "full_access"],
+      runtime_commands: ["agents", "auth", "doctor", "mcp"],
+      skills: [],
+      project_agents: [],
+      project_agent_count: 0,
+      claude_agents_error: null,
+      codex_worker_available: false,
+      codex_worker_name: null,
+      opencode_worker_available: false,
+      opencode_worker_name: null,
+      error: "Studio backend is unreachable (http://backend.example.com/api/studio/status): offline",
       fallback: "anthropic_api",
     })
   })

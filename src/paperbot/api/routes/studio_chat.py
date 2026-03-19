@@ -1,32 +1,72 @@
 """
-Studio Chat API Route - Claude CLI Integration for DeepStudio
+Studio chat transport for the PaperBot Studio shell.
 
-Spawns Claude CLI as a subprocess and streams responses.
-Supports three modes like CodePilot:
-- Code: execution-capable only when explicitly enabled by env
-- Plan: planning only, no execution
-- Ask: text-only conversation, no tools
+Chat turns run Claude CLI in print mode and stream structured NDJSON events.
+Standalone utility commands such as ``claude mcp`` and ``claude doctor`` go
+through a separate management-command path instead of the chat stream.
 """
 
 import asyncio
+import base64
+import importlib.util
 import json
 import logging
 import os
+import re
+import shlex
 import shutil
 import subprocess
 import tempfile
+import time
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Literal, AsyncGenerator
 
-from fastapi import APIRouter
-from pydantic import BaseModel
+from fastapi import APIRouter, Request
+from pydantic import BaseModel, Field
+
+from paperbot.application.collaboration.agent_events import make_lifecycle_event
+from paperbot.application.collaboration.message_schema import EventType, make_event, new_run_id, new_trace_id
+from paperbot.application.services.studio_skill_catalog import list_available_studio_skills
 
 from ..streaming import StreamEvent, sse_response
 
 router = APIRouter()
 
 Mode = Literal["Code", "Plan", "Ask"]
-Model = Literal["claude-sonnet-4-5", "claude-opus-4-5", "claude-haiku-4-5"]
+Effort = Literal["low", "medium", "high", "max"]
+PermissionProfile = Literal["default", "full_access"]
+StudioRuntimeName = Literal["claude", "opencode"]
+StudioChatTransport = Literal["claude_agent_sdk", "claude_cli_print", "anthropic_api"]
+DEFAULT_STUDIO_MODEL = "sonnet"
+_LEGACY_MODEL_ALIASES = {
+    "claude-sonnet-4-5": "sonnet",
+    "claude-opus-4-5": "opus",
+    "claude-haiku-4-5": "haiku",
+}
+_API_FALLBACK_MODEL_ALIASES = {
+    "sonnet": "claude-sonnet-4-5-20250514",
+    "opus": "claude-opus-4-5-20250514",
+    "haiku": "claude-haiku-4-5-20250514",
+}
+_KNOWN_CLAUDE_MODEL_ALIASES = ["sonnet", "opus"]
+_ALLOWED_MANAGEMENT_COMMANDS: Dict[str, set[str]] = {
+    "claude": {"agents", "mcp", "auth", "doctor"},
+    "opencode": {"agent", "mcp", "providers", "models"},
+}
+_CODEX_WORKER_AGENT_HINTS = ("codex-worker", "codex")
+_OPENCODE_WORKER_AGENT_HINTS = ("opencode-worker", "opencode", "open-code-worker", "open-code")
+_CLAUDE_MODEL_SETTING_ENV_KEYS = (
+    "PAPERBOT_STUDIO_DEFAULT_MODEL",
+    "CLAUDE_CODE_MODEL",
+    "ANTHROPIC_MODEL",
+)
+
+
+@dataclass(frozen=True)
+class StudioDefaultModelDetection:
+    model: str
+    source: str
 
 
 class PaperContext(BaseModel):
@@ -40,26 +80,83 @@ class ChatMessage(BaseModel):
     content: str
 
 
+class UploadedFileAttachment(BaseModel):
+    id: str
+    name: str
+    type: str = "application/octet-stream"
+    size: int = 0
+    data: str
+
+
 class StudioChatRequest(BaseModel):
     message: str
     mode: Mode = "Code"
-    model: Model = "claude-sonnet-4-5"
+    model: str = Field(default_factory=lambda: detect_claude_default_model())
+    permission_profile: PermissionProfile = "default"
     paper: Optional[PaperContext] = None
     project_dir: Optional[str] = None
     history: List[ChatMessage] = []
+    attached_files: List[str] = []
+    uploaded_files: List[UploadedFileAttachment] = []
     session_id: Optional[str] = None
     context_pack_id: Optional[str] = None
+    continue_last: bool = False
+    resume_session: Optional[str] = None
+    cli_session_id: Optional[str] = None
+    agent: Optional[str] = None
+    mcp_config: List[str] = []
+    tools: List[str] = []
+    allowed_tools: List[str] = []
+    add_dirs: List[str] = []
+    settings: Optional[str] = None
+    effort: Optional[Effort] = None
+
+
+class StudioCommandRequest(BaseModel):
+    runtime: StudioRuntimeName = "claude"
+    command: str
+    args: str = ""
+    project_dir: Optional[str] = None
+    timeout_ms: int = 15000
 
 
 def find_claude_cli() -> Optional[str]:
     """Find Claude CLI executable path."""
+    nvm_candidates = sorted(
+        (Path.home() / ".nvm" / "versions" / "node").glob("v*/bin/claude"),
+        reverse=True,
+    )
+
     # Check common locations
     candidates = [
         shutil.which("claude"),
+        *[str(path) for path in nvm_candidates],
         os.path.expanduser("~/.npm-global/bin/claude"),
         os.path.expanduser("~/.local/bin/claude"),
         "/opt/homebrew/bin/claude",
         "/usr/local/bin/claude",
+    ]
+
+    for path in candidates:
+        if path and os.path.isfile(path):
+            return path
+
+    return None
+
+
+def find_opencode_cli() -> Optional[str]:
+    nvm_candidates = sorted(
+        (Path.home() / ".nvm" / "versions" / "node").glob("v*/bin/opencode"),
+        reverse=True,
+    )
+
+    candidates = [
+        shutil.which("opencode"),
+        *[str(path) for path in nvm_candidates],
+        os.path.expanduser("~/.npm-global/bin/opencode"),
+        os.path.expanduser("~/.local/bin/opencode"),
+        "/opt/homebrew/bin/opencode",
+        "/usr/local/bin/opencode",
     ]
 
     for path in candidates:
@@ -74,48 +171,560 @@ def is_code_mode_enabled() -> bool:
     return raw in {"1", "true", "yes", "on"}
 
 
+def has_claude_agent_sdk() -> bool:
+    """Return True when the Python Claude Agent SDK is importable."""
+    return importlib.util.find_spec("claude_agent_sdk") is not None
+
+
+def current_studio_chat_transport(*, claude_path: Optional[str]) -> StudioChatTransport:
+    """Return the transport currently used by Studio chat."""
+    if claude_path:
+        return "claude_cli_print"
+    return "anthropic_api"
+
+
+def preferred_studio_chat_transport() -> StudioChatTransport:
+    """Return the long-term transport we align Studio chat with."""
+    return "claude_agent_sdk"
+
+
+def _studio_supported_slash_commands() -> List[str]:
+    return ["help", "status", "new", "clear", "plan", "model", "agents", "mcp", "auth", "doctor"]
+
+
+def _studio_supported_permission_profiles() -> List[str]:
+    return ["default", "full_access"]
+
+
+def _run_cli_text_command(command: List[str], *, timeout: int = 5) -> Optional[subprocess.CompletedProcess]:
+    try:
+        return subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except Exception:
+        return None
+
+
+def _probe_cli_version(binary_path: Optional[str]) -> tuple[bool, Optional[str]]:
+    if not binary_path:
+        return False, None
+
+    result = _run_cli_text_command([binary_path, "--version"], timeout=5)
+    if result is None or result.returncode != 0:
+        return False, None
+
+    version = (result.stdout or result.stderr).strip() or None
+    return True, version
+
+
+def _parse_claude_project_agents(raw_output: str) -> List[str]:
+    agents: List[str] = []
+    in_project_agents = False
+
+    for raw_line in raw_output.splitlines():
+        stripped = raw_line.strip()
+        normalized = stripped.lower()
+        if not stripped:
+            continue
+
+        if normalized == "project agents:":
+            in_project_agents = True
+            continue
+
+        if normalized.endswith("agents:"):
+            if in_project_agents and normalized != "project agents:":
+                break
+            continue
+
+        if not in_project_agents:
+            continue
+
+        name = stripped.split("·", 1)[0].strip()
+        if name:
+            agents.append(name)
+
+    return agents
+
+
+def _match_project_agent_name(project_agents: List[str], hints: tuple[str, ...]) -> Optional[str]:
+    normalized_map = {agent.strip().lower(): agent for agent in project_agents if agent.strip()}
+    for hint in hints:
+        match = normalized_map.get(hint)
+        if match:
+            return match
+
+    for agent in project_agents:
+        lowered = agent.lower()
+        if any(hint in lowered for hint in hints):
+            return agent
+
+    return None
+
+
+def _inspect_claude_project_agents(claude_path: Optional[str]) -> Dict[str, Any]:
+    if not claude_path:
+        return {
+            "project_agents": [],
+            "claude_agents_error": None,
+            "codex_worker_name": None,
+            "opencode_worker_name": None,
+        }
+
+    result = _run_cli_text_command([claude_path, "agents"], timeout=8)
+    if result is None:
+        return {
+            "project_agents": [],
+            "claude_agents_error": "Failed to inspect Claude project agents",
+            "codex_worker_name": None,
+            "opencode_worker_name": None,
+        }
+
+    if result.returncode != 0:
+        detail = result.stderr.strip() or result.stdout.strip() or "Failed to inspect Claude project agents"
+        return {
+            "project_agents": [],
+            "claude_agents_error": detail,
+            "codex_worker_name": None,
+            "opencode_worker_name": None,
+        }
+
+    project_agents = _parse_claude_project_agents(result.stdout)
+    codex_worker_name = _match_project_agent_name(project_agents, _CODEX_WORKER_AGENT_HINTS)
+    opencode_worker_name = _match_project_agent_name(project_agents, _OPENCODE_WORKER_AGENT_HINTS)
+
+    return {
+        "project_agents": project_agents,
+        "claude_agents_error": None,
+        "codex_worker_name": codex_worker_name,
+        "opencode_worker_name": opencode_worker_name,
+    }
+
+
+def _make_studio_session_init_event(
+    state: "_StudioTelemetryState",
+    *,
+    request: "StudioChatRequest",
+    effective_mode: Mode,
+    transport: StudioChatTransport,
+    cwd: Optional[str] = None,
+) -> StreamEvent:
+    resolved_model = get_model_id(
+        request.model,
+        for_cli=True,
+        project_dir=request.project_dir,
+    )
+    data: Dict[str, Any] = {
+        "subtype": "init",
+        "session_id": state.session_id,
+        "chat_surface": "managed_session",
+        "chat_transport": transport,
+        "preferred_chat_transport": preferred_studio_chat_transport(),
+        "claude_agent_sdk_available": has_claude_agent_sdk(),
+        "mode": effective_mode,
+        "requested_mode": request.mode,
+        "permission_profile": request.permission_profile,
+        "permission_mode": resolve_permission_mode(
+            request.mode,
+            request.permission_profile,
+        ),
+        "model": resolved_model,
+        "known_model_aliases": _KNOWN_CLAUDE_MODEL_ALIASES,
+        "slash_commands": _studio_supported_slash_commands(),
+        "permission_profiles": _studio_supported_permission_profiles(),
+        "runtime_commands": sorted(_ALLOWED_MANAGEMENT_COMMANDS["claude"]),
+    }
+    if cwd:
+        data["cwd"] = cwd
+    return StreamEvent(type="status", event="status", data=data)
+
+
+def _make_studio_mode_changed_event(
+    *,
+    request: "StudioChatRequest",
+    effective_mode: Mode,
+) -> Optional[StreamEvent]:
+    if effective_mode == request.mode:
+        return None
+    return StreamEvent(
+        type="status",
+        event="status",
+        data={
+            "subtype": "mode_changed",
+            "mode": effective_mode,
+            "requested_mode": request.mode,
+            "reason": f"Requested {request.mode} mode is unavailable; using {effective_mode} instead.",
+        },
+    )
+
+
 def resolve_execution_mode(mode: Mode) -> Mode:
     if mode == "Code" and not is_code_mode_enabled():
         return "Plan"
     return mode
 
 
-def get_mode_flags(mode: Mode) -> List[str]:
-    """Map mode to Claude CLI permission flags."""
+def resolve_permission_mode(
+    mode: Mode,
+    permission_profile: PermissionProfile = "default",
+) -> str:
+    """Map Studio mode and permission profile to Claude CLI permission mode."""
     effective_mode = resolve_execution_mode(mode)
     if effective_mode == "Code":
-        return ["--permission-mode", "acceptEdits"]
+        return "bypassPermissions" if permission_profile == "full_access" else "acceptEdits"
     if effective_mode == "Plan":
+        return "plan"
+    return "default"
+
+
+def get_mode_flags(
+    mode: Mode,
+    permission_profile: PermissionProfile = "default",
+) -> List[str]:
+    """Map mode to Claude CLI permission flags."""
+    permission_mode = resolve_permission_mode(mode, permission_profile)
+    if permission_mode == "bypassPermissions":
+        return [
+            "--allow-dangerously-skip-permissions",
+            "--permission-mode",
+            "bypassPermissions",
+        ]
+    if permission_mode == "acceptEdits":
+        return ["--permission-mode", "acceptEdits"]
+    if permission_mode == "plan":
         return ["--permission-mode", "plan"]
     return []
 
 
-def get_model_id(model: Model, for_cli: bool = False) -> str:
-    """Map model selection to Claude model ID.
+def _clean_optional_text(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    cleaned = value.strip()
+    return cleaned or None
 
-    Args:
-        model: The model selection from the UI
-        for_cli: If True, returns CLI-friendly alias; if False, returns full model ID for API
+
+def _resolve_model_detection_workspace_dir(project_dir: Optional[str]) -> Path:
+    if not project_dir:
+        return Path(os.getcwd()).resolve()
+
+    try:
+        return _resolve_cli_project_dir(project_dir)
+    except ValueError:
+        return Path(os.getcwd()).resolve()
+
+
+def _normalize_requested_model(
+    model: Optional[str],
+    *,
+    project_dir: Optional[str] = None,
+) -> str:
+    requested = (model or "").strip()
+    if not requested:
+        return detect_claude_default_model(project_dir)
+    return _LEGACY_MODEL_ALIASES.get(requested, requested)
+
+
+def get_model_id(
+    model: Optional[str],
+    for_cli: bool = False,
+    *,
+    project_dir: Optional[str] = None,
+) -> str:
+    """Resolve a requested model for Claude CLI or API fallback.
+
+    Claude Code accepts either short aliases such as ``sonnet`` / ``opus`` or
+    a full model name. The Studio UI therefore forwards the user-provided value
+    instead of forcing an outdated hard-coded list.
     """
+    normalized = _normalize_requested_model(model, project_dir=project_dir)
     if for_cli:
-        # Claude CLI accepts short aliases
-        cli_mapping = {
-            "claude-sonnet-4-5": "sonnet",
-            "claude-opus-4-5": "opus",
-            "claude-haiku-4-5": "haiku",
-        }
-        return cli_mapping.get(model, "sonnet")
-    else:
-        # Full model IDs for Anthropic API
-        api_mapping = {
-            "claude-sonnet-4-5": "claude-sonnet-4-5-20250514",
-            "claude-opus-4-5": "claude-opus-4-5-20250514",
-            "claude-haiku-4-5": "claude-haiku-4-5-20250514",
-        }
-        return api_mapping.get(model, "claude-sonnet-4-5-20250514")
+        return normalized
+    return _API_FALLBACK_MODEL_ALIASES.get(normalized, normalized)
 
 
-def build_prompt_with_context(message: str, paper: Optional[PaperContext], mode: Mode) -> str:
+def _find_nearest_claude_settings_file(start_dir: Path, filename: str) -> Optional[Path]:
+    search_root = start_dir.resolve()
+    for directory in (search_root, *search_root.parents):
+        candidate = directory / ".claude" / filename
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _read_model_from_claude_settings(path: Path) -> Optional[str]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return None
+
+    if not isinstance(payload, dict):
+        return None
+
+    model = _clean_optional_text(payload.get("model")) if isinstance(payload.get("model"), str) else None
+    if not model:
+        return None
+
+    return _LEGACY_MODEL_ALIASES.get(model, model)
+
+
+def detect_claude_default_model_details(project_dir: Optional[str] = None) -> StudioDefaultModelDetection:
+    for env_key in _CLAUDE_MODEL_SETTING_ENV_KEYS:
+        env_value = _clean_optional_text(os.getenv(env_key))
+        if env_value:
+            return StudioDefaultModelDetection(
+                model=_LEGACY_MODEL_ALIASES.get(env_value, env_value),
+                source=f"env:{env_key}",
+            )
+
+    workspace_dir = _resolve_model_detection_workspace_dir(project_dir)
+
+    local_settings = _find_nearest_claude_settings_file(workspace_dir, "settings.local.json")
+    if local_settings is not None:
+        model = _read_model_from_claude_settings(local_settings)
+        if model:
+            return StudioDefaultModelDetection(model=model, source="workspace-local")
+
+    project_settings = _find_nearest_claude_settings_file(workspace_dir, "settings.json")
+    if project_settings is not None:
+        model = _read_model_from_claude_settings(project_settings)
+        if model:
+            return StudioDefaultModelDetection(model=model, source="workspace")
+
+    user_settings = Path.home() / ".claude" / "settings.json"
+    model = _read_model_from_claude_settings(user_settings)
+    if model:
+        return StudioDefaultModelDetection(model=model, source="user")
+
+    return StudioDefaultModelDetection(model=DEFAULT_STUDIO_MODEL, source="fallback")
+
+
+def detect_claude_default_model(project_dir: Optional[str] = None) -> str:
+    return detect_claude_default_model_details(project_dir).model
+
+
+def _normalize_text_items(values: List[str]) -> List[str]:
+    normalized: List[str] = []
+    for value in values:
+        cleaned = _clean_optional_text(value)
+        if cleaned:
+            normalized.append(cleaned)
+    return normalized
+
+
+def _append_multi_value_flag(cmd: List[str], flag: str, values: List[str]) -> None:
+    normalized = _normalize_text_items(values)
+    if normalized:
+        cmd.extend([flag, *normalized])
+
+
+def _append_joined_flag(cmd: List[str], flag: str, values: List[str]) -> None:
+    normalized = _normalize_text_items(values)
+    if normalized:
+        cmd.extend([flag, ",".join(normalized)])
+
+
+def _merge_text_items(*groups: List[str]) -> List[str]:
+    merged: List[str] = []
+    seen: set[str] = set()
+    for group in groups:
+        for value in _normalize_text_items(group):
+            if value in seen:
+                continue
+            seen.add(value)
+            merged.append(value)
+    return merged
+
+
+def _normalize_attached_files(values: List[str]) -> List[str]:
+    normalized: List[str] = []
+    seen: set[str] = set()
+    for value in values:
+        cleaned = _clean_optional_text(value)
+        if not cleaned or "\x00" in cleaned:
+            continue
+        key = cleaned.replace("\\", "/")
+        if key in seen:
+            continue
+        seen.add(key)
+        normalized.append(key)
+    return normalized
+
+
+def build_user_request_content(
+    message: str,
+    attached_files: Optional[List[str]] = None,
+    uploaded_files: Optional[List[str]] = None,
+) -> str:
+    """Build the effective user request text, including selected workspace files."""
+    normalized_message = _clean_optional_text(message) or "Please inspect the attached file(s)."
+    normalized_files = _normalize_attached_files(attached_files or [])
+    normalized_uploaded_files = _normalize_text_items(uploaded_files or [])
+    if not normalized_files and not normalized_uploaded_files:
+        return normalized_message
+
+    sections: List[str] = [normalized_message]
+
+    if normalized_files:
+        attachment_lines = "\n".join(f"- {path}" for path in normalized_files)
+        sections.extend(
+            [
+                "# Attached Workspace Files",
+                attachment_lines,
+                "Treat these paths as user-selected workspace context. Read or edit them directly when needed.",
+            ]
+        )
+
+    if normalized_uploaded_files:
+        uploaded_lines = "\n".join(f"- {path}" for path in normalized_uploaded_files)
+        sections.extend(
+            [
+                "# Uploaded Files",
+                uploaded_lines,
+                "These files were uploaded from the Studio UI for this turn. Open them directly when they are relevant.",
+            ]
+        )
+
+    return "\n\n".join(sections)
+
+
+def _sanitize_uploaded_filename(filename: str) -> str:
+    name = os.path.basename(filename.strip()) or "upload.bin"
+    safe = "".join(ch if ch.isalnum() or ch in {".", "_", "-"} else "_" for ch in name)
+    safe = safe.strip("._") or "upload.bin"
+    return safe[:120]
+
+
+def _persist_uploaded_files(
+    uploads: List[UploadedFileAttachment],
+    *,
+    session_id: str,
+) -> tuple[List[str], List[str]]:
+    if not uploads:
+        return [], []
+
+    upload_dir = Path(tempfile.mkdtemp(prefix=f"paperbot-studio-upload-{session_id[:8]}-")).resolve()
+    prompt_entries: List[str] = []
+
+    for index, upload in enumerate(uploads, start=1):
+        payload = upload.data.strip()
+        if not payload:
+            raise ValueError(f"Uploaded file '{upload.name}' is empty")
+        if "," in payload and "base64" in payload[:64]:
+            payload = payload.split(",", 1)[1]
+
+        try:
+            content = base64.b64decode(payload, validate=False)
+        except Exception as exc:
+            raise ValueError(f"Uploaded file '{upload.name}' could not be decoded") from exc
+
+        safe_name = _sanitize_uploaded_filename(upload.name)
+        file_path = upload_dir / f"{index:02d}-{safe_name}"
+        file_path.write_bytes(content)
+        prompt_entries.append(f"{upload.name} -> {file_path}")
+
+    return prompt_entries, [str(upload_dir)]
+
+
+def build_claude_cli_command_args(
+    request: StudioChatRequest,
+    *,
+    effective_mode: Mode,
+    prompt: str,
+    extra_add_dirs: Optional[List[str]] = None,
+) -> List[str]:
+    # Studio chat uses print mode rather than an interactive Claude TTY.
+    model_id = get_model_id(
+        request.model,
+        for_cli=True,
+        project_dir=request.project_dir,
+    )
+    cmd: List[str] = ["--model", model_id]
+
+    if request.continue_last:
+        cmd.append("--continue")
+
+    resume_session = _clean_optional_text(request.resume_session)
+    if resume_session:
+        cmd.extend(["--resume", resume_session])
+
+    cli_session_id = _clean_optional_text(request.cli_session_id)
+    if cli_session_id:
+        cmd.extend(["--session-id", cli_session_id])
+
+    agent = _clean_optional_text(request.agent)
+    if agent:
+        cmd.extend(["--agent", agent])
+
+    _append_multi_value_flag(cmd, "--add-dir", _merge_text_items(request.add_dirs, extra_add_dirs or []))
+    _append_multi_value_flag(cmd, "--mcp-config", request.mcp_config)
+    _append_joined_flag(cmd, "--tools", request.tools)
+    _append_joined_flag(cmd, "--allowed-tools", request.allowed_tools)
+
+    settings = _clean_optional_text(request.settings)
+    if settings:
+        cmd.extend(["--settings", settings])
+
+    if request.effort:
+        cmd.extend(["--effort", request.effort])
+
+    cmd.extend(get_mode_flags(effective_mode, request.permission_profile))
+    cmd.extend(["-p", prompt, "--output-format", "stream-json", "--verbose"])
+    return cmd
+
+
+def build_management_command(
+    request: StudioCommandRequest,
+) -> List[str]:
+    # Runtime utility commands are intentionally limited to a small allowlist.
+    runtime = request.runtime
+    command = request.command.strip()
+    if command not in _ALLOWED_MANAGEMENT_COMMANDS[runtime]:
+        allowed = ", ".join(sorted(_ALLOWED_MANAGEMENT_COMMANDS[runtime]))
+        raise ValueError(f"Unsupported {runtime} command '{command}'. Allowed: {allowed}")
+
+    binary = find_claude_cli() if runtime == "claude" else find_opencode_cli()
+    if not binary:
+        raise ValueError(f"{runtime} CLI not found")
+
+    cmd = [binary, command]
+    extra_args = shlex.split(request.args) if request.args.strip() else []
+    if not extra_args:
+        if runtime == "claude" and command == "mcp":
+            extra_args = ["list"]
+        elif runtime == "claude" and command == "auth":
+            extra_args = ["status"]
+        elif runtime == "opencode" and command in {"agent", "mcp", "providers"}:
+            extra_args = ["list"]
+    cmd.extend(extra_args)
+    return cmd
+
+
+def _format_history_for_prompt(history: List[ChatMessage]) -> str:
+    lines: List[str] = []
+
+    for msg in history[-10:]:
+        content = msg.content.strip()
+        if not content:
+            continue
+        role = "User" if msg.role == "user" else "Assistant"
+        lines.append(f"## {role}\n{content}")
+
+    if not lines:
+        return ""
+
+    return "# Conversation History\n\n" + "\n\n".join(lines)
+
+
+def build_prompt_with_context(
+    message: str,
+    paper: Optional[PaperContext],
+    mode: Mode,
+    history: Optional[List[ChatMessage]] = None,
+    attached_files: Optional[List[str]] = None,
+    uploaded_files: Optional[List[str]] = None,
+) -> str:
     """Build the prompt with paper context if available."""
     parts = []
 
@@ -125,6 +734,11 @@ def build_prompt_with_context(message: str, paper: Optional[PaperContext], mode:
             parts.append(f"\n**Method Section:** {paper.method_section}")
         parts.append("\n---\n")
 
+    history_block = _format_history_for_prompt(history or [])
+    if history_block:
+        parts.append(history_block)
+        parts.append("\n---\n")
+
     if mode == "Code":
         parts.append("You are helping implement this research paper as working code. ")
     elif mode == "Plan":
@@ -132,12 +746,941 @@ def build_prompt_with_context(message: str, paper: Optional[PaperContext], mode:
     else:
         parts.append("You are answering questions about this research paper. ")
 
-    parts.append(f"\n# User Request\n{message}")
+    parts.append(f"\n# User Request\n{build_user_request_content(message, attached_files, uploaded_files)}")
 
     return "\n".join(parts)
 
 
 log = logging.getLogger(__name__)
+
+
+@dataclass
+class _ToolInvocation:
+    tool_name: str
+    tool_id: str
+    arguments: Dict[str, Any]
+    started_at: float
+    agent_name: str = "claude"
+    role: str = "orchestrator"
+
+
+@dataclass
+class _PendingDelegation:
+    tool_name: str
+    tool_id: str
+    assignee: str
+    task_id: str
+    task_title: str
+    runtime: str
+    worker_run_id: str
+    control_mode: str = "mirrored"
+    interruptible: bool = False
+
+
+@dataclass
+class _StudioTelemetryState:
+    run_id: str
+    trace_id: str
+    session_id: str
+    stage: str
+    cli_session_id: Optional[str] = None
+    tool_invocations: List[_ToolInvocation] = field(default_factory=list)
+    pending_delegations: List[_PendingDelegation] = field(default_factory=list)
+    runtime_terminal_emitted: bool = False
+
+
+def _append_eventlog(event_log, envelope) -> None:
+    if event_log is None or envelope is None:
+        return
+    try:
+        event_log.append(envelope)
+    except Exception:
+        log.debug("Failed to append studio telemetry event", exc_info=True)
+
+
+def _make_studio_lifecycle_event(
+    state: _StudioTelemetryState,
+    *,
+    status: str,
+    agent_name: str,
+    stage: str,
+    detail: Optional[str] = None,
+    role: str = "orchestrator",
+):
+    return make_lifecycle_event(
+        status=status,
+        agent_name=agent_name,
+        run_id=state.run_id,
+        trace_id=state.trace_id,
+        workflow="studio_chat",
+        stage=stage,
+        role=role,
+        detail=detail,
+    )
+
+
+def _make_studio_tool_event(
+    state: _StudioTelemetryState,
+    *,
+    event_type: str,
+    tool_name: str,
+    arguments: Optional[Dict[str, Any]] = None,
+    result_summary: str = "",
+    error: Optional[str] = None,
+    duration_ms: float = 0.0,
+    agent_name: str = "claude",
+    role: str = "orchestrator",
+):
+    return make_event(
+        run_id=state.run_id,
+        trace_id=state.trace_id,
+        workflow="studio_chat",
+        stage="tool_call",
+        attempt=0,
+        agent_name=agent_name,
+        role=role,
+        type=event_type,
+        payload={
+            "tool": tool_name,
+            "arguments": arguments or {},
+            "result_summary": result_summary,
+            "error": error,
+        },
+        metrics={"duration_ms": duration_ms},
+    )
+
+
+def _make_file_change_event(
+    state: _StudioTelemetryState,
+    *,
+    path: str,
+    status: str,
+    agent_name: str = "claude",
+    role: str = "orchestrator",
+):
+    return make_event(
+        run_id=state.run_id,
+        trace_id=state.trace_id,
+        workflow="studio_chat",
+        stage="tool_call",
+        attempt=0,
+        agent_name=agent_name,
+        role=role,
+        type=EventType.FILE_CHANGE,
+        payload={
+            "path": path,
+            "status": status,
+        },
+    )
+
+
+def _make_delegation_event(
+    state: _StudioTelemetryState,
+    *,
+    event_type: str,
+    delegation: _PendingDelegation,
+    error: Optional[str] = None,
+    reason_code: Optional[str] = None,
+):
+    payload: Dict[str, Any] = {
+        "task_id": delegation.task_id,
+        "task_title": delegation.task_title,
+        "session_id": state.session_id,
+        "assignee": delegation.assignee,
+        "runtime": delegation.runtime,
+        "worker_run_id": delegation.worker_run_id,
+        "control_mode": delegation.control_mode,
+        "interruptible": delegation.interruptible,
+    }
+    if error is not None:
+        payload["error"] = error
+    if reason_code is not None:
+        payload["reason_code"] = reason_code
+
+    return make_event(
+        run_id=state.run_id,
+        trace_id=state.trace_id,
+        workflow="studio_chat",
+        stage="delegation",
+        attempt=0,
+        agent_name=delegation.assignee,
+        role="worker",
+        type=event_type,
+        payload=payload,
+    )
+
+
+def _drain_pending_delegation_failures(
+    state: _StudioTelemetryState,
+    *,
+    error: str,
+    reason_code: str,
+) -> List:
+    emitted: List = []
+    while state.pending_delegations:
+        delegation = state.pending_delegations.pop(0)
+        emitted.append(
+            _make_delegation_event(
+                state,
+                event_type=EventType.CODEX_FAILED,
+                delegation=delegation,
+                error=error,
+                reason_code=reason_code,
+            )
+        )
+        emitted.append(
+            _make_studio_lifecycle_event(
+                state,
+                status=EventType.AGENT_ERROR,
+                agent_name=delegation.assignee,
+                stage="delegation",
+                detail=error,
+            )
+        )
+    return emitted
+
+
+def _extract_tool_path(tool_input: Dict[str, Any]) -> Optional[str]:
+    for key in ("path", "file_path", "filename", "target_file", "target_path"):
+        value = tool_input.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _looks_like_file_write(tool_name: str) -> bool:
+    normalized = tool_name.strip().lower()
+    return normalized in {
+        "write",
+        "write_file",
+        "edit",
+        "multiedit",
+        "str_replace_editor",
+        "create_file",
+        "replace",
+    }
+
+
+def _tool_key(tool_name: str, tool_id: str) -> str:
+    return f"{tool_name}:{tool_id}" if tool_id else tool_name
+
+
+def _find_tool_invocation(
+    state: _StudioTelemetryState,
+    *,
+    tool_name: str = "",
+    tool_id: str = "",
+) -> Optional[_ToolInvocation]:
+    if tool_id:
+        for invocation in reversed(state.tool_invocations):
+            if invocation.tool_id == tool_id:
+                return invocation
+    if tool_name:
+        for invocation in reversed(state.tool_invocations):
+            if invocation.tool_name == tool_name:
+                return invocation
+    return None
+
+
+def _pop_tool_invocation(
+    state: _StudioTelemetryState,
+    *,
+    tool_name: str,
+    tool_id: str,
+) -> Optional[_ToolInvocation]:
+    if tool_id:
+        for idx, invocation in enumerate(state.tool_invocations):
+            if invocation.tool_id == tool_id:
+                return state.tool_invocations.pop(idx)
+
+    for idx, invocation in enumerate(state.tool_invocations):
+        if invocation.tool_name == tool_name:
+            return state.tool_invocations.pop(idx)
+    return None
+
+
+def _truncate_text_field(value: Any, max_len: int = 120) -> str:
+    if isinstance(value, (dict, list)):
+        text = json.dumps(value, ensure_ascii=False)
+    else:
+        text = str(value or "")
+    return _truncate(text.strip(), max_len)
+
+
+def _extract_task_title(tool_input: Dict[str, Any], fallback: str) -> str:
+    for key in ("task_title", "title", "summary", "description", "prompt", "message", "instructions"):
+        value = tool_input.get(key)
+        if isinstance(value, str) and value.strip():
+            return _truncate(value.strip(), 96)
+    return fallback
+
+
+def _is_delegation_tool(tool_name: str, tool_input: Dict[str, Any]) -> bool:
+    normalized_name = tool_name.strip().lower()
+    if normalized_name in {
+        "agent",
+        "task",
+        "spawn_agent",
+        "delegate",
+        "delegate_task",
+        "dispatch_agent",
+        "subagent",
+        "teamcreate",
+    }:
+        return True
+
+    for key in (
+        "subagent_type",
+        "delegate_to",
+        "delegate_to_runtime",
+        "teammate_name",
+        "team_name",
+    ):
+        value = tool_input.get(key)
+        if isinstance(value, str) and value.strip():
+            return True
+
+    return False
+
+
+def _infer_subagent_runtime(tool_name: str, tool_input: Dict[str, Any]) -> Optional[str]:
+    normalized_name = tool_name.strip().lower()
+    if not _is_delegation_tool(tool_name, tool_input):
+        return None
+
+    candidate_values: List[str] = [normalized_name]
+    for key in (
+        "agent",
+        "assignee",
+        "delegate_to",
+        "runtime",
+        "executor",
+        "runner",
+        "subagent",
+        "subagent_type",
+        "backend",
+        "target",
+        "teammate_name",
+        "team_name",
+    ):
+        value = tool_input.get(key)
+        if isinstance(value, str) and value.strip():
+            candidate_values.append(value.strip().lower())
+
+    for value in candidate_values:
+        if "opencode" in value or "open code" in value:
+            return "opencode"
+        if "codex" in value:
+            return "codex"
+        if "team" in value or "teammate" in value:
+            return "claude"
+        if value in {"claude", "cc"} or value.startswith("claude-") or value.startswith("cc-"):
+            return "claude"
+
+    if normalized_name in {"agent", "teamcreate"}:
+        return "claude"
+    return "worker"
+
+
+def _register_delegation(
+    state: _StudioTelemetryState,
+    *,
+    tool_name: str,
+    tool_id: str,
+    tool_input: Dict[str, Any],
+) -> Optional[_PendingDelegation]:
+    runtime = _infer_subagent_runtime(tool_name, tool_input)
+    if runtime is None:
+        return None
+
+    suffix = (tool_id or f"{len(state.pending_delegations) + 1}").replace(":", "-")
+    assignee_prefix = {
+        "claude": "claude-worker",
+        "codex": "codex",
+        "opencode": "opencode",
+        "worker": "worker",
+    }.get(runtime, runtime)
+    assignee = f"{assignee_prefix}-{suffix[:6]}"
+    task_id = tool_id or f"studio-delegation-{len(state.pending_delegations) + 1}"
+    worker_run_id = f"worker-run-{suffix[:12]}"
+    fallback_title = f"{tool_name} delegation"
+    task_title = _extract_task_title(tool_input, fallback_title)
+
+    delegation = _PendingDelegation(
+        tool_name=tool_name,
+        tool_id=tool_id,
+        assignee=assignee,
+        task_id=task_id,
+        task_title=task_title,
+        runtime=runtime,
+        worker_run_id=worker_run_id,
+    )
+    state.pending_delegations.append(delegation)
+    return delegation
+
+
+def _pop_delegation(
+    state: _StudioTelemetryState,
+    *,
+    tool_name: str,
+    tool_id: str,
+) -> Optional[_PendingDelegation]:
+    if tool_id:
+        key = _tool_key(tool_name, tool_id)
+        for idx, delegation in enumerate(state.pending_delegations):
+            if _tool_key(delegation.tool_name, delegation.tool_id) == key:
+                return state.pending_delegations.pop(idx)
+
+    for idx, delegation in enumerate(state.pending_delegations):
+        if delegation.tool_name == tool_name:
+            return state.pending_delegations.pop(idx)
+    return None
+
+
+def _find_pending_delegation_by_tool_id(
+    state: _StudioTelemetryState,
+    *,
+    tool_id: str,
+) -> Optional[_PendingDelegation]:
+    if not tool_id:
+        return None
+    for delegation in reversed(state.pending_delegations):
+        if delegation.tool_id == tool_id:
+            return delegation
+    return None
+
+
+def _stringify_tool_result_content(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        text_parts: List[str] = []
+        for item in value:
+            if isinstance(item, dict) and item.get("type") == "text":
+                text = item.get("text")
+                if isinstance(text, str) and text.strip():
+                    text_parts.append(text.strip())
+        if text_parts:
+            return "\n".join(text_parts)
+        return json.dumps(value, ensure_ascii=False)
+    if isinstance(value, dict):
+        text = value.get("text")
+        if isinstance(text, str):
+            return text
+        return json.dumps(value, ensure_ascii=False)
+    return str(value or "")
+
+
+_APPROVAL_COMMAND_PATTERNS = (
+    re.compile(r"approve(?: the)? `([^`]+)` command", re.IGNORECASE),
+    re.compile(r"run `([^`]+)`", re.IGNORECASE),
+)
+_APPROVAL_AGENT_ID_PATTERN = re.compile(r"\bagentId:\s*([A-Za-z0-9_-]+)")
+_BRIDGE_RESULT_JSON_BLOCK_PATTERN = re.compile(
+    r"```(?:json)?\s*(\{[\s\S]*?\})\s*```",
+    re.IGNORECASE,
+)
+
+
+def _normalize_bridge_result(value: Any) -> Optional[Dict[str, Any]]:
+    if not isinstance(value, dict):
+        return None
+
+    task_kind = str(value.get("task_kind") or "").strip().lower()
+    status = str(value.get("status") or "").strip().lower()
+    summary = str(value.get("summary") or "").strip()
+    if not task_kind or not status or not summary:
+        return None
+
+    executor = str(value.get("executor") or "unknown").strip() or "unknown"
+    version = str(value.get("version") or "1").strip() or "1"
+    payload = value.get("payload")
+    artifacts = value.get("artifacts")
+
+    normalized_artifacts: List[Dict[str, Any]] = []
+    if isinstance(artifacts, list):
+        for item in artifacts:
+            if not isinstance(item, dict):
+                continue
+            label = str(item.get("label") or "").strip()
+            if not label:
+                continue
+            normalized_artifacts.append(
+                {
+                    "kind": str(item.get("kind") or "other").strip() or "other",
+                    "label": label,
+                    "path": str(item.get("path") or "").strip() or None,
+                    "value": str(item.get("value") or "").strip() or None,
+                }
+            )
+
+    return {
+        "version": version,
+        "executor": executor,
+        "task_kind": task_kind,
+        "status": status,
+        "summary": summary,
+        "artifacts": normalized_artifacts,
+        "payload": payload if isinstance(payload, dict) else {},
+    }
+
+
+def _parse_bridge_result_content(content: Any) -> Optional[Dict[str, Any]]:
+    if isinstance(content, dict):
+        return _normalize_bridge_result(content)
+
+    result_content = _stringify_tool_result_content(content).strip()
+    if not result_content:
+        return None
+
+    candidates: List[str] = []
+    if result_content.startswith("{") and result_content.endswith("}"):
+        candidates.append(result_content)
+
+    for match in _BRIDGE_RESULT_JSON_BLOCK_PATTERN.finditer(result_content):
+        candidate = match.group(1).strip()
+        if candidate:
+            candidates.append(candidate)
+
+    if "{" in result_content and "}" in result_content:
+        start = result_content.find("{")
+        end = result_content.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            candidates.append(result_content[start:end + 1].strip())
+
+    seen: set[str] = set()
+    for candidate in candidates:
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        try:
+            parsed = json.loads(candidate)
+        except (json.JSONDecodeError, ValueError, TypeError):
+            continue
+        normalized = _normalize_bridge_result(parsed)
+        if normalized is not None:
+            return normalized
+
+    return None
+
+
+def _enrich_bridge_result(
+    bridge_result: Dict[str, Any],
+    *,
+    tool_name: str,
+    tool_id: str,
+    telemetry_state: Optional[_StudioTelemetryState],
+) -> Dict[str, Any]:
+    enriched = dict(bridge_result)
+    payload = bridge_result.get("payload")
+    payload_dict = dict(payload) if isinstance(payload, dict) else {}
+
+    if telemetry_state is None:
+        enriched["payload"] = payload_dict
+        return enriched
+
+    delegation = _find_pending_delegation_by_tool_id(telemetry_state, tool_id=tool_id)
+    if delegation is None and tool_name:
+        invocation = _find_tool_invocation(
+            telemetry_state,
+            tool_name=tool_name,
+            tool_id=tool_id,
+        )
+        if invocation is not None:
+            delegation = _find_pending_delegation_by_tool_id(
+                telemetry_state,
+                tool_id=invocation.tool_id,
+            )
+
+    if delegation is not None:
+        enriched["delegation"] = {
+            "task_id": delegation.task_id,
+            "worker_run_id": delegation.worker_run_id,
+            "task_title": delegation.task_title,
+            "assignee": delegation.assignee,
+            "session_id": telemetry_state.session_id,
+            "runtime": delegation.runtime,
+            "control_mode": delegation.control_mode,
+            "interruptible": delegation.interruptible,
+        }
+        payload_dict.setdefault("delegation_task_id", delegation.task_id)
+        payload_dict.setdefault("worker_run_id", delegation.worker_run_id)
+        payload_dict.setdefault("runtime", delegation.runtime)
+        payload_dict.setdefault("assignee", delegation.assignee)
+
+    enriched["payload"] = payload_dict
+    return enriched
+
+
+def _extract_approval_command(result_content: str) -> Optional[str]:
+    for pattern in _APPROVAL_COMMAND_PATTERNS:
+        match = pattern.search(result_content)
+        if match:
+            command = match.group(1).strip()
+            if command:
+                return command
+
+    for match in re.finditer(r"`([^`\n]+)`", result_content):
+        candidate = match.group(1).strip()
+        if not candidate:
+            continue
+        if " " in candidate or "/" in candidate or "-" in candidate:
+            return candidate
+
+    return None
+
+
+def _extract_approval_request_from_bridge_result(
+    bridge_result: Dict[str, Any],
+) -> Optional[Dict[str, Optional[str]]]:
+    status = str(bridge_result.get("status") or "").strip().lower()
+    task_kind = str(bridge_result.get("task_kind") or "").strip().lower()
+    if status != "approval_required" and task_kind != "approval_required":
+        return None
+
+    payload = bridge_result.get("payload")
+    payload_dict = payload if isinstance(payload, dict) else {}
+    resume_hint = payload_dict.get("resume_hint")
+    resume_hint_dict = resume_hint if isinstance(resume_hint, dict) else {}
+
+    command = str(payload_dict.get("command") or "").strip() or None
+    worker_agent_id = (
+        str(payload_dict.get("worker_agent_id") or "").strip()
+        or str(resume_hint_dict.get("worker_agent_id") or "").strip()
+        or None
+    )
+
+    return {
+        "message": str(bridge_result.get("summary") or "").strip() or None,
+        "command": command,
+        "worker_agent_id": worker_agent_id,
+    }
+
+
+def _build_studio_approval_progress_event(
+    content: Any,
+    *,
+    tool_name: str = "",
+    tool_id: str,
+    telemetry_state: Optional[_StudioTelemetryState] = None,
+) -> Optional[StreamEvent]:
+    if telemetry_state is None:
+        return None
+
+    bridge_result = _parse_bridge_result_content(content)
+    if bridge_result is not None:
+        bridge_result = _enrich_bridge_result(
+            bridge_result,
+            tool_name=tool_name,
+            tool_id=tool_id,
+            telemetry_state=telemetry_state,
+        )
+        approval_request = _extract_approval_request_from_bridge_result(bridge_result)
+        if approval_request is not None:
+            invocation = _find_tool_invocation(telemetry_state, tool_id=tool_id) if tool_id else None
+            return StreamEvent(
+                type="progress",
+                data={
+                    "cli_event": "approval_required",
+                    "tool_name": invocation.tool_name if invocation is not None else "tool",
+                    "tool_id": tool_id,
+                    "message": approval_request["message"] or bridge_result["summary"],
+                    "command": approval_request["command"],
+                    "worker_agent_id": approval_request["worker_agent_id"],
+                    "cli_session_id": telemetry_state.cli_session_id,
+                    "bridge_result": bridge_result,
+                },
+            )
+
+    result_content = _stringify_tool_result_content(content).strip()
+    normalized = result_content.lower()
+    if "approval" not in normalized or "require" not in normalized:
+        return None
+
+    command = _extract_approval_command(result_content)
+    worker_agent_id_match = _APPROVAL_AGENT_ID_PATTERN.search(result_content)
+    worker_agent_id = worker_agent_id_match.group(1).strip() if worker_agent_id_match else None
+    if not command and not worker_agent_id:
+        return None
+
+    invocation = _find_tool_invocation(telemetry_state, tool_id=tool_id) if tool_id else None
+
+    return StreamEvent(
+        type="progress",
+        data={
+            "cli_event": "approval_required",
+            "tool_name": invocation.tool_name if invocation is not None else "tool",
+            "tool_id": tool_id,
+            "message": _truncate(result_content, 2000),
+            "command": command,
+            "worker_agent_id": worker_agent_id,
+            "cli_session_id": telemetry_state.cli_session_id,
+        },
+    )
+
+
+def _emit_tool_result_events(
+    state: _StudioTelemetryState,
+    *,
+    tool_name: str,
+    tool_id: str,
+    content: Any,
+    is_error: bool,
+    error: Optional[str],
+    now: float,
+) -> List:
+    emitted: List = []
+    invocation = _pop_tool_invocation(state, tool_name=tool_name, tool_id=tool_id)
+    resolved_tool_name = invocation.tool_name if invocation is not None else (tool_name or "unknown")
+    duration_ms = max(0.0, (now - invocation.started_at) * 1000) if invocation else 0.0
+    arguments = invocation.arguments if invocation is not None else {}
+    result_content = _stringify_tool_result_content(content)
+    result_summary = _truncate_text_field(result_content, 240)
+    error_text = _truncate_text_field(error or result_content or "", 240) if is_error else None
+    owner_agent_name = invocation.agent_name if invocation is not None else "claude"
+    owner_role = invocation.role if invocation is not None else "orchestrator"
+
+    emitted.append(
+        _make_studio_tool_event(
+            state,
+            event_type=EventType.TOOL_ERROR if is_error else EventType.TOOL_RESULT,
+            tool_name=resolved_tool_name,
+            arguments=arguments,
+            result_summary=result_summary,
+            error=error_text,
+            duration_ms=duration_ms,
+            agent_name=owner_agent_name,
+            role=owner_role,
+        )
+    )
+
+    if invocation is not None and not is_error and _looks_like_file_write(invocation.tool_name):
+        path = _extract_tool_path(invocation.arguments)
+        if path:
+            emitted.append(
+                _make_file_change_event(
+                    state,
+                    path=path,
+                    status="created" if "create" in invocation.tool_name.lower() else "modified",
+                    agent_name=owner_agent_name,
+                    role=owner_role,
+                )
+            )
+
+    delegation = _pop_delegation(state, tool_name=resolved_tool_name, tool_id=tool_id)
+    if delegation is not None:
+        emitted.append(
+            _make_delegation_event(
+                state,
+                event_type=EventType.CODEX_FAILED if is_error else EventType.CODEX_COMPLETED,
+                delegation=delegation,
+                error=error_text,
+                reason_code="tool_error" if is_error else None,
+            )
+        )
+        emitted.append(
+            _make_studio_lifecycle_event(
+                state,
+                status=EventType.AGENT_ERROR if is_error else EventType.AGENT_COMPLETED,
+                agent_name=delegation.assignee,
+                stage="delegation",
+                detail=error_text if is_error else delegation.task_title,
+            )
+        )
+
+    return emitted
+
+
+def _is_tool_result_error(line_data: Dict[str, Any]) -> bool:
+    if bool(line_data.get("is_error")):
+        return True
+    if line_data.get("subtype") == "error":
+        return True
+    error_value = line_data.get("error")
+    return isinstance(error_value, str) and bool(error_value.strip())
+
+
+def _build_cli_telemetry_events(
+    line_data: Dict[str, Any],
+    state: _StudioTelemetryState,
+    *,
+    now_monotonic: Optional[float] = None,
+) -> List:
+    now = time.monotonic() if now_monotonic is None else now_monotonic
+    etype = str(line_data.get("type", "")).strip()
+    emitted: List = []
+
+    if etype == "assistant":
+        parent_tool_use_id = str(line_data.get("parent_tool_use_id") or "").strip()
+        parent_delegation = _find_pending_delegation_by_tool_id(
+            state,
+            tool_id=parent_tool_use_id,
+        ) if parent_tool_use_id else None
+        msg = line_data.get("message", {})
+        content_blocks = msg.get("content", []) if isinstance(msg, dict) else []
+        for block in content_blocks:
+            if not isinstance(block, dict):
+                continue
+            btype = str(block.get("type", "")).strip()
+            if btype == "thinking":
+                thinking = str(block.get("thinking", "")).strip()
+                if thinking:
+                    emitted.append(
+                        _make_studio_lifecycle_event(
+                            state,
+                            status=EventType.AGENT_WORKING,
+                            agent_name="claude",
+                            stage=state.stage,
+                            detail=_truncate(thinking, 160),
+                        )
+                    )
+            elif btype == "tool_use":
+                tool_name = str(block.get("name", "unknown")).strip() or "unknown"
+                tool_id = str(block.get("id", "")).strip()
+                tool_input = block.get("input", {})
+                arguments = tool_input if isinstance(tool_input, dict) else {}
+                owner_agent_name = parent_delegation.assignee if parent_delegation is not None else "claude"
+                owner_role = "worker" if parent_delegation is not None else "orchestrator"
+
+                state.tool_invocations.append(
+                    _ToolInvocation(
+                        tool_name=tool_name,
+                        tool_id=tool_id,
+                        arguments=arguments,
+                        started_at=now,
+                        agent_name=owner_agent_name,
+                        role=owner_role,
+                    )
+                )
+
+                emitted.append(
+                    _make_studio_lifecycle_event(
+                        state,
+                        status=EventType.AGENT_WORKING,
+                        agent_name=owner_agent_name,
+                        stage="delegation" if parent_delegation is not None else state.stage,
+                        detail=f"Using {tool_name}",
+                        role=owner_role,
+                    )
+                )
+                emitted.append(
+                    _make_studio_tool_event(
+                        state,
+                        event_type=EventType.TOOL_CALL,
+                        tool_name=tool_name,
+                        arguments=arguments,
+                        result_summary="started",
+                        agent_name=owner_agent_name,
+                        role=owner_role,
+                    )
+                )
+
+                delegation = _register_delegation(
+                    state,
+                    tool_name=tool_name,
+                    tool_id=tool_id,
+                    tool_input=arguments,
+                )
+                if delegation is not None:
+                    emitted.append(
+                        _make_delegation_event(
+                            state,
+                            event_type=EventType.CODEX_DISPATCHED,
+                            delegation=delegation,
+                        )
+                    )
+                    emitted.append(
+                        _make_studio_lifecycle_event(
+                            state,
+                            status=EventType.AGENT_STARTED,
+                            agent_name=delegation.assignee,
+                            stage="delegation",
+                            detail=delegation.task_title,
+                        )
+                    )
+
+    elif etype == "tool_result":
+        tool_name = str(line_data.get("tool_name", "")).strip() or "unknown"
+        tool_id = str(line_data.get("tool_use_id") or line_data.get("tool_id") or "").strip()
+        is_error = _is_tool_result_error(line_data)
+        emitted.extend(
+            _emit_tool_result_events(
+                state,
+                tool_name=tool_name,
+                tool_id=tool_id,
+                content=line_data.get("content", ""),
+                is_error=is_error,
+                error=str(line_data.get("error") or "").strip() or None,
+                now=now,
+            )
+        )
+
+    elif etype == "user":
+        msg = line_data.get("message", {})
+        content_blocks = msg.get("content", []) if isinstance(msg, dict) else []
+        for block in content_blocks:
+            if not isinstance(block, dict) or str(block.get("type", "")).strip() != "tool_result":
+                continue
+            tool_id = str(block.get("tool_use_id") or "").strip()
+            emitted.extend(
+                _emit_tool_result_events(
+                    state,
+                    tool_name="",
+                    tool_id=tool_id,
+                    content=block.get("content", ""),
+                    is_error=bool(block.get("is_error")),
+                    error=None,
+                    now=now,
+                )
+            )
+
+    elif etype == "system":
+        subtype = str(line_data.get("subtype", "")).strip()
+        tool_id = str(line_data.get("tool_use_id") or "").strip()
+        delegation = _find_pending_delegation_by_tool_id(state, tool_id=tool_id)
+        if delegation is not None and subtype == "task_progress":
+            detail = str(line_data.get("description") or "").strip()
+            last_tool_name = str(line_data.get("last_tool_name") or "").strip()
+            if last_tool_name:
+                detail = f"{detail} ({last_tool_name})" if detail else f"Using {last_tool_name}"
+            if detail:
+                emitted.append(
+                    _make_studio_lifecycle_event(
+                        state,
+                        status=EventType.AGENT_WORKING,
+                        agent_name=delegation.assignee,
+                        stage="delegation",
+                        detail=_truncate(detail, 160),
+                        role="worker",
+                    )
+                )
+
+    elif etype == "result":
+        is_error = line_data.get("subtype") == "error" or _is_tool_result_error(line_data)
+        detail = _truncate_text_field(
+            line_data.get("error") or line_data.get("result") or "Studio chat turn completed",
+            240,
+        )
+        state.runtime_terminal_emitted = True
+        emitted.append(
+            _make_studio_lifecycle_event(
+                state,
+                status=EventType.AGENT_ERROR if is_error else EventType.AGENT_COMPLETED,
+                agent_name="claude",
+                stage=state.stage,
+                detail=detail,
+            )
+        )
+        if is_error:
+            emitted.extend(
+                _drain_pending_delegation_failures(
+                    state,
+                    error=detail,
+                    reason_code="runtime_error",
+                )
+            )
+
+    return emitted
 
 
 def _load_runtime_allowed_dirs() -> List[Path]:
@@ -166,6 +1709,11 @@ def _allowed_workdir_prefixes() -> List[Path]:
         prefixes.append(Path.cwd().resolve())
     except Exception:
         pass
+    try:
+        home_dir = Path.home().resolve()
+        prefixes.append((home_dir / "Documents").resolve(strict=False))
+    except Exception:
+        pass
 
     extra = os.getenv("PAPERBOT_RUNBOOK_ALLOW_DIR_PREFIXES", "").strip()
     if extra:
@@ -190,10 +1738,45 @@ def _allowed_workdir_prefixes() -> List[Path]:
     return unique
 
 
+def _runtime_allowlist_mutation_enabled() -> bool:
+    return os.getenv("PAPERBOT_RUNBOOK_ALLOWLIST_MUTATION", "false").lower() == "true"
+
+
 def _is_under_prefix(path: Path, prefix: Path) -> bool:
     path_real = os.path.realpath(str(path))
     prefix_real = os.path.realpath(str(prefix))
     return path_real == prefix_real or path_real.startswith(prefix_real + os.sep)
+
+
+def _path_is_existing_dir(path: Path) -> bool:
+    try:
+        return path.exists() and path.is_dir()
+    except Exception:
+        return False
+
+
+def _preferred_studio_workspace_dir(actual_cwd: Path) -> Path:
+    allowed_prefixes = _allowed_workdir_prefixes()
+    temp_root = Path(tempfile.gettempdir()).resolve()
+    repo_like_cwd = "paperbot" in str(actual_cwd).lower()
+
+    if not repo_like_cwd and _path_is_existing_dir(actual_cwd):
+        return actual_cwd
+
+    for prefix in allowed_prefixes:
+        if prefix in {temp_root, actual_cwd}:
+            continue
+        if _path_is_existing_dir(prefix):
+            return prefix
+
+    if _path_is_existing_dir(actual_cwd):
+        return actual_cwd
+
+    for prefix in allowed_prefixes:
+        if _path_is_existing_dir(prefix):
+            return prefix
+
+    return temp_root
 
 
 def _resolve_cli_project_dir(raw: Optional[str]) -> Path:
@@ -394,54 +1977,197 @@ def _parse_cli_content_blocks(content_blocks: list) -> list[StreamEvent]:
     return events
 
 
-def _parse_cli_event(line_data: Dict[str, Any]) -> list[StreamEvent]:
+def _parse_user_tool_result_blocks(
+    line_data: Dict[str, Any],
+    telemetry_state: Optional[_StudioTelemetryState] = None,
+) -> list[StreamEvent]:
+    events: list[StreamEvent] = []
+    msg = line_data.get("message", {})
+    content_blocks = msg.get("content", []) if isinstance(msg, dict) else []
+
+    for block in content_blocks:
+        if not isinstance(block, dict) or block.get("type") != "tool_result":
+            continue
+
+        tool_id = str(block.get("tool_use_id", "")).strip()
+        invocation = (
+            _find_tool_invocation(telemetry_state, tool_id=tool_id)
+            if telemetry_state is not None and tool_id
+            else None
+        )
+        events.append(StreamEvent(
+            type="progress",
+            data={
+                "cli_event": "tool_result",
+                "tool_name": invocation.tool_name if invocation is not None else "tool",
+                "tool_id": tool_id,
+                "is_error": bool(block.get("is_error")),
+                "content": _truncate(_stringify_tool_result_content(block.get("content", "")), 2000),
+            },
+        ))
+        bridge_result = _parse_bridge_result_content(block.get("content", ""))
+        if bridge_result is not None:
+            bridge_result = _enrich_bridge_result(
+                bridge_result,
+                tool_name=invocation.tool_name if invocation is not None else "tool",
+                tool_id=tool_id,
+                telemetry_state=telemetry_state,
+            )
+            events.append(
+                StreamEvent(
+                    type="progress",
+                    data={
+                        "cli_event": "bridge_result",
+                        "tool_name": invocation.tool_name if invocation is not None else "tool",
+                        "tool_id": tool_id,
+                        "bridge_result": bridge_result,
+                    },
+                )
+            )
+        approval_event = _build_studio_approval_progress_event(
+            block.get("content", ""),
+            tool_name=invocation.tool_name if invocation is not None else "tool",
+            tool_id=tool_id,
+            telemetry_state=telemetry_state,
+        )
+        if approval_event is not None:
+            events.append(approval_event)
+
+    return events
+
+
+def _parse_cli_event(
+    line_data: Dict[str, Any],
+    telemetry_state: Optional[_StudioTelemetryState] = None,
+) -> list[StreamEvent]:
     """Parse a single NDJSON line from `claude -p --output-format stream-json`.
 
     Claude CLI stream-json emits one JSON object per line:
     - {"type":"assistant","message":{...}} — assistant turn with content blocks
     - {"type":"tool_result","tool_name":"...","content":"..."} — tool output
+    - {"type":"user","message":{"content":[{"type":"tool_result",...}]}} — current tool output shape
     - {"type":"result","subtype":"success","result":"...","cost_usd":...} — final
     - {"type":"system",...} — session init (ignored)
     """
     etype = line_data.get("type", "")
-    events: list[StreamEvent] = []
-
     if etype == "assistant":
         msg = line_data.get("message", {})
         content_blocks = msg.get("content", [])
-        events.extend(_parse_cli_content_blocks(content_blocks))
+        return _parse_cli_content_blocks(content_blocks)
 
-    elif etype == "tool_result":
-        events.append(StreamEvent(
+    if etype == "tool_result":
+        return _parse_cli_tool_result_event(line_data, telemetry_state)
+
+    if etype == "user":
+        return _parse_user_tool_result_blocks(line_data, telemetry_state)
+
+    if etype == "system":
+        return _parse_cli_system_event(line_data, telemetry_state)
+
+    if etype == "result":
+        return [_build_cli_result_event(line_data)]
+
+    # Ignore "system" and other meta events
+    return []
+
+
+def _parse_cli_tool_result_event(
+    line_data: Dict[str, Any],
+    telemetry_state: Optional[_StudioTelemetryState],
+) -> list[StreamEvent]:
+    tool_name = str(line_data.get("tool_name", "") or "tool")
+    tool_id = str(line_data.get("tool_use_id") or line_data.get("tool_id") or "").strip()
+    content = line_data.get("content", "")
+    events = [
+        StreamEvent(
             type="progress",
             data={
                 "cli_event": "tool_result",
                 "tool_name": line_data.get("tool_name", ""),
-                "content": _truncate(str(line_data.get("content", "")), 2000),
+                "tool_id": line_data.get("tool_use_id") or line_data.get("tool_id") or "",
+                "content": _truncate(_stringify_tool_result_content(content), 2000),
             },
-        ))
+        )
+    ]
 
-    elif etype == "result":
-        events.append(StreamEvent(
-            type="result",
-            data={
-                "cli_event": "done",
-                "result": line_data.get("result", ""),
-                "cost_usd": line_data.get("cost_usd"),
-                "duration_ms": line_data.get("duration_ms"),
-                "num_turns": line_data.get("num_turns"),
-            },
-        ))
+    bridge_result = _parse_bridge_result_content(content)
+    if bridge_result is not None:
+        bridge_result = _enrich_bridge_result(
+            bridge_result,
+            tool_name=tool_name,
+            tool_id=tool_id,
+            telemetry_state=telemetry_state,
+        )
+        events.append(
+            StreamEvent(
+                type="progress",
+                data={
+                    "cli_event": "bridge_result",
+                    "tool_name": line_data.get("tool_name", ""),
+                    "tool_id": line_data.get("tool_use_id") or line_data.get("tool_id") or "",
+                    "bridge_result": bridge_result,
+                },
+            )
+        )
 
-    # Ignore "system" and other meta events
+    approval_event = _build_studio_approval_progress_event(
+        content,
+        tool_name=tool_name,
+        tool_id=tool_id,
+        telemetry_state=telemetry_state,
+    )
+    if approval_event is not None:
+        events.append(approval_event)
     return events
+
+
+def _parse_cli_system_event(
+    line_data: Dict[str, Any],
+    telemetry_state: Optional[_StudioTelemetryState],
+) -> list[StreamEvent]:
+    subtype = str(line_data.get("subtype", "")).strip()
+    if subtype != "init":
+        return []
+
+    cli_session_id = str(line_data.get("session_id") or "").strip()
+    if telemetry_state is not None and cli_session_id:
+        telemetry_state.cli_session_id = cli_session_id
+    return [
+        StreamEvent(
+            type="progress",
+            data={
+                "cli_event": "session_init",
+                "cli_session_id": cli_session_id,
+                "permission_mode": line_data.get("permissionMode"),
+                "model": line_data.get("model"),
+            },
+        )
+    ]
+
+
+def _build_cli_result_event(line_data: Dict[str, Any]) -> StreamEvent:
+    return StreamEvent(
+        type="result",
+        data={
+            "cli_event": "done",
+            "result": line_data.get("result", ""),
+            "cost_usd": line_data.get("cost_usd"),
+            "duration_ms": line_data.get("duration_ms"),
+            "num_turns": line_data.get("num_turns"),
+        },
+    )
 
 
 def _truncate(s: str, max_len: int) -> str:
     return s if len(s) <= max_len else s[:max_len] + "..."
 
 
-async def stream_claude_cli(request: StudioChatRequest) -> AsyncGenerator[StreamEvent, None]:
+async def stream_claude_cli(
+    request: StudioChatRequest,
+    *,
+    telemetry_state: _StudioTelemetryState,
+    event_log=None,
+) -> AsyncGenerator[StreamEvent, None]:
     """Stream Claude CLI output as structured SSE events.
 
     Uses ``--output-format stream-json`` so we get real-time NDJSON events
@@ -451,30 +2177,61 @@ async def stream_claude_cli(request: StudioChatRequest) -> AsyncGenerator[Stream
     claude_path = find_claude_cli()
 
     if not claude_path:
+        _append_eventlog(
+            event_log,
+            _make_studio_lifecycle_event(
+                telemetry_state,
+                status=EventType.AGENT_ERROR,
+                agent_name="claude",
+                stage=telemetry_state.stage,
+                detail="Claude CLI not found",
+                role="orchestrator",
+            ),
+        )
+        telemetry_state.runtime_terminal_emitted = True
         yield StreamEvent(
             type="error",
             message="Claude CLI not found. Please install it with: npm install -g @anthropic-ai/claude-code"
         )
         return
 
-    # Build command — use stream-json for structured real-time output
-    cmd = [claude_path]
-
-    model_id = get_model_id(request.model, for_cli=True)
-    cmd.extend(["--model", model_id])
-
     effective_mode = resolve_execution_mode(request.mode)
-    cmd.extend(get_mode_flags(request.mode))
+    transport = current_studio_chat_transport(claude_path=claude_path)
+    resolved_model = get_model_id(
+        request.model,
+        for_cli=True,
+        project_dir=request.project_dir,
+    )
 
-    prompt = build_prompt_with_context(request.message, request.paper, effective_mode)
-    cmd.extend(["-p", prompt, "--output-format", "stream-json", "--verbose"])
+    _append_eventlog(
+        event_log,
+        _make_studio_lifecycle_event(
+            telemetry_state,
+            status=EventType.AGENT_STARTED,
+            agent_name="claude",
+            stage=telemetry_state.stage,
+            detail=f"{effective_mode} turn started",
+            role="orchestrator",
+        ),
+    )
+    _append_eventlog(
+        event_log,
+        _make_studio_lifecycle_event(
+            telemetry_state,
+            status=EventType.AGENT_WORKING,
+            agent_name="claude",
+            stage=telemetry_state.stage,
+            detail="Connecting to Claude CLI",
+            role="orchestrator",
+        ),
+    )
 
     yield StreamEvent(
         type="progress",
         data={
             "phase": "Starting",
             "message": f"[{effective_mode}] Connecting to Claude CLI...",
-            "model": request.model,
+            "model": resolved_model,
             "mode": effective_mode,
             "requested_mode": request.mode,
         }
@@ -484,8 +2241,74 @@ async def stream_claude_cli(request: StudioChatRequest) -> AsyncGenerator[Stream
         try:
             cwd = str(_resolve_cli_project_dir(request.project_dir))
         except ValueError as exc:
+            _append_eventlog(
+                event_log,
+                _make_studio_lifecycle_event(
+                    telemetry_state,
+                    status=EventType.AGENT_ERROR,
+                    agent_name="claude",
+                    stage=telemetry_state.stage,
+                    detail=str(exc),
+                    role="orchestrator",
+                ),
+            )
+            telemetry_state.runtime_terminal_emitted = True
             yield StreamEvent(type="error", message=str(exc))
             return
+
+        try:
+            uploaded_file_entries, upload_add_dirs = await asyncio.to_thread(
+                _persist_uploaded_files,
+                request.uploaded_files,
+                session_id=telemetry_state.session_id,
+            )
+        except ValueError as exc:
+            _append_eventlog(
+                event_log,
+                _make_studio_lifecycle_event(
+                    telemetry_state,
+                    status=EventType.AGENT_ERROR,
+                    agent_name="claude",
+                    stage=telemetry_state.stage,
+                    detail=str(exc),
+                    role="orchestrator",
+                ),
+            )
+            telemetry_state.runtime_terminal_emitted = True
+            yield StreamEvent(type="error", message=str(exc))
+            return
+
+        prompt = build_prompt_with_context(
+            request.message,
+            request.paper,
+            effective_mode,
+            request.history,
+            request.attached_files,
+            uploaded_file_entries,
+        )
+        cmd = [
+            claude_path,
+            *build_claude_cli_command_args(
+                request,
+                effective_mode=effective_mode,
+                prompt=prompt,
+                extra_add_dirs=upload_add_dirs,
+            ),
+        ]
+
+        yield _make_studio_session_init_event(
+            telemetry_state,
+            request=request,
+            effective_mode=effective_mode,
+            transport=transport,
+            cwd=cwd,
+        )
+        mode_changed_event = _make_studio_mode_changed_event(
+            request=request,
+            effective_mode=effective_mode,
+        )
+        if mode_changed_event is not None:
+            yield mode_changed_event
 
         # Write context pack to working directory so Claude CLI can read it
         if request.context_pack_id:
@@ -553,15 +2376,19 @@ async def stream_claude_cli(request: StudioChatRequest) -> AsyncGenerator[Stream
                     log.debug("Skipping non-JSON CLI line: %s", line[:120])
                     continue
 
-                for event in _parse_cli_event(data):
+                for event in _parse_cli_event(data, telemetry_state):
                     yield event
+                for envelope in _build_cli_telemetry_events(data, telemetry_state):
+                    _append_eventlog(event_log, envelope)
 
         # Process any trailing data in buffer
         if line_buffer.strip():
             try:
                 data = json.loads(line_buffer.strip())
-                for event in _parse_cli_event(data):
+                for event in _parse_cli_event(data, telemetry_state):
                     yield event
+                for envelope in _build_cli_telemetry_events(data, telemetry_state):
+                    _append_eventlog(event_log, envelope)
             except json.JSONDecodeError:
                 pass
 
@@ -571,24 +2398,138 @@ async def stream_claude_cli(request: StudioChatRequest) -> AsyncGenerator[Stream
         if process.returncode != 0:
             error_msg = "".join(stderr_chunks).strip()
             if error_msg:
+                if not telemetry_state.runtime_terminal_emitted:
+                    _append_eventlog(
+                        event_log,
+                        _make_studio_lifecycle_event(
+                            telemetry_state,
+                            status=EventType.AGENT_ERROR,
+                            agent_name="claude",
+                            stage=telemetry_state.stage,
+                            detail=error_msg,
+                            role="orchestrator",
+                        ),
+                    )
+                    for envelope in _drain_pending_delegation_failures(
+                        telemetry_state,
+                        error=error_msg,
+                        reason_code="runtime_error",
+                    ):
+                        _append_eventlog(event_log, envelope)
+                    telemetry_state.runtime_terminal_emitted = True
                 yield StreamEvent(type="error", message=error_msg)
                 return
+        elif not telemetry_state.runtime_terminal_emitted:
+            _append_eventlog(
+                event_log,
+                _make_studio_lifecycle_event(
+                    telemetry_state,
+                    status=EventType.AGENT_COMPLETED,
+                    agent_name="claude",
+                    stage=telemetry_state.stage,
+                    detail="Studio chat turn completed",
+                    role="orchestrator",
+                ),
+            )
+            telemetry_state.runtime_terminal_emitted = True
 
     except FileNotFoundError:
+        detail = f"Claude CLI not found at: {claude_path}"
+        if not telemetry_state.runtime_terminal_emitted:
+            _append_eventlog(
+                event_log,
+                _make_studio_lifecycle_event(
+                    telemetry_state,
+                    status=EventType.AGENT_ERROR,
+                    agent_name="claude",
+                    stage=telemetry_state.stage,
+                    detail=detail,
+                    role="orchestrator",
+                ),
+            )
+            telemetry_state.runtime_terminal_emitted = True
         yield StreamEvent(
             type="error",
-            message=f"Claude CLI not found at: {claude_path}"
+            message=detail
         )
     except Exception as e:
+        detail = f"Claude CLI error: {str(e)}"
+        if not telemetry_state.runtime_terminal_emitted:
+            _append_eventlog(
+                event_log,
+                _make_studio_lifecycle_event(
+                    telemetry_state,
+                    status=EventType.AGENT_ERROR,
+                    agent_name="claude",
+                    stage=telemetry_state.stage,
+                    detail=detail,
+                    role="orchestrator",
+                ),
+            )
+            for envelope in _drain_pending_delegation_failures(
+                telemetry_state,
+                error=detail,
+                reason_code="runtime_error",
+            ):
+                _append_eventlog(event_log, envelope)
+            telemetry_state.runtime_terminal_emitted = True
         yield StreamEvent(
             type="error",
-            message=f"Claude CLI error: {str(e)}"
+            message=detail
         )
 
 
-async def stream_anthropic_api(request: StudioChatRequest) -> AsyncGenerator[StreamEvent, None]:
+async def stream_anthropic_api(
+    request: StudioChatRequest,
+    *,
+    telemetry_state: _StudioTelemetryState,
+    event_log=None,
+) -> AsyncGenerator[StreamEvent, None]:
     """Fallback: Stream response using Anthropic API directly."""
     effective_mode = resolve_execution_mode(request.mode)
+    transport = current_studio_chat_transport(claude_path=None)
+    resolved_model = get_model_id(
+        request.model,
+        for_cli=False,
+        project_dir=request.project_dir,
+    )
+
+    _append_eventlog(
+        event_log,
+        _make_studio_lifecycle_event(
+            telemetry_state,
+            status=EventType.AGENT_STARTED,
+            agent_name="claude",
+            stage=telemetry_state.stage,
+            detail=f"{effective_mode} turn started",
+            role="orchestrator",
+        ),
+    )
+    _append_eventlog(
+        event_log,
+        _make_studio_lifecycle_event(
+            telemetry_state,
+            status=EventType.AGENT_WORKING,
+            agent_name="claude",
+            stage=telemetry_state.stage,
+            detail="Using Anthropic API fallback",
+            role="orchestrator",
+        ),
+    )
+
+    yield _make_studio_session_init_event(
+        telemetry_state,
+        request=request,
+        effective_mode=effective_mode,
+        transport=transport,
+        cwd=request.project_dir,
+    )
+    mode_changed_event = _make_studio_mode_changed_event(
+        request=request,
+        effective_mode=effective_mode,
+    )
+    if mode_changed_event is not None:
+        yield mode_changed_event
 
     yield StreamEvent(
         type="progress",
@@ -605,13 +2546,24 @@ async def stream_anthropic_api(request: StudioChatRequest) -> AsyncGenerator[Str
 
         api_key = os.getenv("ANTHROPIC_API_KEY", "")
         if not api_key:
+            _append_eventlog(
+                event_log,
+                _make_studio_lifecycle_event(
+                    telemetry_state,
+                    status=EventType.AGENT_ERROR,
+                    agent_name="claude",
+                    stage=telemetry_state.stage,
+                    detail="ANTHROPIC_API_KEY not set",
+                    role="orchestrator",
+                ),
+            )
+            telemetry_state.runtime_terminal_emitted = True
             yield StreamEvent(type="error", message="ANTHROPIC_API_KEY not set")
             return
 
-        model_id = get_model_id(request.model, for_cli=False)
         provider = AnthropicProvider(
             api_key=api_key,
-            model_name=model_id,
+            model_name=resolved_model,
             max_tokens=8192,
         )
 
@@ -633,7 +2585,16 @@ async def stream_anthropic_api(request: StudioChatRequest) -> AsyncGenerator[Str
         for msg in request.history[-10:]:
             messages.append({"role": msg.role, "content": msg.content})
 
-        messages.append({"role": "user", "content": request.message})
+        messages.append(
+            {
+                "role": "user",
+                "content": build_user_request_content(
+                    request.message,
+                    request.attached_files,
+                    [upload.name for upload in request.uploaded_files],
+                ),
+            }
+        )
 
         full_content = ""
         async for chunk in provider.stream(messages):
@@ -655,23 +2616,66 @@ async def stream_anthropic_api(request: StudioChatRequest) -> AsyncGenerator[Str
                 "content": full_content,
                 "mode": effective_mode,
                 "requested_mode": request.mode,
-                "model": request.model,
+                "model": resolved_model,
             }
         )
+        _append_eventlog(
+            event_log,
+            _make_studio_lifecycle_event(
+                telemetry_state,
+                status=EventType.AGENT_COMPLETED,
+                agent_name="claude",
+                stage=telemetry_state.stage,
+                detail="Studio chat turn completed",
+                role="orchestrator",
+            ),
+        )
+        telemetry_state.runtime_terminal_emitted = True
 
     except Exception as e:
-        yield StreamEvent(type="error", message=f"API error: {str(e)}")
+        detail = f"API error: {str(e)}"
+        if not telemetry_state.runtime_terminal_emitted:
+            _append_eventlog(
+                event_log,
+                _make_studio_lifecycle_event(
+                    telemetry_state,
+                    status=EventType.AGENT_ERROR,
+                    agent_name="claude",
+                    stage=telemetry_state.stage,
+                    detail=detail,
+                    role="orchestrator",
+                ),
+            )
+            telemetry_state.runtime_terminal_emitted = True
+        yield StreamEvent(type="error", message=detail)
 
 
-async def studio_chat_stream(request: StudioChatRequest) -> AsyncGenerator[StreamEvent, None]:
-    """Stream studio chat response - tries Claude CLI first, falls back to API."""
+async def studio_chat_stream(
+    request: StudioChatRequest,
+    *,
+    telemetry_state: _StudioTelemetryState,
+    event_log=None,
+) -> AsyncGenerator[StreamEvent, None]:
+    """Stream Studio chat from the current managed-chat transport.
+
+    Current transport order:
+    1. Claude CLI print mode
+    2. Direct Anthropic API fallback
+
+    Preferred long-term route remains the Claude Agent SDK, matching the
+    CodePilot-style managed session architecture.
+    """
 
     # Check if Claude CLI is available
     claude_path = find_claude_cli()
 
     if claude_path:
         # Use Claude CLI
-        async for event in stream_claude_cli(request):
+        async for event in stream_claude_cli(
+            request,
+            telemetry_state=telemetry_state,
+            event_log=event_log,
+        ):
             yield event
     else:
         # Fallback to Anthropic API
@@ -682,12 +2686,16 @@ async def studio_chat_stream(request: StudioChatRequest) -> AsyncGenerator[Strea
                 "message": "Claude CLI not found, using Anthropic API directly",
             }
         )
-        async for event in stream_anthropic_api(request):
+        async for event in stream_anthropic_api(
+            request,
+            telemetry_state=telemetry_state,
+            event_log=event_log,
+        ):
             yield event
 
 
 @router.post("/studio/chat")
-async def studio_chat(request: StudioChatRequest):
+async def studio_chat(http_request: Request, request: StudioChatRequest):
     """
     Interactive chat for DeepStudio with Claude CLI integration.
 
@@ -698,65 +2706,189 @@ async def studio_chat(request: StudioChatRequest):
 
     Returns Server-Sent Events with streaming text.
     """
-    return sse_response(studio_chat_stream(request), workflow="studio_chat")
+    run_id = new_run_id()
+    trace_id = new_trace_id()
+    session_id = request.session_id or f"studio-{run_id[:8]}"
+    telemetry_state = _StudioTelemetryState(
+        run_id=run_id,
+        trace_id=trace_id,
+        session_id=session_id,
+        stage=resolve_execution_mode(request.mode).lower(),
+    )
+    event_log = getattr(http_request.app.state, "event_log", None)
+
+    return sse_response(
+        studio_chat_stream(
+            request,
+            telemetry_state=telemetry_state,
+            event_log=event_log,
+        ),
+        workflow="studio_chat",
+        run_id=run_id,
+        trace_id=trace_id,
+    )
+
+
+def _studio_command_error_payload(
+    *,
+    command: List[str],
+    returncode: int,
+    stderr: str,
+    cwd: Optional[str],
+) -> Dict[str, Any]:
+    return {
+        "ok": False,
+        "command": command,
+        "returncode": returncode,
+        "stdout": "",
+        "stderr": stderr,
+        "cwd": cwd,
+    }
+
+
+@router.post("/studio/command")
+async def studio_command(request: StudioCommandRequest):
+    """Run a non-chat Claude Code / OpenCode management command and return its output."""
+    try:
+        cmd = build_management_command(request)
+        try:
+            cwd = str(_resolve_cli_project_dir(request.project_dir))
+        except ValueError:
+            return _studio_command_error_payload(
+                command=cmd,
+                returncode=1,
+                stderr="Invalid or disallowed project directory",
+                cwd=request.project_dir,
+            )
+
+        timeout_seconds = max(1.0, min(request.timeout_ms / 1000.0, 60.0))
+
+        def _run():
+            return subprocess.run(
+                cmd,
+                cwd=cwd,
+                env={**os.environ, "FORCE_COLOR": "0"},
+                capture_output=True,
+                text=True,
+                timeout=timeout_seconds,
+            )
+
+        result = await asyncio.to_thread(_run)
+        return {
+            "ok": result.returncode == 0,
+            "command": cmd,
+            "returncode": result.returncode,
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+            "cwd": cwd,
+        }
+    except subprocess.TimeoutExpired:
+        return _studio_command_error_payload(
+            command=[],
+            returncode=124,
+            stderr="Command timed out",
+            cwd=request.project_dir,
+        )
+    except ValueError:
+        return _studio_command_error_payload(
+            command=[],
+            returncode=1,
+            stderr="Invalid management command request",
+            cwd=request.project_dir,
+        )
 
 
 @router.get("/studio/status")
 async def studio_status():
-    """Check if Claude CLI is available."""
+    """Check Studio runtime availability and project-agent readiness."""
     claude_path = find_claude_cli()
+    agent_sdk_available = has_claude_agent_sdk()
+    chat_transport = current_studio_chat_transport(claude_path=claude_path)
+    preferred_transport = preferred_studio_chat_transport()
+    detected_model = detect_claude_default_model_details()
+    skills = [skill.to_payload() for skill in list_available_studio_skills()]
+    opencode_path = find_opencode_cli()
+    opencode_available, opencode_version = _probe_cli_version(opencode_path)
+    claude_available, version = _probe_cli_version(claude_path)
+    project_agent_probe = _inspect_claude_project_agents(claude_path if claude_available else None)
+    project_agents = project_agent_probe["project_agents"]
+    claude_agents_error = project_agent_probe["claude_agents_error"]
+    codex_worker_name = project_agent_probe["codex_worker_name"]
+    opencode_worker_name = project_agent_probe["opencode_worker_name"]
 
-    if claude_path:
-        # Try to get version
-        try:
-            result = subprocess.run(
-                [claude_path, "--version"],
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-            version = result.stdout.strip() if result.returncode == 0 else "unknown"
-        except Exception:
-            version = "unknown"
+    if claude_available:
+        version_label = version or "unknown"
 
         return {
             "claude_cli": True,
+            "claude_agent_sdk": agent_sdk_available,
             "claude_path": claude_path,
-            "claude_version": version,
+            "claude_version": version_label,
+            "chat_surface": "managed_session",
+            "chat_transport": chat_transport,
+            "preferred_chat_transport": preferred_transport,
+            "slash_commands": _studio_supported_slash_commands(),
+            "permission_profiles": _studio_supported_permission_profiles(),
+            "runtime_commands": sorted(_ALLOWED_MANAGEMENT_COMMANDS["claude"]),
+            "skills": skills,
+            "code_mode_enabled": is_code_mode_enabled(),
+            "known_model_aliases": _KNOWN_CLAUDE_MODEL_ALIASES,
+            "detected_default_model": detected_model.model,
+            "detected_default_model_source": detected_model.source,
+            "project_agents": project_agents,
+            "project_agent_count": len(project_agents),
+            "claude_agents_error": claude_agents_error,
+            "codex_worker_available": codex_worker_name is not None,
+            "codex_worker_name": codex_worker_name,
+            "opencode_worker_available": opencode_worker_name is not None,
+            "opencode_worker_name": opencode_worker_name,
+            "opencode_cli": opencode_available,
+            "opencode_path": opencode_path,
+            "opencode_version": opencode_version,
         }
 
     return {
         "claude_cli": False,
+        "claude_agent_sdk": agent_sdk_available,
         "claude_path": None,
         "claude_version": None,
+        "chat_surface": "managed_session",
+        "chat_transport": chat_transport,
+        "preferred_chat_transport": preferred_transport,
+        "slash_commands": _studio_supported_slash_commands(),
+        "permission_profiles": _studio_supported_permission_profiles(),
+        "runtime_commands": sorted(_ALLOWED_MANAGEMENT_COMMANDS["claude"]),
+        "skills": skills,
         "fallback": "anthropic_api",
+        "code_mode_enabled": is_code_mode_enabled(),
+        "known_model_aliases": _KNOWN_CLAUDE_MODEL_ALIASES,
+        "detected_default_model": detected_model.model,
+        "detected_default_model_source": detected_model.source,
+        "project_agents": [],
+        "project_agent_count": 0,
+        "claude_agents_error": None,
+        "codex_worker_available": False,
+        "codex_worker_name": None,
+        "opencode_worker_available": False,
+        "opencode_worker_name": None,
+        "opencode_cli": opencode_available,
+        "opencode_path": opencode_path,
+        "opencode_version": opencode_version,
     }
 
 
 @router.get("/studio/cwd")
 async def studio_cwd():
     """Get the current working directory for Claude CLI session."""
-    # Default to user's home directory or a sensible default
-    default_cwd = os.path.expanduser("~")
-
-    # Try to get the current working directory
-    cwd = os.getcwd()
-
-    # Check if we're in a reasonable project directory
-    # If we're in the PaperBot source directory, suggest a better location
-    if "PaperBot" in cwd or "paperbot" in cwd.lower():
-        # Suggest a projects directory instead
-        projects_dir = os.path.expanduser("~/Projects")
-        if os.path.isdir(projects_dir):
-            suggested_cwd = projects_dir
-        else:
-            suggested_cwd = os.path.expanduser("~/Documents")
-    else:
-        suggested_cwd = cwd
+    home = str(Path.home())
+    actual_cwd = Path(os.getcwd()).resolve()
+    suggested_cwd = _preferred_studio_workspace_dir(actual_cwd)
 
     return {
-        "cwd": suggested_cwd,
-        "actual_cwd": cwd,
-        "home": default_cwd,
+        "cwd": str(suggested_cwd),
+        "actual_cwd": str(actual_cwd),
+        "home": home,
         "source": "system",
+        "allowed_prefixes": [str(prefix) for prefix in _allowed_workdir_prefixes()],
+        "allowlist_mutation_enabled": _runtime_allowlist_mutation_enabled(),
     }

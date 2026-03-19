@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -9,6 +10,7 @@ from paperbot.api import main as api_main
 from paperbot.api.auth.dependencies import get_required_user_id
 from paperbot.api.routes import research as research_route
 from paperbot.infrastructure.stores.paper_store import SqlAlchemyPaperStore
+from paperbot.infrastructure.stores.models import PaperJudgeScoreModel
 from paperbot.infrastructure.stores.research_store import SqlAlchemyResearchStore
 
 
@@ -39,25 +41,29 @@ def test_feedback_route_returns_effective_action_after_toggle(tmp_path, monkeypa
     store, paper, track = _prepare_feedback_state_db(tmp_path)
     monkeypatch.setattr(research_route, "_research_store", store)
 
-    with TestClient(api_main.app) as client:
-        liked = client.post(
-            "/api/research/papers/feedback",
-            json={
-                "user_id": "u-feedback",
-                "track_id": int(track["id"]),
-                "paper_id": str(paper["id"]),
-                "action": "like",
-            },
-        )
-        cleared = client.post(
-            "/api/research/papers/feedback",
-            json={
-                "user_id": "u-feedback",
-                "track_id": int(track["id"]),
-                "paper_id": str(paper["id"]),
-                "action": "unlike",
-            },
-        )
+    api_main.app.dependency_overrides[get_required_user_id] = lambda: "u-feedback"
+    try:
+        with TestClient(api_main.app) as client:
+            liked = client.post(
+                "/api/research/papers/feedback",
+                json={
+                    "user_id": "u-feedback",
+                    "track_id": int(track["id"]),
+                    "paper_id": str(paper["id"]),
+                    "action": "like",
+                },
+            )
+            cleared = client.post(
+                "/api/research/papers/feedback",
+                json={
+                    "user_id": "u-feedback",
+                    "track_id": int(track["id"]),
+                    "paper_id": str(paper["id"]),
+                    "action": "unlike",
+                },
+            )
+    finally:
+        api_main.app.dependency_overrides.pop(get_required_user_id, None)
 
     assert liked.status_code == 200
     assert liked.json()["current_action"] == "like"
@@ -143,25 +149,29 @@ def test_feedback_route_schedules_obsidian_export_for_save_and_unsave(tmp_path: 
         ),
     )
 
-    with TestClient(api_main.app) as client:
-        saved = client.post(
-            "/api/research/papers/feedback",
-            json={
-                "user_id": "u-feedback",
-                "track_id": int(track["id"]),
-                "paper_id": str(paper["id"]),
-                "action": "save",
-            },
-        )
-        unsaved = client.post(
-            "/api/research/papers/feedback",
-            json={
-                "user_id": "u-feedback",
-                "track_id": int(track["id"]),
-                "paper_id": str(paper["id"]),
-                "action": "unsave",
-            },
-        )
+    api_main.app.dependency_overrides[get_required_user_id] = lambda: "u-feedback"
+    try:
+        with TestClient(api_main.app) as client:
+            saved = client.post(
+                "/api/research/papers/feedback",
+                json={
+                    "user_id": "u-feedback",
+                    "track_id": int(track["id"]),
+                    "paper_id": str(paper["id"]),
+                    "action": "save",
+                },
+            )
+            unsaved = client.post(
+                "/api/research/papers/feedback",
+                json={
+                    "user_id": "u-feedback",
+                    "track_id": int(track["id"]),
+                    "paper_id": str(paper["id"]),
+                    "action": "unsave",
+                },
+            )
+    finally:
+        api_main.app.dependency_overrides.pop(get_required_user_id, None)
 
     assert saved.status_code == 200
     assert unsaved.status_code == 200
@@ -203,16 +213,20 @@ def test_feedback_route_schedules_obsidian_export_using_persisted_track_owner(mo
         ),
     )
 
-    with TestClient(api_main.app) as client:
-        response = client.post(
-            "/api/research/papers/feedback",
-            json={
-                "user_id": "spoofed-request-user",
-                "track_id": 9,
-                "paper_id": "paper-1",
-                "action": "save",
-            },
-        )
+    api_main.app.dependency_overrides[get_required_user_id] = lambda: "spoofed-request-user"
+    try:
+        with TestClient(api_main.app) as client:
+            response = client.post(
+                "/api/research/papers/feedback",
+                json={
+                    "user_id": "spoofed-request-user",
+                    "track_id": 9,
+                    "paper_id": "paper-1",
+                    "action": "save",
+                },
+            )
+    finally:
+        api_main.app.dependency_overrides.pop(get_required_user_id, None)
 
     assert response.status_code == 200
     assert captured == [
@@ -283,7 +297,7 @@ def test_store_allows_global_feedback_without_track(tmp_path: Path):
 
     saved = store.list_saved_papers(user_id="u-feedback", limit=10)
     assert len(saved) == 1
-    assert str(saved[0]["id"]) == paper_id
+    assert str(saved[0]["paper"]["id"]) == paper_id
 
 
 def test_store_falls_back_when_legacy_schema_still_requires_track(tmp_path: Path):
@@ -326,4 +340,55 @@ def test_store_falls_back_when_legacy_schema_still_requires_track(tmp_path: Path
 
     saved = store.list_saved_papers(user_id="u-feedback", limit=10)
     assert len(saved) == 1
-    assert str(saved[0]["id"]) == paper_id
+    assert str(saved[0]["paper"]["id"]) == paper_id
+
+
+def test_saved_papers_include_provenance_and_workflow_summary(tmp_path: Path):
+    store, paper, track = _prepare_feedback_state_db(tmp_path)
+    track_id = int(track["id"])
+    paper_id = int(paper["id"])
+
+    store.add_paper_feedback(
+        user_id="u-feedback",
+        track_id=track_id,
+        paper_id=str(paper_id),
+        action="save",
+        metadata={
+            "title": paper["title"],
+            "import_source": "daily_brief",
+        },
+    )
+
+    with store._provider.session() as session:
+        session.add(
+            PaperJudgeScoreModel(
+                paper_id=paper_id,
+                query="daily-brief",
+                overall=4.6,
+                relevance=4.5,
+                novelty=4.0,
+                rigor=4.4,
+                impact=4.7,
+                clarity=4.8,
+                recommendation="must_read",
+                one_line_summary="High-signal paper for the active daily brief.",
+                judge_model="test-model",
+                judge_cost_tier=1,
+                scored_at=datetime.now(timezone.utc),
+                metadata_json="{}",
+            )
+        )
+        session.commit()
+
+    saved = store.list_saved_papers(user_id="u-feedback", track_id=track_id, limit=10)
+
+    assert len(saved) == 1
+    assert saved[0]["track_id"] == track_id
+    assert saved[0]["latest_judge"]["one_line_summary"] == (
+        "High-signal paper for the active daily brief."
+    )
+    assert saved[0]["provenance"]["primary"] == "daily_brief"
+    assert "Daily Brief" in saved[0]["provenance"]["labels"]
+    assert "Workflow reviewed" in saved[0]["provenance"]["labels"]
+    assert saved[0]["provenance"]["is_manual"] is False
+    assert saved[0]["provenance"]["is_workflow"] is True

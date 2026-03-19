@@ -1,43 +1,41 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.0
-milestone_name: MCP Server
-status: planning
-stopped_at: Completed 07-02-PLAN.md
-last_updated: "2026-03-14T06:59:08.790Z"
-last_activity: 2026-03-14 -- v2.0 roadmap created (phases 12-17)
+milestone: v1.1
+milestone_name: Agent Orchestration Dashboard
+status: verifying
+stopped_at: Completed 11-01-PLAN.md
+last_updated: "2026-03-15T05:07:40.638Z"
+last_activity: 2026-03-15 — Completed 09-02-PLAN.md tasks 1-2 (three-panel agent dashboard UI)
 progress:
-  total_phases: 15
-  completed_phases: 5
-  total_plans: 9
-  completed_plans: 9
-  percent: 26
+  total_phases: 21
+  completed_phases: 8
+  total_plans: 18
+  completed_plans: 17
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-03-14)
+See: .planning/PROJECT.md (updated 2026-03-15)
 
-**Core value:** Paper-specific capability layer surfaced as standard MCP tools + agent orchestration dashboard
-**Current focus:** v1.1 Agent Orchestration Dashboard -- Phase 7 (EventBus + SSE Foundation)
+**Core value:** Paper-specific capability layer surfaced as standard MCP tools + agent-agnostic dashboard
+**Current focus:** v1.2 DeepCode Agent Dashboard -- roadmap created, ready for phase planning
 
 ## Current Position
 
-Phase: 7 of 17 (EventBus + SSE Foundation)
-Plan: 0 of ? in current phase
-Status: Ready to plan
-Last activity: 2026-03-14 -- v2.0 roadmap created (phases 12-17)
-
-Progress: [████░░░░░░░░░░░░░] 26%
+Phase: 9 of 17 (Three-Panel Dashboard)
+Plan: 2 completed
+Status: Active — awaiting human verification checkpoint (Task 3)
+Last activity: 2026-03-15 — Completed 09-02-PLAN.md tasks 1-2 (three-panel agent dashboard UI)
 
 ## Milestones
 
 | Milestone | Phases | Status |
 |-----------|--------|--------|
 | v1.0 MCP Server | 1-6 | In progress (phases 3, 6 remaining) |
-| v1.1 Agent Orchestration Dashboard | 7-11 | Planned |
+| v1.1 Agent Orchestration Dashboard | 7-11 | Planned (EventBus/SSE partially built) |
+| v1.2 DeepCode Agent Dashboard | 18-23 | Roadmap created 2026-03-15 |
 | v2.0 PostgreSQL Migration | 12-17 | Roadmap created 2026-03-14 |
 
 ## Performance Metrics
@@ -65,6 +63,15 @@ Progress: [████░░░░░░░░░░░░░] 26%
 | Phase 06-agent-skills P01 | 3 | 2 tasks | 5 files |
 | Phase 07-eventbus-sse-foundation P01 | 3 | 2 tasks | 3 files |
 | Phase 07 P02 | 4 | 2 tasks | 3 files |
+| Phase 08-agent-event-vocabulary P01 | 2min | 2 tasks | 4 files |
+| Phase 08-agent-event-vocabulary P02 | 6min | 2 tasks | 10 files |
+| Phase 09 P01 | 3 | 2 tasks | 8 files |
+| Phase 09 P02 | 8min | 2 tasks | 6 files |
+| Phase 09-three-panel-dashboard P02 | 8min | 3 tasks | 6 files |
+| Phase 10-agent-board-codex-bridge P01 | 5min | 1 tasks | 6 files |
+| Phase 10-agent-board-codex-bridge P02 | 8 | 2 tasks | 10 files |
+| Phase 10-agent-board-codex-bridge P10-03 | 3 | 2 tasks | 2 files |
+| Phase 11-dag-visualization P01 | 5min | 2 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -90,10 +97,38 @@ Recent decisions affecting current work:
 - [Phase 07-02]: Late import of EventBusEventLog inside _get_bus() prevents circular import (events.py loaded at app creation before bus is wired)
 - [Phase 07-02]: No wrap_generator() in events.py: events carry own AgentEventEnvelope fields; second envelope layer would confuse consumers
 - [Phase 07-02]: asyncio.wait_for(q.get(), timeout=15.0) drives both delivery and idle heartbeat at single await point
+- [Phase 08-agent-event-vocabulary]: EventType is a plain class with string annotations (not enum) — constants usable as str directly without .value unwrapping
+- [Phase 08-agent-event-vocabulary]: make_tool_call_event auto-generates run_id/trace_id if not provided — callers can omit for standalone tool logging
+- [Phase 08-agent-event-vocabulary P02]: Zustand 5 create() single-call form (no curry) for non-persisted stores — store test reset uses getInitialState() not plain setState
+- [Phase 08-agent-event-vocabulary P02]: useAgentEvents hook mounted exactly once at page root — child components read Zustand store (no duplicate SSE connections)
+- [Phase 08-agent-event-vocabulary P02]: tool_call type added to TOOL_TYPES in parsers.ts alongside tool_result and tool_error (handles pre-result events)
+- [Phase 09]: [Phase 09-01] parseFileTouched handles two event shapes: explicit file_change type and tool_result with payload.tool=='write_file' (fallback path)
+- [Phase 09]: [Phase 09-01] Store 20-run eviction uses Object.keys(updated)[0] deletion; path dedup within run_id is first-wins
+- [Phase 09]: [Phase 09-02] TasksPanel derives run_ids from feed[].raw.run_id (ActivityFeedItem.raw has run_id; top-level item does not)
+- [Phase 09]: [Phase 09-02] FileListPanel toggles in-place between file list and InlineDiffPanel via Zustand selectedFile (no URL/router change)
+- [Phase 09]: [Phase 09-02] AgentStatusPanel compact=false default preserves backward compatibility with /agent-events page
+- [Phase 09-three-panel-dashboard]: Human visual verification PASSED: dashboard layout, resizable panels, sidebar nav, and empty states confirmed working
+- [Phase 10-agent-board-codex-bridge]: [Phase 10-01] _emit_codex_event uses _get_event_log_from_container() lazy helper for testability without live FastAPI app
+- [Phase 10-agent-board-codex-bridge]: [Phase 10-01] _should_overflow_to_codex is a stub only — actual Codex overflow wiring in Orchestrator.run() deferred to a later plan
+- [Phase 10-agent-board-codex-bridge]: getAllByText instead of getByText for Radix UI components — ScrollArea renders content in multiple DOM nodes causing duplicate text matches
+- [Phase 10-agent-board-codex-bridge]: vitest environmentMatchGlobs: jsdom for src/components/**/*.test.tsx, node for all other tests (faster pure-logic tests)
+- [Phase 10-agent-board-codex-bridge]: extractCodexFailureReason iterates executionLog from end (most recent), checks event==='task_failed' + codex_diagnostics.reason_code, falls back to lastError
+- [Phase 10-agent-board-codex-bridge]: KanbanBoard at page level (not inside SplitPanels) to avoid horizontal scroll conflict
+- [Phase 10-agent-board-codex-bridge]: codex-worker.md tools: only Bash and Read — always available in Claude Code without extra config
+- [Phase 11-dag-visualization]: ScoreEdgeEntry.from_agent uses raw.stage (pipeline stage name) as producing context per research pitfall 2 — avoids misleading agent_name
+- [Phase 11-dag-visualization]: dag.ts has no 'use client' directive — pure computation functions with no React/browser dependencies
+- [Phase 11-dag-visualization]: computeTaskDepths uses iterative relaxation (tasks.length+1 iterations cap) to handle circular references defensively
+- [Phase 11-dag-visualization]: addScoreEdge upserts in-place by id (find-replace) to ensure latest score always reflects reality for the same edge
 
 ### Pending Todos
 
 None.
+
+- [v1.2 roadmap] Adapter layer (Phase 18) gates all v1.2 features; nothing ships without BaseAgentAdapter + ClaudeCodeAdapter
+- [v1.2 roadmap] SSE id: field fix and run-scoped filtering land in Phase 19, not retrofitted later
+- [v1.2 roadmap] CodexAdapter and OpenCodeAdapter deferred to Phase 22 until ClaudeCodeAdapter proven in production
+- [v1.2 roadmap] CTRL-03 (HITL) and DOMAIN-01/02 grouped in Phase 23 -- both require stable panels + adapter state machine
+- [v1.2 roadmap] CHAT_DELTA events excluded from ring buffer (live fan-out only) to prevent buffer saturation at 40 tokens/sec
 
 ### Blockers/Concerns
 
@@ -104,6 +139,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-14T06:48:05.569Z
-Stopped at: Completed 07-02-PLAN.md
+Last session: 2026-03-15T05:07:40.633Z
+Stopped at: Completed 11-01-PLAN.md
 Resume file: None

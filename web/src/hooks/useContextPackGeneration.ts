@@ -4,6 +4,7 @@ import { useCallback, useState } from "react"
 import { readSSE } from "@/lib/sse"
 import { useStudioStore } from "@/lib/store/studio-store"
 import { normalizePack } from "@/lib/context-pack-utils"
+import { presentStudioError, readStudioErrorDetail } from "@/lib/studio-errors"
 import type {
   GenerateCompletedEvent,
   GenerateErrorEvent,
@@ -64,7 +65,13 @@ export function useContextPackGeneration() {
 
       if (!response.ok || !response.body) {
         console.error("[P2C:M3] generate:request_failed", { status: response.status })
-        throw new Error(`Failed to start generation (${response.status})`)
+        const detail = await readStudioErrorDetail(
+          response,
+          `Failed to start generation (${response.status})`,
+        )
+        throw new Error(
+          presentStudioError(detail, `Failed to start generation (${response.status})`),
+        )
       }
 
       for await (const evt of readSSE(response.body)) {
@@ -87,7 +94,13 @@ export function useContextPackGeneration() {
             const packRes = await fetch(`/api/research/repro/context/${completed.context_pack_id}`)
             if (!packRes.ok) {
               console.error("[P2C:M3] generate:pack_fetch_failed", { status: packRes.status })
-              throw new Error(`Failed to load context pack (${packRes.status})`)
+              const detail = await readStudioErrorDetail(
+                packRes,
+                `Failed to load context pack (${packRes.status})`,
+              )
+              throw new Error(
+                presentStudioError(detail, `Failed to load context pack (${packRes.status})`),
+              )
             }
             const payload = await packRes.json()
             const pack = normalizePack(payload)
@@ -113,7 +126,8 @@ export function useContextPackGeneration() {
         }
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Unknown error"
+      const rawMessage = err instanceof Error ? err.message : "Unknown error"
+      const message = presentStudioError(rawMessage, "Unknown error")
       console.error("[P2C:M3] generate:exception", { message })
       setContextPackError(message)
       setStatus("error")

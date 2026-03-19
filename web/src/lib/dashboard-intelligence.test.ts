@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest"
 
-import { buildDashboardIntelligenceCards } from "./dashboard-intelligence"
+import {
+  buildDashboardIntelligenceCards,
+  summarizeDashboardIntelligence,
+} from "./dashboard-intelligence"
 import type { IntelligenceFeedItem } from "./types"
 
 describe("dashboard-intelligence", () => {
@@ -90,5 +93,70 @@ describe("dashboard-intelligence", () => {
     expect(emptyCard.title).toBe("No urgent community signals")
     expect(emptyCard.metricLabel).toBe("stable")
     expect(emptyCard.researchHref).toBe("/research")
+  })
+
+  it("keeps the full mapped signal list and summarizes matching state", () => {
+    const items: IntelligenceFeedItem[] = [
+      {
+        id: "reddit:1",
+        source: "reddit",
+        source_label: "Reddit Search",
+        kind: "keyword_spike",
+        title: "Signal A",
+        summary: "Summary A",
+        keyword_hits: ["rag"],
+        author_matches: [],
+        repo_matches: [],
+        match_reasons: [],
+        score: 88,
+        metric: {
+          name: "mentions/24h",
+          value: 10,
+          delta: 4,
+        },
+        matched_tracks: [
+          {
+            track_id: 1,
+            track_name: "RAG",
+            matched_keywords: ["rag"],
+          },
+        ],
+        research_query: "rag",
+        payload: {},
+      },
+      {
+        id: "github:1",
+        source: "github",
+        source_label: "GitHub Watch",
+        kind: "repo_spike",
+        title: "Signal B",
+        summary: "Summary B",
+        keyword_hits: [],
+        author_matches: [],
+        repo_matches: ["paperbot/paperbot"],
+        match_reasons: [],
+        score: 64,
+        metric: {
+          name: "stars/day",
+          value: 2,
+          delta: 0,
+        },
+        matched_tracks: [],
+        research_query: "",
+        payload: {},
+      },
+    ]
+
+    const cards = buildDashboardIntelligenceCards(items)
+    const summary = summarizeDashboardIntelligence(items)
+
+    expect(cards).toHaveLength(2)
+    expect(cards[1]?.title).toBe("Signal B")
+    expect(summary).toEqual({
+      totalCount: 2,
+      matchedCount: 1,
+      risingCount: 1,
+      sourceCount: 2,
+    })
   })
 })

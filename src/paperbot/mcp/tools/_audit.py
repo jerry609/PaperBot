@@ -12,6 +12,7 @@ import logging
 from typing import Any, Dict, Optional, Union
 
 from paperbot.application.collaboration.message_schema import (
+    EventType,
     make_event,
     new_run_id,
     new_trace_id,
@@ -132,7 +133,7 @@ def log_tool_call(
         attempt=0,
         agent_name="paperbot-mcp",
         role="system",
-        type="error" if error is not None else "tool_result",
+        type=EventType.TOOL_ERROR if error is not None else EventType.TOOL_RESULT,
         payload={
             "tool": tool_name,
             "arguments": _sanitize_arguments(arguments),

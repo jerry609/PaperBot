@@ -1,7 +1,6 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { useSession } from "next-auth/react"
 import Link from "next/link"
 import { Check, ChevronDown, Copy, Download, FileText, Filter, Loader2 } from "lucide-react"
 
@@ -34,6 +33,7 @@ import {
 
 
 type SavedPaperSort = "saved_at" | "judge_score" | "published_at"
+type SavedPaperView = "all" | "workflow" | "manual"
 
 export type ReadingStatus = "unread" | "reading" | "read" | "archived"
 
@@ -61,6 +61,14 @@ export type SavedPaperItem = {
   latest_judge?: {
     overall?: number | null
     recommendation?: string | null
+    one_line_summary?: string | null
+  } | null
+  provenance?: {
+    primary?: string | null
+    labels?: string[]
+    is_manual?: boolean
+    is_workflow?: boolean
+    track_names?: string[]
   } | null
 }
 
@@ -154,6 +162,16 @@ export function formatReadingStatusLabel(status: ReadingStatus): string {
   return "To read"
 }
 
+export function matchesSavedPaperView(item: SavedPaperItem, view: SavedPaperView): boolean {
+  if (view === "workflow") {
+    return Boolean(item.provenance?.is_workflow || item.latest_judge)
+  }
+  if (view === "manual") {
+    return Boolean(item.provenance?.is_manual)
+  }
+  return true
+}
+
 type SavedPaperListItemProps = {
   item: SavedPaperItem
   status: ReadingStatus
@@ -183,6 +201,8 @@ function SavedPaperListItem({
   const publishedDate = formatDate(paper.publication_date || paper.published_at)
   const judgeScore = formatJudge(latest_judge?.overall)
   const judgeRecommendation = latest_judge?.recommendation
+  const judgeSummary = latest_judge?.one_line_summary
+  const provenanceLabels = (item.provenance?.labels || []).filter(Boolean)
 
   const handleUnsave = () => {
     onUnsave(paper.id, paper.external_url || paper.url || null)
@@ -226,11 +246,19 @@ function SavedPaperListItem({
         {paper.venue ? (
           <div className="text-xs text-muted-foreground">{paper.venue}</div>
         ) : null}
+        {judgeSummary ? (
+          <p className="text-sm leading-6 text-foreground/85">{judgeSummary}</p>
+        ) : null}
 
         <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] md:text-xs text-muted-foreground">
           <Badge variant="outline" className="text-[11px] md:text-xs">
             {source}
           </Badge>
+          {provenanceLabels.slice(0, 3).map((label) => (
+            <Badge key={`${paper.id}-${label}`} variant="secondary" className="text-[11px] md:text-xs">
+              {label}
+            </Badge>
+          ))}
           {savedDate !== "-" ? <span>Saved · {savedDate}</span> : null}
           {publishedDate !== "-" ? <span>Published · {publishedDate}</span> : null}
           {judgeScore !== "-" ? (
@@ -309,9 +337,9 @@ function SavedPaperListItem({
 }
 
 export default function SavedPapersList() {
-  const { data: session } = useSession()
   const [items, setItems] = useState<SavedPaperItem[]>([])
   const [sortBy, setSortBy] = useState<SavedPaperSort>("saved_at")
+  const [viewFilter, setViewFilter] = useState<SavedPaperView>("all")
   const [page, setPage] = useState<number>(1)
   const [loading, setLoading] = useState<boolean>(true)
   const [error, setError] = useState<string | null>(null)
@@ -408,15 +436,27 @@ export default function SavedPapersList() {
     loadSavedPapers().catch(() => {})
   }, [loadSavedPapers])
 
+  const filteredItems = useMemo(() => {
+    return items.filter((item) => matchesSavedPaperView(item, viewFilter))
+  }, [items, viewFilter])
+
+  const viewCounts = useMemo(() => {
+    return {
+      all: items.length,
+      workflow: items.filter((item) => matchesSavedPaperView(item, "workflow")).length,
+      manual: items.filter((item) => matchesSavedPaperView(item, "manual")).length,
+    }
+  }, [items])
+
   const totalPages = useMemo(() => {
-    return Math.max(1, Math.ceil(items.length / PAGE_SIZE))
-  }, [items.length])
+    return Math.max(1, Math.ceil(filteredItems.length / PAGE_SIZE))
+  }, [filteredItems.length])
 
   const pagedItems = useMemo(() => {
     const safePage = Math.min(page, totalPages)
     const start = (safePage - 1) * PAGE_SIZE
-    return items.slice(start, start + PAGE_SIZE)
-  }, [items, page, totalPages])
+    return filteredItems.slice(start, start + PAGE_SIZE)
+  }, [filteredItems, page, totalPages])
 
   const hasSelection = selectedIds.size > 0
   const selectedCollection = useMemo(
@@ -436,15 +476,24 @@ export default function SavedPapersList() {
     })
   }, [])
 
-  const toggleSelectAll = useCallback(() => {
-    if (selectedIds.size === pagedItems.length && pagedItems.length > 0) {
-      setSelectedIds(new Set())
-    } else {
-      setSelectedIds(new Set(pagedItems.map((item) => item.paper.id)))
-    }
-  }, [selectedIds.size, pagedItems])
+  const selectedOnPageCount = useMemo(() => {
+    return pagedItems.filter((item) => selectedIds.has(item.paper.id)).length
+  }, [pagedItems, selectedIds])
 
-  const isAllSelected = pagedItems.length > 0 && selectedIds.size === pagedItems.length
+  const toggleSelectAll = useCallback(() => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      const pageIds = pagedItems.map((item) => item.paper.id)
+      if (pagedItems.length > 0 && pageIds.every((paperId) => next.has(paperId))) {
+        pageIds.forEach((paperId) => next.delete(paperId))
+      } else {
+        pageIds.forEach((paperId) => next.add(paperId))
+      }
+      return next
+    })
+  }, [pagedItems])
+
+  const isAllSelected = pagedItems.length > 0 && selectedOnPageCount === pagedItems.length
 
   const unsavePaper = useCallback(
     async (paperId: number, externalId: string | null) => {
@@ -882,10 +931,31 @@ export default function SavedPapersList() {
           <div>
             <CardTitle>Saved Papers</CardTitle>
             <CardDescription>
-              View saved items, sort by score/time, and update reading status.
+              One library for manual saves, workflow-reviewed papers, and import provenance.
             </CardDescription>
           </div>
           <div className="flex items-center gap-2">
+            <div className="inline-flex rounded-lg border bg-muted/40 p-1">
+              {([
+                ["all", "All"],
+                ["workflow", "Workflow Reviewed"],
+                ["manual", "Manual Saves"],
+              ] as const).map(([value, label]) => (
+                <Button
+                  key={value}
+                  type="button"
+                  size="sm"
+                  variant={viewFilter === value ? "secondary" : "ghost"}
+                  className="h-8 rounded-md px-3"
+                  onClick={() => {
+                    setViewFilter(value)
+                    setPage(1)
+                  }}
+                >
+                  {label} ({viewCounts[value]})
+                </Button>
+              ))}
+            </div>
             <label className="text-sm text-muted-foreground" htmlFor="saved-sort">
               Sort
             </label>
@@ -993,8 +1063,14 @@ export default function SavedPapersList() {
           <div className="flex items-center gap-2 py-8 text-sm text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" /> Loading saved papers...
           </div>
-        ) : items.length === 0 ? (
-          <div className="py-8 text-sm text-muted-foreground">No saved papers yet.</div>
+        ) : filteredItems.length === 0 ? (
+          <div className="py-8 text-sm text-muted-foreground">
+            {viewFilter === "workflow"
+              ? "No workflow-reviewed papers yet."
+              : viewFilter === "manual"
+                ? "No manual saves yet."
+                : "No saved papers yet."}
+          </div>
         ) : (
           <>
             <div className="rounded-md border bg-card">
@@ -1008,7 +1084,10 @@ export default function SavedPapersList() {
                   <span>Select all</span>
                 </div>
                 <div>
-                  <span>{items.length} papers</span>
+                  <span>
+                    {filteredItems.length} shown
+                    {filteredItems.length !== items.length ? ` / ${items.length} total` : ""}
+                  </span>
                 </div>
               </div>
               <div>
@@ -1038,7 +1117,7 @@ export default function SavedPapersList() {
             <div className="mt-3 flex items-center justify-between text-sm text-muted-foreground">
               <span>
                 Showing {(Math.min(page, totalPages) - 1) * PAGE_SIZE + 1} -{" "}
-                {Math.min(Math.min(page, totalPages) * PAGE_SIZE, items.length)} of {items.length}
+                {Math.min(Math.min(page, totalPages) * PAGE_SIZE, filteredItems.length)} of {filteredItems.length}
               </span>
               <div className="flex items-center gap-2">
                 <Button

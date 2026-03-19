@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useMemo, useEffect, type CSSProperties } from "react"
+import { useRouter } from "next/navigation"
 import { useStudioStore, type StudioPaper } from "@/lib/store/studio-store"
 import { NewPaperModal } from "./NewPaperModal"
 import { deleteProjectFiles } from "@/lib/runbook/deleteProjectFiles"
@@ -17,7 +18,7 @@ import {
     AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { cn } from "@/lib/utils"
-import { Plus, Search, Trash2, FlaskConical, Loader2 } from "lucide-react"
+import { Plus, Search, Trash2, FlaskConical, Loader2, FolderOpen, MessageSquare, ArrowRight } from "lucide-react"
 
 const STOP_WORDS = new Set([
     "a", "an", "the", "and", "or", "of", "for", "to", "in", "on", "with", "from", "by", "at", "is", "are",
@@ -68,18 +69,6 @@ function PixelCornerIcon({
             aria-hidden="true"
         />
     )
-}
-
-function buildDisplayWords(title: string): string[] {
-    const cleaned = (title || "")
-        .replace(/[^A-Za-z0-9\s-]/g, " ")
-        .split(/\s+/)
-        .map((word) => word.trim())
-        .filter(Boolean)
-        .filter((word) => !STOP_WORDS.has(word.toLowerCase()))
-    if (cleaned.length === 0) return ["untitled"]
-    const words = cleaned.slice(0, 2).map((word) => word.toLowerCase())
-    return words
 }
 
 function summarizeAbstract(abstract: string): string {
@@ -133,7 +122,59 @@ function inferTags(paper: StudioPaper): { shown: string[]; extraCount: number } 
     return { shown, extraCount }
 }
 
+function formatPaperStatus(status: StudioPaper["status"]): string {
+    if (status === "running") return "Running"
+    if (status === "completed") return "Completed"
+    return "Draft"
+}
+
+function paperStatusClassName(status: StudioPaper["status"]): string {
+    if (status === "running") return "border-amber-200 bg-amber-50 text-amber-700"
+    if (status === "completed") return "border-emerald-200 bg-emerald-50 text-emerald-700"
+    return "border-slate-200 bg-[#f7f8f4] text-slate-600"
+}
+
+function buildPaperStageBadges(paper: StudioPaper): Array<{
+    label: string
+    className: string
+}> {
+    const badges = [
+        paper.outputDir
+            ? {
+                label: "workspace ready",
+                className: "border-emerald-200 bg-emerald-50 text-emerald-700",
+            }
+            : {
+                label: "review workspace",
+                className: "border-slate-200 bg-[#f7f8f4] text-slate-600",
+            },
+        paper.contextPackId
+            ? {
+                label: "context ready",
+                className: "border-emerald-200 bg-emerald-50 text-emerald-700",
+            }
+            : {
+                label: "context pending",
+                className: "border-slate-200 bg-[#f7f8f4] text-slate-600",
+            },
+    ]
+
+    if ((paper.taskIds?.length ?? 0) > 0 || paper.boardSessionId) {
+        badges.push({
+            label: "thread started",
+            className: "border-sky-200 bg-sky-50 text-sky-700",
+        })
+    }
+
+    return badges
+}
+
+function hasMonitorEntry(paper: StudioPaper): boolean {
+    return Boolean(paper.boardSessionId || (paper.taskIds?.length ?? 0) > 0)
+}
+
 export function PaperGallery() {
+    const router = useRouter()
     const { papers, selectPaper, deletePaper, updatePaper } = useStudioStore()
     const [query, setQuery] = useState("")
     const [activeFilter, setActiveFilter] = useState<"all" | "draft" | "running" | "completed">("all")
@@ -146,7 +187,6 @@ export function PaperGallery() {
     } | null>(null)
     const [deleting, setDeleting] = useState(false)
     const [deleteError, setDeleteError] = useState<string | null>(null)
-    const [gridColumns, setGridColumns] = useState(4)
     const [spriteFrame, setSpriteFrame] = useState(0)
 
     useEffect(() => {
@@ -155,25 +195,6 @@ export function PaperGallery() {
             setSpriteFrame((prev) => (prev + 1) % 6)
         }, 140)
         return () => window.clearInterval(interval)
-    }, [])
-
-    useEffect(() => {
-        const updateColumns = () => {
-            const width = window.innerWidth
-            if (width >= 1280) {
-                setGridColumns(4)
-                return
-            }
-            if (width >= 768) {
-                setGridColumns(2)
-                return
-            }
-            setGridColumns(1)
-        }
-
-        updateColumns()
-        window.addEventListener("resize", updateColumns)
-        return () => window.removeEventListener("resize", updateColumns)
     }, [])
 
     useEffect(() => {
@@ -277,6 +298,18 @@ export function PaperGallery() {
                 new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
         )
     }, [statusFilteredPapers])
+    const totalPaperCount = papers.length
+    const draftCount = papers.filter((paper) => paper.status === "draft").length
+    const runningCount = papers.filter((paper) => paper.status === "running").length
+    const completedCount = papers.filter((paper) => paper.status === "completed").length
+    const featuredPaper =
+        !query.trim() && activeFilter === "all" && sortedPapers.length > 1 ? sortedPapers[0] : null
+    const remainingPapers = featuredPaper ? sortedPapers.slice(1) : sortedPapers
+    const latestMonitorPaper = useMemo(
+        () =>
+            sortedPapers.find((paper) => hasMonitorEntry(paper)) ?? null,
+        [sortedPapers],
+    )
 
     const handleDeleteClick = (
         e: React.MouseEvent,
@@ -335,17 +368,54 @@ export function PaperGallery() {
             `}</style>
             {/* Header */}
             <div className="border-b border-zinc-300 bg-background px-6 py-5 shrink-0">
-                <div className="mx-auto w-full max-w-[1360px] flex items-center justify-between">
-                    <div>
-                        <h1 className="text-xl font-semibold">DeepCode Studio</h1>
-                        <p className="mt-0.5 text-sm text-zinc-500">
-                            Paper-to-code reproduction workspace
-                        </p>
+                <div className="mx-auto flex w-full max-w-[1360px] flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+                    <div className="max-w-[720px] space-y-3">
+                        <span className="inline-flex rounded-full border border-zinc-300 bg-white px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                            Step 1 of 3
+                        </span>
+                        <div>
+                            <h1 className="text-[28px] font-semibold tracking-[-0.03em] text-zinc-950">
+                                Choose a paper to start Studio
+                            </h1>
+                            <p className="mt-1.5 text-sm leading-6 text-zinc-500">
+                                Pick an existing paper or add a new one. Workspace review and Claude Code chat happen next,
+                                and Monitor stays secondary until you need raw execution detail.
+                            </p>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                            <span className="rounded-full border border-zinc-300 bg-white px-2.5 py-1 text-[11px] text-zinc-600">
+                                {totalPaperCount} papers
+                            </span>
+                            <span className="rounded-full border border-zinc-300 bg-white px-2.5 py-1 text-[11px] text-zinc-600">
+                                {draftCount} draft
+                            </span>
+                            <span className="rounded-full border border-zinc-300 bg-white px-2.5 py-1 text-[11px] text-zinc-600">
+                                {runningCount} running
+                            </span>
+                            <span className="rounded-full border border-zinc-300 bg-white px-2.5 py-1 text-[11px] text-zinc-600">
+                                {completedCount} completed
+                            </span>
+                        </div>
                     </div>
-                    <Button onClick={() => setNewPaperOpen(true)} size="sm">
-                        <Plus className="h-4 w-4 mr-1.5" />
-                        New Paper
-                    </Button>
+                    <div className="flex items-center gap-2">
+                        {latestMonitorPaper ? (
+                            <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="h-10 rounded-full border-zinc-300 bg-white px-4 text-zinc-700"
+                                onClick={() =>
+                                    router.push(`/studio/agent-board?paperId=${encodeURIComponent(latestMonitorPaper.id)}`)
+                                }
+                            >
+                                Monitor latest
+                            </Button>
+                        ) : null}
+                        <Button onClick={() => setNewPaperOpen(true)} size="sm" className="h-10 rounded-full px-4">
+                            <Plus className="mr-1.5 h-4 w-4" />
+                            Add Paper
+                        </Button>
+                    </div>
                 </div>
             </div>
 
@@ -359,157 +429,410 @@ export function PaperGallery() {
                             value={query}
                             onChange={(e) => setQuery(e.target.value)}
                             placeholder="Search papers..."
-                            className="h-11 rounded-none border-zinc-300 bg-white pl-9"
+                            className="h-11 rounded-full border-zinc-300 bg-white pl-9"
                         />
                     </div>
 
-                    {/* Filter strip to mirror catalog-like browsing */}
-                    <div className="mb-5 flex flex-wrap items-center gap-1 border-b border-zinc-300 pb-2 text-sm">
-                        <button
-                            onClick={() => setActiveFilter("all")}
-                            className={cn(
-                                "rounded px-2 py-1",
-                                activeFilter === "all" ? "font-medium text-zinc-900" : "text-zinc-600 hover:text-zinc-900",
-                            )}
-                        >
-                            All Papers ({filteredPapers.length})
-                        </button>
-                        <span className="px-1 text-zinc-300">|</span>
-                        <button
-                            onClick={() => setActiveFilter("draft")}
-                            className={cn(
-                                "rounded px-2 py-1",
-                                activeFilter === "draft" ? "font-medium text-zinc-900" : "text-zinc-600 hover:text-zinc-900",
-                            )}
-                        >
-                            Drafts ({filteredPapers.filter((paper) => paper.status === "draft").length})
-                        </button>
-                        <button
-                            onClick={() => setActiveFilter("running")}
-                            className={cn(
-                                "rounded px-2 py-1",
-                                activeFilter === "running" ? "font-medium text-zinc-900" : "text-zinc-600 hover:text-zinc-900",
-                            )}
-                        >
-                            Running ({filteredPapers.filter((paper) => paper.status === "running").length})
-                        </button>
-                        <button
-                            onClick={() => setActiveFilter("completed")}
-                            className={cn(
-                                "rounded px-2 py-1",
-                                activeFilter === "completed" ? "font-medium text-zinc-900" : "text-zinc-600 hover:text-zinc-900",
-                            )}
-                        >
-                            Completed ({filteredPapers.filter((paper) => paper.status === "completed").length})
-                        </button>
+                    <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+                        <div className="flex flex-wrap gap-2">
+                            {[
+                                {
+                                    key: "all" as const,
+                                    label: `All Papers (${filteredPapers.length})`,
+                                },
+                                {
+                                    key: "draft" as const,
+                                    label: `Drafts (${filteredPapers.filter((paper) => paper.status === "draft").length})`,
+                                },
+                                {
+                                    key: "running" as const,
+                                    label: `Running (${filteredPapers.filter((paper) => paper.status === "running").length})`,
+                                },
+                                {
+                                    key: "completed" as const,
+                                    label: `Completed (${filteredPapers.filter((paper) => paper.status === "completed").length})`,
+                                },
+                            ].map((filter) => (
+                                <button
+                                    key={filter.key}
+                                    onClick={() => setActiveFilter(filter.key)}
+                                    className={cn(
+                                        "rounded-full border px-3 py-1.5 text-[12px] transition-colors",
+                                        activeFilter === filter.key
+                                            ? "border-zinc-900 bg-zinc-900 text-white"
+                                            : "border-zinc-300 bg-white text-zinc-600 hover:border-zinc-400 hover:text-zinc-900",
+                                    )}
+                                >
+                                    {filter.label}
+                                </button>
+                            ))}
+                        </div>
+
+                        <p className="text-[12px] text-zinc-500">
+                            {sortedPapers.length} paper{sortedPapers.length === 1 ? "" : "s"} ready for the next Studio step
+                        </p>
                     </div>
 
                     {sortedPapers.length === 0 ? (
                         /* Empty state */
-                        <div className="flex flex-col items-center justify-center border border-zinc-300 bg-white py-24 text-center">
-                            <div className="rounded-full bg-muted p-4 mb-4">
-                                <FlaskConical className="h-8 w-8 text-muted-foreground" />
-                            </div>
-                            <h2 className="text-lg font-medium mb-1">
-                                {query ? "No papers found" : "Add your first paper"}
-                            </h2>
-                            <p className="text-sm text-muted-foreground mb-4 max-w-sm">
-                                {query
-                                    ? "Try a different search term."
-                                    : "Start by adding a paper to reproduce its code. Paste a title and abstract to get started."}
-                            </p>
-                            {!query && (
-                                <Button
-                                    onClick={() => setNewPaperOpen(true)}
-                                    size="sm"
-                                >
-                                    <Plus className="h-4 w-4 mr-1.5" />
-                                    Add Paper
-                                </Button>
-                            )}
-                        </div>
-                    ) : (
-                        /* Tiled catalog grid (Image-2 style) */
-                        <div className="grid grid-cols-1 gap-0 md:grid-cols-2 xl:grid-cols-4">
-                            {sortedPapers.map((paper, index) => {
-                                const rowIndex = Math.floor(index / gridColumns)
-                                const colIndex = index % gridColumns
-                                const isFirstRow = rowIndex === 0
-                                const isFirstCol = colIndex === 0
-                                return (
-                                    <article
-                                        key={paper.id}
-                                        onClick={() => selectPaper(paper.id)}
-                                        onKeyDown={(event) => {
-                                            if (event.key === "Enter" || event.key === " ") {
-                                                event.preventDefault()
-                                                selectPaper(paper.id)
-                                            }
-                                        }}
-                                        role="button"
-                                        tabIndex={0}
-                                        className={cn(
-                                            "group relative flex min-h-[300px] cursor-pointer flex-col border-r border-b border-zinc-300 bg-background p-6 text-left transition-colors hover:bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 focus-visible:ring-offset-2",
-                                            isFirstRow && "border-t",
-                                            isFirstCol && "border-l",
-                                        )}
-                                    >
-                                        {/* Delete button */}
-                                        <button
-                                            onClick={(e) =>
-                                                handleDeleteClick(e, paper)
-                                            }
-                                            className="absolute right-3 top-3 z-10 rounded-md p-1.5 opacity-0 transition-all hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100"
-                                            title="Delete paper"
-                                        >
-                                            <Trash2 className="h-3.5 w-3.5" />
-                                        </button>
+                        <div className="rounded-[30px] border border-zinc-300 bg-white px-6 py-8 shadow-[0_18px_40px_rgba(15,23,42,0.04)]">
+                            <div className="mx-auto max-w-[920px] text-center">
+                                <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-3xl border border-zinc-300 bg-[#f7f8f4]">
+                                    <FlaskConical className="h-7 w-7 text-zinc-500" />
+                                </div>
+                                <h2 className="mt-5 text-[26px] font-semibold tracking-[-0.03em] text-zinc-950">
+                                    {query ? "No papers match this search" : "Add your first paper"}
+                                </h2>
+                                <p className="mx-auto mt-2 max-w-[38rem] text-sm leading-6 text-zinc-500">
+                                    {query
+                                        ? "Try a different title, keyword, or abstract phrase."
+                                        : "Start with a paper title and abstract. Studio will guide the next steps: workspace review first, then Claude Code chat, then Monitor only when execution detail matters."}
+                                </p>
 
-                                        {/* Header row: icon + abbreviation */}
-                                        <div className="mb-4 flex items-center gap-4">
-                                            <PixelCornerIcon
-                                                frame={spriteFrame}
-                                                style={{
-                                                    animation: "paperRowSync 2.2s ease-in-out infinite",
-                                                    animationDelay: `${rowIndex * 140}ms`,
-                                                }}
-                                            />
-                                            <div className="leading-[0.95]">
-                                                {buildDisplayWords(paper.title).map((word) => (
-                                                    <p
-                                                        key={`${paper.id}-${word}`}
-                                                        className="text-[18px] font-bold tracking-[-0.01em] text-zinc-900"
-                                                    >
-                                                        {word}
+                                {query ? null : (
+                                    <>
+                                        <div className="mt-6 grid gap-3 text-left md:grid-cols-3">
+                                            <div className="rounded-[22px] border border-zinc-300 bg-[#fafaf7] px-4 py-4">
+                                                <div className="flex items-center gap-2">
+                                                    <FlaskConical className="h-4 w-4 text-zinc-500" />
+                                                    <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                                                        1. Add paper
                                                     </p>
-                                                ))}
+                                                </div>
+                                                <p className="mt-2 text-sm font-medium text-zinc-900">
+                                                    Paste the title and abstract for the paper you want to reproduce.
+                                                </p>
+                                            </div>
+                                            <div className="rounded-[22px] border border-zinc-300 bg-[#fafaf7] px-4 py-4">
+                                                <div className="flex items-center gap-2">
+                                                    <FolderOpen className="h-4 w-4 text-zinc-500" />
+                                                    <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                                                        2. Review workspace
+                                                    </p>
+                                                </div>
+                                                <p className="mt-2 text-sm font-medium text-zinc-900">
+                                                    Confirm where generated code should live before the Studio session starts.
+                                                </p>
+                                            </div>
+                                            <div className="rounded-[22px] border border-zinc-300 bg-[#fafaf7] px-4 py-4">
+                                                <div className="flex items-center gap-2">
+                                                    <MessageSquare className="h-4 w-4 text-zinc-500" />
+                                                    <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                                                        3. Start chat
+                                                    </p>
+                                                </div>
+                                                <p className="mt-2 text-sm font-medium text-zinc-900">
+                                                    Open a focused Claude Code thread and keep Monitor for compressed execution detail only.
+                                                </p>
                                             </div>
                                         </div>
 
-                                        {/* Main content */}
-                                        <div className="flex-1 space-y-2">
-                                            <p className="line-clamp-4 text-[17px] leading-[1.4] text-zinc-500">
-                                                {summarizeAbstract(paper.abstract)}
-                                            </p>
-                                            <p className="line-clamp-1 text-[13px] leading-5 text-zinc-500">
-                                                {inferAuthor(paper)}
-                                            </p>
-                                            <p className="line-clamp-2 text-[13px] leading-5 text-zinc-500">
-                                                {(() => {
-                                                    const tags = inferTags(paper)
-                                                    if (tags.shown.length === 0) return "#research #paper"
-                                                    const prefix = tags.shown.map((tag) => `#${tag}`).join(" ")
-                                                    return tags.extraCount > 0 ? `${prefix} +${tags.extraCount} more` : prefix
-                                                })()}
+                                        <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
+                                            <Button
+                                                onClick={() => setNewPaperOpen(true)}
+                                                size="sm"
+                                                className="h-10 rounded-full px-4"
+                                            >
+                                                <Plus className="mr-1.5 h-4 w-4" />
+                                                Add Paper
+                                            </Button>
+                                            <span className="rounded-full border border-zinc-300 bg-[#f7f8f4] px-3 py-1 text-[11px] text-zinc-600">
+                                                Review before runtime
+                                            </span>
+                                            <span className="rounded-full border border-zinc-300 bg-[#f7f8f4] px-3 py-1 text-[11px] text-zinc-600">
+                                                Chat first, Monitor second
+                                            </span>
+                                        </div>
+                                    </>
+                                )}
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="space-y-4">
+                            {featuredPaper ? (
+                                <article
+                                    onClick={() => selectPaper(featuredPaper.id)}
+                                    onKeyDown={(event) => {
+                                        if (event.key === "Enter" || event.key === " ") {
+                                            event.preventDefault()
+                                            selectPaper(featuredPaper.id)
+                                        }
+                                    }}
+                                    role="button"
+                                    tabIndex={0}
+                                    className="group rounded-[30px] border border-zinc-300 bg-white px-5 py-5 text-left shadow-[0_18px_40px_rgba(15,23,42,0.04)] transition-[border-color,box-shadow] hover:border-zinc-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 focus-visible:ring-offset-2"
+                                >
+                                    <div className="flex flex-wrap items-start justify-between gap-3">
+                                        <div>
+                                            <span className="inline-flex rounded-full border border-zinc-300 bg-[#f7f8f4] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                                                Resume latest
+                                            </span>
+                                            <h2 className="mt-3 text-[26px] font-semibold tracking-[-0.03em] text-zinc-950">
+                                                {featuredPaper.title}
+                                            </h2>
+                                            <p className="mt-2 max-w-[48rem] text-sm leading-6 text-zinc-500">
+                                                {summarizeAbstract(featuredPaper.abstract)}
                                             </p>
                                         </div>
+                                        <span className={cn(
+                                            "rounded-full border px-2.5 py-1 text-[11px] font-medium",
+                                            paperStatusClassName(featuredPaper.status),
+                                        )}>
+                                            {formatPaperStatus(featuredPaper.status)}
+                                        </span>
+                                    </div>
 
-                                        <p className="mt-4 text-[12px] text-zinc-500">
-                                            Updated {formatRelativeTime(paper.updatedAt)}
-                                        </p>
-                                    </article>
-                                )
-                            })}
+                                    <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+                                        <div className="flex gap-4">
+                                            <PixelCornerIcon
+                                                frame={spriteFrame}
+                                                size={84}
+                                                style={{
+                                                    animation: "paperRowSync 2.2s ease-in-out infinite",
+                                                }}
+                                            />
+                                            <div className="min-w-0 space-y-3">
+                                                <p className="text-sm text-zinc-600">
+                                                    {inferAuthor(featuredPaper)}
+                                                </p>
+                                                <div className="flex flex-wrap gap-2">
+                                                    {buildPaperStageBadges(featuredPaper).map((badge) => (
+                                                        <span
+                                                            key={badge.label}
+                                                            className={cn(
+                                                                "rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-[0.12em]",
+                                                                badge.className,
+                                                            )}
+                                                        >
+                                                            {badge.label}
+                                                        </span>
+                                                    ))}
+                                                </div>
+                                                <p className="text-[13px] leading-6 text-zinc-500">
+                                                    {(() => {
+                                                        const tags = inferTags(featuredPaper)
+                                                        if (tags.shown.length === 0) return "#research #paper"
+                                                        const prefix = tags.shown.map((tag) => `#${tag}`).join(" ")
+                                                        return tags.extraCount > 0 ? `${prefix} +${tags.extraCount} more` : prefix
+                                                    })()}
+                                                </p>
+                                            </div>
+                                        </div>
+
+                                        <div className="flex h-full flex-col rounded-[24px] border border-zinc-300 bg-[linear-gradient(180deg,#fafaf7_0%,#f4f5ef_100%)] px-4 py-4">
+                                            <div className="flex items-start justify-between gap-3">
+                                                <div>
+                                                    <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                                                        Next Studio move
+                                                    </p>
+                                                    <p className="mt-1 text-[18px] font-semibold tracking-[-0.02em] text-zinc-950">
+                                                        Continue in Studio
+                                                    </p>
+                                                </div>
+                                                <span className="shrink-0 rounded-full border border-zinc-300 bg-white px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-zinc-500">
+                                                    Workspace first
+                                                </span>
+                                            </div>
+                                            <p className="mt-2 text-sm leading-6 text-zinc-700">
+                                                Review workspace, then continue in Claude Code chat.
+                                            </p>
+                                            <div className="mt-3 grid gap-2">
+                                                <div className="rounded-[16px] border border-zinc-300/80 bg-white/80 px-3 py-2">
+                                                    <div className="flex items-center gap-2">
+                                                        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-zinc-300 bg-[#f7f8f4] text-[10px] font-semibold text-zinc-600">
+                                                            1
+                                                        </span>
+                                                        <FolderOpen className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
+                                                        <p className="text-[11px] font-medium text-zinc-900">Review workspace</p>
+                                                    </div>
+                                                    <p className="mt-1 pl-7 text-[10px] leading-5 text-zinc-500">
+                                                        Confirm where generated code should live before the next run.
+                                                    </p>
+                                                </div>
+                                                <div className="rounded-[16px] border border-zinc-300/80 bg-white/80 px-3 py-2">
+                                                    <div className="flex items-center gap-2">
+                                                        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-zinc-300 bg-[#f7f8f4] text-[10px] font-semibold text-zinc-600">
+                                                            2
+                                                        </span>
+                                                        <MessageSquare className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
+                                                        <p className="text-[11px] font-medium text-zinc-900">Continue in chat</p>
+                                                    </div>
+                                                    <p className="mt-1 pl-7 text-[10px] leading-5 text-zinc-500">
+                                                        Keep Monitor secondary unless you need worker or tool detail.
+                                                    </p>
+                                                </div>
+                                            </div>
+                                            <div className="mt-auto border-t border-zinc-300 pt-3">
+                                                <div className="flex flex-wrap items-center justify-between gap-2 text-[12px] text-zinc-500">
+                                                    <span>Updated {formatRelativeTime(featuredPaper.updatedAt)}</span>
+                                                    {hasMonitorEntry(featuredPaper) ? (
+                                                        <span className="rounded-full border border-zinc-300 bg-white px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-zinc-500">
+                                                            Monitor ready
+                                                        </span>
+                                                    ) : null}
+                                                </div>
+                                                <Button
+                                                    type="button"
+                                                    className="mt-3 h-10 w-full rounded-full px-4"
+                                                    onClick={(event) => {
+                                                        event.stopPropagation()
+                                                        selectPaper(featuredPaper.id)
+                                                    }}
+                                                >
+                                                    Continue in Studio
+                                                    <ArrowRight className="ml-1.5 h-4 w-4" />
+                                                </Button>
+                                                <div className="mt-2 flex flex-wrap items-center gap-2">
+                                                    {hasMonitorEntry(featuredPaper) ? (
+                                                        <Button
+                                                            type="button"
+                                                            variant="outline"
+                                                            className="h-9 rounded-full border-zinc-300 bg-white px-4 text-zinc-700"
+                                                            onClick={(event) => {
+                                                                event.stopPropagation()
+                                                                router.push(`/studio/agent-board?paperId=${encodeURIComponent(featuredPaper.id)}`)
+                                                            }}
+                                                        >
+                                                            Monitor
+                                                        </Button>
+                                                    ) : null}
+                                                    <button
+                                                        type="button"
+                                                        onClick={(event) => handleDeleteClick(event, featuredPaper)}
+                                                        className="ml-auto inline-flex h-9 w-9 items-center justify-center rounded-full text-zinc-500 transition-colors hover:bg-white hover:text-rose-600"
+                                                        title="Delete paper"
+                                                        aria-label="Delete paper"
+                                                    >
+                                                        <Trash2 className="h-3.5 w-3.5" />
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </article>
+                            ) : null}
+
+                            {remainingPapers.length > 0 ? (
+                                <div className="space-y-3">
+                                    {featuredPaper ? (
+                                        <div className="flex items-center justify-between gap-3 px-1">
+                                            <h3 className="text-[13px] font-semibold uppercase tracking-[0.14em] text-zinc-500">
+                                                More papers
+                                            </h3>
+                                            <p className="text-[12px] text-zinc-500">
+                                                Choose one and continue straight into Studio
+                                            </p>
+                                        </div>
+                                    ) : null}
+
+                                    {remainingPapers.map((paper, index) => (
+                                        <article
+                                            key={paper.id}
+                                            onClick={() => selectPaper(paper.id)}
+                                            onKeyDown={(event) => {
+                                                if (event.key === "Enter" || event.key === " ") {
+                                                    event.preventDefault()
+                                                    selectPaper(paper.id)
+                                                }
+                                            }}
+                                            role="button"
+                                            tabIndex={0}
+                                            className="group rounded-[26px] border border-zinc-300 bg-white px-4 py-4 text-left transition-[border-color,box-shadow] hover:border-zinc-400 hover:shadow-[0_12px_28px_rgba(15,23,42,0.04)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 focus-visible:ring-offset-2"
+                                        >
+                                            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                                                <div className="flex min-w-0 gap-4">
+                                                    <PixelCornerIcon
+                                                        frame={spriteFrame}
+                                                        size={68}
+                                                        style={{
+                                                            animation: "paperRowSync 2.2s ease-in-out infinite",
+                                                            animationDelay: `${index * 120}ms`,
+                                                        }}
+                                                    />
+                                                    <div className="min-w-0">
+                                                        <div className="flex flex-wrap items-center gap-2">
+                                                            <h3 className="text-[18px] font-semibold tracking-[-0.02em] text-zinc-950">
+                                                                {paper.title}
+                                                            </h3>
+                                                            <span className={cn(
+                                                                "rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.12em]",
+                                                                paperStatusClassName(paper.status),
+                                                            )}>
+                                                                {formatPaperStatus(paper.status)}
+                                                            </span>
+                                                        </div>
+                                                        <p className="mt-2 line-clamp-2 text-sm leading-6 text-zinc-500">
+                                                            {summarizeAbstract(paper.abstract)}
+                                                        </p>
+                                                        <div className="mt-3 flex flex-wrap items-center gap-2 text-[12px] text-zinc-500">
+                                                            <span>{inferAuthor(paper)}</span>
+                                                            <span className="text-zinc-300">/</span>
+                                                            <span>Updated {formatRelativeTime(paper.updatedAt)}</span>
+                                                        </div>
+                                                        <div className="mt-3 flex flex-wrap gap-2">
+                                                            {buildPaperStageBadges(paper).map((badge) => (
+                                                                <span
+                                                                    key={badge.label}
+                                                                    className={cn(
+                                                                        "rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-[0.12em]",
+                                                                        badge.className,
+                                                                    )}
+                                                                >
+                                                                    {badge.label}
+                                                                </span>
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                <div className="flex min-w-[220px] shrink-0 flex-col gap-2">
+                                                    <div className="flex items-center justify-between gap-2 text-[11px] text-zinc-500">
+                                                        <span>Next Studio move</span>
+                                                        <span className="rounded-full border border-zinc-300 bg-[#f7f8f4] px-2 py-0.5 text-[9px] uppercase tracking-[0.12em] text-zinc-500">
+                                                            {paper.outputDir ? "Chat ready" : "Workspace first"}
+                                                        </span>
+                                                    </div>
+                                                    <Button
+                                                        type="button"
+                                                        className="h-9 rounded-full px-4"
+                                                        onClick={(event) => {
+                                                            event.stopPropagation()
+                                                            selectPaper(paper.id)
+                                                        }}
+                                                    >
+                                                        Continue in Studio
+                                                        <ArrowRight className="ml-1.5 h-4 w-4" />
+                                                    </Button>
+                                                    <div className="flex items-center gap-2">
+                                                        {hasMonitorEntry(paper) ? (
+                                                            <Button
+                                                                type="button"
+                                                                variant="outline"
+                                                                className="h-9 rounded-full border-zinc-300 bg-white px-4 text-zinc-700"
+                                                                onClick={(event) => {
+                                                                    event.stopPropagation()
+                                                                    router.push(`/studio/agent-board?paperId=${encodeURIComponent(paper.id)}`)
+                                                                }}
+                                                            >
+                                                                Monitor
+                                                            </Button>
+                                                        ) : null}
+                                                        <button
+                                                            type="button"
+                                                            onClick={(event) => handleDeleteClick(event, paper)}
+                                                            className="ml-auto inline-flex h-9 w-9 items-center justify-center rounded-full text-zinc-500 transition-colors hover:bg-white hover:text-rose-600"
+                                                            title="Delete paper"
+                                                            aria-label="Delete paper"
+                                                        >
+                                                            <Trash2 className="h-3.5 w-3.5" />
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </article>
+                                    ))}
+                                </div>
+                            ) : null}
                         </div>
                     )}
                 </div>

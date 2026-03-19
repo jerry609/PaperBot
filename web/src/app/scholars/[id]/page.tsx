@@ -8,7 +8,6 @@ import {
   Gauge,
   Network,
   Sparkles,
-  Workflow,
 } from "lucide-react"
 
 import { ImpactRadar } from "@/components/paper/ImpactRadar"
@@ -29,11 +28,6 @@ function buildResearchLink(query: string, trackId?: number): string {
   const qs = new URLSearchParams({ query })
   if (trackId) qs.set("track_id", String(trackId))
   return `/research?${qs.toString()}`
-}
-
-function buildWorkflowConsoleLink(query: string): string {
-  const qs = new URLSearchParams({ query })
-  return `/workflows?${qs.toString()}`
 }
 
 export default async function ScholarProfilePage({ params }: { params: Promise<{ id: string }> }) {
@@ -58,7 +52,6 @@ export default async function ScholarProfilePage({ params }: { params: Promise<{
   const evidenceTopicLink = buildResearchLink(`${scholar.name} ${primaryTopic}`, activeTrack?.id)
   const evidenceTrendLink = buildResearchLink(`${scholar.name} recent papers`, activeTrack?.id)
   const actionLink = buildResearchLink(`${scholar.keywords?.[0] || scholar.name}`, activeTrack?.id)
-  const workflowConsoleLink = buildWorkflowConsoleLink(`${scholar.keywords?.[0] || scholar.name}`)
 
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 p-4 pb-10 sm:p-6">
@@ -99,7 +92,7 @@ export default async function ScholarProfilePage({ params }: { params: Promise<{
             <Link href={actionLink}>Open in Research</Link>
           </Button>
           <Button asChild variant="outline">
-            <Link href={workflowConsoleLink}>Open Workflows</Link>
+            <Link href="/settings">Manage Alerts</Link>
           </Button>
         </div>
       </div>
@@ -359,12 +352,12 @@ export default async function ScholarProfilePage({ params }: { params: Promise<{
               <CardContent className="space-y-3 p-4">
                 <p className="text-sm font-semibold">Weekly Digest / Alert</p>
                 <p className="text-xs text-muted-foreground">
-                  Trigger recurring digest and keyword alerts from workflow orchestration.
+                  Manage recurring digest delivery and keyword alerts from settings.
                 </p>
                 <Button asChild size="sm" variant="outline">
-                  <Link href={workflowConsoleLink}>
-                    <Workflow className="mr-1 h-3.5 w-3.5" />
-                    Configure Workflows
+                  <Link href="/settings">
+                    <Bell className="mr-1 h-3.5 w-3.5" />
+                    Open Delivery Settings
                   </Link>
                 </Button>
               </CardContent>

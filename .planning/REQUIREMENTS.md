@@ -1,7 +1,7 @@
 # Requirements: PaperBot
 
 **Defined:** 2026-03-14
-**Core Value:** Paper-specific capability layer surfaced as standard MCP tools + agent orchestration dashboard
+**Core Value:** Paper-specific capability layer surfaced as standard MCP tools + agent-agnostic dashboard
 
 ## v1.0 Requirements
 
@@ -45,33 +45,80 @@ Requirements for Agent Orchestration Dashboard milestone. Each maps to roadmap p
 
 ### Event System
 
-- [ ] **EVNT-01**: User can view a real-time scrolling activity feed showing agent events as they happen
-- [ ] **EVNT-02**: User can see each agent's lifecycle status (idle, working, completed, errored) at a glance
-- [ ] **EVNT-03**: User can view a structured tool call timeline showing tool name, arguments, result summary, and duration
+- [x] **EVNT-01**: User can view a real-time scrolling activity feed showing agent events as they happen
+- [x] **EVNT-02**: User can see each agent's lifecycle status (idle, working, completed, errored) at a glance
+- [x] **EVNT-03**: User can view a structured tool call timeline showing tool name, arguments, result summary, and duration
 - [x] **EVNT-04**: Agent events are pushed to connected dashboard clients in real-time via SSE (no polling)
 
 ### Dashboard
 
-- [ ] **DASH-01**: User can view agent orchestration in a three-panel IDE layout (tasks | activity | files)
-- [ ] **DASH-02**: User can manage agent tasks via Kanban board showing Claude Code and Codex agent identity
-- [ ] **DASH-03**: User can see Codex-specific error states (timeout, sandbox crash) surfaced prominently
-- [ ] **DASH-04**: User can resize panels in the three-panel layout to customize workspace
+- [x] **DASH-01**: User can view agent orchestration in a three-panel IDE layout (tasks | activity | files)
+- [x] **DASH-02**: User can manage agent tasks via Kanban board showing Claude Code and Codex agent identity
+- [x] **DASH-03**: User can see Codex-specific error states (timeout, sandbox crash) surfaced prominently
+- [x] **DASH-04**: User can resize panels in the three-panel layout to customize workspace
 
 ### File Visualization
 
-- [ ] **FILE-01**: User can view inline diffs showing what agents changed in each file
-- [ ] **FILE-02**: User can see a per-task file list showing created/modified files with status indicators
+- [x] **FILE-01**: User can view inline diffs showing what agents changed in each file
+- [x] **FILE-02**: User can see a per-task file list showing created/modified files with status indicators
 
 ### Codex Bridge
 
-- [ ] **CDX-01**: Claude Code can delegate tasks to Codex via custom agent definition (codex-worker.md)
-- [ ] **CDX-02**: Paper2Code pipeline stages can overflow from Claude Code to Codex when workload is high
-- [ ] **CDX-03**: User can observe Codex delegation events in the agent activity feed
+- [x] **CDX-01**: Claude Code can delegate tasks to Codex via custom agent definition (codex-worker.md)
+- [x] **CDX-02**: Paper2Code pipeline stages can overflow from Claude Code to Codex when workload is high
+- [x] **CDX-03**: User can observe Codex delegation events in the agent activity feed
 
 ### Visualization
 
-- [ ] **VIZ-01**: User can view an agent task dependency DAG with real-time status color updates
-- [ ] **VIZ-02**: User can see cross-agent context sharing (ScoreShareBus data flow) in the dashboard
+- [x] **VIZ-01**: User can view an agent task dependency DAG with real-time status color updates
+- [x] **VIZ-02**: User can see cross-agent context sharing (ScoreShareBus data flow) in the dashboard
+
+## v1.2 Requirements
+
+Requirements for DeepCode Agent Dashboard milestone. Agent-agnostic proxy + visualization + control.
+
+### Agent Adapter Layer
+
+- [ ] **ADAPT-01**: User can configure which code agent to use (Claude Code, Codex, OpenCode) in settings
+- [ ] **ADAPT-02**: System provides a BaseAgentAdapter interface abstracting agent-specific protocols
+- [ ] **ADAPT-03**: User can interact with Claude Code via ClaudeCodeAdapter (subprocess + stream-json, stateful sessions)
+- [ ] **ADAPT-04**: User can interact with Codex via CodexAdapter (REST API + JSONL events)
+- [ ] **ADAPT-05**: User can interact with OpenCode via OpenCodeAdapter (HTTP/ACP protocol)
+- [ ] **ADAPT-06**: Dashboard discovers agent activity through hybrid channels (agent push + independent discovery)
+
+### Activity Monitoring
+
+- [ ] **MONIT-01**: User sees real-time agent activity stream (SSE → ActivityFeed component with auto-scroll and pause)
+- [ ] **MONIT-02**: User sees tool call log with tool name, arguments, result status, and duration per event
+- [ ] **MONIT-03**: User sees agent status indicator (running/waiting/complete/error/idle)
+- [ ] **MONIT-04**: User sees connection status indicator (connected/reconnecting/disconnected)
+- [ ] **MONIT-05**: User sees errors surfaced prominently (error badge, red rendering, toast notification on failure)
+
+### Chat & Control
+
+- [ ] **CTRL-01**: User can send tasks to the configured agent via chat input in the web UI
+- [ ] **CTRL-02**: User can interrupt or cancel a running agent from the dashboard
+- [ ] **CTRL-03**: User can approve or reject agent actions via human-in-the-loop approval modal
+
+### Session Management
+
+- [ ] **SESS-01**: User can see a list of sessions (active/completed) with status, agent type, and cost
+- [ ] **SESS-02**: User can view session detail with full event timeline for a run_id
+- [ ] **SESS-03**: User can see token usage and estimated cost per session (input/output tokens, model pricing)
+- [ ] **SESS-04**: User can replay completed sessions with timeline scrubber and step-by-step navigation
+- [ ] **SESS-05**: User can checkpoint and restore agent sessions, branching like git
+
+### Visualization
+
+- [ ] **VIS-01**: User sees agent-initiated team decomposition as a live DAG (@xyflow/react)
+- [ ] **VIS-02**: User sees file diffs for agent-modified files via Monaco diff editor
+- [ ] **VIS-03**: User sees agent card grid (per-agent: cost, context %, status, latest action, color-graded context bar)
+- [ ] **VIS-04**: User sees agent swim lanes (each agent gets a vertical lane showing events chronologically)
+
+### Domain Integration
+
+- [ ] **DOMAIN-01**: User sees enriched Paper2Code view when run_type is paper2code (paper metadata, stage progress)
+- [ ] **DOMAIN-02**: User sees paper-specific rendering for PaperBot MCP tool calls (paper card, score badge)
 
 ## v2.0 Requirements
 
@@ -135,13 +182,15 @@ Explicitly excluded. Documented to prevent scope creep.
 
 | Feature | Reason |
 |---------|--------|
-| Custom agent orchestration runtime | Host agents (Claude Code) own orchestration; PaperBot is a skill provider |
-| Per-host adapters | One MCP surface serves all agents; no Claude Code vs Codex vs Cursor adapters |
-| Visual workflow builder | Massive scope, low value for code-defined pipelines (Paper2Code stages are in code) |
-| Agent chat interface | Duplicates Claude Code/Codex conversation UX; dashboard shows output, not input |
-| Real-time code editing in dashboard | IDE's job; dashboard shows diffs read-only and deep-links to VS Code |
-| Codex CLI wrapper | Agent definition is a file, not server-side Codex management |
-| Business logic duplication | Dashboard calls existing API endpoints; no reimplementation of analysis/tracking |
+| Custom agent orchestration runtime | Host agents own orchestration; PaperBot visualizes, not decomposes tasks |
+| Per-agent custom UI skins | One unified dashboard for all agents; agent type shown as badge/label |
+| Real-time token-by-token LLM streaming | Doubles SSE volume; show full turn on completion with "thinking..." spinner |
+| Full IDE replacement (language servers, extensions, debugging) | Monaco for diffs only; user's IDE remains the editing environment |
+| Agent training / fine-tuning integration | Separate product domain; export session data as JSONL instead |
+| Multi-user collaboration on sessions | Requires real-time sharing, permissions, conflict resolution — too complex |
+| Autonomous agent scheduling (cron-style) | Creates mini-orchestration runtime, contradicts skill-provider constraint |
+| Visual workflow builder | Massive scope, low value for code-defined pipelines |
+| Business logic duplication | Dashboard calls existing API endpoints; no reimplementation |
 
 ## Traceability
 
@@ -166,21 +215,21 @@ Which phases cover which requirements. Updated during roadmap creation.
 | MCP-11 | Phase 5 | Complete |
 | MCP-12 | Phase 5 | Complete |
 | MCP-13 | Phase 6 | Complete |
-| EVNT-01 | Phase 8 | Pending |
-| EVNT-02 | Phase 8 | Pending |
-| EVNT-03 | Phase 8 | Pending |
+| EVNT-01 | Phase 8 | Complete |
+| EVNT-02 | Phase 8 | Complete |
+| EVNT-03 | Phase 8 | Complete |
 | EVNT-04 | Phase 7 | Complete |
-| DASH-01 | Phase 9 | Pending |
-| DASH-02 | Phase 10 | Pending |
-| DASH-03 | Phase 10 | Pending |
-| DASH-04 | Phase 9 | Pending |
-| FILE-01 | Phase 9 | Pending |
-| FILE-02 | Phase 9 | Pending |
-| CDX-01 | Phase 10 | Pending |
-| CDX-02 | Phase 10 | Pending |
-| CDX-03 | Phase 10 | Pending |
-| VIZ-01 | Phase 11 | Pending |
-| VIZ-02 | Phase 11 | Pending |
+| DASH-01 | Phase 9 | Complete |
+| DASH-02 | Phase 10 | Complete |
+| DASH-03 | Phase 10 | Complete |
+| DASH-04 | Phase 9 | Complete |
+| FILE-01 | Phase 9 | Complete |
+| FILE-02 | Phase 9 | Complete |
+| CDX-01 | Phase 10 | Complete |
+| CDX-02 | Phase 10 | Complete |
+| CDX-03 | Phase 10 | Complete |
+| VIZ-01 | Phase 11 | Complete |
+| VIZ-02 | Phase 11 | Complete |
 | PGINFRA-01 | Phase 12 | Pending |
 | PGINFRA-02 | Phase 12 | Pending |
 | PGINFRA-03 | Phase 17 | Pending |
@@ -214,10 +263,39 @@ Which phases cover which requirements. Updated during roadmap creation.
 - v1.1 requirements: 15 total
 - Mapped to phases: 15
 - Unmapped: 0
+- v1.2 requirements: 25 total (ADAPT x6, MONIT x5, CTRL x3, SESS x5, VIS x4, DOMAIN x2)
+- Mapped to phases: 25
+- Unmapped: 0
 - v2.0 requirements: 25 total (counted: PGINFRA x4, ASYNC x5, PGNAT x3, MODEL x3, TEST x4, CI x3, MON x3)
 - Mapped to phases: 25
 - Unmapped: 0
 
+| ADAPT-01 | Phase 18 | Pending |
+| ADAPT-02 | Phase 18 | Pending |
+| ADAPT-03 | Phase 18 | Pending |
+| ADAPT-04 | Phase 22 | Pending |
+| ADAPT-05 | Phase 22 | Pending |
+| ADAPT-06 | Phase 18 | Pending |
+| MONIT-01 | Phase 19 | Pending |
+| MONIT-02 | Phase 19 | Pending |
+| MONIT-03 | Phase 19 | Pending |
+| MONIT-04 | Phase 19 | Pending |
+| MONIT-05 | Phase 19 | Pending |
+| CTRL-01 | Phase 20 | Pending |
+| CTRL-02 | Phase 20 | Pending |
+| CTRL-03 | Phase 23 | Pending |
+| SESS-01 | Phase 19 | Pending |
+| SESS-02 | Phase 19 | Pending |
+| SESS-03 | Phase 19 | Pending |
+| SESS-04 | Phase 20 | Pending |
+| SESS-05 | Phase 20 | Pending |
+| VIS-01 | Phase 21 | Pending |
+| VIS-02 | Phase 21 | Pending |
+| VIS-03 | Phase 21 | Pending |
+| VIS-04 | Phase 21 | Pending |
+| DOMAIN-01 | Phase 23 | Pending |
+| DOMAIN-02 | Phase 23 | Pending |
+
 ---
 *Requirements defined: 2026-03-14*
-*Last updated: 2026-03-14 after v2.0 roadmap created (phases 12-17)*
+*Last updated: 2026-03-15 after v1.2 roadmap created (phases 18-23)*

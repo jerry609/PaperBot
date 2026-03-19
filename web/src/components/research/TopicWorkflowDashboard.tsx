@@ -1874,9 +1874,9 @@ export default function TopicWorkflowDashboard({
       return sum
     }, 0) / 3 * 100,
   )
-  const workflowPageHref = shouldPersistWorkflowQueries(queries)
-    ? `/workflows?query=${encodeURIComponent(queries.join(","))}`
-    : "/workflows"
+  const researchPageHref = shouldPersistWorkflowQueries(queries)
+    ? `/research?query=${encodeURIComponent(queries.join(","))}`
+    : "/research"
   const snapshotHighlights = (
     dailyResult?.report?.global_top?.length ? dailyResult.report.global_top : allPapers
   ).slice(0, 3)
@@ -1968,8 +1968,8 @@ export default function TopicWorkflowDashboard({
 
                   <div className="flex flex-wrap gap-2">
                     <Button asChild size="sm" className="rounded-full bg-indigo-600 px-4 hover:bg-indigo-700">
-                      <Link href={workflowPageHref}>
-                        Open Full Workbench
+                      <Link href={researchPageHref}>
+                        Open Research Workspace
                         <ArrowUpRightIcon className="ml-1.5 size-4" />
                       </Link>
                     </Button>
@@ -2143,8 +2143,8 @@ export default function TopicWorkflowDashboard({
 
                   <div className="flex flex-wrap gap-2">
                     <Button asChild size="sm" className="rounded-full bg-indigo-600 px-4 hover:bg-indigo-700">
-                      <Link href={workflowPageHref}>
-                        Open Full Workbench
+                      <Link href={researchPageHref}>
+                        Open Research Workspace
                         <ArrowUpRightIcon className="ml-1.5 size-4" />
                       </Link>
                     </Button>

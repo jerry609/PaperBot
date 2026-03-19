@@ -13,11 +13,13 @@ import {
 import { auth } from "@/auth"
 
 import DashboardReadingQueuePanel from "@/components/dashboard/DashboardReadingQueuePanel"
+import WorkflowDockCard from "@/components/dashboard/WorkflowDockCard"
 import { fetchDeadlineRadar, fetchPapers } from "@/lib/api"
 import { fetchLatestDashboardBrief } from "@/lib/dashboard-brief"
 import {
   buildDashboardIntelligenceCards,
   type DashboardIntelligenceCard,
+  summarizeDashboardIntelligence,
 } from "@/lib/dashboard-intelligence"
 import type { DashboardReadingQueueItem, DashboardReadingQueuePriority } from "@/lib/dashboard-reading-queue"
 import {
@@ -214,7 +216,7 @@ function buildReadingQueueCards(args: {
   } = args
 
   if (recommendations.length > 0) {
-    const sourceLabel = latestBriefSource ? `${latestBriefSource} brief` : "Workflow brief"
+    const sourceLabel = latestBriefSource ? `${latestBriefSource} brief` : "Daily brief"
     const timeLabel = formatRelativeTime(latestBriefTime)
 
     return recommendations.slice(0, 3).map((item, index) => ({
@@ -403,40 +405,271 @@ function TrackSpotlightCard({ item }: { item: TrackSpotlightItem }) {
   )
 }
 
-function SignalCard({ item }: { item: DashboardIntelligenceCard }) {
+function TrackSpotlightEmptyState({
+  readingQueueCount,
+  signalCount,
+}: {
+  readingQueueCount: number
+  signalCount: number
+}) {
   return (
-    <article className="rounded-2xl border border-slate-100 bg-white p-5 shadow-sm">
-      <div className="flex items-center justify-between gap-3">
-        <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-medium text-slate-600">
-          {item.sourceLabel}
-        </span>
-        <span className="text-xs text-slate-400">{formatRelativeTime(item.timestamp)}</span>
-      </div>
-
-      <h3 className="mt-3 text-base font-bold leading-6 text-slate-800">{item.title}</h3>
-      <p className="mt-2 text-sm leading-6 text-slate-600">{item.summary}</p>
-
-      {item.reasonChips.length > 0 ? (
-        <div className="mt-4 flex flex-wrap gap-2">
-          {item.reasonChips.slice(0, 3).map((reason) => (
-            <span
-              key={`${item.id}-${reason}`}
-              className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-medium text-slate-600"
-            >
-              {reason}
-            </span>
-          ))}
+    <div className="rounded-[28px] border border-dashed border-slate-200 bg-[radial-gradient(circle_at_top_left,_rgba(99,102,241,0.12),_transparent_42%),linear-gradient(180deg,_rgba(255,255,255,0.96),_rgba(248,250,252,0.96))] p-6 shadow-sm">
+      <div className="flex flex-col gap-5">
+        <div className="flex items-start justify-between gap-4">
+          <div className="max-w-md">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-violet-600">
+              Track Spotlight
+            </p>
+            <h3 className="mt-2 text-lg font-bold text-slate-900">
+              Build one focus track to make this dashboard feel coherent.
+            </h3>
+            <p className="mt-2 text-sm leading-6 text-slate-600">
+              Tracks bind search, queue, and signals into the same topic lens. Without one, this panel can only
+              show loose global activity.
+            </p>
+          </div>
+          <div className="rounded-2xl bg-violet-100 p-3 text-violet-700">
+            <Layers className="size-5" />
+          </div>
         </div>
-      ) : null}
 
-      <div className="mt-4 flex items-center justify-between gap-3 border-t border-slate-50 pt-4">
-        <span className="text-xs text-slate-500">{item.metricLabel}</span>
-        <div className="flex items-center gap-2">
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="rounded-2xl border border-white/80 bg-white/80 px-4 py-3">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Queue Ready</p>
+            <p className="mt-2 text-sm font-semibold text-slate-900">{readingQueueCount} picks can be routed</p>
+            <p className="mt-1 text-sm leading-6 text-slate-600">
+              Save the first track and the queue stops feeling generic.
+            </p>
+          </div>
+          <div className="rounded-2xl border border-white/80 bg-white/80 px-4 py-3">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Signals Waiting</p>
+            <p className="mt-2 text-sm font-semibold text-slate-900">{signalCount} fresh signals need a home</p>
+            <p className="mt-1 text-sm leading-6 text-slate-600">
+              A topic track turns broad signals into a watchlist you can actually act on.
+            </p>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          <Link
+            href="/research"
+            className="inline-flex min-h-11 items-center gap-2 rounded-full bg-slate-900 px-5 text-sm font-semibold text-white transition-colors hover:bg-slate-800"
+          >
+            Create first track
+            <ArrowRight className="size-4" />
+          </Link>
+          <Link
+            href="/skills"
+            className="inline-flex min-h-11 items-center gap-2 rounded-full border border-slate-200 bg-white px-5 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50"
+          >
+            Open skills
+            <ArrowRight className="size-4" />
+          </Link>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function SignalPreviewRow({ item }: { item: DashboardIntelligenceCard }) {
+  return (
+    <article className="rounded-xl border border-slate-200/90 bg-white/95 px-3.5 py-3 shadow-sm">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-medium text-slate-600">
+              {item.sourceLabel}
+            </span>
+            <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-medium text-slate-600">
+              {item.metricLabel}
+            </span>
+            <span className="text-[11px] text-slate-400">{formatRelativeTime(item.timestamp)}</span>
+          </div>
+
+          <h3 className="mt-2 line-clamp-1 text-sm font-semibold leading-6 text-slate-900">
+            {item.title}
+          </h3>
+          <p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-600">{item.summary}</p>
+        </div>
+
+        <div className="flex shrink-0 items-center gap-1.5">
           <ActionLink href={item.researchHref} label={item.researchLabel} />
           <ActionLink href={item.href} label="Source" external={item.isExternal} />
         </div>
       </div>
+
+      {item.reasonChips.length > 0 || item.matchedTrackNames.length > 0 ? (
+        <div className="mt-3 flex flex-wrap gap-1.5">
+          {item.reasonChips.slice(0, 2).map((reason) => (
+            <span
+              key={`${item.id}-${reason}`}
+              className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-medium text-slate-600"
+            >
+              {reason}
+            </span>
+          ))}
+          {item.matchedTrackNames.slice(0, 2).map((trackName) => (
+            <span
+              key={`${item.id}-${trackName}`}
+              className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-700"
+            >
+              {trackName}
+            </span>
+          ))}
+        </div>
+      ) : null}
     </article>
+  )
+}
+
+function SignalPreviewSummaryStat({
+  label,
+  value,
+  detail,
+  icon: Icon,
+}: {
+  label: string
+  value: number
+  detail: string
+  icon: LucideIcon
+}) {
+  return (
+    <div className="flex min-h-[62px] items-center gap-3 bg-white/92 px-4 py-2.5">
+      <div className="rounded-lg border border-slate-200 bg-slate-50 p-1.5 text-slate-600">
+        <Icon className="size-4" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-baseline gap-2">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+            {label}
+          </p>
+          <span className="text-base font-semibold tabular-nums text-slate-900">{value}</span>
+        </div>
+        <p className="mt-0.5 line-clamp-1 text-[11px] text-slate-500">{detail}</p>
+      </div>
+    </div>
+  )
+}
+
+function SignalsPreviewPanel({
+  items,
+  totalCount,
+  matchedCount,
+  risingCount,
+  sourceCount,
+  trendQueries,
+}: {
+  items: DashboardIntelligenceCard[]
+  totalCount: number
+  matchedCount: number
+  risingCount: number
+  sourceCount: number
+  trendQueries: string[]
+}) {
+  if (items.length === 0) {
+    return (
+      <div className="rounded-[24px] border border-dashed border-slate-300 bg-white p-5 shadow-sm">
+        <p className="text-sm font-semibold text-slate-900">No signal preview right now.</p>
+        <p className="mt-2 text-sm leading-6 text-slate-600">
+          The full Signals workspace stays available for refresh, filters, and routing once new
+          community activity lands.
+        </p>
+        <div className="mt-4 flex flex-wrap gap-2">
+          <Link
+            href="/signals"
+            className="inline-flex min-h-11 items-center gap-2 rounded-full bg-slate-900 px-5 text-sm font-semibold text-white transition-colors hover:bg-slate-800"
+          >
+            Open Signals
+            <ArrowRight className="size-4" />
+          </Link>
+          <Link
+            href="/research"
+            className="inline-flex min-h-11 items-center gap-2 rounded-full border border-slate-200 bg-white px-5 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50"
+          >
+            Open Research
+            <ArrowRight className="size-4" />
+          </Link>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="rounded-[24px] border border-slate-200 bg-[radial-gradient(circle_at_top_left,_rgba(99,102,241,0.08),_transparent_34%),linear-gradient(180deg,_rgba(255,255,255,0.98),_rgba(248,250,252,0.98))] p-5 shadow-sm">
+      <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div className="max-w-2xl">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-indigo-600">
+              Signals Preview
+            </p>
+            <h3 className="mt-2 text-lg font-semibold text-slate-900">
+              Keep the dashboard skim-level. Open Signals for the full queue and detail pane.
+            </h3>
+            <p className="mt-1.5 text-sm leading-6 text-slate-600">
+              The homepage now shows only the top slice and current routing health instead of a
+              full feed workspace.
+            </p>
+          </div>
+
+          <Link
+            href="/signals"
+            className="inline-flex min-h-11 items-center gap-2 rounded-full bg-slate-900 px-5 text-sm font-semibold text-white transition-colors hover:bg-slate-800"
+          >
+            Open Signals
+            <ArrowRight className="size-4" />
+          </Link>
+        </div>
+
+        {trendQueries.length > 0 ? (
+          <div className="flex flex-wrap gap-1.5">
+            {trendQueries.slice(0, 4).map((query) => (
+              <span
+                key={query}
+                className="inline-flex items-center rounded-full border border-indigo-100 bg-indigo-50 px-2.5 py-0.5 text-[11px] font-medium text-indigo-700"
+              >
+                <TrendingUp className="mr-1.5 size-3.5" />
+                {query}
+              </span>
+            ))}
+          </div>
+        ) : null}
+
+        <div className="overflow-hidden rounded-2xl border border-slate-200/90 bg-slate-200/80 shadow-[inset_0_1px_0_rgba(255,255,255,0.7)]">
+          <div className="grid gap-px md:grid-cols-2 xl:grid-cols-4 xl:[&>*:not(:last-child)]:border-r xl:[&>*:not(:last-child)]:border-r-slate-200/80">
+          <SignalPreviewSummaryStat
+            label="Signals live"
+            value={totalCount}
+            detail="current radar slice"
+            icon={BellDot}
+          />
+          <SignalPreviewSummaryStat
+            label="Track matched"
+            value={matchedCount}
+            detail={matchedCount > 0 ? "ready to route" : "no track overlap yet"}
+            icon={Layers}
+          />
+          <SignalPreviewSummaryStat
+            label="Rising now"
+            value={risingCount}
+            detail={risingCount > 0 ? "positive deltas" : "no positive deltas"}
+            icon={TrendingUp}
+          />
+          <SignalPreviewSummaryStat
+            label="Sources"
+            value={sourceCount}
+            detail="watched surfaces"
+            icon={BookOpen}
+          />
+          </div>
+        </div>
+
+        <div className="space-y-2.5">
+          {items.map((item) => (
+            <SignalPreviewRow key={item.id} item={item} />
+          ))}
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -498,7 +731,7 @@ export default async function DashboardPage() {
   ] = await Promise.allSettled([
     fetchDashboardTracks(accessToken),
     fetchDashboardReadingQueue(accessToken, 6),
-    fetchIntelligenceFeed(accessToken, 6, { sortBy: "delta", sortOrder: "desc" }),
+    fetchIntelligenceFeed(accessToken, 20, { sortBy: "delta", sortOrder: "desc" }),
     fetchPapers(accessToken),
     fetchLatestDashboardBrief(),
     fetchDeadlineRadar(accessToken),
@@ -565,7 +798,8 @@ export default async function DashboardPage() {
   )
 
   const intelligenceCards = buildDashboardIntelligenceCards(intelligenceFeed.items)
-  const signalCards = intelligenceCards.slice(0, 3)
+  const signalPreviewCards = intelligenceCards.slice(0, 4)
+  const intelligenceSummary = summarizeDashboardIntelligence(intelligenceFeed.items)
   const deadlines = [...deadlinesRaw]
     .sort((left, right) => left.days_left - right.days_left)
     .slice(0, 3)
@@ -588,23 +822,23 @@ export default async function DashboardPage() {
                   {greeting}. Here is today&apos;s research queue.
                 </h1>
                 <p className="mt-2 text-sm text-slate-600">
-                  {queueCards.length} picks ready, {urgentDeadlines} urgent deadlines, {signalCards.length} fresh signals.
+                  {queueCards.length} picks ready, {urgentDeadlines} urgent deadlines, {intelligenceSummary.totalCount} fresh signals.
                 </p>
               </div>
 
               <div className="flex flex-wrap gap-2">
                 <Link
-                  href="/workflows"
+                  href={activeTrack ? `/research?track_id=${activeTrack.id}` : "/research"}
                   className="inline-flex min-h-11 items-center gap-2 rounded-full bg-slate-900 px-5 text-sm font-semibold text-white transition-colors hover:bg-slate-800"
                 >
-                  Open Workflows
+                  Open Research
                   <ArrowRight className="size-4" />
                 </Link>
                 <Link
-                  href={activeTrack ? `/research?track_id=${activeTrack.id}` : "/research"}
+                  href="/settings"
                   className="inline-flex min-h-11 items-center gap-2 rounded-full border border-slate-200 bg-white px-5 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50"
                 >
-                  Open Research
+                  Open Settings
                   <ArrowRight className="size-4" />
                 </Link>
               </div>
@@ -632,7 +866,7 @@ export default async function DashboardPage() {
               />
               <OverviewStat
                 label="Signals"
-                value={signalCards.length}
+                value={intelligenceSummary.totalCount}
                 helper={`${urgentDeadlines} deadlines soon`}
                 alert={urgentDeadlines > 0}
                 icon={BellDot}
@@ -652,11 +886,31 @@ export default async function DashboardPage() {
             />
           </section>
 
+          <section>
+            <SectionHeader
+              title="Daily Brief"
+              actionLabel="Manage delivery"
+              actionHref="/settings?tab=daily-brief"
+            />
+            <WorkflowDockCard
+              initialQueries={
+                latestBrief?.trendRows?.map((trend) => trend.query).filter(Boolean) ||
+                activeTrack?.keywords ||
+                []
+              }
+              activeTrackName={activeTrack?.name ?? null}
+              activeTrackHref={activeTrack ? `/research?track_id=${activeTrack.id}` : "/research"}
+              readingQueueCount={queueCards.length}
+              urgentDeadlineCount={urgentDeadlines}
+              signalCount={intelligenceSummary.totalCount}
+            />
+          </section>
+
           <section className="grid gap-8 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
             <div>
               <SectionHeader
                 title="Track Spotlight"
-                actionLabel="Manage tracks"
+                actionLabel={tracks.length > 0 ? "Manage tracks" : "Create first track"}
                 actionHref="/research"
               />
               <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-1">
@@ -665,9 +919,10 @@ export default async function DashboardPage() {
                     <TrackSpotlightCard key={item.id} item={item} />
                   ))
                 ) : (
-                  <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-6 text-sm text-slate-600 shadow-sm">
-                    No tracks yet.
-                  </div>
+                  <TrackSpotlightEmptyState
+                    readingQueueCount={queueCards.length}
+                    signalCount={intelligenceSummary.totalCount}
+                  />
                 )}
               </div>
             </div>
@@ -675,38 +930,25 @@ export default async function DashboardPage() {
             <div>
               <SectionHeader
                 title="Signals"
-                actionLabel="Open research"
-                actionHref="/research"
+                actionLabel="Open signals"
+                actionHref="/signals"
               />
-              <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-sm">
-                {latestBrief?.trendRows.length ? (
-                  <div className="mb-5 flex flex-wrap gap-2 border-b border-slate-100 pb-4">
-                    {latestBrief.trendRows.slice(0, 3).map((trend) => (
-                      <span
-                        key={trend.query}
-                        className="inline-flex items-center rounded-full border border-indigo-100 bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-700"
-                      >
-                        <TrendingUp className="mr-1.5 size-3.5" />
-                        {trend.query}
-                      </span>
-                    ))}
-                  </div>
-                ) : null}
-
-                <div className="space-y-4">
-                  {signalCards.map((item) => (
-                    <SignalCard key={item.id} item={item} />
-                  ))}
-                </div>
-              </div>
+              <SignalsPreviewPanel
+                items={signalPreviewCards}
+                totalCount={intelligenceSummary.totalCount}
+                matchedCount={intelligenceSummary.matchedCount}
+                risingCount={intelligenceSummary.risingCount}
+                sourceCount={intelligenceSummary.sourceCount}
+                trendQueries={latestBrief?.trendRows?.map((trend) => trend.query).filter(Boolean) || []}
+              />
             </div>
           </section>
 
           <section>
             <SectionHeader
               title="Deadlines"
-              actionLabel="Open workflows"
-              actionHref="/workflows"
+              actionLabel="Open research"
+              actionHref={activeTrack ? `/research?track_id=${activeTrack.id}` : "/research"}
             />
             <div className="grid gap-4 lg:grid-cols-3">
               {deadlines.length > 0 ? (
@@ -730,10 +972,10 @@ export default async function DashboardPage() {
                 </div>
                 <div className="flex items-center gap-2">
                   <Link
-                    href="/workflows"
+                    href="/settings?tab=daily-brief"
                     className="inline-flex items-center gap-1 text-sm font-medium text-indigo-600 transition-colors hover:text-indigo-700"
                   >
-                    Run DailyPaper
+                    Manage daily brief
                     <ArrowRight className="size-4" />
                   </Link>
                 </div>

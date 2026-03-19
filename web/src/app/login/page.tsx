@@ -32,13 +32,14 @@ function LoginPageContent({ callbackUrl }: { callbackUrl: string }) {
   const [loading, setLoading] = useState(false)
   const [githubLoading, setGithubLoading] = useState(false)
   const router = useRouter()
+  const registerHref = `/register?callbackUrl=${encodeURIComponent(callbackUrl)}`
+  const forgotHref = `/forgot-password?callbackUrl=${encodeURIComponent(callbackUrl)}`
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError(null)
     setLoading(true)
 
-    // Pre-check to surface specific backend errors (e.g. deleted account)
     try {
       const check = await fetch("/api/auth/login-check", {
         method: "POST",
@@ -46,13 +47,13 @@ function LoginPageContent({ callbackUrl }: { callbackUrl: string }) {
         body: JSON.stringify({ email, password }),
       })
       if (!check.ok) {
-        const data = await check.json().catch(() => ({})) as { detail?: string }
+        const data = (await check.json().catch(() => ({}))) as { detail?: string }
         setError(data.detail || "Invalid email or password.")
         setLoading(false)
         return
       }
     } catch {
-      // Network error, fall through to signIn which will also fail
+      // Fall through to provider sign-in so transient network errors share the same path.
     }
 
     const res = await signIn("credentials", { email, password, redirect: false })
@@ -71,7 +72,6 @@ function LoginPageContent({ callbackUrl }: { callbackUrl: string }) {
 
   return (
     <div className="flex min-h-screen">
-      {/* Left branding panel */}
       <div className="hidden lg:flex lg:w-1/2 flex-col justify-between bg-zinc-950 p-12 text-white">
         <div className="flex items-center gap-2.5">
           <BookOpen className="h-5 w-5" />
@@ -80,7 +80,8 @@ function LoginPageContent({ callbackUrl }: { callbackUrl: string }) {
 
         <div className="space-y-5">
           <p className="text-2xl font-medium leading-snug text-white/90">
-            &ldquo;Stay ahead of the literature.<br />
+            &ldquo;Stay ahead of the literature.
+            <br />
             Let the research come to you.&rdquo;
           </p>
           <div className="space-y-2.5 text-sm text-white/50">
@@ -93,34 +94,20 @@ function LoginPageContent({ callbackUrl }: { callbackUrl: string }) {
         <p className="text-xs text-white/25">© 2026 PaperBot. All rights reserved.</p>
       </div>
 
-      {/* Right form panel */}
-      <div className="flex w-full lg:w-1/2 items-center justify-center px-6 py-16">
+      <div className="flex w-full items-center justify-center px-6 py-16 lg:w-1/2">
         <div className="w-full max-w-sm space-y-7">
-          {/* Mobile logo */}
           <div className="flex items-center gap-2 lg:hidden">
             <BookOpen className="h-5 w-5" />
             <span className="font-semibold tracking-tight">PaperBot</span>
           </div>
 
-          {/* Heading */}
           <div className="space-y-1">
             <h1 className="text-2xl font-semibold tracking-tight">Welcome back</h1>
-            <p className="text-sm text-muted-foreground">
-              Sign in to your account to continue
-            </p>
+            <p className="text-sm text-muted-foreground">Sign in to your account to continue</p>
           </div>
 
-          {/* GitHub */}
-          <Button
-            variant="outline"
-            className="w-full"
-            onClick={onGithub}
-            disabled={loading || githubLoading}
-          >
-            {githubLoading
-              ? <Loader2 className="h-4 w-4 animate-spin" />
-              : <GitHubIcon />
-            }
+          <Button variant="outline" className="w-full" onClick={onGithub} disabled={loading || githubLoading}>
+            {githubLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <GitHubIcon />}
             Continue with GitHub
           </Button>
 
@@ -130,7 +117,6 @@ function LoginPageContent({ callbackUrl }: { callbackUrl: string }) {
             <Separator className="flex-1" />
           </div>
 
-          {/* Email / password form */}
           <form onSubmit={onSubmit} className="space-y-4">
             <div className="space-y-1.5">
               <Label htmlFor="email">Email address</Label>
@@ -140,7 +126,7 @@ function LoginPageContent({ callbackUrl }: { callbackUrl: string }) {
                 autoComplete="email"
                 placeholder="name@example.com"
                 value={email}
-                onChange={e => setEmail(e.target.value)}
+                onChange={(e) => setEmail(e.target.value)}
                 disabled={loading}
                 required
               />
@@ -150,7 +136,7 @@ function LoginPageContent({ callbackUrl }: { callbackUrl: string }) {
               <div className="flex items-center justify-between">
                 <Label htmlFor="password">Password</Label>
                 <Link
-                  href="/forgot-password"
+                  href={forgotHref}
                   className="text-xs text-muted-foreground underline-offset-4 hover:underline"
                 >
                   Forgot password?
@@ -163,7 +149,7 @@ function LoginPageContent({ callbackUrl }: { callbackUrl: string }) {
                   autoComplete="current-password"
                   placeholder="••••••••"
                   value={password}
-                  onChange={e => setPassword(e.target.value)}
+                  onChange={(e) => setPassword(e.target.value)}
                   disabled={loading}
                   required
                   className="pr-9"
@@ -171,30 +157,25 @@ function LoginPageContent({ callbackUrl }: { callbackUrl: string }) {
                 <button
                   type="button"
                   tabIndex={-1}
-                  onClick={() => setShowPassword(v => !v)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                  onClick={() => setShowPassword((value) => !value)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground transition-colors hover:text-foreground"
                 >
                   {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
               </div>
             </div>
 
-            {error && (
-              <p className="text-sm text-destructive">{error}</p>
-            )}
+            {error ? <p className="text-sm text-destructive">{error}</p> : null}
 
             <Button type="submit" className="w-full" disabled={loading || githubLoading}>
-              {loading && <Loader2 className="h-4 w-4 animate-spin" />}
+              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
               Sign in
             </Button>
           </form>
 
           <p className="text-center text-sm text-muted-foreground">
             Don&apos;t have an account?{" "}
-            <Link
-              href="/register"
-              className="font-medium text-foreground underline-offset-4 hover:underline"
-            >
+            <Link href={registerHref} className="font-medium text-foreground underline-offset-4 hover:underline">
               Create one
             </Link>
           </p>
@@ -215,7 +196,7 @@ function GitHubIcon() {
 function BulletPoint({ text }: { text: string }) {
   return (
     <div className="flex items-start gap-2">
-      <span className="mt-0.5 select-none text-white/30">–</span>
+      <span className="mt-0.5 select-none text-white/30">-</span>
       <span>{text}</span>
     </div>
   )

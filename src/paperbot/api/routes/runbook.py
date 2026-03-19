@@ -121,6 +121,11 @@ def _allowed_workdir_prefixes() -> List[Path]:
         prefixes.append(Path.cwd().resolve())
     except Exception:
         pass
+    try:
+        home_dir = Path.home().resolve()
+        prefixes.append((home_dir / "Documents").resolve(strict=False))
+    except Exception:
+        pass
 
     extra = os.getenv("PAPERBOT_RUNBOOK_ALLOW_DIR_PREFIXES", "").strip()
     if extra:
@@ -167,10 +172,7 @@ def _allowed_workdir(workdir: Path) -> bool:
     return False
 
 
-def _normalize_user_directory(raw_path: str, field_name: str) -> Path:
-    """
-    Normalize a user-supplied directory path and enforce allow-prefix policy.
-    """
+def _normalize_path_input(raw_path: str, field_name: str) -> str:
     raw = raw_path.strip()
     if not raw:
         raise HTTPException(status_code=400, detail=f"{field_name} cannot be empty")
@@ -182,17 +184,25 @@ def _normalize_user_directory(raw_path: str, field_name: str) -> Path:
     if raw == "~":
         normalized = str(Path.home())
     elif raw.startswith("~/"):
-        normalized = str(Path.home() / raw[2:])
+        normalized = os.path.join(str(Path.home()), raw[2:])
     else:
         normalized = raw
 
     if not os.path.isabs(normalized):
-        normalized = str((Path.cwd() / normalized).resolve(strict=False))
-    normalized_real = os.path.realpath(normalized)
+        normalized = os.path.join(os.getcwd(), normalized)
+    return os.path.abspath(normalized)
 
-    for prefix in _allowed_workdir_prefixes():
-        prefix_str = str(prefix)
-        prefix_real = os.path.realpath(prefix_str)
+
+def _resolve_real_path_within_prefixes(
+    normalized_real: str,
+    prefixes: List[Path],
+    *,
+    field_name: str,
+    status_code: int = 403,
+    detail: Optional[str] = None,
+) -> Path:
+    for prefix in prefixes:
+        prefix_real = os.path.realpath(str(prefix))
         if normalized_real == prefix_real:
             return prefix
         if normalized_real.startswith(prefix_real + os.sep):
@@ -200,9 +210,46 @@ def _normalize_user_directory(raw_path: str, field_name: str) -> Path:
             candidate = (prefix / suffix).resolve(strict=False) if suffix else prefix
             if _is_under_prefix(candidate, prefix):
                 return candidate
-            raise HTTPException(status_code=403, detail=f"{field_name} is not allowed")
+            break
 
-    raise HTTPException(status_code=403, detail=f"{field_name} is not allowed")
+    raise HTTPException(
+        status_code=status_code,
+        detail=detail or f"{field_name} is not allowed",
+    )
+
+
+def _normalize_user_directory(raw_path: str, field_name: str) -> Path:
+    """
+    Normalize a user-supplied directory path and enforce allow-prefix policy.
+    """
+    normalized_real = _normalize_path_input(raw_path, field_name)
+    return _resolve_real_path_within_prefixes(
+        normalized_real,
+        _allowed_workdir_prefixes(),
+        field_name=field_name,
+    )
+
+
+def _allowlist_mutation_roots() -> List[Path]:
+    roots: List[Path] = [Path(tempfile.gettempdir()).resolve()]
+    try:
+        roots.append(Path.cwd().resolve())
+    except Exception:
+        pass
+    try:
+        roots.append(Path.home().resolve())
+    except Exception:
+        pass
+
+    unique: List[Path] = []
+    seen = set()
+    for root in roots:
+        key = str(root)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(root)
+    return unique
 
 
 class PrepareProjectDirRequest(BaseModel):
@@ -270,9 +317,13 @@ async def add_allowed_dir(body: AddAllowedDirRequest):
     if not raw or "\x00" in raw:
         raise HTTPException(status_code=400, detail="invalid directory path")
 
-    # Normalize and validate against configured safe prefixes before touching FS.
-    # This prevents path-injection style access to arbitrary locations.
-    resolved = _normalize_user_directory(raw, field_name="directory")
+    normalized_real = _normalize_path_input(raw, field_name="directory")
+    resolved = _resolve_real_path_within_prefixes(
+        normalized_real,
+        _allowlist_mutation_roots(),
+        field_name="directory",
+        detail="directory is outside the allowed mutation roots",
+    )
 
     denied_roots = {Path(denied).resolve() for denied in _DENIED_PATHS}
     if resolved in denied_roots:
