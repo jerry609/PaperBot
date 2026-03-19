@@ -2040,84 +2040,112 @@ def _parse_cli_event(
     - {"type":"system",...} — session init (ignored)
     """
     etype = line_data.get("type", "")
-    events: list[StreamEvent] = []
-
     if etype == "assistant":
         msg = line_data.get("message", {})
         content_blocks = msg.get("content", [])
-        events.extend(_parse_cli_content_blocks(content_blocks))
+        return _parse_cli_content_blocks(content_blocks)
 
-    elif etype == "tool_result":
-        events.append(StreamEvent(
+    if etype == "tool_result":
+        return _parse_cli_tool_result_event(line_data, telemetry_state)
+
+    if etype == "user":
+        return _parse_user_tool_result_blocks(line_data, telemetry_state)
+
+    if etype == "system":
+        return _parse_cli_system_event(line_data, telemetry_state)
+
+    if etype == "result":
+        return [_build_cli_result_event(line_data)]
+
+    # Ignore "system" and other meta events
+    return []
+
+
+def _parse_cli_tool_result_event(
+    line_data: Dict[str, Any],
+    telemetry_state: Optional[_StudioTelemetryState],
+) -> list[StreamEvent]:
+    tool_name = str(line_data.get("tool_name", "") or "tool")
+    tool_id = str(line_data.get("tool_use_id") or line_data.get("tool_id") or "").strip()
+    content = line_data.get("content", "")
+    events = [
+        StreamEvent(
             type="progress",
             data={
                 "cli_event": "tool_result",
                 "tool_name": line_data.get("tool_name", ""),
                 "tool_id": line_data.get("tool_use_id") or line_data.get("tool_id") or "",
-                "content": _truncate(_stringify_tool_result_content(line_data.get("content", "")), 2000),
+                "content": _truncate(_stringify_tool_result_content(content), 2000),
             },
-        ))
-        bridge_result = _parse_bridge_result_content(line_data.get("content", ""))
-        if bridge_result is not None:
-            bridge_result = _enrich_bridge_result(
-                bridge_result,
-                tool_name=str(line_data.get("tool_name", "") or "tool"),
-                tool_id=str(line_data.get("tool_use_id") or line_data.get("tool_id") or "").strip(),
-                telemetry_state=telemetry_state,
-            )
-            events.append(
-                StreamEvent(
-                    type="progress",
-                    data={
-                        "cli_event": "bridge_result",
-                        "tool_name": line_data.get("tool_name", ""),
-                        "tool_id": line_data.get("tool_use_id") or line_data.get("tool_id") or "",
-                        "bridge_result": bridge_result,
-                    },
-                )
-            )
-        approval_event = _build_studio_approval_progress_event(
-            line_data.get("content", ""),
-            tool_name=str(line_data.get("tool_name", "") or "tool"),
-            tool_id=str(line_data.get("tool_use_id") or line_data.get("tool_id") or "").strip(),
+        )
+    ]
+
+    bridge_result = _parse_bridge_result_content(content)
+    if bridge_result is not None:
+        bridge_result = _enrich_bridge_result(
+            bridge_result,
+            tool_name=tool_name,
+            tool_id=tool_id,
             telemetry_state=telemetry_state,
         )
-        if approval_event is not None:
-            events.append(approval_event)
-
-    elif etype == "user":
-        events.extend(_parse_user_tool_result_blocks(line_data, telemetry_state))
-
-    elif etype == "system":
-        subtype = str(line_data.get("subtype", "")).strip()
-        if subtype == "init":
-            cli_session_id = str(line_data.get("session_id") or "").strip()
-            if telemetry_state is not None and cli_session_id:
-                telemetry_state.cli_session_id = cli_session_id
-            events.append(StreamEvent(
+        events.append(
+            StreamEvent(
                 type="progress",
                 data={
-                    "cli_event": "session_init",
-                    "cli_session_id": cli_session_id,
-                    "permission_mode": line_data.get("permissionMode"),
-                    "model": line_data.get("model"),
+                    "cli_event": "bridge_result",
+                    "tool_name": line_data.get("tool_name", ""),
+                    "tool_id": line_data.get("tool_use_id") or line_data.get("tool_id") or "",
+                    "bridge_result": bridge_result,
                 },
-            ))
+            )
+        )
 
-    elif etype == "result":
-        events.append(StreamEvent(
-            type="result",
-            data={
-                "cli_event": "done",
-                "result": line_data.get("result", ""),
-                "cost_usd": line_data.get("cost_usd"),
-                "duration_ms": line_data.get("duration_ms"),
-                "num_turns": line_data.get("num_turns"),
-            },
-        ))
-
-    # Ignore "system" and other meta events
+    approval_event = _build_studio_approval_progress_event(
+        content,
+        tool_name=tool_name,
+        tool_id=tool_id,
+        telemetry_state=telemetry_state,
+    )
+    if approval_event is not None:
+        events.append(approval_event)
     return events
+
+
+def _parse_cli_system_event(
+    line_data: Dict[str, Any],
+    telemetry_state: Optional[_StudioTelemetryState],
+) -> list[StreamEvent]:
+    subtype = str(line_data.get("subtype", "")).strip()
+    if subtype != "init":
+        return []
+
+    cli_session_id = str(line_data.get("session_id") or "").strip()
+    if telemetry_state is not None and cli_session_id:
+        telemetry_state.cli_session_id = cli_session_id
+    return [
+        StreamEvent(
+            type="progress",
+            data={
+                "cli_event": "session_init",
+                "cli_session_id": cli_session_id,
+                "permission_mode": line_data.get("permissionMode"),
+                "model": line_data.get("model"),
+            },
+        )
+    ]
+
+
+def _build_cli_result_event(line_data: Dict[str, Any]) -> StreamEvent:
+    return StreamEvent(
+        type="result",
+        data={
+            "cli_event": "done",
+            "result": line_data.get("result", ""),
+            "cost_usd": line_data.get("cost_usd"),
+            "duration_ms": line_data.get("duration_ms"),
+            "num_turns": line_data.get("num_turns"),
+        },
+    )
 
 
 def _truncate(s: str, max_len: int) -> str:

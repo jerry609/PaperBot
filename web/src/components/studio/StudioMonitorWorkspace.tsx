@@ -171,14 +171,14 @@ function SectionCard({
   children,
   action,
   className,
-}: {
+}: Readonly<{
   title: string
   eyebrow: string
   description: string
   children: ReactNode
   action?: ReactNode
   className?: string
-}) {
+}>) {
   return (
     <section className={cn("min-h-0 overflow-hidden rounded-[28px] border border-slate-200 bg-[#f7f7f4] shadow-[0_20px_56px_rgba(15,23,42,0.04)]", className)}>
       <div className="border-b border-slate-200 bg-[#f4f5f1] px-3 py-2">
@@ -201,10 +201,10 @@ function SectionCard({
 export function StudioMonitorWorkspace({
   initialPaperId = null,
   initialWorkerRunId = null,
-}: {
+}: Readonly<{
   initialPaperId?: string | null
   initialWorkerRunId?: string | null
-}) {
+}>) {
   useAgentEvents()
 
   const router = useRouter()

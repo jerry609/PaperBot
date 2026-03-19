@@ -42,13 +42,15 @@ function getWorkerRunId(item: ActivityFeedItem): string | null {
   return typeof workerRunId === "string" && workerRunId.trim().length > 0 ? workerRunId : null
 }
 
+type ActivityFeedRowProps = Readonly<{
+  item: ActivityFeedItem
+  onOpenWorkerRun: (workerRunId: string) => void
+}>
+
 function ActivityFeedRow({
   item,
   onOpenWorkerRun,
-}: {
-  item: ActivityFeedItem
-  onOpenWorkerRun: (workerRunId: string) => void
-}) {
+}: ActivityFeedRowProps) {
   const timeStr = formatTimestamp(item.ts)
   const colorClass = getTypeColor(item.type)
   const presentation = getAgentPresentation(item.agent_name)

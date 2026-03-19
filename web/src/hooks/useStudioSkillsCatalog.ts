@@ -43,7 +43,16 @@ export function useStudioSkillsCatalog() {
   }, [])
 
   useEffect(() => {
-    void refresh()
+    let cancelled = false
+    queueMicrotask(() => {
+      if (cancelled) return
+      refresh().catch(() => {
+        // fetchJson already normalizes errors to null; this only protects the effect chain
+      })
+    })
+    return () => {
+      cancelled = true
+    }
   }, [refresh])
 
   return {
@@ -55,30 +64,43 @@ export function useStudioSkillsCatalog() {
 }
 
 export function useStudioSkillDetail(skillKey: string | null) {
-  const [detail, setDetail] = useState<StudioSkillDetailInfo>(() => buildStudioSkillDetailInfo())
+  const emptyDetail = buildStudioSkillDetailInfo()
+  const [detail, setDetail] = useState<StudioSkillDetailInfo>(() => emptyDetail)
   const [loading, setLoading] = useState(Boolean(skillKey))
 
   useEffect(() => {
     let active = true
-    if (!skillKey) {
-      setDetail(buildStudioSkillDetailInfo())
+
+    const loadDetail = async (resolvedSkillKey: string) => {
+      const payload = await fetchJson<StudioSkillDetailResponse>(`/api/studio/skills/${encodeURIComponent(resolvedSkillKey)}`)
+      if (!active) return
+      setDetail(buildStudioSkillDetailInfo(payload))
       setLoading(false)
-      return
     }
 
-    setLoading(true)
-    void fetchJson<StudioSkillDetailResponse>(`/api/studio/skills/${encodeURIComponent(skillKey)}`).then(
-      (payload) => {
+    if (!skillKey) {
+      return () => {
+        active = false
+      }
+    }
+
+    queueMicrotask(() => {
+      if (!active) return
+      setLoading(true)
+      loadDetail(skillKey).catch(() => {
         if (!active) return
-        setDetail(buildStudioSkillDetailInfo(payload))
+        setDetail(buildStudioSkillDetailInfo())
         setLoading(false)
-      },
-    )
+      })
+    })
 
     return () => {
       active = false
     }
   }, [skillKey])
 
-  return { detail, loading }
+  return {
+    detail: skillKey ? detail : emptyDetail,
+    loading: skillKey ? loading : false,
+  }
 }

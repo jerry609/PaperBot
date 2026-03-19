@@ -489,7 +489,7 @@ export function PaperGallery() {
                                         : "Start with a paper title and abstract. Studio will guide the next steps: workspace review first, then Claude Code chat, then Monitor only when execution detail matters."}
                                 </p>
 
-                                {!query ? (
+                                {query ? null : (
                                     <>
                                         <div className="mt-6 grid gap-3 text-left md:grid-cols-3">
                                             <div className="rounded-[22px] border border-zinc-300 bg-[#fafaf7] px-4 py-4">
@@ -544,7 +544,7 @@ export function PaperGallery() {
                                             </span>
                                         </div>
                                     </>
-                                ) : null}
+                                )}
                             </div>
                         </div>
                     ) : (

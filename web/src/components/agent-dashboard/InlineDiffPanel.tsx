@@ -10,7 +10,7 @@ interface InlineDiffPanelProps {
   onBack: () => void
 }
 
-export function InlineDiffPanel({ entry, onBack }: InlineDiffPanelProps) {
+export function InlineDiffPanel({ entry, onBack }: Readonly<InlineDiffPanelProps>) {
   const hasContent =
     entry.oldContent !== undefined || entry.newContent !== undefined || entry.diff !== undefined
 

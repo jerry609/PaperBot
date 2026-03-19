@@ -12,6 +12,12 @@ const LIFECYCLE_TYPES = new Set([
 
 const TOOL_TYPES = new Set(["tool_result", "tool_error", "tool_call"])
 
+function displayScalar(value: unknown): string {
+  if (typeof value === "string") return value
+  if (typeof value === "number" || typeof value === "boolean") return String(value)
+  return ""
+}
+
 export function parseActivityItem(raw: AgentEventEnvelopeRaw): ActivityFeedItem | null {
   if (!raw.type || !raw.ts) return null
   const id = `${raw.run_id ?? ""}-${raw.ts}`
@@ -35,31 +41,31 @@ function deriveHumanSummary(raw: AgentEventEnvelopeRaw): string {
   if (t === "agent_started") return `${raw.agent_name} started: ${raw.stage}`
   if (t === "agent_working") return `${raw.agent_name} working on: ${raw.stage}`
   if (t === "agent_completed") return `${raw.agent_name} completed: ${raw.stage}`
-  if (t === "agent_error") return `${raw.agent_name} error: ${String(payload.detail ?? "")}`
+  if (t === "agent_error") return `${raw.agent_name} error: ${displayScalar(payload.detail)}`
   if (t === "tool_result" || t === "tool_error" || t === "tool_call") {
-    const tool = String(payload.tool ?? t)
-    return `Tool: ${tool} — ${String(payload.result_summary ?? "").slice(0, 80)}`
+    const tool = displayScalar(payload.tool) || t
+    return `Tool: ${tool} — ${displayScalar(payload.result_summary).slice(0, 80)}`
   }
   if (t === "codex_dispatched") {
-    const assignee = String(payload.assignee ?? raw.agent_name ?? "Codex")
-    const title = String(payload.task_title ?? "")
+    const assignee = displayScalar(payload.assignee) || String(raw.agent_name ?? "Codex")
+    const title = displayScalar(payload.task_title)
     return `Worker dispatched to ${getAgentPresentation(assignee).shortLabel}: ${title}`
   }
   if (t === "codex_accepted") {
-    const assignee = String(payload.assignee ?? raw.agent_name ?? "Codex")
-    const title = String(payload.task_title ?? "")
+    const assignee = displayScalar(payload.assignee) || String(raw.agent_name ?? "Codex")
+    const title = displayScalar(payload.task_title)
     return `${getAgentPresentation(assignee).shortLabel} accepted worker run: ${title}`
   }
   if (t === "codex_completed") {
-    const assignee = String(payload.assignee ?? raw.agent_name ?? "Codex")
-    const title = String(payload.task_title ?? "")
+    const assignee = displayScalar(payload.assignee) || String(raw.agent_name ?? "Codex")
+    const title = displayScalar(payload.task_title)
     const files = Array.isArray(payload.files_generated) ? payload.files_generated.length : 0
     return `${getAgentPresentation(assignee).shortLabel} completed worker run: ${title} (${files} files)`
   }
   if (t === "codex_failed") {
-    const assignee = String(payload.assignee ?? raw.agent_name ?? "Codex")
-    const title = String(payload.task_title ?? "")
-    const reason = String(payload.reason_code ?? "unknown")
+    const assignee = displayScalar(payload.assignee) || String(raw.agent_name ?? "Codex")
+    const title = displayScalar(payload.task_title)
+    const reason = displayScalar(payload.reason_code) || "unknown"
     return `${getAgentPresentation(assignee).shortLabel} failed worker run: ${title} (${reason})`
   }
   if (t === "job_start") return `Job started: ${raw.stage}`

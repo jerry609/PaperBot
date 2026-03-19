@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import pathlib
 
+import pytest
+
 
 def test_event_type_constants():
     """All EventType constants are non-empty unique strings with the required sets."""
@@ -157,7 +159,7 @@ def test_tool_call_event_duration():
     )
 
     assert "duration_ms" in envelope.metrics
-    assert envelope.metrics["duration_ms"] == 42.5
+    assert envelope.metrics["duration_ms"] == pytest.approx(42.5)
 
 
 def test_audit_uses_constants():

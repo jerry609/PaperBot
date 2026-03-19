@@ -285,14 +285,14 @@ export function buildStudioRuntimeInfo(
   const preferredTransportLabel = formatTransportLabel(preferredChatTransport)
 
   if (status?.claude_cli) {
-    const detail =
-      chatTransport === "claude_cli_print"
-        ? claudeAgentSdkAvailable
-          ? "Managed chat is currently running on Claude CLI print transport. Agent SDK is available for the CodePilot route."
-          : "Managed chat is currently running on Claude CLI print transport. Install claude_agent_sdk to match the CodePilot route."
-        : cwd
-          ? `Running in ${workspaceLabel}`
-          : "CLI connected to the current Studio workspace"
+    let detail = "CLI connected to the current Studio workspace"
+    if (chatTransport === "claude_cli_print") {
+      detail = claudeAgentSdkAvailable
+        ? "Managed chat is currently running on Claude CLI print transport. Agent SDK is available for the CodePilot route."
+        : "Managed chat is currently running on Claude CLI print transport. Install claude_agent_sdk to match the CodePilot route."
+    } else if (cwd) {
+      detail = `Running in ${workspaceLabel}`
+    }
 
     return {
       source: "claude_code",

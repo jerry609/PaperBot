@@ -8,7 +8,6 @@ import remarkGfm from "remark-gfm"
 import {
   ArrowLeft,
   ArrowUpRight,
-  CheckCircle2,
   FolderOpen,
   GitBranch,
   Loader2,
@@ -92,27 +91,112 @@ function buildSkillsQuery(params: { toString(): string }, updates: Record<string
   return next.toString()
 }
 
+type FlowStepStatus = "ready" | "pending" | "active"
+
+type FlowStepCardProps = Readonly<{
+  step: number
+  title: string
+  description: string
+  status: FlowStepStatus
+  children?: React.ReactNode
+}>
+
+type PageShellProps = Readonly<{
+  eyebrow: string
+  title: string
+  description: string
+  actions?: React.ReactNode
+  children: React.ReactNode
+}>
+
+type MetricCardProps = Readonly<{
+  label: string
+  value: string
+  hint: string
+}>
+
+type SectionProps = Readonly<{
+  title: string
+  description: string
+  count?: number
+  children: React.ReactNode
+}>
+
+type SkillCardProps = Readonly<{
+  skill: StudioSkillInfo
+  selected: boolean
+  attached: boolean
+  onSelect: (skillKey: string) => void
+}>
+
+type SkillSetupPageProps = Readonly<{
+  skillKey: string
+}>
+
+function getFlowStepTone(status: FlowStepStatus): string {
+  if (status === "ready") return "border-emerald-200 bg-emerald-50 text-emerald-700"
+  if (status === "active") return "border-slate-300 bg-[#eef1ea] text-slate-900"
+  return "border-slate-200 bg-white text-slate-500"
+}
+
+function getFlowStepLabel(status: FlowStepStatus): string {
+  if (status === "ready") return "Ready"
+  if (status === "active") return "Next"
+  return "Waiting"
+}
+
+function getWorkspaceStepStatus(
+  requiresWorkspace: boolean,
+  workspacePath: string,
+  selectedPaper: unknown,
+): FlowStepStatus {
+  if (!requiresWorkspace || workspacePath.trim()) return "ready"
+  return selectedPaper ? "active" : "pending"
+}
+
+function toggleStringSelection(values: string[], value: string): string[] {
+  return values.includes(value) ? values.filter((item) => item !== value) : [...values, value]
+}
+
+function getPrimaryActionLabel(params: {
+  selectedSkill: StudioSkillInfo | null
+  selectedPaper: unknown
+  requiresWorkspace: boolean
+  workspacePath: string
+  requiresGeneratedContext: boolean
+  contextReady: boolean
+  generationStatus: string
+  selectedSkillAttached: boolean
+}): string {
+  const {
+    selectedSkill,
+    selectedPaper,
+    requiresWorkspace,
+    workspacePath,
+    requiresGeneratedContext,
+    contextReady,
+    generationStatus,
+    selectedSkillAttached,
+  } = params
+
+  if (!selectedSkill) return "Choose a skill"
+  if (!selectedPaper) return "Choose a paper"
+  if (requiresWorkspace && !workspacePath.trim()) return "Set workspace"
+  if (requiresGeneratedContext && !contextReady) {
+    return generationStatus === "generating" ? "Generating context..." : "Generate context"
+  }
+  return selectedSkillAttached ? "Continue in Studio" : "Attach and continue"
+}
+
 function FlowStepCard({
   step,
   title,
   description,
   status,
   children,
-}: {
-  step: number
-  title: string
-  description: string
-  status: "ready" | "pending" | "active"
-  children?: React.ReactNode
-}) {
-  const tone =
-    status === "ready"
-      ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-      : status === "active"
-        ? "border-slate-300 bg-[#eef1ea] text-slate-900"
-        : "border-slate-200 bg-white text-slate-500"
-
-  const label = status === "ready" ? "Ready" : status === "active" ? "Next" : "Waiting"
+}: FlowStepCardProps) {
+  const tone = getFlowStepTone(status)
+  const label = getFlowStepLabel(status)
 
   return (
     <div className="rounded-[22px] border border-slate-200 bg-[#fbfbf8] p-4">
@@ -139,13 +223,7 @@ function PageShell({
   description,
   actions,
   children,
-}: {
-  eyebrow: string
-  title: string
-  description: string
-  actions?: React.ReactNode
-  children: React.ReactNode
-}) {
+}: PageShellProps) {
   return (
     <div className="min-h-screen bg-[#f5f6f1]">
       <div className="mx-auto flex w-full max-w-[1440px] flex-col gap-6 px-4 py-6 lg:px-8">
@@ -170,7 +248,7 @@ function PageShell({
   )
 }
 
-function MetricCard({ label, value, hint }: { label: string; value: string; hint: string }) {
+function MetricCard({ label, value, hint }: MetricCardProps) {
   return (
     <div className="rounded-[22px] border border-slate-200 bg-white p-4 shadow-[0_14px_30px_rgba(15,23,42,0.04)]">
       <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">{label}</p>
@@ -185,12 +263,7 @@ function Section({
   description,
   count,
   children,
-}: {
-  title: string
-  description: string
-  count?: number
-  children: React.ReactNode
-}) {
+}: SectionProps) {
   return (
     <section className="rounded-[26px] border border-slate-200 bg-white/95 p-5 shadow-[0_18px_36px_rgba(15,23,42,0.04)]">
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
@@ -214,12 +287,7 @@ function SkillCard({
   selected,
   attached,
   onSelect,
-}: {
-  skill: StudioSkillInfo
-  selected: boolean
-  attached: boolean
-  onSelect: (skillKey: string) => void
-}) {
+}: SkillCardProps) {
   const primaryPath = getStudioSkillPaths(skill)[0] ?? "Path unavailable"
 
   return (
@@ -695,19 +763,16 @@ export function SkillsDirectoryPage() {
     handleAttachAndContinue()
   }
 
-  const primaryActionLabel = !selectedSkill
-    ? "Choose a skill"
-    : !selectedPaper
-      ? "Choose a paper"
-      : requiresWorkspace && !workspacePath.trim()
-        ? "Set workspace"
-        : requiresGeneratedContext && !contextReady
-          ? generationStatus === "generating"
-            ? "Generating context..."
-            : "Generate context"
-          : selectedSkillAttached
-            ? "Continue in Studio"
-            : "Attach and continue"
+  const primaryActionLabel = getPrimaryActionLabel({
+    selectedSkill,
+    selectedPaper,
+    requiresWorkspace,
+    workspacePath,
+    requiresGeneratedContext,
+    contextReady,
+    generationStatus,
+    selectedSkillAttached,
+  })
 
   return (
     <PageShell
@@ -997,7 +1062,7 @@ export function SkillsDirectoryPage() {
                       ? "This skill expects a writable workspace before Claude Code enters Code mode."
                       : "Workspace is optional for this skill, but you can still pin one now."
                   }
-                  status={!requiresWorkspace || workspacePath.trim() ? "ready" : selectedPaper ? "active" : "pending"}
+                  status={getWorkspaceStepStatus(requiresWorkspace, workspacePath, selectedPaper)}
                 >
                   <Input
                     value={workspacePath}
@@ -1250,7 +1315,7 @@ export function SkillDetailPage({ skillKey }: { skillKey: string }) {
   )
 }
 
-export function SkillSetupPage({ skillKey }: { skillKey: string }) {
+export function SkillSetupPage({ skillKey }: SkillSetupPageProps) {
   const router = useRouter()
   const { detail, loading } = useStudioSkillDetail(skillKey)
   const { generate, status: generationStatus } = useContextPackGeneration()
@@ -1262,10 +1327,10 @@ export function SkillSetupPage({ skillKey }: { skillKey: string }) {
     contextPack,
     setAttachedSkill,
   } = useStudioStore()
-  const [selectedPaperId, setSelectedPaperId] = useState<string>("")
-  const [workspacePath, setWorkspacePath] = useState("")
+  const [selectedPaperIdOverride, setSelectedPaperIdOverride] = useState<string | null>(null)
+  const [workspacePathOverride, setWorkspacePathOverride] = useState<string | null>(null)
   const [cwd, setCwd] = useState<string | null>(null)
-  const [contextModules, setContextModules] = useState<string[]>([])
+  const [contextModulesOverride, setContextModules] = useState<string[] | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -1290,40 +1355,24 @@ export function SkillSetupPage({ skillKey }: { skillKey: string }) {
     }
   }, [])
 
-  useEffect(() => {
-    if (!detail.skill) return
-    setContextModules(detail.contextModules)
-  }, [detail.contextModules, detail.skill])
-
-  useEffect(() => {
-    if (papers.length === 0) {
-      setSelectedPaperId("")
-      return
-    }
-    if (selectedPaperId && papers.some((paper) => paper.id === selectedPaperId)) {
-      return
-    }
-    setSelectedPaperId(papers[0].id)
-  }, [papers, selectedPaperId])
+  const defaultSelectedPaperId = useMemo(() => papers[0]?.id ?? "", [papers])
+  const selectedPaperId =
+    selectedPaperIdOverride && papers.some((paper) => paper.id === selectedPaperIdOverride)
+      ? selectedPaperIdOverride
+      : defaultSelectedPaperId
 
   const selectedPaper = useMemo(
     () => papers.find((paper) => paper.id === selectedPaperId) ?? null,
     [papers, selectedPaperId],
   )
-
-  useEffect(() => {
-    if (!selectedPaper) {
-      setWorkspacePath(cwd ?? "")
-      return
-    }
-    selectPaper(selectedPaper.id)
-    setWorkspacePath(selectedPaper.outputDir || cwd || "")
-  }, [cwd, selectPaper, selectedPaper?.id, selectedPaper?.outputDir])
+  const workspacePath = workspacePathOverride ?? selectedPaper?.outputDir ?? cwd ?? ""
+  const contextModules = contextModulesOverride ?? detail.contextModules
 
   const requiresGeneratedContext = skillNeedsGeneratedContext(contextModules)
   const requiresWorkspace = skillNeedsWorkspace(contextModules, {
     requiresWorkspaceHint: detail.requiresWorkspace,
   })
+  const setupSkill = detail.skill
 
   const handleGenerateContext = async () => {
     if (!selectedPaper) {
@@ -1340,7 +1389,7 @@ export function SkillSetupPage({ skillKey }: { skillKey: string }) {
   }
 
   const handleLaunch = () => {
-    if (!detail.skill) {
+    if (!setupSkill) {
       setError("Skill metadata is not ready yet.")
       return
     }
@@ -1358,21 +1407,31 @@ export function SkillSetupPage({ skillKey }: { skillKey: string }) {
       updatePaper(selectedPaper.id, { outputDir: workspacePath.trim() })
     }
     setAttachedSkill({
-      ...detail.skill,
+      ...setupSkill,
       contextModules,
     })
     router.push(`/studio?paperId=${encodeURIComponent(selectedPaper.id)}`)
   }
 
+  const handleToggleContextModule = (module: string) => {
+    setContextModules((current) => toggleStringSelection(current ?? detail.contextModules, module))
+  }
+
+  const handlePaperSelectionChange = (paperId: string) => {
+    setSelectedPaperIdOverride(paperId)
+    setWorkspacePathOverride(null)
+    setError(null)
+  }
+
   return (
     <PageShell
       eyebrow="Skill Setup"
-      title={detail.skill?.title ?? "Set up skill"}
+      title={setupSkill?.title ?? "Set up skill"}
       description="Choose the paper, workspace, and context modules first. Paper context is generated only when this selected skill actually needs it."
       actions={
         <>
           <Button asChild variant="outline" className="h-10 rounded-full border-slate-200 bg-white px-4 text-sm text-slate-700">
-            <Link href={detail.skill ? `/skills?skill=${encodeURIComponent(detail.skill.key)}` : "/skills"}>
+            <Link href={setupSkill ? `/skills?skill=${encodeURIComponent(setupSkill.key)}` : "/skills"}>
               <ArrowLeft className="mr-2 h-4 w-4" />
               Back
             </Link>
@@ -1380,7 +1439,7 @@ export function SkillSetupPage({ skillKey }: { skillKey: string }) {
           <Button
             type="button"
             className="h-10 rounded-full bg-slate-900 px-4 text-sm text-white hover:bg-slate-800"
-            disabled={loading || !detail.skill || !selectedPaper || (requiresWorkspace && !workspacePath.trim())}
+            disabled={loading || !setupSkill || !selectedPaper || (requiresWorkspace && !workspacePath.trim())}
             onClick={handleLaunch}
           >
             Continue in Studio
@@ -1395,13 +1454,7 @@ export function SkillSetupPage({ skillKey }: { skillKey: string }) {
             Loading setup...
           </div>
         </Section>
-      ) : !detail.skill ? (
-        <Section title="Skill not found" description="This skill is not available in the current Studio catalog.">
-          <div className="rounded-[22px] border border-dashed border-slate-200 bg-[#fbfbf8] p-6 text-sm text-slate-500">
-            Refresh the Skills directory or reinstall the skill repo first.
-          </div>
-        </Section>
-      ) : (
+      ) : setupSkill ? (
         <div className="grid gap-4 xl:grid-cols-[minmax(0,0.95fr)_minmax(360px,1.05fr)]">
           <Section
             title="Paper"
@@ -1417,7 +1470,7 @@ export function SkillSetupPage({ skillKey }: { skillKey: string }) {
                   <Label className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
                     Selected paper
                   </Label>
-                  <Select value={selectedPaperId} onValueChange={setSelectedPaperId}>
+                  <Select value={selectedPaperId} onValueChange={handlePaperSelectionChange}>
                     <SelectTrigger className="mt-3 h-11 rounded-2xl border-slate-200 bg-white px-4 text-sm text-slate-700">
                       <SelectValue placeholder="Choose a paper" />
                     </SelectTrigger>
@@ -1456,7 +1509,7 @@ export function SkillSetupPage({ skillKey }: { skillKey: string }) {
                 </div>
                 <Input
                   value={workspacePath}
-                  onChange={(event) => setWorkspacePath(event.target.value)}
+                  onChange={(event) => setWorkspacePathOverride(event.target.value)}
                   placeholder={cwd ?? "/tmp"}
                   className="mt-3 h-11 rounded-2xl border-slate-200 bg-white px-4 text-sm text-slate-800"
                 />
@@ -1489,13 +1542,7 @@ export function SkillSetupPage({ skillKey }: { skillKey: string }) {
                               ? "border-slate-300 bg-[#eef1ea] text-slate-900"
                               : "border-slate-200 bg-white text-slate-600 hover:bg-[#f7f8f4]",
                           )}
-                          onClick={() =>
-                            setContextModules((current) =>
-                              current.includes(module)
-                                ? current.filter((item) => item !== module)
-                                : [...current, module],
-                            )
-                          }
+                          onClick={() => handleToggleContextModule(module)}
                         >
                           {formatContextModule(module)}
                         </button>
@@ -1559,7 +1606,7 @@ export function SkillSetupPage({ skillKey }: { skillKey: string }) {
                   </div>
                 </div>
                 <Textarea
-                  value={`Skill: ${detail.skill.title}\nPaper: ${selectedPaper?.title ?? "Choose a paper"}\nWorkspace: ${workspacePath || cwd || "Not set"}\nContext modules: ${contextModules.map(formatContextModule).join(", ") || "None"}`}
+                  value={`Skill: ${setupSkill.title}\nPaper: ${selectedPaper?.title ?? "Choose a paper"}\nWorkspace: ${workspacePath || cwd || "Not set"}\nContext modules: ${contextModules.map(formatContextModule).join(", ") || "None"}`}
                   readOnly
                   className="mt-3 min-h-[132px] rounded-[20px] border-slate-200 bg-white px-4 py-3 text-sm text-slate-700"
                 />
@@ -1569,6 +1616,12 @@ export function SkillSetupPage({ skillKey }: { skillKey: string }) {
             </div>
           </Section>
         </div>
+      ) : (
+        <Section title="Skill not found" description="This skill is not available in the current Studio catalog.">
+          <div className="rounded-[22px] border border-dashed border-slate-200 bg-[#fbfbf8] p-6 text-sm text-slate-500">
+            Refresh the Skills directory or reinstall the skill repo first.
+          </div>
+        </Section>
       )}
     </PageShell>
   )

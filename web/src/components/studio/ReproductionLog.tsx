@@ -1,6 +1,16 @@
 "use client"
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react"
+import {
+    memo,
+    useCallback,
+    useEffect,
+    useMemo,
+    useRef,
+    useState,
+    type ChangeEvent,
+    type ComponentPropsWithoutRef,
+    type ReactNode,
+} from "react"
 import { useRouter } from "next/navigation"
 import Markdown from "react-markdown"
 import remarkGfm from "remark-gfm"
@@ -189,6 +199,86 @@ function shouldReplaceThinkingMessage(current: string | null, next: string): boo
         return false
     }
     return true
+}
+
+type MarkdownHeadingTag = "h1" | "h2" | "h3"
+
+function hasMarkdownHeadingContent(children: ReactNode): boolean {
+    if (Array.isArray(children)) {
+        return children.some((child) => hasMarkdownHeadingContent(child))
+    }
+    return children !== null && children !== undefined && children !== false && children !== ""
+}
+
+function renderMarkdownHeading(tag: MarkdownHeadingTag, baseClassName: string) {
+    return function MarkdownHeading({
+        className,
+        children,
+        ...props
+    }: Readonly<ComponentPropsWithoutRef<"h1">>) {
+        if (!hasMarkdownHeadingContent(children)) {
+            return null
+        }
+
+        const HeadingTag = tag
+        return (
+            <HeadingTag className={cn(baseClassName, className)} {...props}>
+                {children}
+            </HeadingTag>
+        )
+    }
+}
+
+function isPlaceholderChatTask(task: {
+    history?: Array<unknown>
+    actions?: Array<unknown>
+} | null | undefined): boolean {
+    return task?.history?.length === 0 && task?.actions?.length === 0
+}
+
+function getProjectAgentStatusLabel(runtimeInfo: StudioRuntimeInfo): string {
+    if (runtimeInfo.source !== "claude_code") return "Unknown"
+    if (runtimeInfo.claudeAgentsError) return "Probe failed"
+    return runtimeInfo.projectAgentCount > 0 ? `${runtimeInfo.projectAgentCount} configured` : "None detected"
+}
+
+function getBridgeStatusLabel(
+    runtimeInfo: StudioRuntimeInfo,
+    workerKind: "codex" | "opencode",
+): string {
+    if (runtimeInfo.source !== "claude_code") return "Unknown"
+    if (runtimeInfo.claudeAgentsError) return "Unknown (agent probe failed)"
+
+    const workerAvailable =
+        workerKind === "codex" ? runtimeInfo.codexWorkerAvailable : runtimeInfo.opencodeWorkerAvailable
+    const workerName =
+        workerKind === "codex" ? runtimeInfo.codexWorkerName : runtimeInfo.opencodeWorkerName
+
+    if (workerAvailable) {
+        return `Ready (${workerName ?? "configured"})`
+    }
+    if (runtimeInfo.projectAgentCount > 0) {
+        return "Not configured"
+    }
+    return "No bridge agent found"
+}
+
+function getCliAvailabilityLabel(available: boolean, version: string | null): string {
+    if (!available) return "Unavailable"
+    return version ? `Available (${version})` : "Available"
+}
+
+function getCodeModeStatusLabel(codeModeEnabled: boolean | null): string {
+    if (codeModeEnabled === true) return "Enabled"
+    if (codeModeEnabled === false) return "Disabled"
+    return "Unknown"
+}
+
+function getDetectedDefaultModelLabel(runtimeInfo: StudioRuntimeInfo): string {
+    if (!runtimeInfo.detectedDefaultModel) return "Unavailable"
+    return runtimeInfo.detectedDefaultModelSource
+        ? `${runtimeInfo.detectedDefaultModel} (${runtimeInfo.detectedDefaultModelSource})`
+        : runtimeInfo.detectedDefaultModel
 }
 
 type SlashCommandItem = {
@@ -746,17 +836,19 @@ interface ActionItemProps {
 
 type MarkdownActionBlockTone = "default" | "error"
 
+type MarkdownActionBlockProps = Readonly<{
+    rawContent: string
+    renderContent?: string
+    label?: string
+    tone?: MarkdownActionBlockTone
+}>
+
 function MarkdownActionBlock({
     rawContent,
     renderContent,
     label,
     tone = "default",
-}: {
-    rawContent: string
-    renderContent?: string
-    label?: string
-    tone?: MarkdownActionBlockTone
-}) {
+}: MarkdownActionBlockProps) {
     const [copied, setCopied] = useState(false)
 
     const copy = useCallback(async () => {
@@ -813,15 +905,9 @@ function MarkdownActionBlock({
                     <Markdown
                         remarkPlugins={[remarkGfm]}
                         components={{
-                            h1: ({ className, ...props }) => (
-                                <h1 className={cn("mb-1 text-[14px] font-semibold text-slate-900", className)} {...props} />
-                            ),
-                            h2: ({ className, ...props }) => (
-                                <h2 className={cn("mb-1 text-[12px] font-semibold text-slate-900", className)} {...props} />
-                            ),
-                            h3: ({ className, ...props }) => (
-                                <h3 className={cn("mb-1 text-[11px] font-semibold text-slate-900", className)} {...props} />
-                            ),
+                            h1: renderMarkdownHeading("h1", "mb-1 text-[14px] font-semibold text-slate-900"),
+                            h2: renderMarkdownHeading("h2", "mb-1 text-[12px] font-semibold text-slate-900"),
+                            h3: renderMarkdownHeading("h3", "mb-1 text-[11px] font-semibold text-slate-900"),
                             p: ({ className, ...props }) => (
                                 <p className={cn("my-0 whitespace-pre-wrap text-[11px] leading-[19px] text-slate-800", className)} {...props} />
                             ),
@@ -1483,6 +1569,282 @@ export function ReproductionLog({
         : "Enter send · Shift+Enter newline · / commands"
     const workspaceRequired = mode === "Code" && !projectDir
 
+    type StreamActionType = "thinking" | "text" | "tool" | "other"
+    type StreamTurnState = {
+        assistantResponse: string
+        assistantHistoryCommitted: boolean
+        negotiatedMode: Mode
+        currentCliSessionId: string
+        lastActionIsText: boolean
+        lastStreamActionType: StreamActionType
+        lastThinkingContent: string | null
+    }
+
+    const appendStreamText = (taskId: string, text: string, streamState: StreamTurnState) => {
+        if (!text) return
+
+        streamState.assistantResponse += text
+        if (streamState.lastActionIsText) {
+            appendToLastAction(taskId, text)
+        } else {
+            addAction(taskId, { type: "text", content: text })
+            streamState.lastActionIsText = true
+        }
+        streamState.lastStreamActionType = "text"
+        streamState.lastThinkingContent = null
+    }
+
+    const markStreamActionBoundary = (
+        streamState: StreamTurnState,
+        nextType: Exclude<StreamActionType, "text" | "thinking"> = "tool",
+    ) => {
+        streamState.lastActionIsText = false
+        streamState.lastStreamActionType = nextType
+        streamState.lastThinkingContent = null
+    }
+
+    const pushStreamThinking = (taskId: string, value: unknown, streamState: StreamTurnState) => {
+        const message = normalizeThinkingMessage(value)
+        if (!message) return
+
+        if (streamState.lastStreamActionType === "thinking") {
+            if (!shouldReplaceThinkingMessage(streamState.lastThinkingContent, message)) {
+                return
+            }
+            upsertThinkingAction(taskId, message)
+        } else {
+            addAction(taskId, { type: "thinking", content: message })
+        }
+
+        streamState.lastStreamActionType = "thinking"
+        streamState.lastThinkingContent = message
+        streamState.lastActionIsText = false
+    }
+
+    const handleStatusStreamEvent = (
+        taskId: string,
+        data: StudioSessionStatusPayload,
+        streamState: StreamTurnState,
+    ) => {
+        if (data.subtype !== "init" && data.subtype !== "mode_changed") {
+            return
+        }
+
+        if (isStudioMode(data.mode)) {
+            streamState.negotiatedMode = data.mode
+            if (data.mode !== mode) {
+                setMode(data.mode)
+            }
+        }
+
+        if (data.subtype === "init") {
+            if (data.permission_profile === "default" || data.permission_profile === "full_access") {
+                setPermissionProfile(data.permission_profile)
+            }
+            const initMessage = buildStudioSessionInitMessage(data)
+            if (initMessage) {
+                pushStreamThinking(taskId, initMessage, streamState)
+            }
+            return
+        }
+
+        const reason =
+            normalizeThinkingMessage((data as Record<string, unknown>).reason) ??
+            buildStudioSessionInitMessage(data)
+        if (reason) {
+            pushStreamThinking(taskId, reason, streamState)
+        }
+    }
+
+    const handleProgressStreamEvent = (
+        taskId: string,
+        data: Record<string, unknown>,
+        streamState: StreamTurnState,
+    ) => {
+        const cliEvent = data.cli_event as string | undefined
+
+        if (cliEvent === "session_init") {
+            const nextCliSessionId =
+                typeof data.cli_session_id === "string" ? data.cli_session_id.trim() : ""
+            if (nextCliSessionId) {
+                streamState.currentCliSessionId = nextCliSessionId
+            }
+            return
+        }
+
+        if (cliEvent === "text") {
+            appendStreamText(taskId, (data.text as string) || "", streamState)
+            return
+        }
+
+        if (cliEvent === "tool_use") {
+            markStreamActionBoundary(streamState)
+            addAction(taskId, {
+                type: "function_call",
+                content: `${data.tool_name}()`,
+                metadata: {
+                    toolId: data.tool_id as string | undefined,
+                    functionName: data.tool_name as string,
+                    params: data.tool_input as Record<string, unknown>,
+                },
+            })
+            return
+        }
+
+        if (cliEvent === "tool_result") {
+            markStreamActionBoundary(streamState)
+            const functionName = data.tool_name as string
+            const rawResult = data.content as string
+            const bridgeResult =
+                parseStudioBridgeResult((data as Record<string, unknown>).bridge_result) ??
+                parseStudioBridgeResult(rawResult)
+            const attached = attachResultToLatestFunctionCall(
+                taskId,
+                functionName,
+                rawResult,
+                data.tool_id as string | undefined,
+                bridgeResult ? { bridgeResult } : undefined,
+            )
+            if (!attached) {
+                addAction(taskId, {
+                    type: "function_call",
+                    content: `${functionName}()`,
+                    metadata: {
+                        toolId: data.tool_id as string | undefined,
+                        functionName,
+                        result: rawResult,
+                        bridgeResult: bridgeResult ?? undefined,
+                    },
+                })
+            }
+            return
+        }
+
+        if (cliEvent === "bridge_result") {
+            markStreamActionBoundary(streamState)
+            const functionName = data.tool_name as string
+            const bridgeResult = parseStudioBridgeResult((data as Record<string, unknown>).bridge_result)
+            if (!bridgeResult) {
+                return
+            }
+            const attached = attachResultToLatestFunctionCall(
+                taskId,
+                functionName,
+                undefined,
+                data.tool_id as string | undefined,
+                { bridgeResult },
+            )
+            if (!attached) {
+                addAction(taskId, {
+                    type: "function_call",
+                    content: `${functionName}()`,
+                    metadata: {
+                        toolId: data.tool_id as string | undefined,
+                        functionName,
+                        bridgeResult,
+                    },
+                })
+            }
+            return
+        }
+
+        if (cliEvent === "approval_required") {
+            markStreamActionBoundary(streamState, "other")
+            const rawMessage = typeof data.message === "string" ? data.message : ""
+            const approvalBridgeResult =
+                parseStudioBridgeResult((data as Record<string, unknown>).bridge_result) ??
+                parseStudioBridgeResult(rawMessage)
+            const parsedApproval = parseStudioApprovalRequest(rawMessage)
+            const approvalMessage =
+                approvalBridgeResult?.summary ||
+                parsedApproval?.message ||
+                rawMessage.trim() ||
+                "This action requires approval before Claude can continue."
+            const explicitCommand =
+                typeof data.command === "string" && data.command.trim().length > 0
+                    ? data.command.trim()
+                    : parsedApproval?.command ?? undefined
+            const explicitWorkerAgentId =
+                typeof data.worker_agent_id === "string" && data.worker_agent_id.trim().length > 0
+                    ? data.worker_agent_id.trim()
+                    : parsedApproval?.workerAgentId ?? undefined
+            const resumeCliSessionId =
+                typeof data.cli_session_id === "string" && data.cli_session_id.trim().length > 0
+                    ? data.cli_session_id.trim()
+                    : streamState.currentCliSessionId || undefined
+
+            addAction(taskId, {
+                type: "approval_request",
+                content: approvalMessage,
+                metadata: {
+                    approvalRequest: {
+                        message: approvalMessage,
+                        command: explicitCommand,
+                        cliSessionId: resumeCliSessionId,
+                        workerAgentId: explicitWorkerAgentId,
+                        toolId: typeof data.tool_id === "string" ? data.tool_id : undefined,
+                        toolName: typeof data.tool_name === "string" ? data.tool_name : undefined,
+                        bridgeResult: approvalBridgeResult ?? parsedApproval?.bridgeResult ?? null,
+                    },
+                },
+            })
+            return
+        }
+
+        if (cliEvent === "thinking") {
+            pushStreamThinking(taskId, (data.text as string) || "Thinking...", streamState)
+            return
+        }
+
+        if (data.keepalive) {
+            return
+        }
+
+        if (data.message) {
+            pushStreamThinking(taskId, data.message as string, streamState)
+            return
+        }
+
+        if (data.delta) {
+            appendStreamText(taskId, data.delta as string, streamState)
+        }
+    }
+
+    const commitAssistantHistoryIfNeeded = (taskId: string, streamState: StreamTurnState, content: string) => {
+        if (!content.trim() || streamState.assistantHistoryCommitted) {
+            return
+        }
+        appendTaskHistory(taskId, { role: "assistant", content })
+        streamState.assistantHistoryCommitted = true
+    }
+
+    const handleResultStreamEvent = (
+        taskId: string,
+        data: Record<string, unknown>,
+        streamState: StreamTurnState,
+    ) => {
+        const finalContent =
+            streamState.assistantResponse || (typeof data.content === "string" ? data.content : "")
+        commitAssistantHistoryIfNeeded(taskId, streamState, finalContent)
+        if (!finalContent.trim()) {
+            const summary = data.num_turns
+                ? `[${streamState.negotiatedMode}] Completed in ${data.num_turns} turns`
+                : "Completed"
+            addAction(taskId, { type: "complete", content: summary })
+        }
+        updateTaskStatus(taskId, "completed")
+        setStatus("success")
+    }
+
+    const handleStreamFailure = (taskId: string, message: string, streamState: StreamTurnState) => {
+        const streamError = presentStudioError(message, "Chat failed")
+        commitAssistantHistoryIfNeeded(taskId, streamState, streamState.assistantResponse)
+        addAction(taskId, { type: "error", content: streamError })
+        updateTaskStatus(taskId, "error")
+        setLastError(streamError)
+        setStatus("error")
+    }
+
     useEffect(() => {
         if (activeTask && activeTask.kind !== "chat") {
             setActiveTask(null)
@@ -1594,11 +1956,17 @@ export function ReproductionLog({
         cliSessionIdOverride?: string
     }) => {
         let assistantResponse = ""
-        let assistantHistoryCommitted = false
-        let negotiatedMode: Mode = outgoingMode
-        let currentCliSessionId = cliSessionIdOverride?.trim() || resumeSessionOverride?.trim() || ""
         const chatProjectDir = outgoingMode === "Code" ? preparedProjectDir : undefined
         const initialThinking = `[${outgoingMode}] Sending to ${runtimeLabel}...`
+        const streamState: StreamTurnState = {
+            assistantResponse: "",
+            assistantHistoryCommitted: false,
+            negotiatedMode: outgoingMode,
+            currentCliSessionId: cliSessionIdOverride?.trim() || resumeSessionOverride?.trim() || "",
+            lastActionIsText: false,
+            lastStreamActionType: "thinking",
+            lastThinkingContent: initialThinking,
+        }
 
         addAction(
             taskId,
@@ -1658,250 +2026,22 @@ export function ReproductionLog({
                 throw new Error(presentStudioError(detail, `Failed to send message (${res.status})`))
             }
 
-            let lastActionIsText = false
-            let lastStreamActionType: "thinking" | "text" | "tool" | "other" = "thinking"
-            let lastThinkingContent: string | null = initialThinking
-
-            const pushThinking = (value: unknown) => {
-                const message = normalizeThinkingMessage(value)
-                if (!message) return
-
-                if (lastStreamActionType === "thinking") {
-                    if (!shouldReplaceThinkingMessage(lastThinkingContent, message)) {
-                        return
-                    }
-                    upsertThinkingAction(taskId, message)
-                } else {
-                    addAction(taskId, { type: "thinking", content: message })
-                }
-
-                lastStreamActionType = "thinking"
-                lastThinkingContent = message
-                lastActionIsText = false
-            }
-
             for await (const evt of readSSE(res.body)) {
                 if (evt?.type === "status") {
-                    const data = (evt.data ?? {}) as StudioSessionStatusPayload
-
-                    if (data.subtype === "init") {
-                        if (isStudioMode(data.mode)) {
-                            negotiatedMode = data.mode
-                            if (data.mode !== mode) {
-                                setMode(data.mode)
-                            }
-                        }
-                        if (data.permission_profile === "default" || data.permission_profile === "full_access") {
-                            setPermissionProfile(data.permission_profile)
-                        }
-                        const initMessage = buildStudioSessionInitMessage(data)
-                        if (initMessage) {
-                            pushThinking(initMessage)
-                        }
-                        continue
-                    }
-
-                    if (data.subtype === "mode_changed") {
-                        if (isStudioMode(data.mode)) {
-                            negotiatedMode = data.mode
-                            if (data.mode !== mode) {
-                                setMode(data.mode)
-                            }
-                        }
-                        const reason =
-                            normalizeThinkingMessage((data as Record<string, unknown>).reason) ??
-                            buildStudioSessionInitMessage(data)
-                        if (reason) {
-                            pushThinking(reason)
-                        }
-                        continue
-                    }
-                } else if (evt?.type === "progress") {
-                    const data = (evt.data ?? {}) as Record<string, unknown>
-                    const cliEvent = data.cli_event as string | undefined
-
-                    if (cliEvent === "session_init") {
-                        const nextCliSessionId =
-                            typeof data.cli_session_id === "string" ? data.cli_session_id.trim() : ""
-                        if (nextCliSessionId) {
-                            currentCliSessionId = nextCliSessionId
-                        }
-                    } else if (cliEvent === "text") {
-                        const text = (data.text as string) || ""
-                        if (text) {
-                            assistantResponse += text
-                            if (lastActionIsText) {
-                                appendToLastAction(taskId, text)
-                            } else {
-                                addAction(taskId, { type: "text", content: text })
-                                lastActionIsText = true
-                            }
-                            lastStreamActionType = "text"
-                            lastThinkingContent = null
-                        }
-                    } else if (cliEvent === "tool_use") {
-                        lastActionIsText = false
-                        lastStreamActionType = "tool"
-                        lastThinkingContent = null
-                        addAction(taskId, {
-                            type: "function_call",
-                            content: `${data.tool_name}()`,
-                            metadata: {
-                                toolId: data.tool_id as string | undefined,
-                                functionName: data.tool_name as string,
-                                params: data.tool_input as Record<string, unknown>,
-                            },
-                        })
-                    } else if (cliEvent === "tool_result") {
-                        lastActionIsText = false
-                        lastStreamActionType = "tool"
-                        lastThinkingContent = null
-                        const functionName = data.tool_name as string
-                        const rawResult = data.content as string
-                        const bridgeResult =
-                            parseStudioBridgeResult((data as Record<string, unknown>).bridge_result) ??
-                            parseStudioBridgeResult(rawResult)
-                        const attached = attachResultToLatestFunctionCall(
-                            taskId,
-                            functionName,
-                            rawResult,
-                            data.tool_id as string | undefined,
-                            bridgeResult ? { bridgeResult } : undefined,
-                        )
-                        if (!attached) {
-                            addAction(taskId, {
-                                type: "function_call",
-                                content: `${functionName}()`,
-                                metadata: {
-                                    toolId: data.tool_id as string | undefined,
-                                    functionName,
-                                    result: rawResult,
-                                    bridgeResult: bridgeResult ?? undefined,
-                                },
-                            })
-                        }
-                    } else if (cliEvent === "bridge_result") {
-                        lastActionIsText = false
-                        lastStreamActionType = "tool"
-                        lastThinkingContent = null
-                        const functionName = data.tool_name as string
-                        const bridgeResult = parseStudioBridgeResult((data as Record<string, unknown>).bridge_result)
-                        if (!bridgeResult) {
-                            continue
-                        }
-                        const attached = attachResultToLatestFunctionCall(
-                            taskId,
-                            functionName,
-                            undefined,
-                            data.tool_id as string | undefined,
-                            { bridgeResult },
-                        )
-                        if (!attached) {
-                            addAction(taskId, {
-                                type: "function_call",
-                                content: `${functionName}()`,
-                                metadata: {
-                                    toolId: data.tool_id as string | undefined,
-                                    functionName,
-                                    bridgeResult,
-                                },
-                            })
-                        }
-                    } else if (cliEvent === "approval_required") {
-                        lastActionIsText = false
-                        lastStreamActionType = "other"
-                        lastThinkingContent = null
-
-                        const rawMessage = typeof data.message === "string" ? data.message : ""
-                        const approvalBridgeResult =
-                            parseStudioBridgeResult((data as Record<string, unknown>).bridge_result) ??
-                            parseStudioBridgeResult(rawMessage)
-                        const parsedApproval = parseStudioApprovalRequest(rawMessage)
-                        const approvalMessage =
-                            approvalBridgeResult?.summary ||
-                            parsedApproval?.message ||
-                            rawMessage.trim() ||
-                            "This action requires approval before Claude can continue."
-                        const explicitCommand =
-                            typeof data.command === "string" && data.command.trim().length > 0
-                                ? data.command.trim()
-                                : parsedApproval?.command ?? undefined
-                        const explicitWorkerAgentId =
-                            typeof data.worker_agent_id === "string" && data.worker_agent_id.trim().length > 0
-                                ? data.worker_agent_id.trim()
-                                : parsedApproval?.workerAgentId ?? undefined
-                        const resumeCliSessionId =
-                            typeof data.cli_session_id === "string" && data.cli_session_id.trim().length > 0
-                                ? data.cli_session_id.trim()
-                                : currentCliSessionId || undefined
-
-                        addAction(taskId, {
-                            type: "approval_request",
-                            content: approvalMessage,
-                            metadata: {
-                                approvalRequest: {
-                                    message: approvalMessage,
-                                    command: explicitCommand,
-                                    cliSessionId: resumeCliSessionId,
-                                    workerAgentId: explicitWorkerAgentId,
-                                    toolId: typeof data.tool_id === "string" ? data.tool_id : undefined,
-                                    toolName: typeof data.tool_name === "string" ? data.tool_name : undefined,
-                                    bridgeResult: approvalBridgeResult ?? parsedApproval?.bridgeResult ?? null,
-                                },
-                            },
-                        })
-                    } else if (cliEvent === "thinking") {
-                        pushThinking((data.text as string) || "Thinking...")
-                    } else if (data.keepalive) {
-                        continue
-                    } else if (data.message) {
-                        pushThinking(data.message as string)
-                    } else if (data.delta) {
-                        const text = data.delta as string
-                        assistantResponse += text
-                        if (lastActionIsText) {
-                            appendToLastAction(taskId, text)
-                        } else {
-                            addAction(taskId, { type: "text", content: text })
-                            lastActionIsText = true
-                        }
-                        lastStreamActionType = "text"
-                        lastThinkingContent = null
-                    }
+                    handleStatusStreamEvent(taskId, (evt.data ?? {}) as StudioSessionStatusPayload, streamState)
                 } else if (evt?.type === "result") {
-                    const data = (evt.data ?? {}) as Record<string, unknown>
-                    const finalContent =
-                        assistantResponse || (typeof data.content === "string" ? data.content : "")
-                    if (finalContent.trim() && !assistantHistoryCommitted) {
-                        appendTaskHistory(taskId, { role: "assistant", content: finalContent })
-                        assistantHistoryCommitted = true
-                    }
-                    if (!finalContent.trim()) {
-                        const summary = data.num_turns
-                            ? `[${negotiatedMode}] Completed in ${data.num_turns} turns`
-                            : "Completed"
-                        addAction(taskId, { type: "complete", content: summary })
-                    }
-                    updateTaskStatus(taskId, "completed")
-                    setStatus("success")
+                    handleResultStreamEvent(taskId, (evt.data ?? {}) as Record<string, unknown>, streamState)
+                } else if (evt?.type === "progress") {
+                    handleProgressStreamEvent(taskId, (evt.data ?? {}) as Record<string, unknown>, streamState)
                 } else if (evt?.type === "error") {
-                    const streamError = presentStudioError(evt.message || "Chat failed", "Chat failed")
-                    if (assistantResponse.trim() && !assistantHistoryCommitted) {
-                        appendTaskHistory(taskId, { role: "assistant", content: assistantResponse })
-                        assistantHistoryCommitted = true
-                    }
-                    addAction(taskId, { type: "error", content: streamError })
-                    updateTaskStatus(taskId, "error")
-                    setLastError(streamError)
-                    setStatus("error")
+                    handleStreamFailure(taskId, evt.message || "Chat failed", streamState)
                     return
                 }
             }
         } catch (e) {
             const msg = presentStudioError(e instanceof Error ? e.message : String(e), "Chat failed")
-            if (assistantResponse.trim() && !assistantHistoryCommitted) {
-                appendTaskHistory(taskId, { role: "assistant", content: assistantResponse })
-            }
+            assistantResponse = streamState.assistantResponse
+            commitAssistantHistoryIfNeeded(taskId, streamState, assistantResponse)
             addAction(taskId, { type: "error", content: msg })
             updateTaskStatus(taskId, "error")
             setLastError(msg)
@@ -1982,7 +2122,7 @@ export function ReproductionLog({
             activeChatTask?.id ??
             addTask(threadTitle)
 
-        if (activeChatTask && activeChatTask.history.length === 0 && activeChatTask.actions.length === 0) {
+        if (isPlaceholderChatTask(activeChatTask)) {
             renameTask(taskId, threadTitle)
         }
         if (parsedSkillCommand?.skill) {
@@ -2081,7 +2221,7 @@ export function ReproductionLog({
         const nextTitle = title ?? buildChatThreadTitle(inputContent)
         const taskId = activeChatTask?.id ?? addTask(nextTitle)
 
-        if (activeChatTask && activeChatTask.history.length === 0 && activeChatTask.actions.length === 0) {
+        if (isPlaceholderChatTask(activeChatTask)) {
             renameTask(taskId, nextTitle)
         }
 
@@ -2605,36 +2745,10 @@ export function ReproductionLog({
             : runtimeInfo.source === "claude_code"
                 ? "Available"
                 : "Unavailable"
-        const projectAgentStatus = runtimeInfo.source !== "claude_code"
-            ? "Unknown"
-            : runtimeInfo.claudeAgentsError
-                ? "Probe failed"
-                : runtimeInfo.projectAgentCount > 0
-                    ? `${runtimeInfo.projectAgentCount} configured`
-                    : "None detected"
-        const codexBridgeStatus = runtimeInfo.source !== "claude_code"
-            ? "Unknown"
-            : runtimeInfo.claudeAgentsError
-                ? "Unknown (agent probe failed)"
-                : runtimeInfo.codexWorkerAvailable
-                    ? `Ready (${runtimeInfo.codexWorkerName ?? "configured"})`
-                    : runtimeInfo.projectAgentCount > 0
-                        ? "Not configured"
-                        : "No bridge agent found"
-        const opencodeCliStatus = runtimeInfo.opencodeAvailable
-            ? runtimeInfo.opencodeVersion
-                ? `Available (${runtimeInfo.opencodeVersion})`
-                : "Available"
-            : "Unavailable"
-        const opencodeBridgeStatus = runtimeInfo.source !== "claude_code"
-            ? "Unknown"
-            : runtimeInfo.claudeAgentsError
-                ? "Unknown (agent probe failed)"
-                : runtimeInfo.opencodeWorkerAvailable
-                    ? `Ready (${runtimeInfo.opencodeWorkerName ?? "configured"})`
-                    : runtimeInfo.projectAgentCount > 0
-                        ? "Not configured"
-                        : "No bridge agent found"
+        const projectAgentStatus = getProjectAgentStatusLabel(runtimeInfo)
+        const codexBridgeStatus = getBridgeStatusLabel(runtimeInfo, "codex")
+        const opencodeCliStatus = getCliAvailabilityLabel(runtimeInfo.opencodeAvailable, runtimeInfo.opencodeVersion)
+        const opencodeBridgeStatus = getBridgeStatusLabel(runtimeInfo, "opencode")
         const fields = [
             { label: "Runtime", value: runtimeLoading ? "Checking runtime" : runtimeLabel },
             { label: "Claude CLI", value: claudeCliStatus },
@@ -2649,12 +2763,7 @@ export function ReproductionLog({
             { label: "OpenCode bridge", value: opencodeBridgeStatus },
             {
                 label: "Code mode",
-                value:
-                    runtimeInfo.codeModeEnabled === true
-                        ? "Enabled"
-                        : runtimeInfo.codeModeEnabled === false
-                            ? "Disabled"
-                            : "Unknown",
+                value: getCodeModeStatusLabel(runtimeInfo.codeModeEnabled),
             },
             { label: "Mode", value: mode },
             { label: "Permission", value: permissionProfile },
@@ -2668,12 +2777,7 @@ export function ReproductionLog({
             },
             {
                 label: "Detected default",
-                value:
-                    runtimeInfo.detectedDefaultModel
-                        ? runtimeInfo.detectedDefaultModelSource
-                            ? `${runtimeInfo.detectedDefaultModel} (${runtimeInfo.detectedDefaultModelSource})`
-                            : runtimeInfo.detectedDefaultModel
-                        : "Unavailable",
+                value: getDetectedDefaultModelLabel(runtimeInfo),
             },
             { label: "Workspace", value: projectDir ?? "Not set" },
             { label: "Uploaded files", value: String(uploadedFiles.length) },
@@ -2697,25 +2801,7 @@ export function ReproductionLog({
         permissionProfile,
         projectDir,
         requestedModel,
-        runtimeInfo.detectedDefaultModel,
-        runtimeInfo.detectedDefaultModelSource,
-        runtimeInfo.chatSurface,
-        runtimeInfo.chatTransport,
-        runtimeInfo.claudeAgentsError,
-        runtimeInfo.claudeAgentSdkAvailable,
-        runtimeInfo.codeModeEnabled,
-        runtimeInfo.codexWorkerAvailable,
-        runtimeInfo.codexWorkerName,
-        runtimeInfo.error,
-        runtimeInfo.skills,
-        runtimeInfo.opencodeAvailable,
-        runtimeInfo.opencodeVersion,
-        runtimeInfo.opencodeWorkerAvailable,
-        runtimeInfo.opencodeWorkerName,
-        runtimeInfo.preferredChatTransport,
-        runtimeInfo.projectAgentCount,
-        runtimeInfo.source,
-        runtimeInfo.version,
+        runtimeInfo,
         runtimeLabel,
         runtimeLoading,
         attachedSkill?.title,
@@ -3444,7 +3530,6 @@ export function ReproductionLog({
 
                                     <div
                                         ref={slashPaletteListRef}
-                                        role="listbox"
                                         aria-label="Slash commands"
                                         className="max-h-64 overflow-y-auto overscroll-contain px-1.5 py-1 [scrollbar-gutter:stable]"
                                         onWheel={(event) => event.stopPropagation()}
@@ -3470,8 +3555,6 @@ export function ReproductionLog({
                                                                         <button
                                                                             key={item.id}
                                                                             type="button"
-                                                                            role="option"
-                                                                            aria-selected={selected}
                                                                             data-slash-index={globalIndex}
                                                                             data-selected={selected ? "true" : "false"}
                                                                             className={cn(

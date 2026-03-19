@@ -30,7 +30,12 @@ async def studio_skills_catalog():
     return list_studio_skill_catalog()
 
 
-@router.post("/studio/skills/install")
+_SKILL_CATALOG_BAD_REQUEST_RESPONSE = {
+    400: {"description": "Invalid skill catalog request or repository metadata."}
+}
+
+
+@router.post("/studio/skills/install", responses=_SKILL_CATALOG_BAD_REQUEST_RESPONSE)
 async def studio_skill_install(request: InstallStudioSkillRepoRequest):
     try:
         return install_studio_skill_repo(request.repo_url, repo_ref=request.repo_ref)
@@ -38,7 +43,10 @@ async def studio_skill_install(request: InstallStudioSkillRepoRequest):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@router.post("/studio/skills/repos/{repo_slug}/update")
+@router.post(
+    "/studio/skills/repos/{repo_slug}/update",
+    responses=_SKILL_CATALOG_BAD_REQUEST_RESPONSE,
+)
 async def studio_skill_repo_update(repo_slug: str, request: UpdateStudioSkillRepoRequest):
     try:
         return update_studio_skill_repo(repo_slug, repo_ref=request.repo_ref)
