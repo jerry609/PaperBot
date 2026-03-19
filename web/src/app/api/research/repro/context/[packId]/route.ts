@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server"
 
-import { apiBaseUrl, proxyJson } from "../../../_base"
+import { apiBaseUrl, proxyJson } from "@/app/api/_utils/auth-json-proxy"
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ packId: string }> }) {
   const { packId } = await params

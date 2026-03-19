@@ -1,6 +1,6 @@
 export const runtime = "nodejs"
 
-import { apiBaseUrl, proxyJson } from "../../../../../_base"
+import { apiBaseUrl, proxyJson } from "@/app/api/_utils/auth-json-proxy"
 
 export async function POST(req: Request, ctx: { params: Promise<{ trackId: string; authorId: string }> }) {
   const { trackId, authorId } = await ctx.params
