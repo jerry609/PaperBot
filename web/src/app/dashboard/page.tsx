@@ -403,6 +403,72 @@ function TrackSpotlightCard({ item }: { item: TrackSpotlightItem }) {
   )
 }
 
+function TrackSpotlightEmptyState({
+  readingQueueCount,
+  signalCount,
+}: {
+  readingQueueCount: number
+  signalCount: number
+}) {
+  return (
+    <div className="rounded-[28px] border border-dashed border-slate-200 bg-[radial-gradient(circle_at_top_left,_rgba(99,102,241,0.12),_transparent_42%),linear-gradient(180deg,_rgba(255,255,255,0.96),_rgba(248,250,252,0.96))] p-6 shadow-sm">
+      <div className="flex flex-col gap-5">
+        <div className="flex items-start justify-between gap-4">
+          <div className="max-w-md">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-violet-600">
+              Track Spotlight
+            </p>
+            <h3 className="mt-2 text-lg font-bold text-slate-900">
+              Build one focus track to make this dashboard feel coherent.
+            </h3>
+            <p className="mt-2 text-sm leading-6 text-slate-600">
+              Tracks bind search, queue, and signals into the same topic lens. Without one, this panel can only
+              show loose global activity.
+            </p>
+          </div>
+          <div className="rounded-2xl bg-violet-100 p-3 text-violet-700">
+            <Layers className="size-5" />
+          </div>
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="rounded-2xl border border-white/80 bg-white/80 px-4 py-3">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Queue Ready</p>
+            <p className="mt-2 text-sm font-semibold text-slate-900">{readingQueueCount} picks can be routed</p>
+            <p className="mt-1 text-sm leading-6 text-slate-600">
+              Save the first track and the queue stops feeling generic.
+            </p>
+          </div>
+          <div className="rounded-2xl border border-white/80 bg-white/80 px-4 py-3">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Signals Waiting</p>
+            <p className="mt-2 text-sm font-semibold text-slate-900">{signalCount} fresh signals need a home</p>
+            <p className="mt-1 text-sm leading-6 text-slate-600">
+              A topic track turns broad signals into a watchlist you can actually act on.
+            </p>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          <Link
+            href="/research"
+            className="inline-flex min-h-11 items-center gap-2 rounded-full bg-slate-900 px-5 text-sm font-semibold text-white transition-colors hover:bg-slate-800"
+          >
+            Create first track
+            <ArrowRight className="size-4" />
+          </Link>
+          <Link
+            href="/skills"
+            className="inline-flex min-h-11 items-center gap-2 rounded-full border border-slate-200 bg-white px-5 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50"
+          >
+            Open skills
+            <ArrowRight className="size-4" />
+          </Link>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function SignalCard({ item }: { item: DashboardIntelligenceCard }) {
   return (
     <article className="rounded-2xl border border-slate-100 bg-white p-5 shadow-sm">
@@ -498,7 +564,7 @@ export default async function DashboardPage() {
   ] = await Promise.allSettled([
     fetchDashboardTracks(accessToken),
     fetchDashboardReadingQueue(accessToken, 6),
-    fetchIntelligenceFeed(accessToken, 6, { sortBy: "delta", sortOrder: "desc" }),
+    fetchIntelligenceFeed(accessToken, 10, { sortBy: "delta", sortOrder: "desc" }),
     fetchPapers(accessToken),
     fetchLatestDashboardBrief(),
     fetchDeadlineRadar(accessToken),
@@ -565,7 +631,7 @@ export default async function DashboardPage() {
   )
 
   const intelligenceCards = buildDashboardIntelligenceCards(intelligenceFeed.items)
-  const signalCards = intelligenceCards.slice(0, 3)
+  const signalCards = intelligenceCards.slice(0, 5)
   const deadlines = [...deadlinesRaw]
     .sort((left, right) => left.days_left - right.days_left)
     .slice(0, 3)
@@ -656,7 +722,7 @@ export default async function DashboardPage() {
             <div>
               <SectionHeader
                 title="Track Spotlight"
-                actionLabel="Manage tracks"
+                actionLabel={tracks.length > 0 ? "Manage tracks" : "Create first track"}
                 actionHref="/research"
               />
               <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-1">
@@ -665,9 +731,10 @@ export default async function DashboardPage() {
                     <TrackSpotlightCard key={item.id} item={item} />
                   ))
                 ) : (
-                  <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-6 text-sm text-slate-600 shadow-sm">
-                    No tracks yet.
-                  </div>
+                  <TrackSpotlightEmptyState
+                    readingQueueCount={queueCards.length}
+                    signalCount={signalCards.length}
+                  />
                 )}
               </div>
             </div>
